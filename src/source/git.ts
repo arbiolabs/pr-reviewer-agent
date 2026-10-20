@@ -90,13 +90,15 @@ export class PinnedRepo {
     return files;
   }
 
-  /** `undefined` when the path does not exist at `sha`. */
+  /** `undefined` when the path or object does not exist at `sha`; any other git failure throws so the caller retries. */
   async show(sha: string, path: string): Promise<string | undefined> {
+    const safe = assertSafePath(path);
     try {
-      return await git(this.dir, ["show", `${sha}:${assertSafePath(path)}`]);
+      return await git(this.dir, ["show", `${sha}:${safe}`]);
     } catch (error) {
-      if (error instanceof UnsafePathError) throw error;
-      return undefined;
+      const { code, stderr } = error as { code?: unknown; stderr?: unknown };
+      if (code === 128 && /does not exist|exists on disk, but not in|invalid object name/.test(String(stderr))) return undefined;
+      throw error;
     }
   }
 

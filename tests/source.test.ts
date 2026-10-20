@@ -29,6 +29,12 @@ describe("pinned repo", () => {
     expect(await repo.show(fixture.baseSha, DEFECT.file)).not.toContain("app.delete");
     expect((await repo.show(fixture.headSha, DEFECT.file))?.split("\n")[4]).toBe('  app.delete("/orders/:id", deleteOrder);');
     expect(await repo.show(fixture.headSha, "missing.ts")).toBe(undefined);
+    expect(await repo.show("0".repeat(40), DEFECT.file)).toBe(undefined);
+  });
+
+  it("rethrows git failures other than a missing path, so the phase retries instead of discarding", async () => {
+    const gone = new PinnedRepo(join(tmpdir(), "no-such-repo.git"), fixture.baseSha, fixture.headSha);
+    await expect(gone.show(fixture.headSha, DEFECT.file)).rejects.toThrow("cannot change to");
   });
 
   it("searches the head tree with literal queries and scopes", async () => {
