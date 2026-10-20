@@ -526,3 +526,17 @@ fn ascii_frames_stay_ascii_across_the_showcase() {
         }
     }
 }
+
+#[test]
+fn the_pr_title_stays_in_view_while_the_live_log_pushes_the_open_card_down() {
+    for (w, h) in [100u16, 120, 130, 140, 160].into_iter().flat_map(|w| (24..=50u16).map(move |h| (w, h))) {
+        for events in 30..=43 {
+            let mut s = Sim::new(Look::default()).play("showcase", 2 + events).key(KeyCode::Char('w'));
+            let (frame, _) = render(&mut s.m, w, h);
+            // The reading column's top three rows, right of the PR rail.
+            let top: Vec<String> = frame.lines().skip(2).take(3).map(|l| l.chars().skip(34).collect()).collect();
+            let title: String = s.m.selected_pr().unwrap().title.as_str().chars().take(16).collect();
+            assert!(top.iter().any(|l| l.contains(&title)), "{w}x{h} after {events}:\n{frame}");
+        }
+    }
+}

@@ -109,12 +109,13 @@ pub fn screen(c: &Ctx, f: &mut Frame, area: Rect) {
     let doc = document(c, pr, col.width as usize, col.height as usize);
     let scroll = doc.scroll(c, col.height as usize);
     f.render_widget(Paragraph::new(doc.lines).scroll((scroll, 0)), col);
-    if scroll > 0 && col.height < COMPACT_H {
+    // Once the repository line and the title have scrolled off, a one-line sticky header stands in for them.
+    if scroll >= 2 {
         f.render_widget(Paragraph::new(sticky(c, pr, col.width as usize)), Rect { height: 1, ..col });
     }
 }
 
-/// Below this many rows the PR header scrolls away under an open card, and a one-line sticky header stands in.
+/// Below this many rows the document drops its spacer lines and the open card makes room for the sticky header.
 const COMPACT_H: u16 = 28;
 
 /// `#1287 Orders: self-serve…   ●─●─●─●─●─●  ◆1 ▲1 ●1 ○1`: the PR, its run's dot stepper and its counts.
