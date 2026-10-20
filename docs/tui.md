@@ -41,6 +41,7 @@ To try the client without GitHub or a model, play a scripted session:
 | `--socket PATH` | Connect to this socket instead of the default |
 | `--pr URL` | Open this PR, as a URL or as `owner/repo#N` |
 | `--ascii` | Use ASCII glyphs and borders only |
+| `--theme NAME` | Use `auto`, `dark`, `light`, or `mono`. This overrides `theme` in the config file. |
 | `--playback FILE` | Play a scripted session instead of connecting |
 | `--config FILE` | Read this config file instead of `<config dir>/pr-review/config.toml` |
 | `NO_COLOR` | When set to any non-empty value, turns colors off. Every status keeps its word or icon. |
@@ -90,14 +91,14 @@ In Timeline, `Enter` opens the selected event's detail under its row, and `Esc` 
 | `f`, `v`, and `P` | Change the timeline's scope, category, or phase filter |
 | `A` | Open the GitHub accounts in Settings |
 | `r` | Refresh from the daemon, or retry a timed-out request |
-| `?` | Show help. The help page is built from the keymap. |
+| `?` | Show help. The help page is built from the keymap. When it is taller than the window, `j`, `k`, the wheel, PgUp, and PgDn scroll it, and its last row shows how many lines remain below. |
 | `q` | Quit the client |
 
 ## Use the mouse
 
 - Click a PR in the list to select it.
 - Click a finding's card to select it. Click the selected card again to read the finding in full.
-- Scroll the wheel to move the reading column: the open finding, the document, the diff, or the timeline.
+- Scroll the wheel to move the reading column: the open finding, the help page, the document, the diff, or the timeline.
 
 While the client captures the mouse, a plain drag no longer selects text in the terminal. To select text, hold the terminal's bypass modifier while you drag: Shift in most terminals, or Option in iTerm2 and macOS Terminal. To give plain drag back to the terminal, turn mouse capture off in the config file:
 
@@ -108,13 +109,13 @@ mouse = false   # the default is true
 
 With `mouse = false`, clicks and the wheel do nothing in the client. The keys do everything the mouse does.
 
-## Change the background
+## Change the theme and the background
 
 The client reads `<config dir>/pr-review/config.toml`, or the file that `--config` names. The `[ui]` table sets the display:
 
 ```toml
 [ui]
-theme = "dark"          # or "mono", which turns colors off like NO_COLOR
+theme = "auto"          # or "dark", "light", or "mono", which turns colors off like NO_COLOR
 background = "theme"    # or "terminal"
 ascii = false           # true is the same as --ascii
 start_view = "review"   # inbox, review, diff, timeline, or settings
@@ -122,9 +123,13 @@ mouse = true            # false leaves drag-to-select to the terminal
 show_activity = true    # false hides the "Reviewing now" log and the tool-call rates
 ```
 
-With `background = "theme"`, the default, the client paints its own dark background on every cell. The contrast test checks every text color against these painted surfaces, so the contrast holds in any terminal.
+The client has two palettes. `dark` is "Ink", light text on a near-black ground. `light` is "Paper", dark text on a warm off-white ground, with its own severity, syntax, diff, and selection colors.
 
-With `background = "terminal"`, the client leaves the terminal's own background in place and still paints the panels, code blocks, selection, and diff lines. This setting assumes a dark terminal background. The contrast test requires 4.5:1 for every text color against black, `#1e1e1e`, and `#282c34`. The worst pair is 5.11:1. On a white terminal, the client's light text measures 1.29:1, so use `theme` there.
+With `theme = "auto"`, the default, the client asks the terminal for its background color (the OSC 11 query) before it draws. A background with a relative luminance above 0.5 selects `light`, and any other background selects `dark`. If the terminal does not answer within 100 ms, the client reads `COLORFGBG`, where a background of 7 or 15 selects `light`. Otherwise it uses `dark`. The client skips the query when stdin or stdout is not a terminal, or when `NO_COLOR` is set. A terminal that never answers delays startup by at most 100 ms.
+
+With `background = "theme"`, the default, the client paints its palette's background on every cell. The contrast test requires 4.5:1 for every text color on every painted surface, in both palettes, so the contrast holds in any terminal. The worst pair is 5.17:1 in `dark` and 5.04:1 in `light`.
+
+With `background = "terminal"`, the client leaves the terminal's own background in place and still paints the panels, code blocks, selection, and diff lines. This setting assumes that the palette matches the terminal, which `theme = "auto"` arranges. The contrast test checks `dark` against black, `#1e1e1e`, and `#282c34`, with a worst pair of 5.11:1. It checks `light` against white, `#eeeeee`, and `#fdf6e3`, with a worst pair of 5.55:1. A mismatched pair fails: `dark` on a white terminal measures 1.29:1, and `light` on a black terminal measures 1.32:1.
 
 ## Choose a GitHub account
 
