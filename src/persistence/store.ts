@@ -2,7 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { transition } from "../domain/machine.ts";
 import { REVIEW_MACHINE, type ReviewEvent, type ReviewState, TERMINAL_REVIEW_STATES } from "../domain/machines.ts";
-import { type CandidateFinding, type ChangedFile, type PullInfo, stableId } from "../domain/types.ts";
+import { type CandidateFinding, type ChangedFile, type Disposition, type PullInfo, stableId } from "../domain/types.ts";
 
 const MIGRATIONS_DIR = new URL("../../migrations/", import.meta.url);
 
@@ -50,8 +50,6 @@ export type DecisionRecord = {
   selectedMode: string;
   reasons: string[];
 };
-
-export type Disposition = { candidateId: string; state: "VERIFIED" | "DISCARDED"; reason: string | null; findingId: string | null };
 
 export type FindingView = {
   findingId: string;

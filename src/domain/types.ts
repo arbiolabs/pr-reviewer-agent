@@ -60,3 +60,12 @@ export function stableId(...parts: (string | number)[]): string {
 export function sha256(text: string): string {
   return createHash("sha256").update(text).digest("hex");
 }
+
+/** How VERIFY disposed of one candidate: the candidate-machine states it passed through and why it ended there. */
+export type Disposition = {
+  candidateId: string;
+  state: "VERIFIED" | "DISCARDED";
+  path: string[];
+  reason: string | null;
+  findingId: string | null;
+};
