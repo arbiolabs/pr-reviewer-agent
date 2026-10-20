@@ -235,3 +235,73 @@ fn y_confirms_only_inside_the_confirmation_modal_and_sends_the_command_once() {
     press(&mut m, KeyCode::Esc);
     assert_eq!(m.top_modal(), None);
 }
+
+fn diff_loaded() -> Model {
+    let mut m = review_184();
+    press(&mut m, KeyCode::Char('d'));
+    let id = m.diff.as_ref().and_then(|d| d.pending.clone()).unwrap();
+    send(&mut m, &read("fixtures/server.diff.page.json").replace("req-diff", id.as_str()));
+    m
+}
+
+#[test]
+fn jump_to_path_and_line_selects_that_file_and_row() {
+    let mut m = diff_loaded();
+    press(&mut m, KeyCode::Char(':'));
+    for c in "booking.ts:43".chars() {
+        press(&mut m, KeyCode::Char(c));
+    }
+    press(&mut m, KeyCode::Enter);
+    let d = m.diff.as_ref().unwrap();
+    assert_eq!((d.selected_file.as_ref().map(|p| p.as_str()), d.cursor), (Some("src/booking.ts"), 5));
+
+    press(&mut m, KeyCode::Char(':'));
+    for c in "assets/logo.png".chars() {
+        press(&mut m, KeyCode::Char(c));
+    }
+    press(&mut m, KeyCode::Enter);
+    let d = m.diff.as_ref().unwrap();
+    assert_eq!((d.selected_file.as_ref().map(|p| p.as_str()), d.cursor), (Some("assets/logo.png"), 0));
+}
+
+#[test]
+fn reaching_the_last_file_requests_the_next_diff_page() {
+    let mut m = diff_loaded();
+    m.ui.focus = Pane::Sidebar;
+    let mut fx = Vec::new();
+    for _ in 0..3 {
+        fx.extend(press(&mut m, KeyCode::Char('j')));
+    }
+    let [Effect::Send(ClientMessage::DiffGet { cursor, .. })] = &fx[..] else { panic!("{fx:?}") };
+    assert_eq!(cursor.as_ref().map(|c| c.as_str()), Some("c-2"));
+}
+
+#[test]
+fn timeline_category_filter_hides_other_events() {
+    let mut m = review_184();
+    let fx = press(&mut m, KeyCode::Char('4'));
+    let [Effect::Send(ClientMessage::TimelineGet { request_id, .. })] = &fx[..] else { panic!("{fx:?}") };
+    send(&mut m, &read("fixtures/server.timeline.page.json").replace("req-tl", request_id.as_str()));
+    let shown = |m: &Model| {
+        let t = m.timeline.as_ref().unwrap();
+        pr_review_tui::update::timeline_rows(m, t).iter().map(|(e, _)| e.sequence.get()).collect::<Vec<_>>()
+    };
+    assert_eq!(shown(&m), [100, 99]);
+    press(&mut m, KeyCode::Char('v'));
+    assert_eq!(shown(&m), [100]);
+    press(&mut m, KeyCode::Char('v'));
+    assert_eq!(shown(&m), [99]);
+}
+
+#[test]
+fn a_diff_request_lost_with_the_connection_is_retried_when_reopened() {
+    let mut m = review_184();
+    press(&mut m, KeyCode::Char('3'));
+    update(&mut m, Msg::Net(NetEvent::Lost { reason: "eof".into(), retry_in_ms: Some(250) }));
+    assert!(m.diff.as_ref().unwrap().error.is_some());
+    update(&mut m, Msg::Net(NetEvent::Opened));
+    send(&mut m, &read("fixtures/server.welcome.json"));
+    press(&mut m, KeyCode::Char('1'));
+    let fx = press(&mut m, KeyCode::Char('3'));
+    assert!(matches!(&fx[..], [Effect::Send(ClientMessage::DiffGet { .. })]), "{fx:?}");
+}

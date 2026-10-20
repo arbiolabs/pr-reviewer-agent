@@ -72,7 +72,7 @@ pub async fn run(cfg: NetConfig, tx: mpsc::Sender<Msg>, mut rx: mpsc::Receiver<N
             }
         };
         tokio::pin!(wait);
-        // Requests made while offline are dropped: the reducer re-issues what it needs after reconnecting.
+        // Requests made while offline are dropped; the reducer marked its pending ones failed when the link was lost.
         loop {
             tokio::select! {
                 _ = &mut wait => break,

@@ -165,12 +165,18 @@ fn net(m: &mut Model, e: NetEvent, fx: &mut Vec<Effect>) {
         NetEvent::Lost { reason, retry_in_ms } => {
             m.diag.error(m.now_ms, format!("connection lost: {reason}"));
             transition(m, LinkInput::Lost { reason: Text::new(&reason), retry_in_ms });
-            for t in m.timeline.iter_mut() {
-                t.pending = None;
+            let lost = Text::new("connection lost before the reply arrived");
+            if let Some(t) = &mut m.timeline
+                && t.pending.take().is_some()
+            {
+                t.error = Some(lost.clone());
             }
-            if let Some(d) = &mut m.diff {
-                d.pending = None;
+            if let Some(d) = &mut m.diff
+                && d.pending.take().is_some()
+            {
+                d.error = Some(lost);
             }
+            m.detail_requests.clear();
         }
     }
 }
@@ -893,14 +899,15 @@ fn goto(m: &mut Model, s: Screen, fx: &mut Vec<Effect>) {
     m.ui.screen = s;
     match s {
         Screen::Diff => {
-            let have = m.diff.as_ref().is_some_and(|d| Some(&d.key.pr) == m.ui.selected_pr.as_ref());
+            let have =
+                m.diff.as_ref().is_some_and(|d| Some(&d.key.pr) == m.ui.selected_pr.as_ref() && d.error.is_none());
             if !have && let Some(pr) = m.selected_pr() {
                 let key = DiffKey { pr: pr.id.clone(), base: pr.base_sha.clone(), head: pr.head_sha.clone() };
                 load_diff(m, key, None, fx);
             }
         }
         Screen::Timeline => {
-            let have = m.timeline.as_ref().is_some_and(|t| t.query.pr == m.ui.selected_pr);
+            let have = m.timeline.as_ref().is_some_and(|t| t.query.pr == m.ui.selected_pr && t.error.is_none());
             if !have && m.ui.selected_pr.is_some() {
                 let q = timeline_query(m, TimelineScope::Pr);
                 load_timeline(m, TimelineScope::Pr, q, fx);
