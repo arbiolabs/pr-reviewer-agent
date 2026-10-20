@@ -482,3 +482,23 @@ fn an_unanswered_request_times_out_and_clears_its_pending_marker() {
     assert_eq!(sent(&send(&mut m, &read("fixtures/server.snapshot.json"))), ["diff.get"]);
     assert!(m.diff.as_ref().unwrap().pending.is_some());
 }
+
+#[test]
+fn resync_required_while_resyncing_asks_again_and_ignores_the_stale_snapshot() {
+    let mut m = live();
+    let fx = update(&mut m, Msg::Net(NetEvent::Overflow));
+    let [Effect::Send(ClientMessage::SnapshotGet { request_id: first })] = &fx[..] else { panic!("{fx:?}") };
+    assert_eq!(m.link, Link::Resyncing);
+
+    let fx = send(&mut m, r#"{"type":"resync.required","reason":"client fell behind the event stream"}"#);
+    let [Effect::Send(ClientMessage::SnapshotGet { request_id: second })] = &fx[..] else { panic!("{fx:?}") };
+    assert_ne!(first, second);
+    assert_eq!(m.link, Link::Resyncing);
+
+    let stale = read("fixtures/server.snapshot.empty.json").replacen("{", &format!(r#"{{"requestId":"{first}","#), 1);
+    send(&mut m, &stale);
+    assert_eq!((m.link.clone(), m.domain.prs.len()), (Link::Resyncing, 3));
+
+    send(&mut m, &read("fixtures/server.snapshot.json").replace("req-snapshot", second.as_str()));
+    assert_eq!((m.link.clone(), m.domain.prs.len()), (Link::Live, 3));
+}

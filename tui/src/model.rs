@@ -1,6 +1,6 @@
 //! Client state. The domain cache is keyed by stable IDs; the UI stores selected IDs, never list indexes.
 
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use crate::protocol::*;
 
@@ -427,6 +427,9 @@ pub struct Model {
     /// When each request went out, until it times out; a reply does not remove it.
     pub sent_at: BTreeMap<RequestId, u64>,
     pub request_timeout_ms: u64,
+    /// The unanswered snapshot.get, and the ones it superseded, whose replies are ignored.
+    pub snapshot_request: Option<RequestId>,
+    pub stale_snapshots: BTreeSet<RequestId>,
     pub dirty: bool,
 }
 
@@ -461,6 +464,8 @@ impl Model {
             next_request: 1,
             sent_at: BTreeMap::new(),
             request_timeout_ms: 15_000,
+            snapshot_request: None,
+            stale_snapshots: BTreeSet::new(),
             dirty: true,
         }
     }

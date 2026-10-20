@@ -222,17 +222,28 @@ fn net(m: &mut Model, e: NetEvent, fx: &mut Vec<Effect>) {
                 d.error = Some(lost);
             }
             m.detail_requests.clear();
+            m.snapshot_request = None;
+            m.stale_snapshots.clear();
         }
     }
 }
 
 fn resync(m: &mut Model, reason: &str, fx: &mut Vec<Effect>) {
     if transition(m, LinkInput::StreamBroken) {
-        m.diag.resyncs += 1;
         tracing::info!(reason, "resync");
-        let request_id = request(m);
-        fx.push(Effect::Send(ClientMessage::SnapshotGet { request_id }));
+        snapshot_get(m, fx);
     }
+}
+
+/// Asks for a full snapshot. The reply to any earlier, unanswered snapshot.get is stale from now on.
+fn snapshot_get(m: &mut Model, fx: &mut Vec<Effect>) {
+    m.diag.resyncs += 1;
+    if let Some(old) = m.snapshot_request.take() {
+        m.stale_snapshots.insert(old);
+    }
+    let request_id = request(m);
+    m.snapshot_request = Some(request_id.clone());
+    fx.push(Effect::Send(ClientMessage::SnapshotGet { request_id }));
 }
 
 fn server_message(m: &mut Model, msg: ServerMessage, fx: &mut Vec<Effect>) {
@@ -265,12 +276,13 @@ fn server_message(m: &mut Model, msg: ServerMessage, fx: &mut Vec<Effect>) {
             m.diag.error(m.now_ms, format!("resync required: {reason}"));
             if m.link == Link::Live {
                 resync(m, reason.as_str(), fx);
+            } else if m.link == Link::Resyncing {
+                // The server dropped what it had queued, maybe the snapshot reply too: ask again.
+                snapshot_get(m, fx);
             } else if m.link == Link::Syncing || m.link == Link::Negotiating {
                 // A rejected resume: fall back to a full snapshot.
-                let request_id = request(m);
                 m.link = Link::Syncing;
-                m.diag.resyncs += 1;
-                fx.push(Effect::Send(ClientMessage::SnapshotGet { request_id }));
+                snapshot_get(m, fx);
             }
         }
         ServerMessage::DiffPage(p) => apply_diff_page(m, p, fx),
@@ -337,8 +349,13 @@ fn server_message(m: &mut Model, msg: ServerMessage, fx: &mut Vec<Effect>) {
 }
 
 fn apply_snapshot(m: &mut Model, s: Snapshot, fx: &mut Vec<Effect>) {
-    if !transition(m, LinkInput::SnapshotApplied) {
+    if s.request_id.as_ref().is_some_and(|id| m.stale_snapshots.remove(id))
+        || !transition(m, LinkInput::SnapshotApplied)
+    {
         return;
+    }
+    if s.request_id.is_some() && s.request_id == m.snapshot_request {
+        m.snapshot_request = None;
     }
     m.stream = StreamPos { epoch: Some(s.stream_epoch), last_applied: s.sequence };
     m.diag.last_snapshot_ms = Some(m.now_ms);
