@@ -39,7 +39,7 @@ expression: frame
 
 
 
-   j/k move  Enter detail  w watch live  f scope  v kind  P phase  Esc back      1 inbox  2 review  3 diff  4 timeline
+   j/k move  Enter detail  w watch live  f scope  v kind  P phase    1 inbox  2 review  3 diff  4 timeline  5 settings
 
 aabbbbbbbbbacadabbbbbbbbbabbbbaddddddaccccccacccccccacccaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaeaeeeeaa
 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
@@ -78,7 +78,7 @@ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-aaacccaccccaacccccaccccccaacacccccaccccaacacccccaacaccccaacacccccaacccaccccaaaaaacacccccaacaccccccaacaccccaacaddddddddaa
+aaacccaccccaacccccaccccccaacacccccaccccaacacccccaacaccccaacacccccaaaacacccccaacaccccccaacaccccaacaddddddddaacaccccccccaa
 
 a - on base
 b text on base

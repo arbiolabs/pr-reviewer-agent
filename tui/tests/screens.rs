@@ -124,3 +124,11 @@ fn settings_describes_the_display_in_plain_words() {
     assert_eq!(row(&frame, "color"), "off");
     assert_eq!(row(&frame, "background"), "terminal");
 }
+
+#[test]
+fn the_footer_lists_settings_among_the_views_when_it_fits() {
+    let mut s = showcase(2);
+    let (frame, _) = render(&mut s.m, 120, 38);
+    let footer = frame.lines().last().unwrap();
+    assert!(footer.ends_with("4 timeline  5 settings"), "{footer}");
+}

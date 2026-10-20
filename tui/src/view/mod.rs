@@ -249,8 +249,10 @@ fn activity_words(kind: &crate::model::ActivityKind, phase: Option<crate::protoc
 
 fn views_line(c: &Ctx) -> Line<'static> {
     let mut spans = Vec::new();
-    for (i, s) in Screen::ALL.iter().take(4).enumerate() {
-        let on = *s == c.m.ui.screen || (*s == Screen::Review && c.m.ui.screen == Screen::Inbox && false);
+    // Settings joins the list once the footer has room for it beside the hints.
+    let shown = if c.m.size.0 >= 120 { 5 } else { 4 };
+    for (i, s) in Screen::ALL.iter().take(shown).enumerate() {
+        let on = *s == c.m.ui.screen;
         spans.push(c.span(format!("{}", i + 1), Role::Muted));
         spans.push(c.span(format!(" {}  ", s.label().to_lowercase()), if on { Role::Focus } else { Role::Muted }));
     }
@@ -318,7 +320,7 @@ fn footer_line(c: &Ctx, width: u16) -> Line<'static> {
             "j/k move  Enter fold or read  f scope  v kind  P phase  Esc fold  ? help"
         }
         (_, Screen::Timeline) => "j/k move  Enter detail  f scope  v kind  P phase  Esc back  ? help",
-        (_, Screen::Settings) => "j/k account  Enter select account  r refresh  1-4 views  ? help  q quit",
+        (_, Screen::Settings) => "j/k account  Enter select account  r refresh  1-5 views  ? help  q quit",
     };
     let running = c.m.domain.runs.values().any(|r| r.status == crate::protocol::RunStatus::Running);
     let watch = running && c.m.top_modal().is_none();
