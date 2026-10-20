@@ -87,11 +87,18 @@ fn help(c: &Ctx, f: &mut Frame, body: Rect) {
     };
     let two = col.width >= 76;
     let half = if two { col.width as usize / 2 } else { col.width as usize };
-    let left = section(Context::Global, "Everywhere", half);
-    let mut right = Vec::new();
-    for (ctx, name) in [(Context::Review, "Review"), (Context::Diff, "Diff"), (Context::Timeline, "Timeline")] {
-        right.extend(section(ctx, name, half));
+    let mut all = Vec::new();
+    for (ctx, name) in [
+        (Context::Global, "Everywhere"),
+        (Context::Review, "Review"),
+        (Context::Diff, "Diff"),
+        (Context::Timeline, "Timeline"),
+    ] {
+        all.extend(section(ctx, name, half));
     }
+    // Two columns of equal height, so the page ends as high as it can.
+    let mut left = all;
+    let right = if two { left.split_off(left.len().div_ceil(2)) } else { Vec::new() };
     let mut lines = vec![
         Line::raw(""),
         Line::from(c.span("Keys", Role::Title)),
@@ -107,6 +114,7 @@ fn help(c: &Ctx, f: &mut Frame, body: Rect) {
             spans.extend(right.get(i).map_or(vec![], |l| l.spans.clone()));
             lines.push(Line::from(spans));
         }
+        lines.push(Line::raw(""));
     } else {
         lines.extend(left);
         lines.extend(right);

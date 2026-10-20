@@ -540,3 +540,17 @@ fn the_pr_title_stays_in_view_while_the_live_log_pushes_the_open_card_down() {
         }
     }
 }
+
+#[test]
+fn the_help_page_shows_every_key_at_80x24() {
+    let mut s = mid_review(Look::default()).key(KeyCode::Char('?'));
+    let (frame, _) = render(&mut s.m, 80, 24);
+    use pr_review_tui::keymap::Context as C;
+    let rows = pr_review_tui::keymap::help_rows();
+    // The confirmation panel names its own y and n.
+    for (_, keys, what) in rows.iter().filter(|r| matches!(r.0, C::Global | C::Review | C::Diff | C::Timeline)) {
+        // A long description may end in an ellipsis; its start must show beside its keys.
+        let row = format!("{keys:<11}{}", what.chars().take(12).collect::<String>());
+        assert!(frame.contains(&row), "{row} is missing:\n{frame}");
+    }
+}

@@ -1,5 +1,6 @@
 ---
 source: tests/golden.rs
+assertion_line: 347
 expression: text
 ---
   pr-review · • reviewing #184 verify found: Finding f-1                ● live
@@ -8,21 +9,21 @@ expression: text
   Keys
   Read from the keymap itself, so this page cannot drift from what the keys do
 
-  Everywhere                            Review
-    q C-c      quit; reviews keep runn…   J K        scroll the explanation
-    ?          this help                  n N        next / previous finding
-    Esc        close / back
-    j k        move                     Diff
+  Everywhere                              s R c p    start/retry/cancel/publ…
+    q C-c      quit; reviews keep runn…   w          watch the running review
+    ?          this help
+    Esc        close / back             Review
+    j k        move                       J K        scroll the explanation
     C-d C-u    page down / up             n N        next / previous finding
-    g G        first / last               : /        jump to path:line
-    h l        pane left / right
-    Tab        cycle panes              Timeline
-    Enter      open selected              f          timeline scope
-    1 2 3 4 5  views; 5 is settings       v          timeline category
-    /          search PRs                 P          timeline phase
-    d          diff at the finding
-    t          timeline for selection
-    r          refresh snapshot
+    g G        first / last
+    h l        pane left / right        Diff
+    Tab        cycle panes                n N        next / previous finding
+    Enter      open selected              : /        jump to path:line
+    1 2 3 4 5  views; 5 is settings
+    /          search PRs               Timeline
+    d          diff at the finding        f          timeline scope
+    t          timeline for selection     v          timeline category
+    r          refresh snapshot           P          timeline phase
     A          GitHub accounts (Settin…
-    s R c p    start/retry/cancel/publ…
+
    Esc close  q quit
