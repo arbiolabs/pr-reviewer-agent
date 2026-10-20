@@ -13,6 +13,7 @@ use pr_review_tui::playback;
 use pr_review_tui::terminal::TerminalGuard;
 use pr_review_tui::update::Msg;
 use pr_review_tui::view::view;
+use tokio::signal::unix::{SignalKind, signal};
 use tokio::sync::mpsc;
 use tokio::time::MissedTickBehavior;
 
@@ -97,6 +98,10 @@ async fn run(settings: config::Settings, script: Option<playback::Script>) -> st
     model.request_timeout_ms = settings.request_timeout.as_millis() as u64;
     tracing::info!(endpoint = %model.diag.endpoint, config = %settings.config_path.display(), "start");
 
+    // Raw mode turns Ctrl-C into a key, so SIGINT only comes from kill; all three quit through the guard's restore.
+    let mut term = signal(SignalKind::terminate())?;
+    let mut hup = signal(SignalKind::hangup())?;
+    let mut int = signal(SignalKind::interrupt())?;
     let mut guard = TerminalGuard::enter()?;
     let size = guard.terminal.size()?;
     model.size = (size.width, size.height);
@@ -129,6 +134,9 @@ async fn run(settings: config::Settings, script: Option<playback::Script>) -> st
                     break;
                 }
             }
+            _ = term.recv() => break,
+            _ = hup.recv() => break,
+            _ = int.recv() => break,
             _ = tick.tick() => {
                 dispatch(&mut model, Msg::Tick(started.elapsed().as_millis() as u64), &cmds);
             }
