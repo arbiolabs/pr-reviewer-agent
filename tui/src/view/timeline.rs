@@ -220,7 +220,7 @@ pub fn timeline(c: &Ctx, f: &mut Frame, area: Rect) {
     head.push(Line::from(c.span(
         c.fit(
             &format!(
-                "{} of {} {}, oldest first {} {scope} (f) {} {} (v) {} phase {} (P)",
+                "{} of {} {}, oldest first {} {scope} (f) {} {} (v) {} phase {} (P){}",
                 rows.len(),
                 t.events.len(),
                 if t.events.len() == 1 { "event" } else { "events" },
@@ -228,7 +228,8 @@ pub fn timeline(c: &Ctx, f: &mut Frame, area: Rect) {
                 g.sep,
                 t.category.map_or("all kinds", |x| x.label()),
                 g.sep,
-                t.phase.map_or("any", phase_name)
+                t.phase.map_or("any", phase_name),
+                if t.text.is_empty() { String::new() } else { format!(" {} \"{}\" (/)", g.sep, t.text) },
             ),
             w,
         ),
@@ -238,10 +239,10 @@ pub fn timeline(c: &Ctx, f: &mut Frame, area: Rect) {
     if let Some(e) = &t.error {
         head.push(Line::from(c.span(c.fit(&format!("timeline unavailable: {e}"), w), Role::Fail)));
     } else if rows.is_empty() {
-        let filtered = t.scope != TimelineScope::Pr || t.category.is_some() || t.phase.is_some();
+        let filtered = t.scope != TimelineScope::Pr || t.category.is_some() || t.phase.is_some() || !t.text.is_empty();
         let text = match (t.pending.is_some(), filtered) {
             (true, _) => format!("loading{}", g.ellipsis),
-            (false, true) => "no events match the filters (f v P)".into(),
+            (false, true) => "no events match the filters (f v P /)".into(),
             (false, false) => "no events recorded yet".into(),
         };
         head.push(Line::from(c.span(text, Role::Muted)));

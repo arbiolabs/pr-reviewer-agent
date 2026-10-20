@@ -640,6 +640,7 @@ fn load_diff(m: &mut Model, key: DiffKey, anchor: Option<(Text, Option<u32>)>, f
         cursor: 0,
         stack: 0,
         anchor,
+        search: None,
     });
     diff_get(m, None, fx);
 }
@@ -774,7 +775,8 @@ fn finding_stops(m: &Model, d: &DiffView) -> Vec<(usize, usize, usize)> {
 // ---- timeline ----
 
 fn load_timeline(m: &mut Model, scope: TimelineScope, query: TimelineQuery, fx: &mut Vec<Effect>) {
-    let (category, phase) = m.timeline.as_ref().map_or((None, None), |t| (t.category, t.phase));
+    let (category, phase, text) =
+        m.timeline.as_ref().map_or((None, None, String::new()), |t| (t.category, t.phase, t.text.clone()));
     let pending = send(m, fx, |request_id| ClientMessage::TimelineGet {
         request_id,
         pr_id: query.pr.clone(),
@@ -794,6 +796,7 @@ fn load_timeline(m: &mut Model, scope: TimelineScope, query: TimelineQuery, fx: 
         open: None,
         category,
         phase,
+        text,
     });
 }
 
@@ -823,15 +826,34 @@ pub fn event_phases(m: &Model, events: &[SequencedEvent]) -> Vec<Option<Phase>> 
         .collect()
 }
 
-/// The events the timeline shows after its category and phase filters, oldest first, with their inferred phases.
+/// The words `/` matches an event by: what it names, the way its row reads.
+pub fn event_text(e: &SequencedEvent) -> String {
+    match &e.body {
+        EventBody::PrUpdated(p) => format!("#{} {} {}", p.number, p.title, p.head_sha.short()),
+        EventBody::Run(change, r) => {
+            let reason = r.failure_reason.as_ref().map_or("", |x| x.as_str());
+            format!("{change:?} {:?} {} {reason}", r.status, r.head_sha.short())
+        }
+        EventBody::PhaseChanged(p) => format!("{:?} {:?} {}", p.from, p.to, p.event),
+        EventBody::FindingUpdated(f) => format!("{} {} {:?} {:?}", f.title, f.file, f.severity, f.status),
+        EventBody::ToolActivity(a) => format!("{} {}", a.tool, a.summary),
+        EventBody::AccountsUpdated(a) => a.iter().map(|x| x.login.to_string()).collect::<Vec<_>>().join(" "),
+        EventBody::Other(kind) => kind.to_string(),
+    }
+}
+
+/// The events the timeline shows after its category, phase and text filters, oldest first, with their inferred phases.
 pub fn timeline_rows<'a>(m: &Model, t: &'a TimelineView) -> Vec<(&'a SequencedEvent, Option<Phase>)> {
     let phases = event_phases(m, &t.events);
+    let text = t.text.to_lowercase();
     let mut rows: Vec<_> = t
         .events
         .iter()
         .zip(phases)
         .filter(|(e, p)| {
-            t.category.is_none_or(|c| EventCategory::of(&e.body) == c) && t.phase.is_none_or(|want| *p == Some(want))
+            t.category.is_none_or(|c| EventCategory::of(&e.body) == c)
+                && t.phase.is_none_or(|want| *p == Some(want))
+                && (text.is_empty() || event_text(e).to_lowercase().contains(&text))
         })
         .collect();
     rows.reverse();
@@ -888,6 +910,10 @@ fn act(m: &mut Model, a: Action, fx: &mut Vec<Effect>) {
                 && m.ui.modals.is_empty()
             {
                 t.open = None;
+            } else if let Some(d) = m.diff.as_mut().filter(|d| m.ui.screen == Screen::Diff && d.search.is_some())
+                && m.ui.modals.is_empty()
+            {
+                d.search = None;
             } else if m.ui.modals.pop().is_none() {
                 m.ui.screen = match m.ui.screen {
                     Screen::Diff | Screen::Timeline => Screen::Review,
@@ -917,13 +943,14 @@ fn act(m: &mut Model, a: Action, fx: &mut Vec<Effect>) {
             m.ui.focus = if m.ui.focus == Pane::Main { Pane::Sidebar } else { Pane::Main }
         }
         Action::Open => open(m, fx),
+        // `/` searches what the screen shows: the diff's text, the timeline's events, else the PR list.
         Action::Search => {
-            if m.ui.screen == Screen::Diff {
-                act(m, Action::JumpTo, fx);
-            } else {
-                let before = m.ui.pr_filter.clone();
-                m.ui.modals.push(Modal::Input { purpose: InputPurpose::Search, buffer: before.clone(), before });
-            }
+            let (purpose, before) = match (m.ui.screen, &m.timeline, &m.diff) {
+                (Screen::Diff, _, Some(d)) => (InputPurpose::DiffSearch, d.search.clone().unwrap_or_default()),
+                (Screen::Timeline, Some(t), _) => (InputPurpose::TimelineFilter, t.text.clone()),
+                _ => (InputPurpose::Search, m.ui.pr_filter.clone()),
+            };
+            m.ui.modals.push(Modal::Input { purpose, buffer: before.clone(), before });
         }
         Action::JumpTo => m.ui.modals.push(Modal::Input {
             purpose: InputPurpose::JumpTo,
@@ -972,20 +999,24 @@ fn act(m: &mut Model, a: Action, fx: &mut Vec<Effect>) {
         Action::InputBackspace => edit_input(m, |b| {
             b.pop();
         }),
-        Action::InputCancel => {
-            if let Some(Modal::Input { purpose: InputPurpose::Search, before, .. }) = m.ui.modals.pop() {
+        Action::InputCancel => match m.ui.modals.pop() {
+            Some(Modal::Input { purpose: InputPurpose::Search, before, .. }) => {
                 m.ui.pr_filter = before;
                 reselect(m);
             }
-        }
-        Action::Confirm => send_confirmed(m, fx),
-        Action::InputSubmit => {
-            if let Some(Modal::Input { purpose, buffer, .. }) = m.ui.modals.pop()
-                && purpose == InputPurpose::JumpTo
-            {
-                jump_to(m, &buffer, fx);
+            Some(Modal::Input { purpose: InputPurpose::TimelineFilter, before, .. }) => {
+                if let Some(t) = &mut m.timeline {
+                    t.text = before;
+                }
             }
-        }
+            _ => {}
+        },
+        Action::Confirm => send_confirmed(m, fx),
+        Action::InputSubmit => match m.ui.modals.pop() {
+            Some(Modal::Input { purpose: InputPurpose::JumpTo, buffer, .. }) => jump_to(m, &buffer, fx),
+            Some(Modal::Input { purpose: InputPurpose::DiffSearch, buffer, .. }) => diff_search(m, buffer),
+            _ => {}
+        },
     }
 }
 
@@ -1100,9 +1131,17 @@ fn send_confirmed(m: &mut Model, fx: &mut Vec<Effect>) {
 fn edit_input(m: &mut Model, f: impl FnOnce(&mut String)) {
     if let Some(Modal::Input { purpose, buffer, .. }) = m.ui.modals.last_mut() {
         f(buffer);
-        if *purpose == InputPurpose::Search {
-            m.ui.pr_filter = buffer.clone();
-            reselect(m);
+        match purpose {
+            InputPurpose::Search => {
+                m.ui.pr_filter = buffer.clone();
+                reselect(m);
+            }
+            InputPurpose::TimelineFilter => {
+                if let Some(t) = &mut m.timeline {
+                    t.text = buffer.clone();
+                }
+            }
+            InputPurpose::JumpTo | InputPurpose::DiffSearch => {}
         }
     }
 }
@@ -1375,6 +1414,7 @@ fn next_finding(m: &mut Model, dir: isize, fx: &mut Vec<Effect>) {
             m.ui.focus = Pane::Main;
             move_by(m, dir, fx);
         }
+        Screen::Diff if m.diff.as_ref().is_some_and(|d| d.search.is_some()) => walk_matches(m, dir, false),
         Screen::Diff => {
             let Some(d) = &m.diff else { return };
             let stops = finding_stops(m, d);
@@ -1402,6 +1442,49 @@ fn next_finding(m: &mut Model, dir: isize, fx: &mut Vec<Effect>) {
         }
         _ => {}
     }
+}
+
+/// (file index, row) of every diff line whose text contains `query`, ignoring case, in diff order.
+pub fn diff_matches(d: &DiffView, query: &str) -> Vec<(usize, usize)> {
+    let q = query.to_lowercase();
+    let mut out = Vec::new();
+    for (fi, f) in d.files.iter().enumerate() {
+        for (ri, row) in file_rows(f).iter().enumerate() {
+            if matches!(row, DiffRow::Line(l) if l.text.as_str().to_lowercase().contains(&q)) {
+                out.push((fi, ri));
+            }
+        }
+    }
+    out
+}
+
+fn diff_search(m: &mut Model, query: String) {
+    if let Some(d) = &mut m.diff {
+        d.search = Some(query).filter(|q| !q.is_empty());
+    }
+    walk_matches(m, 1, true);
+}
+
+/// Moves the diff cursor to the next (`dir` > 0) or previous match of its search, wrapping; `here` counts the line
+/// under the cursor.
+fn walk_matches(m: &mut Model, dir: isize, here: bool) {
+    let Some(d) = &mut m.diff else { return };
+    let Some(q) = d.search.clone() else { return };
+    let stops = diff_matches(d, &q);
+    let at = (d.selected_file.as_ref().and_then(|p| d.files.iter().position(|f| &f.path == p)).unwrap_or(0), d.cursor);
+    let target = if dir > 0 {
+        stops.iter().find(|s| **s > at || (here && **s == at)).or(stops.first())
+    } else {
+        stops.iter().rev().find(|s| **s < at).or(stops.last())
+    };
+    let Some(&(fi, row)) = target else {
+        notice(m, format!("no line in this diff contains \"{q}\""));
+        return;
+    };
+    d.selected_file = Some(d.files[fi].path.clone());
+    d.cursor = row;
+    d.stack = 0;
+    m.ui.focus = Pane::Main;
 }
 
 fn jump_to(m: &mut Model, spec: &str, fx: &mut Vec<Effect>) {

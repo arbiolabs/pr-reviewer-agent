@@ -171,8 +171,13 @@ pub enum Pane {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InputPurpose {
+    /// The PR list's fuzzy filter.
     Search,
     JumpTo,
+    /// Timeline events whose text contains the buffer.
+    TimelineFilter,
+    /// Diff lines whose text contains the buffer; `n`/`N` walk them.
+    DiffSearch,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -230,6 +235,8 @@ pub struct DiffView {
     /// Which of the findings stacked on the cursor's line `Enter` opens; `n` walks the stack before the next line.
     pub stack: usize,
     pub anchor: Option<(Text, Option<u32>)>,
+    /// The text `/` searched for; while set, `n`/`N` walk its matches instead of the findings.
+    pub search: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -326,6 +333,8 @@ pub struct TimelineView {
     pub open: Option<u64>,
     pub category: Option<EventCategory>,
     pub phase: Option<Phase>,
+    /// Shows only events whose text contains this, ignoring case.
+    pub text: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]

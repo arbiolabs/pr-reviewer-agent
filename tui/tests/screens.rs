@@ -195,7 +195,7 @@ fn help_marks_write_keys_the_daemon_does_not_grant() {
     granted.server(ServerMessage::parse(&read("fixtures/server.snapshot.json")).unwrap());
     let mut granted = granted.key(crossterm::event::KeyCode::Char('?'));
     let (frame, _) = render(&mut granted.m, 120, 38);
-    assert!(frame.lines().any(|l| l.trim_end().ends_with("start a review")), "{frame}");
+    assert!(frame.contains("start a review") && !frame.contains("start a review (not offered)"), "{frame}");
     assert!(frame.contains("retry the run (not offered)"), "{frame}");
 }
 
@@ -231,7 +231,7 @@ fn an_empty_timeline_says_whether_filters_hide_events() {
         filtered = filtered.key(KeyCode::Char('v'));
     }
     let (frame, _) = render(&mut filtered.m, 120, 38);
-    assert!(frame.contains("no events match the filters (f v P)"), "{frame}");
+    assert!(frame.contains("no events match the filters (f v P /)"), "{frame}");
 }
 
 #[test]
@@ -303,4 +303,50 @@ fn at_200_columns_the_rail_and_the_column_use_the_width() {
     // Below 140 columns the rail keeps its 34.
     let (frame, _) = render(&mut s.m, 120, 38);
     assert!(frame.contains("#345 Partition ledger_entrie…"), "{frame}");
+}
+
+fn typed(mut s: Sim, text: &str) -> Sim {
+    for ch in text.chars() {
+        s = s.key(crossterm::event::KeyCode::Char(ch));
+    }
+    s
+}
+
+#[test]
+fn slash_on_timeline_filters_its_events_by_text() {
+    use crossterm::event::KeyCode;
+    let s = showcase(2).key(KeyCode::Char('t')).key(KeyCode::Char('/'));
+    let mut s = typed(s, "refund").key(KeyCode::Enter);
+    assert_eq!(s.m.ui.pr_filter, "", "the PR list is not what / filters here");
+    let (frame, _) = render(&mut s.m, 120, 38);
+    assert!(frame.contains("Any signed-in customer can refund any order"), "{frame}");
+    assert!(!frame.contains("review finished"), "{frame}");
+    assert!(frame.contains("\"refund\" (/)"), "the header names the filter:\n{frame}");
+}
+
+#[test]
+fn slash_on_diff_searches_its_text_and_n_walks_the_matches() {
+    use crossterm::event::KeyCode;
+    use pr_review_tui::model::{DiffRow, file_rows};
+    let line_at_cursor = |s: &Sim| {
+        let d = s.m.diff.as_ref().unwrap();
+        match file_rows(d.file().unwrap()).get(d.cursor) {
+            Some(DiffRow::Line(l)) => l.text.to_string(),
+            _ => String::new(),
+        }
+    };
+    let s = showcase(2).key(KeyCode::Enter).key(KeyCode::Char('d')).key(KeyCode::Char('g')).key(KeyCode::Char('/'));
+    let mut s = typed(s, "refundedcents").key(KeyCode::Enter);
+    let first = line_at_cursor(&s);
+    assert!(first.to_lowercase().contains("refundedcents"), "{first:?}");
+    s = s.key(KeyCode::Char('n'));
+    let second = line_at_cursor(&s);
+    assert!(second.to_lowercase().contains("refundedcents") && second != first, "{second:?}");
+    let (frame, _) = render(&mut s.m, 120, 38);
+    assert!(frame.contains("match 2 of"), "{frame}");
+    let s = s.key(KeyCode::Char(':'));
+    assert!(matches!(
+        s.m.top_modal(),
+        Some(pr_review_tui::model::Modal::Input { purpose: pr_review_tui::model::InputPurpose::JumpTo, .. })
+    ));
 }

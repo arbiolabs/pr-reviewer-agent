@@ -141,7 +141,8 @@ const TABLE: &[(Context, KeyCode, KeyModifiers, Action)] = &[
     (C::Diff, K::Char('N'), NONE, A::PrevFinding),
     (C::Diff, K::Char(':'), NONE, A::JumpTo),
     (C::Diff, K::Char(':'), SHIFT, A::JumpTo),
-    (C::Diff, K::Char('/'), NONE, A::JumpTo),
+    (C::Diff, K::Char('/'), NONE, A::Search),
+    (C::Timeline, K::Char('/'), NONE, A::Search),
     (C::Timeline, K::Char('f'), NONE, A::CycleScope),
     (C::Timeline, K::Char('v'), NONE, A::CycleCategory),
     (C::Timeline, K::Char('P'), SHIFT, A::CyclePhase),
@@ -193,8 +194,10 @@ pub fn resolve(screen: Screen, modal: Option<&Modal>, key: KeyEvent) -> Option<A
 /// The help page's rows by context, read from the same table so help never drifts from behavior: the context, its keys,
 /// what they do, and the capability the server must grant for them to act.
 pub fn help_rows() -> Vec<(Context, String, &'static str, Option<&'static str>)> {
-    let describe = |a: Action| -> Option<&'static str> {
+    let describe = |ctx: Context, a: Action| -> Option<&'static str> {
         Some(match a {
+            A::Search if ctx == C::Diff => "search the diff; n N walk matches",
+            A::Search if ctx == C::Timeline => "filter events by text",
             A::Quit => "quit; reviews keep running",
             A::Help => "this help",
             A::Back => "close / back",
@@ -226,7 +229,7 @@ pub fn help_rows() -> Vec<(Context, String, &'static str, Option<&'static str>)>
     };
     let mut rows: Vec<(Context, String, &'static str, Option<&'static str>)> = Vec::new();
     for (ctx, code, mods, action) in TABLE {
-        let Some(text) = describe(*action) else { continue };
+        let Some(text) = describe(*ctx, *action) else { continue };
         let key = match code {
             K::Char(c) if mods.contains(CTRL) => format!("C-{c}"),
             K::Char(c) => c.to_string(),

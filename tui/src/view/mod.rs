@@ -293,6 +293,8 @@ fn footer_line(c: &Ctx, width: u16) -> Line<'static> {
         let prompt = match purpose {
             InputPurpose::Search => " / search PRs: ",
             InputPurpose::JumpTo => " : jump to path[:line]: ",
+            InputPurpose::TimelineFilter => " / filter events: ",
+            InputPurpose::DiffSearch => " / search the diff: ",
         };
         let field = c.fit(&format!("{buffer}_"), w.saturating_sub(crate::text::width(prompt) + 22));
         return Line::from(vec![
@@ -315,11 +317,14 @@ fn footer_line(c: &Ctx, width: u16) -> Line<'static> {
         (_, Screen::Review) => {
             "j/k finding  Enter read  d diff  J/K scroll  h pull requests  t timeline  ? help  q quit"
         }
-        (_, Screen::Diff) => "j/k line  n/N finding  Enter read  h files  : jump  Esc back  ? help",
-        (_, Screen::Timeline) if c.m.timeline.as_ref().is_some_and(|t| t.open.is_some()) => {
-            "j/k move  Enter fold or read  f scope  v kind  P phase  Esc fold  ? help"
+        (_, Screen::Diff) if c.m.diff.as_ref().is_some_and(|d| d.search.is_some()) => {
+            "j/k line  n/N match  Enter read  h files  / search  Esc clear search  ? help"
         }
-        (_, Screen::Timeline) => "j/k move  Enter detail  f scope  v kind  P phase  Esc back  ? help",
+        (_, Screen::Diff) => "j/k line  n/N finding  Enter read  h files  / search  : jump  Esc back  ? help",
+        (_, Screen::Timeline) if c.m.timeline.as_ref().is_some_and(|t| t.open.is_some()) => {
+            "j/k move  Enter fold or read  / filter  f scope  v kind  P phase  Esc fold  ? help"
+        }
+        (_, Screen::Timeline) => "j/k move  Enter detail  / filter  f scope  v kind  P phase  Esc back  ? help",
         (_, Screen::Settings) => "j/k account  Enter select account  r refresh  1-5 views  ? help  q quit",
     };
     let running = c.m.domain.runs.values().any(|r| r.status == crate::protocol::RunStatus::Running);

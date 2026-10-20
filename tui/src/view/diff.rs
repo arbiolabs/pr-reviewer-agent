@@ -74,6 +74,14 @@ fn header(c: &Ctx, d: &DiffView, anchored: &[&Finding], w: usize) -> Vec<Line<'s
         second.push(c.span(format!("   loading{}", g.ellipsis), Role::Pending));
     } else if let Some(e) = &d.error {
         second.push(c.span(format!("   diff unavailable: {e}"), Role::Fail));
+    } else if let Some(q) = &d.search {
+        let matches = crate::update::diff_matches(d, q);
+        let here = d.selected_file.as_ref().and_then(|p| d.files.iter().position(|f| &f.path == p));
+        let pos = match matches.iter().position(|m| Some(m.0) == here && m.1 == d.cursor) {
+            Some(i) => format!("match {} of {} for \"{q}\"", i + 1, matches.len()),
+            None => format!("{} matches for \"{q}\"", matches.len()),
+        };
+        second.push(c.span(format!("   {pos}"), Role::Accent));
     } else {
         let at = anchored.iter().position(|f| on_cursor(d, f));
         let pos = at.map_or(String::new(), |i| format!("finding {} of {}", i + 1, anchored.len()));
