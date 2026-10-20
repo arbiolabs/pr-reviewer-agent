@@ -28,10 +28,13 @@ pub fn diff(c: &Ctx, f: &mut Frame, area: Rect) {
     let anchored = diff_findings(c.m, d);
     let tree_focus = c.focused(Pane::Sidebar);
     let (rail, body) = match c.width {
-        Width::Narrow if tree_focus => (Some(area), None),
-        Width::Narrow => (None, Some(area)),
-        w => {
-            let rw = if w == Width::Wide { 34 } else { 28 };
+        // Below the wide layout the code needs every column; h shows the file list in its place.
+        Width::Narrow | Width::Medium if tree_focus => (Some(area), None),
+        Width::Narrow | Width::Medium => {
+            (None, Some(Rect { x: area.x + 1, width: area.width.saturating_sub(2), ..area }))
+        }
+        Width::Wide => {
+            let rw = 34;
             (Some(Rect { width: rw, ..area }), Some(Rect { x: area.x + rw + 2, width: area.width - rw - 3, ..area }))
         }
     };
