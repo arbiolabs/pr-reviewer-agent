@@ -12,7 +12,7 @@ use super::doc::{column, filled};
 use crate::keymap::{Context, help_rows};
 use crate::model::{ConfirmState, Link, Modal};
 use crate::protocol::{Account, AccountState};
-use crate::theme::{Bg, Role};
+use crate::theme::{Bg, Palette, Role};
 
 pub fn modal(c: &Ctx, f: &mut Frame, body: Rect, modal: &Modal) {
     match modal {
@@ -289,7 +289,12 @@ pub fn settings(c: &Ctx, f: &mut Frame, area: Rect) {
     ));
     lines.push(row(
         "background",
-        if look.terminal_bg { "terminal: assumes a dark terminal".into() } else { "theme: painted ink".into() },
+        match (look.palette, look.terminal_bg) {
+            (Palette::Dark, true) => "terminal: assumes a dark terminal".into(),
+            (Palette::Light, true) => "terminal: assumes a light terminal".into(),
+            (Palette::Dark, false) => "theme: painted ink (dark)".into(),
+            (Palette::Light, false) => "theme: painted paper (light)".into(),
+        },
         Role::Normal,
     ));
     gap(&mut lines);

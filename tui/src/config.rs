@@ -7,13 +7,15 @@ use std::time::Duration;
 use serde::Deserialize;
 
 use crate::model::{Look, PrRef, Screen};
+use crate::theme::Palette;
 
 pub const USAGE: &str =
-    "usage: pr-review-tui [--socket PATH] [--pr URL] [--ascii] [--playback FILE.ndjson] [--config FILE]
+    "usage: pr-review-tui [--socket PATH] [--pr URL] [--ascii] [--theme NAME] [--playback FILE.ndjson] [--config FILE]
 
   --socket PATH       reviewer control socket (default: config, then the platform runtime dir)
   --pr URL            open this PR, e.g. https://github.com/owner/repo/pull/184 or owner/repo#184
   --ascii             ASCII glyphs and borders only
+  --theme NAME        auto, dark, light or mono (default: config, then auto, which asks the terminal)
   --playback FILE     play a scripted server session (protocol/playback/*.ndjson) instead of connecting
   --config FILE       config file (default: <config dir>/pr-review/config.toml)
 
@@ -24,6 +26,7 @@ pub struct Args {
     pub socket: Option<PathBuf>,
     pub pr: Option<String>,
     pub ascii: bool,
+    pub theme: Option<String>,
     pub playback: Option<PathBuf>,
     pub config: Option<PathBuf>,
 }
@@ -35,6 +38,7 @@ pub fn parse_args(mut it: impl Iterator<Item = String>) -> Result<Option<Args>, 
         match flag.as_str() {
             "--socket" => a.socket = Some(value("--socket")?.into()),
             "--pr" => a.pr = Some(value("--pr")?),
+            "--theme" => a.theme = Some(value("--theme")?),
             "--playback" => a.playback = Some(value("--playback")?.into()),
             "--config" => a.config = Some(value("--config")?.into()),
             "--ascii" => a.ascii = true,
@@ -86,7 +90,7 @@ struct UiSection {
 impl Default for UiSection {
     fn default() -> Self {
         UiSection {
-            theme: "dark".into(),
+            theme: "auto".into(),
             start_view: "review".into(),
             show_activity: true,
             ascii: false,
@@ -184,17 +188,25 @@ fn screen(name: &str) -> Result<Screen, String> {
     })
 }
 
-pub fn resolve(args: Args, no_color: bool) -> Result<Settings, String> {
+/// `detect` asks the terminal for its background, and runs only for `theme = "auto"` with color on.
+pub fn resolve(args: Args, no_color: bool, detect: impl FnOnce() -> Palette) -> Result<Settings, String> {
     let config_path = args.config.clone().unwrap_or_else(|| config_dir().join("config.toml"));
     let file: File = match std::fs::read_to_string(&config_path) {
         Ok(text) => toml::from_str(&text).map_err(|e| format!("{}: {e}", config_path.display()))?,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound && args.config.is_none() => File::default(),
         Err(e) => return Err(format!("{}: {e}", config_path.display())),
     };
-    let color = match file.ui.theme.as_str() {
-        "dark" => !no_color,
-        "mono" => false,
-        other => return Err(format!("ui.theme: {other:?} is not supported (dark, mono)")),
+    let (key, theme) = match &args.theme {
+        Some(t) => ("--theme", t.as_str()),
+        None => ("ui.theme", file.ui.theme.as_str()),
+    };
+    let (color, palette) = match theme {
+        "auto" if no_color => (false, Palette::Dark),
+        "auto" => (true, detect()),
+        "dark" => (!no_color, Palette::Dark),
+        "light" => (!no_color, Palette::Light),
+        "mono" => (false, Palette::Dark),
+        other => return Err(format!("{key}: {other:?} is not supported (auto, dark, light, mono)")),
     };
     let terminal_bg = match file.ui.background.as_str() {
         "theme" => false,
@@ -222,7 +234,13 @@ pub fn resolve(args: Args, no_color: bool) -> Result<Settings, String> {
         reconnect: file.connection.reconnect,
         heartbeat_timeout: Duration::from_secs(file.connection.heartbeat_timeout_secs),
         request_timeout: Duration::from_secs(file.connection.request_timeout_secs),
-        look: Look { ascii: args.ascii || file.ui.ascii, color, show_activity: file.ui.show_activity, terminal_bg },
+        look: Look {
+            ascii: args.ascii || file.ui.ascii,
+            color,
+            show_activity: file.ui.show_activity,
+            terminal_bg,
+            palette,
+        },
         start,
         wanted_pr,
         config_path,
@@ -268,22 +286,51 @@ mod tests {
         )
         .unwrap();
         let a = Args { config: Some(path.clone()), ..Args::default() };
-        let s = resolve(a, true).unwrap();
+        let s = resolve(a, true, || Palette::Dark).unwrap();
         assert_eq!(s.source, Source::Socket("/from/file.sock".into()));
         assert_eq!((s.look.ascii, s.look.color, s.start), (true, false, Screen::Timeline));
         let a = Args { config: Some(path.clone()), socket: Some("/flag.sock".into()), ..Args::default() };
-        assert_eq!(resolve(a, false).unwrap().source, Source::Socket("/flag.sock".into()));
+        assert_eq!(resolve(a, false, || Palette::Dark).unwrap().source, Source::Socket("/flag.sock".into()));
 
         assert!(!s.look.terminal_bg);
         assert!(s.mouse, "mouse capture is on by default");
         std::fs::write(&path, "[ui]\nbackground = \"terminal\"\n").unwrap();
-        assert!(resolve(Args { config: Some(path.clone()), ..Args::default() }, false).unwrap().look.terminal_bg);
+        assert!(
+            resolve(Args { config: Some(path.clone()), ..Args::default() }, false, || Palette::Dark)
+                .unwrap()
+                .look
+                .terminal_bg
+        );
         std::fs::write(&path, "[ui]\nbackground = \"clear\"\n").unwrap();
-        let err = resolve(Args { config: Some(path.clone()), ..Args::default() }, false).unwrap_err();
+        let err = resolve(Args { config: Some(path.clone()), ..Args::default() }, false, || Palette::Dark).unwrap_err();
         assert!(err.contains("ui.background"), "{err}");
 
         std::fs::write(&path, "[ui]\nascci = true\n").unwrap();
-        let err = resolve(Args { config: Some(path), ..Args::default() }, false).unwrap_err();
+        let err = resolve(Args { config: Some(path), ..Args::default() }, false, || Palette::Dark).unwrap_err();
         assert!(err.contains("unknown field `ascci`"), "{err}");
+    }
+
+    #[test]
+    fn auto_asks_the_terminal_and_the_flag_overrides_the_file() {
+        let dir = std::env::temp_dir().join(format!("pr-review-tui-theme-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("config.toml");
+        let look = |file: &str, flag: Option<&str>, no_color: bool, detected: Palette| {
+            std::fs::write(&path, file).unwrap();
+            let a = Args { config: Some(path.clone()), theme: flag.map(String::from), ..Args::default() };
+            resolve(a, no_color, || detected).map(|s| (s.look.color, s.look.palette))
+        };
+        assert_eq!(look("", None, false, Palette::Light), Ok((true, Palette::Light)), "auto is the default");
+        assert_eq!(look("", None, true, Palette::Light), Ok((false, Palette::Dark)), "NO_COLOR skips detection");
+        let light = "[ui]\ntheme = \"light\"\n";
+        assert_eq!(look(light, None, false, Palette::Dark), Ok((true, Palette::Light)));
+        assert_eq!(look(light, Some("dark"), false, Palette::Light), Ok((true, Palette::Dark)));
+        assert_eq!(look(light, Some("mono"), false, Palette::Light), Ok((false, Palette::Dark)));
+        assert_eq!(look("", Some("auto"), false, Palette::Light), Ok((true, Palette::Light)));
+        let err = look("", Some("sepia"), false, Palette::Dark).unwrap_err();
+        assert_eq!(err, "--theme: \"sepia\" is not supported (auto, dark, light, mono)");
+        let err = look("[ui]\ntheme = \"sepia\"\n", None, false, Palette::Dark).unwrap_err();
+        assert!(err.starts_with("ui.theme:"), "{err}");
+        assert_eq!(args(&["--theme", "light"]).unwrap().unwrap().theme.as_deref(), Some("light"));
     }
 }

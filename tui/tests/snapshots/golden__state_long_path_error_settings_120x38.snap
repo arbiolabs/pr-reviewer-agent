@@ -28,7 +28,7 @@ expression: settings
 
           Display
             glyphs, color         unicode, color
-            background            theme: painted ink
+            background            theme: painted ink (dark)
 
           Recent errors
             0.0s ago              disconnected: socket directory does not exist: /private/tmp/claude-501/xxxx…

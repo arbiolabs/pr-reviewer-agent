@@ -33,7 +33,7 @@ fn main() -> ExitCode {
         }
     };
     let no_color = std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty());
-    let settings = match config::resolve(args, no_color) {
+    let settings = match config::resolve(args, no_color, pr_review_tui::terminal::detect_palette) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("pr-review-tui: {e}");

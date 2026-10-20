@@ -28,7 +28,7 @@ expression: ascii_text
 
           Display
             glyphs, color         ascii, color
-            background            theme: painted ink
+            background            theme: painted ink (dark)
 
           Recent errors
             none

@@ -28,7 +28,7 @@ expression: text
 
           Display
             glyphs, color         unicode, color
-            background            theme: painted ink
+            background            theme: painted ink (dark)
 
           Recent errors
             none

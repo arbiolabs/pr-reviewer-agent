@@ -111,7 +111,7 @@ mod tests {
         let m = Model::new("x", Look::default(), Screen::Review, None);
         let c = Ctx {
             m: &m,
-            t: Theme { color: false, ascii: false, terminal_bg: false },
+            t: Theme { color: false, ascii: false, terminal_bg: false, palette: Default::default() },
             width: super::super::Width::Wide,
         };
         assert_eq!(sparkline(&c, &[0, 1, 3, 6]), "▁▃▅█");

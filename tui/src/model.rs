@@ -358,11 +358,12 @@ pub struct Look {
     pub show_activity: bool,
     /// `[ui] background = "terminal"`: the terminal's own background shows where the theme would paint `base`.
     pub terminal_bg: bool,
+    pub palette: crate::theme::Palette,
 }
 
 impl Default for Look {
     fn default() -> Self {
-        Look { ascii: false, color: true, show_activity: true, terminal_bg: false }
+        Look { ascii: false, color: true, show_activity: true, terminal_bg: false, palette: Default::default() }
     }
 }
 

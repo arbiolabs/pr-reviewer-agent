@@ -81,7 +81,7 @@ pub enum Hit {
 fn ctx(m: &Model, width: u16) -> Ctx<'_> {
     Ctx {
         m,
-        t: Theme { color: m.look.color, ascii: m.look.ascii, terminal_bg: m.look.terminal_bg },
+        t: Theme { color: m.look.color, ascii: m.look.ascii, terminal_bg: m.look.terminal_bg, palette: m.look.palette },
         width: Width::of(width),
     }
 }
