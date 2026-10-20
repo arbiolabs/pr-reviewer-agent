@@ -3,6 +3,7 @@ import { parseArgs } from "node:util";
 import type { AuthInteraction, CredentialStore, Models } from "@earendil-works/pi-ai";
 import { createTypeSafeClient, createZenClient } from "jev-systemone";
 import { loadConfig, saveDefaultModel } from "../config/config.ts";
+import { runDaemon, runTui } from "../control/daemon.ts";
 import { GitHubPullSource, parsePullRef, parsePullUrl, type PullSource, resolveGitHubToken } from "../github/pulls.ts";
 import { type DecisionEngine, JevDecisionEngine, type JevRoute, jevSkipReason } from "../jev/decision.ts";
 import { PiAuthFileStore } from "../models/credential-store.ts";
@@ -29,7 +30,9 @@ const USAGE = `usage:
   pr-review review <pr-url> --dry-run [--json] [--no-jev] [--model provider/id] [--retry]
   pr-review inspect --pr owner/repo#123 [--json]
   pr-review models [--json]
-  pr-review login [provider] [--api-key]`;
+  pr-review login [provider] [--api-key]
+  pr-review daemon [--socket PATH] [--fixture NAME] [--data DIR] [--heartbeat SECONDS]
+  pr-review tui [args for pr-review-tui]`;
 
 /** Text output; `json` writes the value unchanged, so a JSON consumer gets the raw strings (JSON escapes C0 itself). */
 type Out = ((text: string) => void) & { json(value: unknown): void };
@@ -55,6 +58,10 @@ export async function main(argv: string[], deps: CliDeps = {}): Promise<number> 
         return await models(rest, out);
       case "login":
         return await login(rest, deps, out);
+      case "daemon":
+        return await runDaemon(rest, dataDir, err);
+      case "tui":
+        return runTui(rest);
       default:
         err(`${USAGE}\n`);
         return 2;
