@@ -115,6 +115,10 @@ export class AppStore {
     return id;
   }
 
+  pullById(id: string): PullRow | undefined {
+    return this.db.prepare("SELECT * FROM pull_requests WHERE id = ?").get(id) as PullRow | undefined;
+  }
+
   pullByName(fullName: string, number: number): PullRow | undefined {
     return this.db
       .prepare("SELECT * FROM pull_requests WHERE lower(repo_full_name) = lower(?) AND number = ?")

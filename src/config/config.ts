@@ -11,6 +11,7 @@ export type Config = {
     max_diff_bytes: number;
     base_policy_version: string;
     jev_timeout_ms: number;
+    retry_backoff_ms: number;
   };
   routing: {
     mandatory_deep_paths: string[];
@@ -33,6 +34,7 @@ export const DEFAULT_CONFIG: Config = {
     max_diff_bytes: 2_000_000,
     base_policy_version: "1",
     jev_timeout_ms: 15_000,
+    retry_backoff_ms: 1000,
   },
   routing: {
     mandatory_deep_paths: ["**/auth/**", "**/payments/**", "**/booking/**", "**/migrations/**"],
