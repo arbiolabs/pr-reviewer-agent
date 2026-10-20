@@ -31,7 +31,7 @@ export function fakeGh(status: unknown = GH_STATUS, exitCode = 0) {
     join(dir, "gh"),
     `#!/bin/sh
 echo "$*" >> "${dir}/calls.log"
-echo "GITHUB_TOKEN=\${GITHUB_TOKEN-unset}" >> "${dir}/env.log"
+echo "GITHUB_TOKEN=\${GITHUB_TOKEN-unset} GH_TOKEN=\${GH_TOKEN-unset}" >> "${dir}/env.log"
 if [ "$1 $2" = "auth status" ]; then /bin/cat "${dir}/status.json"; exit $(/bin/cat "${dir}/exit-code"); fi
 if [ "$1 $2" = "auth token" ]; then
   if [ "$5" = "--user" ]; then echo "${FAKE_TOKEN}-$6"; else echo "${FAKE_TOKEN}-active"; fi

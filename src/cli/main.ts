@@ -336,7 +336,7 @@ async function withStore<T>(dataDir: string, fn: (store: AppStore) => Promise<T>
 function using(list: Account[]): { ok: boolean; text: string } {
   try {
     const plan = planGithubAuth(list);
-    if (plan.source === "env") return { ok: true, text: "GITHUB_TOKEN from the environment (overrides gh accounts)" };
+    if (plan.source === "env") return { ok: true, text: `${plan.account.login} from the environment (overrides gh accounts)` };
     if (plan.source === "none") return { ok: true, text: "no token, public repositories only" };
     return { ok: true, text: `${plan.account.id} (${plan.source === "selected" ? "selected" : "gh active account"})` };
   } catch (error) {

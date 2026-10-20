@@ -128,8 +128,8 @@ export const DiffFile = Type.Object({
 export type DiffFile = Static<typeof DiffFile>;
 
 /**
- * A GitHub identity the daemon can see. `id` is `<host>/<login>`. `env/GITHUB_TOKEN` is the daemon's environment token,
- * which overrides every gh account and cannot be selected. A selected account gh no longer lists is still listed, with
+ * A GitHub identity the daemon can see. `id` is `<host>/<login>`. `env/GITHUB_TOKEN` or `env/GH_TOKEN` is the daemon's
+ * environment token, which overrides every gh account and cannot be selected. A selected account gh no longer lists is still listed, with
  * state error, so the client can show why GitHub reads fail.
  */
 export const Account = Type.Object({

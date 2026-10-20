@@ -31,10 +31,12 @@ describe("detectGh", () => {
     expect(await detectGh({ PATH: gh.dir })).toEqual({ installed: true, path: join(gh.dir, "gh"), accounts: [] });
   });
 
-  it("hides GITHUB_TOKEN from gh so it lists only its own accounts", async () => {
+  it("hides GITHUB_TOKEN and GH_TOKEN from gh so it lists only its own accounts", async () => {
     const gh = fakeGh();
-    await detectGh({ PATH: gh.dir, GITHUB_TOKEN: "env-secret" });
-    expect(gh.envLog()).toBe("GITHUB_TOKEN=unset\n");
+    await detectGh({ PATH: gh.dir, GITHUB_TOKEN: "env-secret", GH_TOKEN: "gh-secret" });
+    await resolveGithubAuth(meta("github.com/octo-work"), { PATH: gh.dir, GITHUB_TOKEN: "", GH_TOKEN: "" });
+    expect(gh.calls()).toEqual(["auth status --json hosts", "auth status --json hosts", "auth token --hostname github.com --user octo-work"]);
+    expect(gh.envLog()).toBe("GITHUB_TOKEN=unset GH_TOKEN=unset\n".repeat(3));
   });
 });
 
@@ -42,6 +44,8 @@ describe("resolveGithubAuth precedence", () => {
   it("env GITHUB_TOKEN > selected > gh active (github.com) > none", async () => {
     const gh = fakeGh();
     expect(await resolveGithubAuth(meta("github.com/octo-work"), { PATH: gh.dir, GITHUB_TOKEN: "env-token" })).toEqual({ token: "env-token", source: "env", account: "env/GITHUB_TOKEN" });
+    expect(await resolveGithubAuth(meta("github.com/octo-work"), { PATH: gh.dir, GH_TOKEN: "gh-token" })).toEqual({ token: "gh-token", source: "env", account: "env/GH_TOKEN" });
+    expect(await resolveGithubAuth(meta(), { PATH: gh.dir, GITHUB_TOKEN: "env-token", GH_TOKEN: "gh-token" })).toEqual({ token: "env-token", source: "env", account: "env/GITHUB_TOKEN" });
     expect(await resolveGithubAuth(meta("github.com/octo-work"), { PATH: gh.dir })).toEqual({ token: `${FAKE_TOKEN}-octo-work`, source: "selected", account: "github.com/octo-work" });
     expect(await resolveGithubAuth(meta(), { PATH: gh.dir })).toEqual({ token: `${FAKE_TOKEN}-diego-arbio-dev`, source: "active", account: "github.com/diego-arbio-dev" });
     expect(await resolveGithubAuth(meta(), { PATH: mkdtempSync(join(tmpdir(), "no-gh-")) })).toEqual({ token: undefined, source: "none" });
@@ -70,6 +74,8 @@ describe("listAccounts and chooseAccount", () => {
       [GHE.id, "ok", false],
       ["github.com/gone", "error", true],
     ]);
+    expect(listAccounts(detection, undefined, { GH_TOKEN: "t" })[0]).toEqual({ id: "env/GH_TOKEN", host: "env", login: "GH_TOKEN", state: "ok", ghActive: false, selected: false, scopes: [] });
+    expect(listAccounts(detection, undefined, { GITHUB_TOKEN: "t", GH_TOKEN: "t" }).filter((a) => a.host === "env").map((a) => a.id)).toEqual(["env/GITHUB_TOKEN"]);
   });
 
   it("accepts a github.com account in state ok by id or unique login, and refuses the rest", async () => {
@@ -81,6 +87,8 @@ describe("listAccounts and chooseAccount", () => {
     expect(chooseAccount(detection, "github.com/old-bot", {})).toMatchObject({ ok: false, code: "CONFLICT" });
     expect(chooseAccount(detection, "ghe.acme.com/diego", {})).toMatchObject({ ok: false, code: "CONFLICT", message: expect.stringContaining("only talks to github.com") });
     expect(chooseAccount(detection, "octo-work", { GITHUB_TOKEN: "t" })).toMatchObject({ ok: false, code: "CONFLICT", message: expect.stringContaining("GITHUB_TOKEN") });
+    expect(chooseAccount(detection, "octo-work", { GH_TOKEN: "t" })).toEqual({ ok: false, code: "CONFLICT", message: "GH_TOKEN is set and overrides any selected account; unset it first" });
+    expect(chooseAccount(detection, "env/GH_TOKEN", { GH_TOKEN: "t" })).toMatchObject({ ok: false, code: "NOT_FOUND" });
     expect(chooseAccount({ installed: false }, "octo-work", {})).toMatchObject({ ok: false, code: "NOT_FOUND" });
   });
 });

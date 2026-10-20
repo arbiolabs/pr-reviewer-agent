@@ -53,8 +53,9 @@ An `Account` is `{ id, host, login, state: ok | error, ghActive, selected, scope
 The daemon detects accounts with `gh auth status` and stores the selection per data dir. GitHub reads and publishing
 use the first of:
 
-1. `GITHUB_TOKEN` in the daemon's environment, listed as the account `env/GITHUB_TOKEN`. It cannot be selected, and no
-   selection overrides it.
+1. `GITHUB_TOKEN`, else `GH_TOKEN`, in the daemon's environment, listed as the account `env/GITHUB_TOKEN` or
+   `env/GH_TOKEN`. It cannot be selected, and no selection overrides it. gh never sees either variable, so it lists and
+   hands out only its stored accounts.
 2. The `selected` account. If gh no longer lists it, it is still listed, with state `error`, and GitHub calls fail
    naming it instead of falling back to another identity.
 3. gh's active account on `github.com` (`ghActive`).
@@ -62,7 +63,7 @@ use the first of:
 
 `account.select` is offered when `welcome.capabilities` contains `account.select`. The server accepts it only on a
 connection that is streaming (after `snapshot.get` or `resume`), for a `github.com` account that `gh auth status` lists
-now in state `ok`, and while no `GITHUB_TOKEN` overrides the selection. Otherwise it answers `rejected` with
+now in state `ok`, and while no `GITHUB_TOKEN` or `GH_TOKEN` overrides the selection. Otherwise it answers `rejected` with
 `NOT_FOUND` (no such account) or `CONFLICT`. `accepted` only means the selection was journaled. The client shows the
 new selection when the `accounts.updated` event arrives, never on `accepted`. Tokens never cross the socket.
 

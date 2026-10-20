@@ -8,7 +8,6 @@ export type Env = Record<string, string | undefined>;
 
 /** `meta` key holding this data dir's selected account, as `<host>/<login>`. */
 export const ACCOUNT_KEY = "github.account";
-export const ENV_ACCOUNT_ID = "env/GITHUB_TOKEN";
 /** The only host pr-review talks to; a token for another host must never be sent to api.github.com. */
 export const GITHUB_HOST = "github.com";
 
@@ -19,8 +18,19 @@ type GhStatus = { hosts?: Record<string, { state?: string; active?: boolean; hos
 
 const run = promisify(execFile);
 
-/** gh reads GITHUB_TOKEN itself; strip it so gh lists only its stored accounts and the env token stays our pseudo-account. */
-const ghEnv = (env: Env): Env => ({ ...env, GITHUB_TOKEN: undefined });
+/** The env tokens, in the order they win. Either one is the daemon's env pseudo-account `env/<name>`. */
+const ENV_TOKENS = ["GITHUB_TOKEN", "GH_TOKEN"] as const;
+
+function envToken(env: Env): { name: (typeof ENV_TOKENS)[number]; token: string } | undefined {
+  for (const name of ENV_TOKENS) {
+    const token = env[name];
+    if (token) return { name, token };
+  }
+  return undefined;
+}
+
+/** gh reads GH_TOKEN and GITHUB_TOKEN before its stored accounts; strip both so gh lists and hands out only those. */
+const ghEnv = (env: Env): Env => ({ ...env, GITHUB_TOKEN: undefined, GH_TOKEN: undefined });
 
 /**
  * `gh auth status --json hosts`, which never prints a token. gh exits 1 when any account has an auth problem but still
@@ -62,12 +72,13 @@ export async function detectGh(env: Env = process.env): Promise<GhDetection> {
 }
 
 /**
- * The account list clients see: the env pseudo-account first when GITHUB_TOKEN is set, then gh's accounts with the
- * selection marked. A selection gh no longer lists stays in the list as an error, so its absence is visible.
+ * The account list clients see: the env pseudo-account first when GITHUB_TOKEN or GH_TOKEN is set, then gh's accounts
+ * with the selection marked. A selection gh no longer lists stays in the list as an error, so its absence is visible.
  */
 export function listAccounts(detection: GhDetection, selected: string | undefined, env: Env = process.env): Account[] {
   const gh = (detection.installed ? detection.accounts : []).map((a) => ({ ...a, selected: a.id === selected }));
-  const envAccount: Account[] = env.GITHUB_TOKEN ? [{ id: ENV_ACCOUNT_ID, host: "env", login: "GITHUB_TOKEN", state: "ok", ghActive: false, selected: false, scopes: [] }] : [];
+  const name = envToken(env)?.name;
+  const envAccount: Account[] = name ? [{ id: `env/${name}`, host: "env", login: name, state: "ok", ghActive: false, selected: false, scopes: [] }] : [];
   const slash = selected?.indexOf("/") ?? -1;
   const vanished: Account[] =
     selected !== undefined && !gh.some((a) => a.selected)
@@ -76,14 +87,12 @@ export function listAccounts(detection: GhDetection, selected: string | undefine
   return [...envAccount, ...gh, ...vanished];
 }
 
-export type AuthPlan =
-  | { source: "env" }
-  | { source: "selected" | "active"; account: Account }
-  | { source: "none" };
+export type AuthPlan = { source: "env" | "selected" | "active"; account: Account } | { source: "none" };
 
-/** Precedence: GITHUB_TOKEN > the selected account > gh's active github.com account > none. Never falls back past a bad selection. */
+/** Precedence: GITHUB_TOKEN > GH_TOKEN > the selected account > gh's active github.com account > none. Never falls back past a bad selection. */
 export function planGithubAuth(accounts: Account[]): AuthPlan {
-  if (accounts.some((a) => a.id === ENV_ACCOUNT_ID)) return { source: "env" };
+  const env = accounts.find((a) => a.host === "env");
+  if (env) return { source: "env", account: env };
   const selected = accounts.find((a) => a.selected);
   if (selected) {
     if (selected.state !== "ok") {
@@ -99,7 +108,8 @@ export type GithubAuth = { token: string | undefined; source: AuthPlan["source"]
 
 /** The one place a GitHub token is resolved. The token is returned to the caller only: never logged or stored. */
 export async function resolveGithubAuth(store: { getMeta(key: string): string | undefined }, env: Env = process.env): Promise<GithubAuth> {
-  if (env.GITHUB_TOKEN) return { token: env.GITHUB_TOKEN, source: "env", account: ENV_ACCOUNT_ID };
+  const fromEnv = envToken(env);
+  if (fromEnv) return { token: fromEnv.token, source: "env", account: `env/${fromEnv.name}` };
   const detection = await detectGh(env);
   const plan = planGithubAuth(listAccounts(detection, store.getMeta(ACCOUNT_KEY), env));
   if (plan.source === "none" || plan.source === "env" || !detection.installed) return { token: undefined, source: "none" };
@@ -121,6 +131,7 @@ export function chooseAccount(detection: GhDetection, requested: string, env: En
   const account = matches[0]!;
   if (account.host !== GITHUB_HOST) return { ok: false, code: "CONFLICT", message: `${account.id} is not a ${GITHUB_HOST} account; pr-review only talks to ${GITHUB_HOST}` };
   if (account.state !== "ok") return { ok: false, code: "CONFLICT", message: `${account.id} has an auth problem in gh; run \`gh auth login --hostname ${account.host}\`` };
-  if (env.GITHUB_TOKEN) return { ok: false, code: "CONFLICT", message: "GITHUB_TOKEN is set and overrides any selected account; unset it first" };
+  const fromEnv = envToken(env);
+  if (fromEnv) return { ok: false, code: "CONFLICT", message: `${fromEnv.name} is set and overrides any selected account; unset it first` };
   return { ok: true, account };
 }
