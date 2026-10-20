@@ -148,7 +148,7 @@ The daemon can start, retry, cancel, and publish reviews on the client's behalf.
 
 	Or set `"control": { "allow_commands": true }` in `pr-review.config.json`.
 
-2. The daemon must be in **engine mode**: it takes the data directory lock at startup and runs reviews itself. While `pr-review serve` or `pr-review review` holds that lock, the daemon starts in **read-only mode** and grants only the account selector. The daemon's start line and the client's Settings view show the mode.
+2. The daemon must be in **engine mode**: it takes the data directory lock at startup and runs reviews itself. While `pr-review serve` or `pr-review review` holds that lock, the daemon starts in **read-only mode** and grants only the account selector. The daemon's start line reports the mode, and the `welcome` message carries it as `mode`, with `readOnlyReason` saying why a read-only daemon is read-only. The client's Settings view will show both once its action screens land.
 
 3. To approve publications from the client, set `"review": { "publish_mode": "approval" }`. [Publishing](publishing.md#approval-mode) describes the approval flow.
 
@@ -158,10 +158,10 @@ The daemon checks every command itself, whatever the client showed:
 |---|---|---|
 | Start | Reviews the PR at the head the client saw, with the configured publish mode. The run appears in the client through its events. | A PR the daemon has not seen (`NOT_FOUND`). A head that is no longer GitHub's head (`REVISION_STALE`, with the live head). A head that already has a finished or parked review, or a closed PR (`CONFLICT`). |
 | Retry | Reopens a failed run as a new attempt, recorded as a manual override. | A run that is not failed (`INVALID_TRANSITION`). |
-| Cancel | Fails a running or parked run with the reason `cancelled from the TUI`. A run whose head moved meanwhile is superseded instead. | A run in `PUBLISH` or `RECONCILE`, where a GitHub write may be in flight (`CONFLICT`). A finished run (`INVALID_TRANSITION`). |
+| Cancel | Fails a running or parked run with the reason `cancelled from the TUI`. A parked run always fails. A running run whose head moved meanwhile, or whose PR closed, is superseded instead. | A run in `PUBLISH` or `RECONCILE`, where a GitHub write may be in flight (`CONFLICT`). A finished run (`INVALID_TRANSITION`). |
 | Publish | Approves exactly the preview the client showed, for exactly the head it showed, and posts it once through the outbox. | A run that is not awaiting approval (`INVALID_TRANSITION`). A preview that is not the stored payload (`CONFLICT`). A head that moved or a PR that closed, which supersedes the run with nothing posted (`REVISION_STALE`). |
 
-A repeated command, for example after a reconnect, answers the first result and does nothing again. An accepted command means the daemon recorded the request. The client shows the outcome when the events arrive: a published review only on the `published` publication status, never on the acceptance.
+A repeated command, for example after a reconnect, answers the first result and does nothing again, as long as the run is still on the attempt that command ended or opened. Once a retry or an approval has opened a later attempt, the same command acts on that attempt: a run that failed twice can be retried twice, and a retried run can be cancelled again. An accepted command means the daemon recorded the request. The client shows the outcome when the events arrive: a published review only on the `published` publication status, never on the acceptance.
 
 Quitting the client never stops the daemon or its reviews. Stopping the daemon suspends the reviews in flight; they resume when the daemon, `serve`, or `review` next opens the data directory.
 
