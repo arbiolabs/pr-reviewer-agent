@@ -84,6 +84,10 @@ export type OutboxRow = {
   updated_at: string;
 };
 
+export type OutboxEventRow = { from_status: OutboxStatus; event: OutboxEvent; to_status: OutboxStatus; detail: string | null };
+
+export type WebhookRow = { delivery_id: string; event_type: string; payload_json: string };
+
 export type AuditEvent = { seq: number; from_state: string; event: string; to_state: string; detail: string | null; at: string };
 
 const now = () => new Date().toISOString();
@@ -284,8 +288,8 @@ export class AppStore {
     });
   }
 
-  outboxEvents(id: string): { from_status: string; event: string; to_status: string; detail: string | null }[] {
-    return this.db.prepare("SELECT from_status, event, to_status, detail FROM outbox_events WHERE outbox_id = ? ORDER BY seq").all(id) as never;
+  outboxEvents(id: string): OutboxEventRow[] {
+    return this.db.prepare("SELECT from_status, event, to_status, detail FROM outbox_events WHERE outbox_id = ? ORDER BY seq").all(id) as OutboxEventRow[];
   }
 
   /** The revision's verified findings are now on GitHub (§4.3 DETECTED → PUBLISHED). */
@@ -466,10 +470,10 @@ export class AppStore {
     return info.changes === 1;
   }
 
-  unprocessedWebhooks(limit = 100): { delivery_id: string; event_type: string; payload_json: string }[] {
+  unprocessedWebhooks(limit = 100): WebhookRow[] {
     return this.db
       .prepare("SELECT delivery_id, event_type, payload_json FROM webhook_events WHERE processed_at IS NULL ORDER BY received_at, delivery_id LIMIT ?")
-      .all(limit) as never;
+      .all(limit) as WebhookRow[];
   }
 
   markWebhookProcessed(deliveryId: string, outcome: string): void {
