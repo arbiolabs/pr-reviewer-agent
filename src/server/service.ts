@@ -68,10 +68,12 @@ export async function startService(options: ServiceOptions): Promise<Service> {
     track(reconcileOutbox(store, options.github(pr.installation_id), { fullName: pr.repo_full_name, number: pr.number }, outbox));
   }
 
+  // The worker loop's own GitHub reads never sit through a long rate-limit wait: the delivery backs off instead.
+  const maxSleepMs = config.github.max_rate_limit_sleep_ms;
   const coordinator = new Coordinator({
     store,
-    pulls: options.pulls,
-    botLogin: (installationId) => options.github(installationId).viewerLogin(),
+    pulls: { getPull: (ref) => options.pulls.getPull(ref, { maxSleepMs }) },
+    botLogin: (installationId) => options.github(installationId).viewerLogin({ maxSleepMs }),
     start: async (pull) => {
       const started = await startReview(app, pull, config.review.base_policy_version, { publish: options.publish });
       follow(started.revision.id, started.taskId);
@@ -155,6 +157,7 @@ export async function startService(options: ServiceOptions): Promise<Service> {
       stopped = true;
       wake();
       await loop;
+      await coordinator.drain();
       server.closeAllConnections();
       await new Promise((resolve) => server.close(resolve));
     },

@@ -84,6 +84,8 @@ export type CoordinatorDeps = {
 /** §4.1 and §9.2: drains the webhook inbox into the coordinator machine, then starts each PR's latest head once it is due. */
 export class Coordinator {
   private readonly deps: CoordinatorDeps;
+  /** Aborts in flight, per revision. They run beside the ticks, since an abort can wait on a task for a long time. */
+  private readonly aborts = new Map<string, Promise<void>>();
 
   constructor(deps: CoordinatorDeps) {
     this.deps = deps;
@@ -128,7 +130,7 @@ export class Coordinator {
       // Debounce: each event restarts the wait, so a burst of pushes reviews only the head GitHub has when it ends.
       store.setPullSchedule(prId, status, open ? this.deps.now() + this.deps.debounceMs : null);
       // A closed or merged PR supersedes every in-flight revision, whatever its head.
-      await this.supersedeOlder(prId, open ? live.headSha : undefined);
+      this.supersedeOlder(prId, open ? live.headSha : undefined);
       store.markWebhookProcessed(deliveryId, `${trigger.event} -> ${status}`);
     });
     if (!done) throw new Error(`PR ${prId} is leased by another worker; delivery ${deliveryId} waits`);
@@ -151,12 +153,22 @@ export class Coordinator {
   }
 
   /** §11: in-flight revisions of other heads (all, with no head) are marked superseded_requested; those not yet publishing are aborted. */
-  private async supersedeOlder(prId: string, headSha: string | undefined): Promise<void> {
+  private supersedeOlder(prId: string, headSha: string | undefined): void {
     for (const revision of this.deps.store.unfinishedRevisions(prId)) {
       if (revision.head_sha === headSha) continue;
       this.deps.store.requestSupersede(revision.id);
-      if (revision.durable_task_id && ABORTABLE.includes(revision.state)) await this.deps.abort(revision.durable_task_id);
+      if (!revision.durable_task_id || !ABORTABLE.includes(revision.state) || this.aborts.has(revision.id)) continue;
+      const abort = this.deps
+        .abort(revision.durable_task_id)
+        .catch((error) => this.deps.report(error))
+        .finally(() => this.aborts.delete(revision.id));
+      this.aborts.set(revision.id, abort);
     }
+  }
+
+  /** Resolves once every abort started so far has settled; the service awaits it on shutdown. */
+  async drain(): Promise<void> {
+    while (this.aborts.size > 0) await Promise.all(this.aborts.values());
   }
 
   private async withLease(prId: string, fn: () => Promise<void>): Promise<boolean> {

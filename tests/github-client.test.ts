@@ -1,6 +1,7 @@
 import { generateKeyPairSync, verify } from "node:crypto";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { type Attempt, appJwt, classify, GitHubClient, GitHubError, retryDelayMs } from "../src/github/client.ts";
+import { GitHubPullSource } from "../src/github/pulls.ts";
 import { FakeGitHub } from "./fake-github.ts";
 
 const res = (status: number, headers: Record<string, string> = {}, body = ""): Attempt => ({ kind: "response", status, headers: new Headers(headers), body });
@@ -128,4 +129,25 @@ describe("against a fake GitHub", () => {
     const { c } = client();
     await expect(c.request("GET", "https://evil.example/x")).rejects.toThrow(`refusing to call https://evil.example/x outside ${fake.url}`);
   });
+});
+
+it("gives up on a rate-limit wait longer than the caller's cap with a retryable error, without sleeping", async () => {
+  const fake = await FakeGitHub.start();
+  try {
+    const sleeps: number[] = [];
+    const client = new GitHubClient({ auth: { kind: "token", token: "t" }, baseUrl: fake.url, maxRetries: 3, backoffMs: 1, concurrency: 1, timeoutMs: 5000, sleep: async (ms) => void sleeps.push(ms) });
+    fake.setPull({ installationId: 0, repositoryId: 1, fullName: "acme/shop", number: 1, title: "t", body: "", baseSha: "b", headSha: "h", state: "open", merged: false, private: false, cloneUrl: "x" });
+    fake.rateLimitedPullReads = 1;
+    const error = await new GitHubPullSource(() => client).getPull({ owner: "acme", repo: "shop", number: 1 }, { maxSleepMs: 30_000 }).catch((e: unknown) => e);
+    expect([error instanceof GitHubError && error.class, (error as Error).message, sleeps]).toEqual([
+      "retryable",
+      "GET /repos/acme/shop/pulls/1: HTTP 403; rate limited for 120000 ms, over the 30000 ms cap",
+      [],
+    ]);
+    fake.rateLimitedPullReads = 1;
+    expect((await new GitHubPullSource(() => client).getPull({ owner: "acme", repo: "shop", number: 1 })).headSha).toBe("h");
+    expect(sleeps).toEqual([120_000]);
+  } finally {
+    await fake.close();
+  }
 });

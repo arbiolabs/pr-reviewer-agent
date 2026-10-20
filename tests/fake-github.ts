@@ -24,6 +24,8 @@ export class FakeGitHub {
   tokensMinted = 0;
   requests: { method: string; path: string; authorization: string | undefined }[] = [];
   onGetPull: ((key: string) => void) | undefined;
+  /** Answer this many PR reads with a secondary rate limit and `Retry-After: 120`. */
+  rateLimitedPullReads = 0;
   onPost: (() => void) | undefined;
   private nextId = 1000;
 
@@ -74,6 +76,7 @@ export class FakeGitHub {
     if ((m = /^\/repos\/([^/]+\/[^/]+)\/pulls\/(\d+)$/.exec(url.pathname)) && req.method === "GET") {
       const key = `${m[1]}#${m[2]}`;
       this.onGetPull?.(key);
+      if (this.rateLimitedPullReads > 0 && this.rateLimitedPullReads--) return json(403, { message: "You have exceeded a secondary rate limit" }, { "retry-after": "120" });
       const pull = this.pulls.get(key);
       if (!pull) return json(404, { message: "Not Found" });
       return json(200, {

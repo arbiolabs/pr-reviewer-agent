@@ -278,3 +278,18 @@ it("requests supersede and aborts in-flight revisions when the PR is merged, as 
   expect(h.aborted).toEqual(["task-a"]);
   expect(h.store.db.prepare("SELECT superseded_requested_at IS NOT NULL AS requested FROM review_revisions").all()).toEqual([{ requested: 1 }]);
 });
+
+it("keeps ticking while an abort hangs: another PR's delivery is processed on the next tick", async () => {
+  let pull = { ...base };
+  const h = harness({ getPull: async (ref) => ({ ...pull, number: ref.number }), abort: () => new Promise(() => {}) });
+  h.pr("opened");
+  await h.coordinator.tick();
+  h.advance(30_000);
+  await h.coordinator.tick();
+  pull = { ...base, headSha: head("e") };
+  h.pr("synchronize");
+  const settled = await Promise.race([h.coordinator.tick().then(() => "returned"), new Promise((resolve) => setTimeout(() => resolve("blocked"), 500))]);
+  h.pr("opened", { number: 2 });
+  await Promise.race([h.coordinator.tick(), new Promise((resolve) => setTimeout(resolve, 500))]);
+  expect([settled, h.aborted, outcomes(h.store).at(-1)]).toEqual(["returned", ["task-a"], { delivery_id: "d3", attempts: 0, outcome: "PR_OPENED -> ACTIVE" }]);
+});

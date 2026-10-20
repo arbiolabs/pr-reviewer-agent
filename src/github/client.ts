@@ -74,7 +74,8 @@ export type ClientOptions = {
   now?: () => number;
 };
 
-type RequestOptions = { body?: unknown; signal?: AbortSignal; jwt?: boolean; idempotent?: boolean };
+/** `maxSleepMs` caps one retry wait: a longer rate-limit wait throws a retryable error instead of blocking the caller. */
+export type RequestOptions = { body?: unknown; signal?: AbortSignal; jwt?: boolean; idempotent?: boolean; maxSleepMs?: number };
 
 export class GitHubClient {
   readonly baseUrl: string;
@@ -111,7 +112,11 @@ export class GitHubClient {
       const what = attempt.kind === "response" ? `HTTP ${attempt.status}` : attempt.sent ? "connection lost after sending" : "connection failed";
       const error = new GitHubError(cls === "ok" ? "fatal" : cls, `${method} ${url.slice(this.baseUrl.length)}: ${what}`, attempt.kind === "response" ? attempt.status : undefined);
       if (cls !== "retryable" || retry >= this.options.maxRetries || options.signal?.aborted) throw error;
-      await this.sleep(retryDelayMs(attempt, retry, this.now(), this.options.backoffMs));
+      const delay = retryDelayMs(attempt, retry, this.now(), this.options.backoffMs);
+      if (options.maxSleepMs !== undefined && delay > options.maxSleepMs) {
+        throw new GitHubError("retryable", `${error.message}; rate limited for ${delay} ms, over the ${options.maxSleepMs} ms cap`, error.status);
+      }
+      await this.sleep(delay);
     }
   }
 
@@ -127,12 +132,12 @@ export class GitHubClient {
   }
 
   /** The login a review we post is authored by: the app's bot user, or the token's user. */
-  async viewerLogin(): Promise<string> {
+  async viewerLogin(options: { maxSleepMs?: number } = {}): Promise<string> {
     if (this.login === undefined) {
       this.login =
         this.auth.kind === "app"
-          ? `${(await this.request<{ slug: string }>("GET", "/app", { jwt: true })).data.slug}[bot]`
-          : (await this.request<{ login: string }>("GET", "/user")).data.login;
+          ? `${(await this.request<{ slug: string }>("GET", "/app", { jwt: true, ...options })).data.slug}[bot]`
+          : (await this.request<{ login: string }>("GET", "/user", options)).data.login;
     }
     return this.login;
   }

@@ -7,7 +7,7 @@ import { type GitHubClient, GitHubError } from "./client.ts";
 export type PullRef = { owner: string; repo: string; number: number; installationId?: number };
 
 export interface PullSource {
-  getPull(ref: PullRef): Promise<PullInfo>;
+  getPull(ref: PullRef, options?: { maxSleepMs?: number }): Promise<PullInfo>;
 }
 
 export function parsePullUrl(url: string): PullRef {
@@ -51,12 +51,12 @@ export class GitHubPullSource implements PullSource {
     this.clientFor = clientFor;
   }
 
-  async getPull(ref: PullRef): Promise<PullInfo> {
+  async getPull(ref: PullRef, options: { maxSleepMs?: number } = {}): Promise<PullInfo> {
     const installationId = ref.installationId ?? 0;
     const client = this.clientFor(installationId);
     let pull: GitHubPull;
     try {
-      pull = (await client.request<GitHubPull>("GET", `/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}`)).data;
+      pull = (await client.request<GitHubPull>("GET", `/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}`, options)).data;
     } catch (error) {
       // A rate-limited 403 is retryable and passes through; only a definite refusal is reworded, and stays fatal.
       if (error instanceof GitHubError && error.class === "fatal" && (error.status === 401 || error.status === 403 || error.status === 404)) {
