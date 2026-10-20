@@ -45,6 +45,14 @@ The client opens on the worst finding across the tracked PRs, and `w` follows a 
 
 You need Node 22.19 or later, pnpm, and git. The terminal client also needs a Rust toolchain.
 
+To try the terminal client first, play the recorded showcase session. It needs no daemon, no credentials and no network:
+
+```bash
+(cd tui && cargo build --release) && ./tui/target/release/pr-review-tui --playback protocol/playback/showcase.ndjson
+```
+
+Press `?` for the keys and `q` to quit. To review your own PRs:
+
 1. Install the dependencies:
 
 	```bash
