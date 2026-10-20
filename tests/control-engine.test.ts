@@ -287,6 +287,7 @@ it("approves a review end to end over the socket: parked, previewed, published o
   );
   expect(fake.postAttempts).toBe(0);
 
+  const approvalSeq = h.app.store.db.prepare("SELECT max(seq) AS n FROM audit_events").get() as { n: number };
   const approved = await command(c, { command: "review.publish", params: { runId, previewId: outbox.payload_hash, expectedHeadSha: fixture.headSha } });
   expect(approved).toMatchObject({ status: "accepted", operationId: `review.publish:${runId}` });
   await c.waitFor((m) => m.type === "event" && m.eventType === "review.completed");
@@ -312,7 +313,14 @@ it("approves a review end to end over the socket: parked, previewed, published o
     { runId, status: "publishing" },
     { runId, status: "published", reviewId: 1000, url: "https://github.com/acme/shop/pull/1#pullrequestreview-1000" },
   ]);
-
+  // The journal follows causality: the publisher's rows, then the run's end.
+  expect(h.app.store.db.prepare("SELECT event, to_state, detail FROM audit_events WHERE revision_id = ? AND seq > ? ORDER BY seq").all(runId, approvalSeq.n)).toEqual([
+    { event: "APPROVED", to_state: "PUBLISH", detail: expect.stringMatching(/^approved by /) },
+    { event: "PUBLICATION_CHANGED", to_state: "PUBLISH", detail: "publishing" },
+    { event: "PUBLICATION_CHANGED", to_state: "PUBLISH", detail: "published" },
+    { event: "FINDING_UPDATED", to_state: "PUBLISH", detail: expect.any(String) },
+    { event: "REVIEW_RECONCILED", to_state: "COMPLETED", detail: "review 1000 posted" },
+  ]);
 
   // The replayed approval is the recorded one: same answer, no second attempt, no second POST.
   expect(operation(await command(c, { command: "review.publish", params: { runId, previewId: outbox.payload_hash, expectedHeadSha: fixture.headSha } }))).toEqual(operation(approved));

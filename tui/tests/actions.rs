@@ -366,9 +366,11 @@ fn publication_events_show_in_the_timeline_and_a_pr_update_between_runs_is_under
 }
 
 #[test]
-fn publication_rows_sit_under_publish_and_carry_a_url_only_once_published_whatever_order_the_journal_wrote() {
-    // The daemon's journal: the run's PUBLISH -> COMPLETED first, then the publisher's statuses, each with the URL.
+fn publication_rows_sit_under_publish_though_the_run_ends_with_no_phase_change() {
+    // The daemon's journal: the publisher's statuses, then review.completed, which names no `from` phase.
     let url = r#","reviewId":3141,"url":"https://github.com/acme/shop/pull/184#pullrequestreview-3141""#;
+    let completed =
+        run_json("rev-184-a", "acme/shop#184", "4444444444444444444444444444444444444444", "COMPLETED", "COMPLETED");
     let mut s = Sim::new(pr_review_tui::model::Look::default()).play("approval", 5);
     for (seq, kind, data) in [
         (
@@ -376,13 +378,9 @@ fn publication_rows_sit_under_publish_and_carry_a_url_only_once_published_whatev
             "review.phase_changed",
             r#"{"from":"AWAITING_APPROVAL","to":"PUBLISH","event":"APPROVED","detail":null}"#.to_string(),
         ),
-        (
-            15,
-            "review.phase_changed",
-            r#"{"from":"PUBLISH","to":"COMPLETED","event":"REVIEW_RECONCILED","detail":null}"#.to_string(),
-        ),
-        (16, "review.publication_changed", format!(r#"{{"runId":"rev-184-a","status":"publishing"{url}}}"#)),
-        (17, "review.publication_changed", format!(r#"{{"runId":"rev-184-a","status":"published"{url}}}"#)),
+        (15, "review.publication_changed", r#"{"runId":"rev-184-a","status":"publishing"}"#.to_string()),
+        (16, "review.publication_changed", format!(r#"{{"runId":"rev-184-a","status":"published"{url}}}"#)),
+        (17, "review.completed", completed),
     ] {
         s.server(ServerMessage::parse(&event(seq, "acme/shop#184", "rev-184-a", kind, &data)).unwrap());
     }
