@@ -44,6 +44,7 @@ To try the client without GitHub or a model, play a scripted session:
 | `--theme NAME` | Use `auto`, `dark`, `light`, or `mono`. This overrides `theme` in the config file. |
 | `--playback FILE` | Play a scripted session instead of connecting |
 | `--config FILE` | Read this config file instead of `<config dir>/pr-review/config.toml` |
+| `--version` | Print the client's version and exit |
 | `NO_COLOR` | When set to any non-empty value, turns colors off. Every status keeps its word or icon. |
 
 ## Views
@@ -61,15 +62,19 @@ The client starts on Review, on the PR with the most severe current finding. The
 The layout adapts to the terminal size:
 
 - At 100 columns or more, the PR list sits beside the reading column. Below 100 columns, the Inbox is a full-width list and `Enter` opens the PR.
+- The PR list is 34 columns wide below 140 columns and widens to 48 at 200. The reading column is at most 112 columns wide.
+- At 120 columns or more, the footer lists all five views, Settings included.
 - At 110 columns or more, the diff shows its file list beside the code. Below 110 columns, the code takes the full width and `h` shows the file list.
 - At 120×38, the open finding's card and the head of the next card are both in view.
 - Below 60×16, the client shows a resize hint.
 
 In Review, the open card shows as much of the explanation and the quoted code as fits. A cut explanation ends with `… N more, J scrolls`. `J` scrolls the explanation inside the card while the code stays in view. When the explanation has nothing left below, `J` scrolls the document.
 
-In Diff, a long line wraps onto up to four rows. Each finding is written under its line. When several findings share a line, they stack, and `n` steps through them.
+In Diff, a long line or hunk header wraps onto up to four rows. Each finding is written under its line. When several findings share a line, they stack, and `n` steps through them.
 
-In Timeline, `Enter` opens the selected event's detail under its row, and `Esc` closes it.
+In Timeline, `Enter` opens the selected event's detail under its row, and `Esc` closes it. The detail shows what the event carries: a tool call's whole summary, or a finding's title, severity, `file:line`, and the start of its explanation.
+
+The help page marks a write key `(not offered)` when the connected daemon does not grant its capability.
 
 ## Keys
 
@@ -81,12 +86,12 @@ In Timeline, `Enter` opens the selected event's detail under its row, and `Esc` 
 | `Esc` | Close a dialog, a timeline event's detail, or go back |
 | `g` and `G` | Go to the top or the bottom |
 | `Ctrl-d` and `Ctrl-u` | Page down or up |
-| `/` | Filter the PR list by a fuzzy match. In Diff, jump to `path:line`. |
+| `/` | Search what the screen shows. On Inbox and Review, filter the PR list by a fuzzy match. On Timeline, filter the events by text. On Diff, search the lines; `n` and `N` then step through the matches, and `Esc` clears the search. |
 | `w` | Watch the running review. Press `w` again for the next running PR. |
 | `J` and `K` | Scroll the open finding's explanation down or up, in Review |
 | `d` | Open the diff at the selected finding's line |
 | `t` | Open the selected PR's timeline |
-| `n` and `N` | Next or previous finding, in Review and Diff. In Diff, `n` also steps through findings stacked on one line. |
+| `n` and `N` | Next or previous finding, in Review, Diff, and the finding reader. In Diff, `n` also steps through findings stacked on one line. |
 | `:` | Jump to `path:line`, in Diff |
 | `f`, `v`, and `P` | Change the timeline's scope, category, or phase filter |
 | `A` | Open the GitHub accounts in Settings |
@@ -98,6 +103,9 @@ In Timeline, `Enter` opens the selected event's detail under its row, and `Esc` 
 
 - Click a PR in the list to select it.
 - Click a finding's card to select it. Click the selected card again to read the finding in full.
+- In Diff, click a file to show it, or a line to move the cursor there. Click the cursor's line again to read its finding.
+- In Timeline, click an event to select it. Click it again to open its detail.
+- Click a view's name in the footer to go there.
 - Scroll the wheel to move the reading column: the open finding, the help page, the document, the diff, or the timeline.
 
 While the client captures the mouse, a plain drag no longer selects text in the terminal. To select text, hold the terminal's bypass modifier while you drag: Shift in most terminals, or Option in iTerm2 and macOS Terminal. To give plain drag back to the terminal, turn mouse capture off in the config file:
