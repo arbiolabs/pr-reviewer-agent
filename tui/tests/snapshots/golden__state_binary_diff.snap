@@ -2,41 +2,41 @@
 source: tests/golden.rs
 expression: text
 ---
- PR REVIEWER ● live · unix:/run/user/501/pr-review/reviewer.sock                                                 ? help
-  1 Inbox   2 Review   3 Diff   4 Timeline   5 Settings
-#184 · base bbbbbbb → head 4444444  TRUNCATED
-1 finding on this revision
-┌ › FILES (4) ─────────────────────┐┌ assets/logo.png ─────────────────────────────────────────────────────────────────┐
-│  M src/booking.ts        ▲  +2 -1││                                                                                  │
-│› B assets/logo.png            bin││  Binary file: metadata only, not decoded or rendered.                            │
-│  R src/slots.ts             +0 -0││                                                                                  │
-│  A src/generate…   +4000 -0 trunc││                                                                                  │
-│ more files: scroll down to load  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-└──────────────────────────────────┘└──────────────────────────────────────────────────────────────────────────────────┘
- j/k line  h/l pane  n/N finding  : jump  Enter finding  Esc back  ? help  q quit
+  pr-review · • reviewing #184 verify found: Finding f-1                                                        ● live
+
+                                    assets/logo.png   +0 -0
+  FILES  4                          acme/shop #184 · bbbbbbb → 4444444   TRUNCATED
+
+  ▲ booking.ts                      Binary file: metadata only, not decoded or rendered.
+    src                     +2 -1
+
+▌   logo.png
+▌   assets                 binary
+
+    slots.ts
+    renamed  src            +0 -0
+
+    schema.ts
+    new  src/generated   +4000 -0
+
+  more files below
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   j/k line  n/N finding  w watch live  Enter read  h files  : jump  Esc back    1 inbox  2 review  3 diff  4 timeline

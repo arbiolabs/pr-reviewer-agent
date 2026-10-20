@@ -2,27 +2,27 @@
 source: tests/golden.rs
 expression: ascii_text
 ---
- PR REVIEWER * live | unix:/run/user/501/pr-review/reviewer.sock         ? help
-  1 Inbox   2 Review   3 Diff   4 Timeline   5 Settings
-+ > TRACKED PRS (3) -----------------------------------------------------------+
-|  PR    TITLE                 REVIEW                HEAD     FINDINGS         |
-|  #184  Booking API           * VERIFY              4444444  ^1               |
-|> #186  Bump deps             . no run (quiescing)  6666666  none             |
-|  #185  Fix cache eviction    + completed           5555555  o1               |
-|                                                                              |
-|                                                                              |
-|                                                                              |
-|                                                                              |
-|                                                                              |
-|                                                                              |
-|                                                                              |
-|                                                                              |
-|                                                                              |
-|                                                                              |
-|                                                                              |
-|                                                                              |
-|                                                                              |
-|                                                                              |
-|                                                                              |
-+------------------------------------------------------------------------------+
- j/k move  Enter open  / search  d diff  t timeline  r refresh  ? help  q quit
+  pr-review | - reviewing #184 verify found: Finding f-1                * live
+
+
+  PULL REQUESTS                                                              3
+
+  . #186 Bump deps
+    acme/shop | 6666666                                            not reviewed
+
+> o #185 Fix cache eviction
+>   acme/shop | 5555555                                                  o1 ->0
+
+  - #184 Booking API
+    acme/shop | by octocat | verify                         +-+-+---.-. . 0.2/s
+
+
+
+
+
+
+
+
+
+
+   j/k pull request  Enter read  w watch live  / search  ? help  q quit

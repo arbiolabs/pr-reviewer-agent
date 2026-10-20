@@ -1,31 +1,37 @@
 ---
 source: tests/golden.rs
-assertion_line: 332
 expression: settings
 ---
- PR REVIEWER ✗ disconnected · unix:/private/tmp/claude-501/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx… ? help
-  1 Inbox   2 Review   3 Diff   4 Timeline   5 Settings
+  pr-review · 0 PRs tracked · nothing running                                                           ✗ disconnected
+
  ✗ disconnected: socket directory does not exist: /private/tmp/claude-501/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…
- GITHUB ACCOUNTS
-  waiting for a snapshot
- CONNECTION
-  endpoint              unix:/private/tmp/claude-501/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…
-  state                 ✗ disconnected
-  protocol              client 1, server -
-  server version        -
-  session               -
-  capabilities          -
- DIAGNOSTICS
-  stream epoch          -
-  last applied sequence 0
-  last snapshot         never
-  last heartbeat        never
-  resyncs / reconnects  0 / 0
-  activity              0 feed entries kept (cap 2000); 0 tool events applied
- DISPLAY
-  glyphs / color        unicode / color
- RECENT ERRORS
-  0.0s ago              disconnected: socket directory does not exist: /private/tmp/claude-501/xxxxxxxxxxxxxxxxxxxxxx…
+
+          Settings
+          connected through unix:/private/tmp/claude-501/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…
+
+          GitHub accounts
+            publishes as          not reported by this daemon
+            accounts              waiting for a snapshot
+
+          Connection
+            state                 ✗ disconnected
+            protocol              client 1, server -
+            server version        -
+            session               -
+            capabilities          -
+
+          Stream
+            epoch, last sequence  -, 0
+            snapshot, heartbeat   never, never
+            resyncs / reconnects  0 / 0
+            activity              0 feed entries kept (cap 2000); 0 tool events applied
+
+          Display
+            glyphs, color         unicode, color
+            background            theme: painted ink
+
+          Recent errors
+            0.0s ago              disconnected: socket directory does not exist: /private/tmp/claude-501/xxxx…
 
 
 
@@ -33,11 +39,4 @@ expression: settings
 
 
 
-
-
-
-
-
-
-
- j/k account  Enter select account  r refresh  1-4 views  ? help  q quit
+   j/k account  Enter select account  r refresh  1-4 views  ? help  q quit       1 inbox  2 review  3 diff  4 timeline

@@ -11,7 +11,7 @@ use ratatui::widgets::Paragraph;
 use super::doc::{current, filled, spinner, split_row};
 use super::live::{per_sec, rate_cell, stepper};
 use super::{Ctx, window};
-use crate::model::{InputPurpose, Modal};
+use crate::model::{InputPurpose, Link, Modal};
 use crate::protocol::{Finding, FindingStatus, Pr, RunStatus, Severity};
 use crate::text::width;
 use crate::theme::{Bg, Role};
@@ -19,6 +19,24 @@ use crate::theme::{Bg, Role};
 pub const RAIL_W: u16 = 34;
 /// Rows above the first PR: blank, heading, filter or blank.
 pub const RAIL_HEAD: u16 = 3;
+
+/// What an empty rail says: no snapshot yet, no reviewer to ask, nothing tracked, or nothing matching the filter.
+pub fn empty_rail(c: &Ctx, total: usize) -> Vec<(String, Role)> {
+    if total > 0 {
+        return vec![("  no PR matches".into(), Role::Muted)];
+    }
+    let reason = match &c.m.link {
+        Link::Disconnected { reason, .. } => reason,
+        Link::Unusable { message } | Link::Incompatible { message, .. } => {
+            return vec![(format!("  unavailable: {message}"), Role::Fail)];
+        }
+        Link::Connecting { .. } | Link::Negotiating | Link::Syncing => {
+            return vec![("  loading the snapshot".into(), Role::Muted)];
+        }
+        Link::Live | Link::Resyncing => return vec![("  nothing tracked yet".into(), Role::Muted)],
+    };
+    vec![(format!("  unavailable: {reason}"), Role::Fail), ("  is `pr-review daemon` running?".into(), Role::Muted)]
+}
 
 /// Rows each PR takes; the spacer row goes when the list would not fit.
 pub fn row_h(c: &Ctx, height: u16) -> u16 {
@@ -61,8 +79,14 @@ pub fn rail(c: &Ctx, f: &mut Frame, area: Rect, focused: bool) {
         )
     }));
     if prs.is_empty() {
-        let text = if total == 0 { "  nothing tracked yet" } else { "  no PR matches" };
-        lines.push(Line::from(filled(vec![Span::styled(text, c.s(Role::Muted).patch(bg))], w, bg)));
+        let mut empty = empty_rail(c, total);
+        if area.width <= RAIL_W && empty[0].1 == Role::Fail {
+            // Beside the reading column, which carries the reason in full.
+            empty = vec![("  unavailable".into(), Role::Fail)];
+        }
+        for (text, role) in empty {
+            lines.push(Line::from(filled(vec![Span::styled(c.fit(&text, w), c.s(role).patch(bg))], w, bg)));
+        }
     }
     let (range, rh) = visible(c, &prs, area.height);
     let sel = c.m.ui.selected_pr.as_ref().and_then(|id| prs.iter().position(|p| &p.id == id));

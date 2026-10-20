@@ -99,7 +99,10 @@ pub fn screen(c: &Ctx, f: &mut Frame, area: Rect) {
     let Some(doc_area) = doc_area else { return };
     let col = column(doc_area);
     let Some(pr) = c.m.selected_pr() else {
-        let p = Paragraph::new(vec![Line::raw(""), Line::from(c.span("No tracked PRs yet.", Role::Muted))]);
+        let empty = super::rail::empty_rail(c, c.m.domain.prs.len());
+        let lines = empty.into_iter().map(|(t, role)| Line::from(c.span(t.trim_start(), role)));
+        let p = Paragraph::new(std::iter::once(Line::raw("")).chain(lines).collect::<Vec<_>>())
+            .wrap(ratatui::widgets::Wrap { trim: false });
         f.render_widget(p, col);
         return;
     };
@@ -280,6 +283,9 @@ fn summary_line(c: &Ctx, pr: &Pr, findings: &[&Finding], w: usize) -> Line<'stat
     let words = |compact: bool| {
         let mut left = vec![c.span(
             match live.len() {
+                0 if c.m.domain.latest_run(&pr.id).is_some_and(|r| r.status == RunStatus::Completed) => {
+                    "No findings".to_string()
+                }
                 0 => "No findings yet".to_string(),
                 1 => "1 finding".to_string(),
                 n => format!("{n} findings"),
@@ -355,7 +361,8 @@ fn phase_line(c: &Ctx, run: Option<&Run>, w: usize) -> Line<'static> {
     let start = secs(run.started_at.as_str());
     let tail = match run.status {
         RunStatus::Completed => {
-            let took = run.completed_at.as_ref().and_then(|e| Some(secs(e.as_str())? - start?));
+            // A clock that ran backwards gives no duration rather than a negative one.
+            let took = run.completed_at.as_ref().and_then(|e| Some(secs(e.as_str())? - start?)).filter(|s| *s >= 0);
             let took = took.map_or(String::new(), |s| format!(" in {}m {:02}s", s / 60, s % 60));
             (format!("{} done{took}", g.ok), Role::Ok)
         }
@@ -517,13 +524,27 @@ fn card(c: &Ctx, f: &Finding, d: Option<&FindingDetail>, w: usize, focused: bool
         body.extend(code_block(c, ev, f, iw, code_lines));
     }
     body.push(vec![]);
-    let fix = if d.suggested_fix.is_some() { ", the fix" } else { "" };
-    body.push(vec![
+    let mut parts = vec![];
+    if !d.evidence.is_empty() {
+        parts.push(format!("all {} evidence", d.evidence.len()));
+    }
+    if d.suggested_fix.is_some() {
+        parts.push("the fix".into());
+    }
+    let opens = match parts.len() {
+        0 => "read it beside the diff".to_string(),
+        _ => format!("{} and the diff", parts.join(", ")),
+    };
+    let mut hint = vec![
         c.span("Enter", Role::Accent),
-        c.span(format!(" all {} evidence{fix} and the diff    ", d.evidence.len()), Role::Muted),
+        c.span(format!(" {opens}    "), Role::Muted),
         c.span("d", Role::Accent),
         c.span(" diff at this line", Role::Muted),
-    ]);
+    ];
+    if spans_w(&hint) > iw {
+        hint.truncate(2);
+    }
+    body.push(hint);
     barred(c, f.severity, focused, body)
 }
 

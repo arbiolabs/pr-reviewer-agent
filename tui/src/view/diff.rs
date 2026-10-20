@@ -79,6 +79,10 @@ fn header(c: &Ctx, d: &DiffView, anchored: &[&Finding], w: usize) -> Vec<Line<'s
         let pos = at.map_or(String::new(), |i| format!("finding {} of {}", i + 1, anchored.len()));
         second.push(c.span(format!("   {pos}"), Role::Accent));
     }
+    // The least important notes go first rather than being cut mid-word.
+    while second.len() > 1 && super::doc::spans_w(&second) > w {
+        second.pop();
+    }
     vec![Line::from(first), Line::from(second), Line::raw("")]
 }
 

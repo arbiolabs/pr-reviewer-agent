@@ -1,21 +1,20 @@
 ---
 source: tests/golden.rs
-assertion_line: 140
 expression: ascii_text
 ---
- PR REVIEWER * live | unix:/run/user/501/pr-review/~ ? help
-  1 Inbox   2 Review   3 Diff   4 Timeline   5 Settings
-scope PR #184 acme/shop (f) | category all (v) | phase all ~
-+ > TIMELINE (2 of 2) -------------------------------------+
-|>   12 13:00:12 f-1 ^ HIGH Finding f-1: detected          |
-|    11 13:00:11 read_file src/booking.ts:1-120            |
-|                                                          |
-|                                                          |
-|                                                          |
-|                                                          |
-|                                                          |
-|                                                          |
-|                                                          |
-|                                                          |
-+----------------------------------------------------------+
- j/k move  Enter detail  f scope  v category  P phase  Esc ~
+  pr-review | - reviewing #184 verify new finding   * live
+
+
+  acme/shop  #184  timeline
+  Booking API
+  2 of 2 events, oldest first | the whole PR (f) | all ki~
+
+  VERIFY --------------------------------------- 13:00:11
+    13:00:11    read_file     src/booking.ts:1-120
+  > 13:00:12  ^ HIGH          Finding f-1  detected
+
+
+
+
+
+   j/k move  Enter detail  w watch live  f scope  v kind

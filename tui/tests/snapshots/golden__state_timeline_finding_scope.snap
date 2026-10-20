@@ -1,29 +1,28 @@
 ---
 source: tests/golden.rs
-assertion_line: 340
 expression: text
 ---
- PR REVIEWER ● live · unix:/run/user/501/pr-review/reviewer.sock         ? help
-  1 Inbox   2 Review   3 Diff   4 Timeline   5 Settings
-scope finding "Finding f-1" on #184 acme/shop (f) · category all (v) · phase al…
-┌ › TIMELINE (1 of 1) ─────────────────────────────────────────────────────────┐
-│›   12 13:00:12 system finding f-1 ▲ HIGH Finding f-1: detected               │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-└──────────────────────────────────────────────────────────────────────────────┘
- j/k move  Enter detail  f scope  v category  P phase  Esc back  ? help  q quit
+  pr-review · • reviewing #184 verify found: Finding f-1                ● live
+
+
+  acme/shop  #184  timeline
+  Booking API
+  1 of 1 event, oldest first · "Finding f-1" (f) · all kinds (v) · phase any …
+
+  VERIFY ─────────────────────────────────────────────────────────── 13:00:12
+  ▌ 13:00:12  ▲ HIGH          Finding f-1  detected
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   j/k move  Enter detail  w watch live  f scope  v kind  P phase  Esc back

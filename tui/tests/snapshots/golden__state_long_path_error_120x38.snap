@@ -1,43 +1,42 @@
 ---
 source: tests/golden.rs
-assertion_line: 328
 expression: inbox
 ---
- PR REVIEWER ✗ disconnected · unix:/private/tmp/claude-501/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx… ? help
-  1 Inbox   2 Review   3 Diff   4 Timeline   5 Settings
+  pr-review · 0 PRs tracked · nothing running                                                           ✗ disconnected
+
  ✗ disconnected: socket directory does not exist: /private/tmp/claude-501/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…
-┌ › TRACKED PRS (0) ───────────────────────────────────────────────────────────┐┌ SELECTED ────────────────────────────┐
-│                                                                              ││                                      │
-│  Reviewer service unavailable: socket directory does not exist: /private/tmp…││                                      │
-│  Is `pr-review daemon` running?                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-└──────────────────────────────────────────────────────────────────────────────┘└──────────────────────────────────────┘
- j/k move  Enter open  / search  d diff  t timeline  r refresh  ? help  q quit
+
+  PULL REQUESTS                0    unavailable: socket directory does not exist:
+                                    /private/tmp/claude-501/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx
+  unavailable                       xxxxxxxxxxxx/pr-review
+                                    is `pr-review daemon` running?
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   j/k pull request  Enter read  / search  ? help  q quit                        1 inbox  2 review  3 diff  4 timeline

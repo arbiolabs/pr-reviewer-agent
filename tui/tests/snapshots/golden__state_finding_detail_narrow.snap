@@ -2,19 +2,19 @@
 source: tests/golden.rs
 expression: text
 ---
- PR REVIEWER ● live · unix:/run/user/501/pr-review/… ? help
-  1 Inbox   2 Review   3 Diff   4 Timeline   5 Settings
-┌ › FINDING ───────────────────────────────────────────────┐
-│▲ HIGH Finding f-1                                        │
-│correctness · detected · confidence 82% · 1 evidence      │
-│anchor src/booking.ts:42 at head 4444444 (run rev-184-a) ·│
-│fingerprint fp-f-1                                        │
-│                                                          │
-│Explanation                                               │
-│  Two concurrent bookings can both observe `slot.free`    │
-│before either sets `held`.                                │
-│                                                          │
-│Reasoning summary (model-written, not a confirmation)     │
-│  Traced book() -> lock(); lock() is advisory and not     │
-└──────────────────────────────────────────────────────────┘
- j/k scroll  d diff at anchor  t timeline  Esc close
+  pr-review · • reviewing #184 verify new finding   ● live
+
+
+  acme/shop #184 → finding 1 of 1
+
+  ┃ ▲ HIGH   correctness          detected · 82% confident
+  ┃ Finding f-1
+  ┃ src/booking.ts:42
+  ┃
+  ┃ What is wrong
+  ┃ Two concurrent bookings can both observe slot.free
+  ┃ before either sets held.
+  ┃
+  ┃ Evidence
+  ┃   src/booking.ts  lines 40-43 @ 4444444
+   j/k scroll  d diff at anchor  t timeline  Esc close

@@ -2,27 +2,27 @@
 source: tests/golden.rs
 expression: text
 ---
- PR REVIEWER ● live · unix:/run/user/501/pr-review/reviewer.sock         ? help
-  1 Inbox   2 Review   3 Diff   4 Timeline   5 Settings
-┌ › TRACKED PRS (3) ───────────────────────────────────────────────────────────┐
-│  PR    TITLE                 REVIEW                HEAD     FINDINGS         │
-│› #186  Bump deps             · no run (quiescing)  6666666  none             │
-│  #185  Fix cache eviction    ✓ completed           5555555  ○1               │
-│  #184  Booking API           ● VERIFY              4444444  ▲1               │
-│                                                                              │
-│                                                                              │
-│       ┌ › REVIEW.START ──────────────────────────────────────────────┐       │
-│       │Start a review of #186 at 6666666?                            │       │
-│       │command review.start                                          │       │
-│       │                                                              │       │
-│       │y confirm   n / Esc cancel                                    │       │
-│       └──────────────────────────────────────────────────────────────┘       │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-└──────────────────────────────────────────────────────────────────────────────┘
- y confirm  n/Esc cancel
+  pr-review · 3 PRs tracked · nothing running                           ● live
+
+
+  PULL REQUESTS                                                              3
+
+▌ · #186 Bump deps
+▌   acme/shop · 6666666                                            not reviewed
+
+  ○ #185 Fix cache eviction
+    acme▌                                                                 ○1 →0
+        ▌  REVIEW.START
+  • #184▌  Start a review of #186 at 6666666?
+    acme▌  sends review.start                                           ▁ 0.0/s
+        ▌
+        ▌  y confirm   n / Esc cancel
+        ▌
+
+
+
+
+
+
+
+   y confirm  n/Esc cancel

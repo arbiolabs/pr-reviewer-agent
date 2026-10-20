@@ -2,27 +2,27 @@
 source: tests/golden.rs
 expression: ascii_text
 ---
- PR REVIEWER * live | unix:/run/user/501/pr-review/reviewer.sock         ? help
-  1 Inbox   2 Review   3 Diff   4 Timeline   5 Settings
-+ TRACKED PRS -------------++ REVIEW ------------------------------------------+
-|> #184  Booking API      *||#184 Booking API                                  |
-|  #186  Bump deps        .||acme/shop | by octocat | base bbbbbbb -> head 444~|
-|  #185  Fix cache evict~ +||* running | run rev-184-a | claude-opus-5-5 | sta~|
-|                          ||Col +  Tri +  Ana +  Ver ~  Prep .  Pub .         |
-|                          |+--------------------------------------------------+
-|                          |+ > FINDINGS (1) ----------------------------------+
-|                          ||> ^ HIGH Finding f-1          detected            |
-|                          ||                                                  |
-|                          ||                                                  |
-|                          ||                                                  |
-|                          ||                                                  |
-|                          ||                                                  |
-|                          |+--------------------------------------------------+
-|                          |+ RECENT ACTIVITY ---------------------------------+
-|                          ||13:00:11 read_file src/booking.ts:1-120           |
-|                          ||13:00:12 finding ^ HIGH Finding f-1: detected     |
-|                          ||                                                  |
-|                          ||                                                  |
-|                          ||                                                  |
-+--------------------------++--------------------------------------------------+
- j/k move  Tab pane  Enter inspect  d diff  t timeline  n/N finding  ? help  q ~
+  pr-review | - reviewing #184 verify found: Finding f-1                * live
+
+  #184 Booking API                                        +-+-+---.-.  ^1 ->0
+  ----------------------------------------------------------------------------
+  - Reviewing now                                               :  0.2 calls/s
+
+  #184   ======= ======= ======= ======= ------- -------  verify     2 calls
+
+      13:00:11  read_file   src/booking.ts:1-120
+    - 13:00:12  finding     ^ HIGH Finding f-1
+
+  # ^ HIGH   correctness                              detected | 82% confident
+  # Finding f-1
+  # src/booking.ts:42
+  #
+  # Two concurrent bookings can both observe slot.free before either sets
+  # held.
+  #
+  #   src/booking.ts  lines 40-43 @ 4444444
+  #    40 | if (slot.free && !slot.held) {
+  #
+  # Enter all 5 evidence, the fix and the diff    d diff at this line
+
+   j/k finding  Enter read  w watch live  d diff  J/K scroll  h pull requests

@@ -2,27 +2,27 @@
 source: tests/golden.rs
 expression: text
 ---
- PR REVIEWER ● live · unix:/run/user/501/pr-review/reviewer.sock         ? help
-  1 Inbox   2 Review   3 Diff   4 Timeline   5 Settings
-┌ › TRACKED PRS (0) ───────────────────────────────────────────────────────────┐
-│                                                                              │
-│  No tracked PRs yet. The reviewer lists PRs here once it tracks them.        │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-└──────────────────────────────────────────────────────────────────────────────┘
- j/k move  Enter open  / search  d diff  t timeline  r refresh  ? help  q quit
+  pr-review · 0 PRs tracked · nothing running                           ● live
+
+
+  PULL REQUESTS                                                              0
+
+  nothing tracked yet
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   j/k pull request  Enter read  / search  ? help  q quit

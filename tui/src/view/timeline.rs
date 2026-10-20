@@ -199,9 +199,10 @@ pub fn timeline(c: &Ctx, f: &mut Frame, area: Rect) {
     head.push(Line::from(c.span(
         c.fit(
             &format!(
-                "{} of {} events, oldest first {} {scope} (f) {} {} (v) {} phase {} (P)",
+                "{} of {} {}, oldest first {} {scope} (f) {} {} (v) {} phase {} (P)",
                 rows.len(),
                 t.events.len(),
+                if t.events.len() == 1 { "event" } else { "events" },
                 g.sep,
                 g.sep,
                 t.category.map_or("all kinds", |x| x.label()),

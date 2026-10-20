@@ -2,41 +2,41 @@
 source: tests/golden.rs
 expression: "text.replace('\\u{200b}', \"\")"
 ---
- PR REVIEWER ● live · unix:/run/user/501/pr-review/reviewer.sock                                                 ? help
-  1 Inbox   2 Review   3 Diff   4 Timeline   5 Settings
-#184 · base bbbbbbb → head 4444444  TRUNCATED
-1 finding on this revision
-┌ FILES (4) ───────────────────────┐┌ › src/booking.ts ────────────────────────────────────────────────────────────────┐
-│› M src/booking.ts        ▲  +2 -1││@@ -40,3 +40,4 @@ export function book()                                          │
-│  B assets/logo.png            bin││    40    40 │    const slot = await lock(id);                                    │
-│  R src/slots.ts             +0 -0││    41       │ -  if (slot.free) {                                                │
-│  A src/generate…   +4000 -0 trunc││          41 │ +  if (slot.free && !slot.held) {                                  │
-│ more files: scroll down to load  ││▲         42 │ +    abcdefghij…                                                   │
-│                                  ││    42    43 │    }                                                               │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-│                                  ││                                                                                  │
-└──────────────────────────────────┘└──────────────────────────────────────────────────────────────────────────────────┘
- j/k line  h/l pane  n/N finding  : jump  Enter finding  Esc back  ? help  q quit
+  pr-review · • reviewing #184 verify found: Finding f-1                                                        ● live
+
+                                    src/booking.ts   +2 -1
+  FILES  4                          acme/shop #184 · bbbbbbb → 4444444   TRUNCATED
+
+▌ ▲ booking.ts                                   @@ -40,3 +40,4 @@  export function book()
+▌   src                     +2 -1       40   40     const slot = await lock(id);
+                                        41      -   if (slot.free) {
+    logo.png                                 41 +   if (slot.free && !slot.held) {
+    assets                 binary   ▲        42 +     abcdefghij…
+                                                 ┃ ▲ HIGH     Finding f-1
+    slots.ts                            42   43     }
+    renamed  src            +0 -0
+
+    schema.ts
+    new  src/generated   +4000 -0
+
+  more files below
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   j/k line  n/N finding  w watch live  Enter read  h files  : jump  Esc back    1 inbox  2 review  3 diff  4 timeline

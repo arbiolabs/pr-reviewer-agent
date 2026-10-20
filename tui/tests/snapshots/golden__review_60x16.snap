@@ -2,19 +2,19 @@
 source: tests/golden.rs
 expression: text
 ---
- PR REVIEWER ● live · unix:/run/user/501/pr-review/… ? help
-  1 Inbox   2 Review   3 Diff   4 Timeline   5 Settings
-┌ REVIEW ──────────────────────────────────────────────────┐
-│#184 Booking API                                          │
-│acme/shop · by octocat · base bbbbbbb → head 4444444      │
-│● running · run rev-184-a · claude-opus-5-5 · started 13:…│
-│Col ✓  Tri ✓  Ana ✓  Ver ◐  Prep ·  Pub ·                 │
-└──────────────────────────────────────────────────────────┘
-┌ › FINDINGS (1) ──────────────────────────────────────────┐
-│› ▲ HIGH Finding f-1                  detected            │
-└──────────────────────────────────────────────────────────┘
-┌ RECENT ACTIVITY ─────────────────────────────────────────┐
-│13:00:11 read_file src/booking.ts:1-120                   │
-│13:00:12 finding ▲ HIGH Finding f-1: detected             │
-└──────────────────────────────────────────────────────────┘
- j/k move  Tab pane  Enter inspect  d diff  t timeline  n/N…
+  pr-review · • reviewing #184 verify new finding   ● live
+
+  #184 Booking API                     ●─●─●─•─○─○  ▲1 →0
+  ┃ ▲ HIGH   correctness          detected · 82% confident
+  ┃ Finding f-1
+  ┃ src/booking.ts:42
+  ┃
+  ┃ Two concurrent bookings can both observe slot.free
+  ┃ before either sets held.
+  ┃
+  ┃   src/booking.ts  lines 40-43 @ 4444444
+  ┃    40 │ if (slot.free && !slot.held) {
+  ┃
+  ┃ Enter all 5 evidence, the fix and the diff
+
+   j/k finding  Enter read  w watch live  d diff  ? help

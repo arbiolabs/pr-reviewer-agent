@@ -190,7 +190,11 @@ fn status_line(c: &Ctx, width: u16) -> Line<'static> {
             left.push(c.span(whole(activity_words(&a.kind), room), Role::Muted));
             left.push(c.span(more, Role::Muted));
         }
-        _ => left.push(c.span(format!("{} PRs tracked {} nothing running", c.m.domain.prs.len(), g.sep), Role::Muted)),
+        _ => {
+            let n = c.m.domain.prs.len();
+            let prs = if n == 1 { "PR" } else { "PRs" };
+            left.push(c.span(format!("{n} {prs} tracked {} nothing running", g.sep), Role::Muted))
+        }
     }
     let used: usize = left.iter().chain(&right).map(|s| crate::text::width(&s.content)).sum();
     left.push(Span::raw(" ".repeat(w.saturating_sub(used))));

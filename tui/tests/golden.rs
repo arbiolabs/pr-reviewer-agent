@@ -125,7 +125,6 @@ fn colorless(term: &Terminal<TestBackend>) -> bool {
 }
 
 #[test]
-#[ignore = "design prototype C changes the layout"]
 fn views_at_every_breakpoint() {
     let ascii = Look { ascii: true, ..Look::default() };
     let mono = Look { color: false, ..Look::default() };
@@ -141,9 +140,10 @@ fn views_at_every_breakpoint() {
             insta::assert_snapshot!(format!("{name}_{w}x{h}_ascii"), ascii_text);
             assert!(ascii_text.is_ascii(), "{name} {w}x{h} --ascii frame has non-ASCII glyphs");
 
-            // NO_COLOR keeps every label and only drops color.
+            // NO_COLOR keeps every label and only drops color; code spans, chips in color, get their backticks back.
             let (mono_text, term) = render(&mut n.m, w, h);
-            assert_eq!(mono_text, text, "{name} {w}x{h}: NO_COLOR changed the text");
+            let unticked = |t: &str| t.replace('`', "");
+            assert_eq!(unticked(&mono_text), unticked(&text), "{name} {w}x{h}: NO_COLOR changed the text");
             assert!(colorless(&term), "{name} {w}x{h}: NO_COLOR frame has colors");
         }
     }
@@ -165,7 +165,6 @@ fn accounts_blocked() -> Sim {
 }
 
 #[test]
-#[ignore = "design prototype C changes the layout"]
 fn accounts_view() {
     let ascii = Look { ascii: true, ..Look::default() };
     let mono = Look { color: false, ..Look::default() };
@@ -180,13 +179,13 @@ fn accounts_view() {
         assert!(ascii_text.is_ascii(), "accounts {w}x{h} --ascii frame has non-ASCII glyphs");
         let (mono_text, term) = render(&mut n.m, w, h);
         // Settings names the display mode; nothing else may change.
-        assert_eq!(mono_text.replace("monochrome", "color"), text, "accounts {w}x{h}: NO_COLOR changed the text");
+        let mono_text = mono_text.replace("monochrome (NO_COLOR or theme = \"mono\")", "color");
+        assert_eq!(mono_text, text, "accounts {w}x{h}: NO_COLOR changed the text");
         assert!(colorless(&term));
     }
 }
 
 #[test]
-#[ignore = "design prototype C changes the layout"]
 fn special_states() {
     let mut cases: Vec<(&str, Sim, (u16, u16))> = vec![
         ("loading", Sim::new(Look::default()), (80, 24)),
@@ -297,7 +296,12 @@ fn special_states() {
         ),
         (
             "timeline_finding_scope",
-            mid_review(Look::default()).select("acme/shop#184").key(KeyCode::Enter).key(KeyCode::Char('t')),
+            mid_review(Look::default())
+                .select("acme/shop#184")
+                .key(KeyCode::Enter)
+                .key(KeyCode::Char('t'))
+                .key(KeyCode::Char('f'))
+                .key(KeyCode::Char('f')),
             (80, 24),
         ),
         (
@@ -345,7 +349,6 @@ fn special_states() {
 }
 
 #[test]
-#[ignore = "design prototype C changes the layout"]
 fn a_diff_line_with_a_long_zero_width_run_renders() {
     let mut s = mid_review(Look::default()).select("acme/shop#184").key_unanswered(KeyCode::Char('3'));
     let id = s.m.diff.as_ref().and_then(|d| d.pending.clone()).unwrap();
@@ -362,7 +365,6 @@ fn a_diff_line_with_a_long_zero_width_run_renders() {
 }
 
 #[test]
-#[ignore = "design prototype C changes the layout"]
 fn a_connection_error_on_a_long_path_keeps_its_reason_in_view() {
     let long = format!("/private/tmp/claude-501/{}/pr-review/reviewer.sock", "x".repeat(70));
     let reason = pr_review_tui::net::check_socket_dir(std::path::Path::new(&long)).unwrap_err();
@@ -379,7 +381,8 @@ fn a_connection_error_on_a_long_path_keeps_its_reason_in_view() {
         insta::assert_snapshot!(format!("state_long_path_error_settings_{w}x{h}"), settings);
         let shows = |frame: &str, prefix: &str| frame.lines().any(|l| l.contains(prefix));
         assert!(shows(&inbox, "disconnected: socket directory does not exist: /pri"), "banner, {w} cols:\n{inbox}");
-        assert!(shows(&inbox, "unavailable: socket directory does not exist: /pri"), "inbox, {w} cols:\n{inbox}");
+        assert!(shows(&inbox, "unavailable: socket directory does not exist:"), "inbox, {w} cols:\n{inbox}");
+        assert!(inbox.matches("/private/tmp/claude-501/").count() >= 2, "inbox names the path, {w} cols:\n{inbox}");
         assert!(
             shows(&settings, "disconnected: socket directory does not exist: /"),
             "settings, {w} cols:\n{settings}"

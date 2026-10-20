@@ -150,25 +150,29 @@ pub fn rich(c: &Ctx, text: &str, w: usize, role: Role) -> Vec<Vec<Span<'static>>
                 tokens.extend(seg.split(' ').filter(|s| !s.is_empty()).map(|s| (s.to_string(), false)));
             }
         }
-        // Punctuation right after a code span sticks to it.
+        // Punctuation right after a code span sticks to it, so the two wrap as one word.
+        let mut words: Vec<Vec<(String, bool)>> = Vec::new();
+        for (tok, code) in tokens {
+            let glue = !code && tok.starts_with(|ch: char| ",.;:)".contains(ch));
+            match words.last_mut() {
+                Some(word) if glue && word.last().is_some_and(|(_, c)| *c) => word.push((tok, code)),
+                _ => words.push(vec![(tok, code)]),
+            }
+        }
         let mut line: Vec<Span<'static>> = Vec::new();
         let mut used = 0;
-        let mut prev_code = false;
-        for (tok, code) in tokens {
-            let glue = prev_code && !code && tok.starts_with(|ch: char| ",.;:)".contains(ch));
-            let tw = width(&tok);
-            let space = usize::from(used > 0 && !glue);
-            if used > 0 && used + space + tw > w {
+        for word in words {
+            let ww: usize = word.iter().map(|(t, _)| width(t)).sum();
+            if used > 0 && used + 1 + ww > w {
                 lines.push(std::mem::take(&mut line));
                 used = 0;
             }
-            if used > 0 && !glue {
+            if used > 0 {
                 line.push(Span::styled(" ", c.s(role)));
                 used += 1;
             }
-            used += tw;
-            line.push(if code { Span::styled(tok, code_style) } else { Span::styled(tok, c.s(role)) });
-            prev_code = code;
+            used += ww;
+            line.extend(word.into_iter().map(|(t, code)| Span::styled(t, if code { code_style } else { c.s(role) })));
         }
         lines.push(line);
     }

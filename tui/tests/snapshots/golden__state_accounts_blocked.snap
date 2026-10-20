@@ -1,43 +1,42 @@
 ---
 source: tests/golden.rs
-assertion_line: 340
 expression: text
 ---
- PR REVIEWER ● live · unix:/run/user/501/pr-review/reviewer.sock                                       env token ? help
-  1 Inbox   2 Review   3 Diff   4 Timeline   5 Settings
- GITHUB ACCOUNTS
-  › GITHUB_TOKEN     env         ✓ ok                        set by the daemon env
-    diego-arbio-dev  github.com  ✓ ok    gh active           env token wins
-    octo-work        github.com  ✓ ok    selected            env token wins
-    old-bot          github.com  ✗ error                     run gh auth login
- CONNECTION
-  endpoint              unix:/run/user/501/pr-review/reviewer.sock
-  state                 ● live
-  protocol              client 1, server 1
-  server version        0.1.0
-  session               session-1
-  capabilities          account.select
- DIAGNOSTICS
-  stream epoch          epoch-1
-  last applied sequence 108
-  last snapshot         0.0s ago
-  last heartbeat        never
-  resyncs / reconnects  0 / 0
-  activity              0 feed entries kept (cap 2000); 0 tool events applied
- DISPLAY
-  glyphs / color        unicode / color
- RECENT ERRORS
-  none
+  pr-review · 1 PR tracked · nothing running                                                                    ● live
+
+
+          Settings
+          connected through unix:/run/user/501/pr-review/reviewer.sock
+
+          GitHub accounts
+            publishes as          the daemon's GITHUB_TOKEN
+          ▌ GITHUB_TOKEN     env         ✓ ok                          set by the daemon env
+            diego-arbio-dev  github.com  ✓ ok      gh active           env token wins
+            octo-work        github.com  ✓ ok      selected            env token wins
+            old-bot          github.com  ✗ error                       run gh auth login
+
+          Connection
+            state                 ● live
+            protocol              client 1, server 1
+            server version        0.1.0
+            session               session-1
+            capabilities          account.select
+
+          Stream
+            epoch, last sequence  epoch-1, 108
+            snapshot, heartbeat   0.0s ago, never
+            resyncs / reconnects  0 / 0
+            activity              0 feed entries kept (cap 2000); 0 tool events applied
+
+          Display
+            glyphs, color         unicode, color
+            background            theme: painted ink
+
+          Recent errors
+            none
 
 
 
 
 
-
-
-
-
-
-
-
- j/k account  Enter select account  r refresh  1-4 views  ? help  q quit
+   j/k account  Enter select account  w watch live  r refresh  1-4 views         1 inbox  2 review  3 diff  4 timeline
