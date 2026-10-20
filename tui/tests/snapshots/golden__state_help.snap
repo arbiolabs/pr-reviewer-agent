@@ -6,23 +6,23 @@ expression: text
 
 
   Keys
-  Read from the keymap itself, so this page cannot drift from what the keys do
+  Read from the keymap, so this page cannot drift from what the keys do.
 
-  Everywhere                              s R c p    start/retry/cancel/publ…
-    q C-c      quit; reviews keep runn…   w          watch the running review
+  Everywhere
+    q C-c      quit; reviews keep running
     ?          this help
-    Esc        close / back             Review
-    j k        move                       J K        scroll the explanation
-    C-d C-u    page down / up             n N        next / previous finding
+    Esc        close / back
+    j k        move
+    C-d C-u    page down / up
     g G        first / last
-    h l        pane left / right        Diff
-    Tab        cycle panes                n N        next / previous finding
-    Enter      open selected              : /        jump to path:line
+    h l        pane left / right
+    Tab        cycle panes
+    Enter      open selected
     1 2 3 4 5  views; 5 is settings
-    /          search PRs               Timeline
-    d          diff at the finding        f          timeline scope
-    t          timeline for selection     v          timeline category
-    r          refresh snapshot           P          timeline phase
-    A          GitHub accounts (Settin…
-    … 10 more below, j scrolls
+    /          search PRs
+    d          diff at the finding
+    t          timeline for selection
+    r          refresh snapshot
+    A          GitHub accounts (Settings)
+    … 28 more below, j scrolls
    j/k scroll  Esc close  q quit

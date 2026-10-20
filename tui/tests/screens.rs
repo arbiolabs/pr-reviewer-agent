@@ -169,3 +169,12 @@ fn n_and_shift_n_walk_the_findings_inside_the_reader() {
     s.apply(pr_review_tui::update::Msg::Key(KeyEvent::new(KeyCode::Char('N'), KeyModifiers::SHIFT)));
     assert!(reader(&mut s).ends_with("finding 1 of 4"), "N stops at the first: {}", reader(&mut s));
 }
+
+#[test]
+fn help_at_120_columns_splits_between_sections_without_cutting_text() {
+    let mut s = showcase(2).key(crossterm::event::KeyCode::Char('?'));
+    let (frame, _) = render(&mut s.m, 120, 38);
+    let row = |h: &str| frame.lines().position(|l| l.contains(h)).unwrap_or_else(|| panic!("{h}:\n{frame}"));
+    assert!(row("Timeline") < row("Everywhere") + 22, "two columns:\n{frame}");
+    assert!(frame.contains("quit; reviews keep running") && !frame.contains('…'), "{frame}");
+}

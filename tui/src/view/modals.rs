@@ -96,38 +96,46 @@ fn help(c: &Ctx, f: &mut Frame, body: Rect, scroll: u16) {
 pub fn help_lines(c: &Ctx, body: Rect) -> Vec<Line<'static>> {
     let g = c.t.g();
     let col = column(body);
-    let rows = help_rows();
-    let section = |ctx: Context, name: &str, w: usize| -> Vec<Line<'static>> {
+    let rows: Vec<_> = help_rows().into_iter().filter(|r| r.0 != Context::ConfirmModal).collect();
+    // Two columns from 100 columns up; below that one column, its key column as narrow as the longest keys.
+    let two = body.width >= 100;
+    let half = if two { col.width as usize / 2 } else { col.width as usize };
+    let kw = if two { 11 } else { rows.iter().map(|r| crate::text::width(&r.1)).max().unwrap_or(0) + 2 };
+    let section = |ctx: Context, name: &str| -> Vec<Line<'static>> {
         let mut out = vec![heading(c, name)];
         for (_, keys, what) in rows.iter().filter(|r| r.0 == ctx) {
             out.push(Line::from(vec![
-                c.span(format!("  {}", c.pad(keys, 11)), Role::Accent),
-                c.span(c.fit(what, w.saturating_sub(14)), Role::Normal),
+                c.span(format!("  {}", c.pad(keys, kw)), Role::Accent),
+                c.span(c.fit(what, half.saturating_sub(kw + 3)), Role::Normal),
             ]));
         }
         out.push(Line::raw(""));
         out
     };
-    let two = col.width >= 76;
-    let half = if two { col.width as usize / 2 } else { col.width as usize };
-    let mut all = Vec::new();
-    for (ctx, name) in [
+    let sections: Vec<Vec<Line<'static>>> = [
         (Context::Global, "Everywhere"),
         (Context::Review, "Review"),
         (Context::Diff, "Diff"),
         (Context::Timeline, "Timeline"),
-    ] {
-        all.extend(section(ctx, name, half));
-    }
-    // Two columns of equal height, so the page ends as high as it can.
-    let mut left = all;
-    let right = if two { left.split_off(left.len().div_ceil(2)) } else { Vec::new() };
+        (Context::FindingModal, "Finding reader"),
+    ]
+    .into_iter()
+    .map(|(ctx, name)| section(ctx, name))
+    .collect();
+    // Two columns split between sections, at the boundary that ends the page highest.
+    let total: usize = sections.iter().map(Vec::len).sum();
+    let split = (0..=sections.len())
+        .min_by_key(|&k| {
+            let left: usize = sections[..k].iter().map(Vec::len).sum();
+            left.max(total - left)
+        })
+        .unwrap_or(0);
+    let (left, right): (Vec<_>, Vec<_>) =
+        if two { (sections[..split].concat(), sections[split..].concat()) } else { (sections.concat(), Vec::new()) };
     let mut lines = vec![
         Line::raw(""),
         Line::from(c.span("Keys", Role::Title)),
-        Line::from(
-            c.span("Read from the keymap itself, so this page cannot drift from what the keys do.", Role::Muted),
-        ),
+        Line::from(c.span("Read from the keymap, so this page cannot drift from what the keys do.", Role::Muted)),
         Line::raw(""),
     ];
     if two {
@@ -137,10 +145,8 @@ pub fn help_lines(c: &Ctx, body: Rect) -> Vec<Line<'static>> {
             spans.extend(right.get(i).map_or(vec![], |l| l.spans.clone()));
             lines.push(Line::from(spans));
         }
-        lines.push(Line::raw(""));
     } else {
         lines.extend(left);
-        lines.extend(right);
     }
     lines.push(heading(c, "Glyphs"));
     let mut sev = vec![Span::raw("  ")];

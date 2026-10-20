@@ -437,17 +437,36 @@ fn the_pr_title_stays_in_view_while_the_live_log_pushes_the_open_card_down() {
     }
 }
 
-#[test]
-fn the_help_page_shows_every_key_at_80x24() {
+/// Every help frame from the top to the end of the page, scrolling with j.
+fn help_pages(w: u16, h: u16) -> Vec<String> {
     let mut s = mid_review(Look::default()).key(KeyCode::Char('?'));
-    let (frame, _) = render(&mut s.m, 80, 24);
-    use pr_review_tui::keymap::Context as C;
+    let mut pages = vec![render(&mut s.m, w, h).0];
+    for _ in 0..200 {
+        s = s.key(KeyCode::Char('j'));
+        let (frame, _) = render(&mut s.m, w, h);
+        if Some(&frame) == pages.last() {
+            break;
+        }
+        pages.push(frame);
+    }
+    pages
+}
+
+#[test]
+fn below_100_columns_the_help_page_is_one_column_of_whole_descriptions() {
     let rows = pr_review_tui::keymap::help_rows();
-    // The confirmation panel names its own y and n.
-    for (_, keys, what) in rows.iter().filter(|r| matches!(r.0, C::Global | C::Review | C::Diff | C::Timeline)) {
-        // A long description may end in an ellipsis; its start must show beside its keys.
-        let row = format!("{keys:<11}{}", what.chars().take(12).collect::<String>());
-        assert!(frame.contains(&row), "{row} is missing:\n{frame}");
+    for (w, h) in [(80, 24), (60, 16)] {
+        let seen = help_pages(w, h).concat();
+        for (_, keys, what) in rows.iter().filter(|r| r.0 != pr_review_tui::keymap::Context::ConfirmModal) {
+            // One entry per line, its keys, a gap, and the description in full.
+            let whole = |l: &str| {
+                let l = l.trim();
+                l.strip_prefix(keys.as_str())
+                    .and_then(|rest| rest.strip_suffix(what))
+                    .is_some_and(|gap| !gap.is_empty() && gap.trim().is_empty())
+            };
+            assert!(seen.lines().any(whole), "{w}x{h}: no whole line for {keys} {what}:\n{seen}");
+        }
     }
 }
 
