@@ -1,4 +1,4 @@
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import type { ReviewMode, Severity } from "../domain/types.ts";
 
 /** Spec §16, the parts M1 reads, plus the verification thresholds §7 asks to make configurable. */
@@ -23,6 +23,12 @@ export type Config = {
     min_severity: Severity;
     min_confidence: number;
   };
+  models: {
+    /** `provider/id`; empty means pick one. */
+    default: string;
+    /** Ordered preference for picking among available models; `provider/*` matches a whole provider. */
+    preferred: string[];
+  };
 };
 
 export const DEFAULT_CONFIG: Config = {
@@ -42,10 +48,16 @@ export const DEFAULT_CONFIG: Config = {
     jev_critical_threshold: 0.9,
   },
   verification: { min_severity: "medium", min_confidence: 0.5 },
+  models: {
+    default: "",
+    preferred: ["anthropic/claude-opus-5-5", "anthropic/claude-fable-5-1", "anthropic/claude-sonnet-5-5", "openai/*"],
+  },
 };
 
 /** Overlay `pr-review.config.json` onto the defaults; every key must exist in the defaults with the same JSON type. */
-export function loadConfig(path = "pr-review.config.json"): Config {
+export const CONFIG_FILE = "pr-review.config.json";
+
+export function loadConfig(path = CONFIG_FILE): Config {
   if (!existsSync(path)) return DEFAULT_CONFIG;
   return mergeChecked(DEFAULT_CONFIG, JSON.parse(readFileSync(path, "utf8")), path) as Config;
 }
@@ -60,4 +72,11 @@ function mergeChecked(base: unknown, override: unknown, at: string): unknown {
     result[key] = mergeChecked(result[key], value, `${at}.${key}`);
   }
   return result;
+}
+
+/** Persist one model choice into the config file, keeping whatever else it holds. */
+export function saveDefaultModel(ref: string, path = CONFIG_FILE): void {
+  const current = existsSync(path) ? (JSON.parse(readFileSync(path, "utf8")) as Record<string, Record<string, unknown>>) : {};
+  current.models = { ...current.models, default: ref };
+  writeFileSync(path, `${JSON.stringify(current, null, 2)}\n`);
 }

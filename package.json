@@ -12,16 +12,18 @@
   "scripts": {
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "pr-review": "node --experimental-strip-types src/cli/main.ts"
+    "pr-review": "node bin/pr-review.mjs"
   },
   "dependencies": {
     "@earendil-works/chord": "1.3.0",
     "@earendil-works/pi-ai": "1.3.0",
     "@earendil-works/pi-durable": "1.3.0",
-    "jev-systemone": "0.1.1"
+    "jev-systemone": "0.1.1",
+    "proper-lockfile": "4.1.2"
   },
   "devDependencies": {
     "@types/node": "26.6.5",
+    "@types/proper-lockfile": "4.1.4",
     "typescript": "7.0.2",
     "vitest": "5.0.5"
   }
