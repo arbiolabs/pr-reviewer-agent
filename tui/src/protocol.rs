@@ -389,7 +389,6 @@ impl ServerMessage {
 
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(try_from = "RawEvent")]
-#[allow(clippy::large_enum_variant)] // transient: parsed, applied, dropped
 pub enum Event {
     /// Never durable and never sequenced: it only proves the connection is alive.
     Heartbeat {
