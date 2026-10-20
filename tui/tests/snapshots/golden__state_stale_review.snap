@@ -2,25 +2,25 @@
 source: tests/golden.rs
 expression: text
 ---
-  pr-review · • reviewing #184 collect started                                                                  ● live
+  pr-review · ⠋ reviewing #184 collect started                                                                  ● live
 
 
   PULL REQUESTS                3    acme/shop  #184
                                     Booking API
   · #186 Bump deps                  by octocat · bbbbbbb → ccccccc · claude-opus-5-5 · run rev-184-
     shop 6666666     not reviewed
-                                     • Collect ○ Triage ○ Analyze ○ Verify ○ Prepare ○ Publish          since 13:00:13
+                                     ⠋ Collect ○ Triage ○ Analyze ○ Verify ○ Prepare ○ Publish          since 13:00:13
   ○ #185 Fix cache eviction
     shop 5555555            ○1 →0   No findings yet   1 from an older head
                                     ──────────────────────────────────────────────────────────────────────────────────
-▌ • #184 Booking API
-▌   shop      •─○─○─○─○─○ ▁ 0.0/s   • Reviewing now                                  ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁  0.0 calls/s
+▌ ⠋ #184 Booking API
+▌   shop      ⠋─○─○─○─○─○ ▁ 0.0/s   ⠋ Reviewing now                                  ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁  0.0 calls/s
 
                                     #184   ━━━━━━━━ ──────── ──────── ──────── ──────── ────────  collect    3 calls
 
                                         13:00:12  run         started
                                         13:00:13  finding     ▲ HIGH Finding f-1
-                                      • 13:00:14  run         started
+                                      ⠋ 13:00:14  run         started
 
                                     ┃ ▲ HIGH   correctness                                    detected · 82% confident
                                     ┃ Finding f-1

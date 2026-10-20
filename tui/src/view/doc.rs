@@ -16,11 +16,12 @@ use crate::theme::{Bg, Role, finding_status, phase_name};
 
 pub const COLUMN: u16 = 100;
 
+/// A braille spinner: no frame reads as the `·` separator or the `●` of a finished phase.
 pub fn spinner(c: &Ctx) -> &'static str {
-    const U: [&str; 4] = ["•", "●", "●", "•"];
-    const A: [&str; 4] = ["-", "\\", "|", "/"];
-    let n = (c.m.now_ms / 125) as usize;
-    if c.t.ascii { A[n % 4] } else { U[n % 4] }
+    const U: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+    const A: &[&str] = &["-", "\\", "|", "/"];
+    let set = if c.t.ascii { A } else { U };
+    set[(c.m.now_ms / 125) as usize % set.len()]
 }
 
 fn secs(at: &str) -> Option<i64> {

@@ -23,3 +23,19 @@ fn the_status_line_does_not_repeat_the_phase_it_already_names() {
     assert!(top.contains("reviewing #1291 triage"), "{top}");
     assert!(!top.contains("entered"), "{top}");
 }
+
+#[test]
+fn the_spinner_never_looks_like_the_separator_or_a_done_dot() {
+    let mut s = showcase(6);
+    let mut frames = std::collections::BTreeSet::new();
+    for now in (0..3_000).step_by(125) {
+        s.apply(pr_review_tui::update::Msg::Tick(now));
+        let (frame, _) = render(&mut s.m, 120, 38);
+        let glyph = first_line(&frame).trim_start().strip_prefix("pr-review · ").unwrap().chars().next().unwrap();
+        frames.insert(glyph);
+    }
+    assert!(frames.len() > 2, "the spinner moves: {frames:?}");
+    for dot in ['·', '•', '●', '○', '.', '∙'] {
+        assert!(!frames.contains(&dot), "the spinner shows {dot:?}: {frames:?}");
+    }
+}

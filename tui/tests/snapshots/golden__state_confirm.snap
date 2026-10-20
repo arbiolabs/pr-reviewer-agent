@@ -13,7 +13,7 @@ expression: text
   ○ #185 Fix cache eviction
     acme▌                                                                 ○1 →0
         ▌  REVIEW.START
-  • #184▌  Start a review of #186 at 6666666?
+  ⠋ #184▌  Start a review of #186 at 6666666?
     acme▌  sends review.start                                           ▁ 0.0/s
         ▌
         ▌  y confirm   n / Esc cancel
