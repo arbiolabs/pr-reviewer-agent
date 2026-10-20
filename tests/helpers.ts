@@ -39,7 +39,7 @@ export function fauxModels(responses: FauxResponseStep[]) {
   return models;
 }
 
-export async function open(dataDir: string, fixture: Fixture, responses: FauxResponseStep[], config: Config = DEFAULT_CONFIG): Promise<App> {
+export async function open(dataDir: string, fixture: Fixture, responses: FauxResponseStep[], config: Config = DEFAULT_CONFIG, lockWaitMs?: number): Promise<App> {
   const models = fauxModels(responses);
   return openApp({
     dataDir,
@@ -49,6 +49,7 @@ export async function open(dataDir: string, fixture: Fixture, responses: FauxRes
     models,
     model: { provider: "faux", modelId: "reviewer" },
     reviewerVersion: "m1+faux/reviewer",
+    lockWaitMs,
   });
 }
 

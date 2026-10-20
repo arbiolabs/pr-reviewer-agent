@@ -63,7 +63,8 @@ it("lets only one pr-review at a time use a data dir, and frees it on close", as
   const dataDir = mkdtempSync(join(tmpdir(), "lock-"));
   const first = await open(dataDir, fixture, []);
   try {
-    await expect(open(dataDir, fixture, [])).rejects.toThrow(`another pr-review is running on ${dataDir}`);
+    // A live holder refreshes its lock, so waiting out the retry window could only end the same way.
+    await expect(open(dataDir, fixture, [], undefined, 0)).rejects.toThrow(`another pr-review is running on ${dataDir}`);
   } finally {
     await first.close();
   }
