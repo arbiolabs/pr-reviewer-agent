@@ -60,6 +60,12 @@ pub fn modal(c: &Ctx, f: &mut Frame, body: Rect, modal: &Modal) {
                     Line::from(spans)
                 })
                 .collect();
+            let g = c.t.g();
+            let legend = format!(
+                " Severity: {} critical  {} high  {} medium  {} low",
+                g.sev_crit, g.sev_high, g.sev_med, g.sev_low
+            );
+            lines.push(Line::from(c.span(legend, Role::Muted)));
             lines.push(Line::from(c.span(" Write keys need a capability the server grants.", Role::Muted)));
             let area = centered(body, if two { 80 } else { 44 }, lines.len() as u16 + 2);
             draw(c, f, area, "HELP", lines, 0);

@@ -66,14 +66,19 @@ fn severity_counts(c: &Ctx, pr: &Pr) -> String {
         return "none".into();
     }
     let g = c.t.g();
-    [(Severity::Critical, "!"), (Severity::High, g.sev_high), (Severity::Medium, g.sev_med), (Severity::Low, g.sev_low)]
-        .iter()
-        .filter_map(|(s, glyph)| {
-            let n = current.iter().filter(|f| f.severity == *s).count();
-            (n > 0).then(|| format!("{glyph}{n}"))
-        })
-        .collect::<Vec<_>>()
-        .join(" ")
+    [
+        (Severity::Critical, g.sev_crit),
+        (Severity::High, g.sev_high),
+        (Severity::Medium, g.sev_med),
+        (Severity::Low, g.sev_low),
+    ]
+    .iter()
+    .filter_map(|(s, glyph)| {
+        let n = current.iter().filter(|f| f.severity == *s).count();
+        (n > 0).then(|| format!("{glyph}{n}"))
+    })
+    .collect::<Vec<_>>()
+    .join(" ")
 }
 
 fn is_stale(c: &Ctx, pr: &Pr) -> bool {

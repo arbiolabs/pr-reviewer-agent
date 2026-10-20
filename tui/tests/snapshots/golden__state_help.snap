@@ -1,6 +1,6 @@
 ---
 source: tests/golden.rs
-assertion_line: 314
+assertion_line: 340
 expression: text
 ---
  PR REVIEWER ● live · unix:/run/user/501/pr-review/reviewer.sock         ? help
@@ -20,9 +20,9 @@ expression: text
 │ Enter     open selected                v         timeline category           │
 │ 1 2 3 4 5 views (see tabs)             P         timeline phase              │
 │ /         search PRs                                                         │
+│ Severity: ◆ critical  ▲ high  ● medium  ○ low                                │
 │ Write keys need a capability the server grants.                              │
 └──────────────────────────────────────────────────────────────────────────────┘
-│                                                                              │
 │                                                                              │
 │                                                                              │
 └──────────────────────────────────────────────────────────────────────────────┘

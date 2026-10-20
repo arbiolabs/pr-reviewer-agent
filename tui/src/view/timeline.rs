@@ -8,7 +8,7 @@ use ratatui::widgets::Paragraph;
 use super::lists::time_of;
 use super::{Ctx, Width, window};
 use crate::model::{EventCategory, Pane, TimelineScope};
-use crate::protocol::{EventBody, Phase, RunChange, SequencedEvent};
+use crate::protocol::{EventBody, Phase, PrId, RunChange, SequencedEvent};
 use crate::text::{fit_len, pad_left, width};
 use crate::theme::{Role, finding_status, phase_name};
 use crate::update::timeline_rows;
@@ -53,6 +53,14 @@ pub fn summary(c: &Ctx, e: &SequencedEvent) -> (String, Role) {
     }
 }
 
+// IDs are engine hashes; people know a PR by number and repository.
+fn pr_label(c: &Ctx, id: &PrId) -> String {
+    match c.m.domain.prs.get(id) {
+        Some(p) => format!("#{} {}", p.number, p.repository),
+        None => id.to_string(),
+    }
+}
+
 /// The detail lines for one event, used by the wide side pane and the event modal.
 pub fn detail_lines(c: &Ctx, e: &SequencedEvent, phase: Option<Phase>, w: usize) -> Vec<Line<'static>> {
     let field = |k: &str, v: String| {
@@ -67,7 +75,7 @@ pub fn detail_lines(c: &Ctx, e: &SequencedEvent, phase: Option<Phase>, w: usize)
         field("actor", actor(e).into()),
         field("category", EventCategory::of(&e.body).label().into()),
         field("phase", phase.map_or_else(none, |p| phase_name(p).into())),
-        field("pr", e.pr_id.as_ref().map_or_else(none, |p| p.to_string())),
+        field("pr", e.pr_id.as_ref().map_or_else(none, |p| pr_label(c, p))),
         field("run", e.run_id.as_ref().map_or_else(none, |r| r.to_string())),
         Line::raw(""),
     ];
@@ -94,11 +102,7 @@ pub fn timeline(c: &Ctx, f: &mut Frame, area: Rect) {
         return;
     };
     let g = c.t.g();
-    // IDs are engine hashes; people know a PR by number and repository, and a finding by its title.
-    let pr = t.query.pr.as_ref().map_or("-".into(), |id| match c.m.domain.prs.get(id) {
-        Some(p) => format!("#{} {}", p.number, p.repository),
-        None => id.to_string(),
-    });
+    let pr = t.query.pr.as_ref().map_or("-".into(), |id| pr_label(c, id));
     let scope = match t.scope {
         TimelineScope::Pr => format!("PR {pr}"),
         TimelineScope::Run => format!("run {} of {pr}", t.query.run.as_ref().map_or("-", |r| r.short())),
