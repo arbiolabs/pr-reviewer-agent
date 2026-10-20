@@ -182,9 +182,6 @@ pub enum Modal {
         id: FindingId,
         scroll: u16,
     },
-    Event {
-        sequence: u64,
-    },
     Input {
         purpose: InputPurpose,
         buffer: String,
@@ -323,6 +320,8 @@ pub struct TimelineView {
     pub pending: Option<RequestId>,
     pub error: Option<Text>,
     pub selected: Option<u64>,
+    /// The event whose detail shows inline under its row.
+    pub open: Option<u64>,
     pub category: Option<EventCategory>,
     pub phase: Option<Phase>,
 }

@@ -15,7 +15,6 @@ pub enum Context {
     Settings,
     Help,
     FindingModal,
-    EventModal,
     ConfirmModal,
 }
 
@@ -155,7 +154,6 @@ pub fn context(screen: Screen, modal: Option<&Modal>) -> Context {
     match modal {
         Some(Modal::Help) => C::Help,
         Some(Modal::Finding { .. }) => C::FindingModal,
-        Some(Modal::Event { .. }) => C::EventModal,
         Some(Modal::Confirm { .. }) => C::ConfirmModal,
         Some(Modal::Input { .. }) | None => match screen {
             Screen::Inbox => C::Inbox,

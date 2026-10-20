@@ -10,7 +10,6 @@ use crate::keymap::help_rows;
 use crate::model::{ConfirmState, Link, Modal};
 use crate::protocol::{Account, AccountState, EvidenceKind, FindingId};
 use crate::theme::{Role, finding_status};
-use crate::update::event_phases;
 
 fn centered(area: Rect, w: u16, h: u16) -> Rect {
     let w = w.min(area.width);
@@ -19,7 +18,6 @@ fn centered(area: Rect, w: u16, h: u16) -> Rect {
 }
 
 pub fn modal(c: &Ctx, f: &mut Frame, body: Rect, modal: &Modal) {
-    let big = if body.width < 80 { body } else { centered(body, body.width * 9 / 10, (body.height * 9 / 10).max(12)) };
     match modal {
         Modal::Input { .. } => {}
         Modal::Confirm { title, prompt, command, state } => {
@@ -71,15 +69,6 @@ pub fn modal(c: &Ctx, f: &mut Frame, body: Rect, modal: &Modal) {
             draw(c, f, area, "HELP", lines, 0);
         }
         Modal::Finding { id, scroll } => super::doc::finding_page(c, f, body, id, *scroll),
-        Modal::Event { sequence } => {
-            let Some(t) = &c.m.timeline else { return };
-            let phases = event_phases(c.m, &t.events);
-            let Some((e, phase)) = t.events.iter().zip(phases).find(|(e, _)| e.sequence.get() == *sequence) else {
-                return;
-            };
-            let lines = super::timeline::detail_lines(c, e, phase, big.width.saturating_sub(2) as usize);
-            draw(c, f, big, "EVENT", lines, 0);
-        }
     }
 }
 

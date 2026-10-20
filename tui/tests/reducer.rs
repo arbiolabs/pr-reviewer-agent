@@ -310,7 +310,7 @@ fn timeline_category_filter_hides_other_events() {
         let t = m.timeline.as_ref().unwrap();
         pr_review_tui::update::timeline_rows(m, t).iter().map(|(e, _)| e.sequence.get()).collect::<Vec<_>>()
     };
-    assert_eq!(shown(&m), [100, 99]);
+    assert_eq!(shown(&m), [99, 100], "oldest first");
     press(&mut m, KeyCode::Char('v'));
     assert_eq!(shown(&m), [100]);
     press(&mut m, KeyCode::Char('v'));
@@ -640,4 +640,25 @@ fn n_walks_the_findings_stacked_on_one_diff_line_before_moving_on() {
     press(&mut m, KeyCode::Esc);
     press(&mut m, KeyCode::Char('j'));
     assert_eq!(at(&m), (5, 0), "moving the cursor leaves the stack");
+}
+
+#[test]
+fn enter_opens_an_events_detail_inline_and_esc_folds_it_before_leaving() {
+    let mut m = review_184();
+    let fx = press(&mut m, KeyCode::Char('4'));
+    let [Effect::Send(ClientMessage::TimelineGet { request_id, .. })] = &fx[..] else { panic!("{fx:?}") };
+    send(&mut m, &read("fixtures/server.timeline.page.json").replace("req-tl", request_id.as_str()));
+    let open = |m: &Model| m.timeline.as_ref().and_then(|t| t.open);
+    assert_eq!(m.timeline.as_ref().and_then(|t| t.selected), Some(100), "lands on the newest, at the bottom");
+    press(&mut m, KeyCode::Enter);
+    assert_eq!((open(&m), m.top_modal()), (Some(100), None));
+    press(&mut m, KeyCode::Enter);
+    assert_eq!(open(&m), None, "Enter again folds a non-finding event");
+    press(&mut m, KeyCode::Char('k'));
+    press(&mut m, KeyCode::Enter);
+    assert_eq!(open(&m), Some(99));
+    press(&mut m, KeyCode::Esc);
+    assert_eq!((open(&m), m.ui.screen), (None, Screen::Timeline));
+    press(&mut m, KeyCode::Esc);
+    assert_eq!(m.ui.screen, Screen::Review);
 }

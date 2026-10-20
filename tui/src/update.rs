@@ -775,6 +775,7 @@ fn load_timeline(m: &mut Model, scope: TimelineScope, query: TimelineQuery, fx: 
         pending: Some(request_id),
         error: None,
         selected: None,
+        open: None,
         category,
         phase,
     });
@@ -806,16 +807,19 @@ pub fn event_phases(m: &Model, events: &[SequencedEvent]) -> Vec<Option<Phase>> 
         .collect()
 }
 
-/// The events the timeline shows after its category and phase filters, with their inferred phases.
+/// The events the timeline shows after its category and phase filters, oldest first, with their inferred phases.
 pub fn timeline_rows<'a>(m: &Model, t: &'a TimelineView) -> Vec<(&'a SequencedEvent, Option<Phase>)> {
     let phases = event_phases(m, &t.events);
-    t.events
+    let mut rows: Vec<_> = t
+        .events
         .iter()
         .zip(phases)
         .filter(|(e, p)| {
             t.category.is_none_or(|c| EventCategory::of(&e.body) == c) && t.phase.is_none_or(|want| *p == Some(want))
         })
-        .collect()
+        .collect();
+    rows.reverse();
+    rows
 }
 
 const PHASE_CYCLE: [Option<Phase>; 9] = [
@@ -864,7 +868,11 @@ fn act(m: &mut Model, a: Action, fx: &mut Vec<Effect>) {
             }
         }
         Action::Back => {
-            if m.ui.modals.pop().is_none() {
+            if let Some(t) = m.timeline.as_mut().filter(|t| m.ui.screen == Screen::Timeline && t.open.is_some())
+                && m.ui.modals.is_empty()
+            {
+                t.open = None;
+            } else if m.ui.modals.pop().is_none() {
                 m.ui.screen = match m.ui.screen {
                     Screen::Diff | Screen::Timeline => Screen::Review,
                     _ => Screen::Inbox,
@@ -1133,8 +1141,9 @@ fn move_by(m: &mut Model, delta: isize, fx: &mut Vec<Effect>) {
             let Some(t) = &m.timeline else { return };
             let seqs: Vec<u64> = timeline_rows(m, t).iter().map(|(e, _)| e.sequence.get()).collect();
             let next = step(&seqs, t.selected.as_ref(), delta);
-            let at_end = next.is_some() && next == seqs.last().copied();
-            let more = t.next_before.filter(|_| at_end && t.pending.is_none());
+            // Older events sit at the top: reaching it pages them in.
+            let at_top = next.is_some() && next == seqs.first().copied();
+            let more = t.next_before.filter(|_| at_top && t.pending.is_none());
             let (scope, query) = (t.scope, t.query.clone());
             if let Some(t) = &mut m.timeline {
                 t.selected = next;
@@ -1203,9 +1212,14 @@ fn open(m: &mut Model, fx: &mut Vec<Effect>) {
                 EventBody::FindingUpdated(f) => Some(f.id.clone()),
                 _ => None,
             });
-            match finding {
-                Some(id) => open_finding(m, id, fx),
-                None => m.ui.modals.push(Modal::Event { sequence: seq }),
+            // Enter shows the detail under the row; on an open finding event it reads the finding, else it folds.
+            match (t.open == Some(seq), finding) {
+                (true, Some(id)) => open_finding(m, id, fx),
+                (open, _) => {
+                    if let Some(t) = &mut m.timeline {
+                        t.open = (!open).then_some(seq);
+                    }
+                }
             }
         }
         (Screen::Settings, _) => select_account(m),

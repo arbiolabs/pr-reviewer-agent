@@ -294,7 +294,6 @@ fn footer_line(c: &Ctx, width: u16) -> Line<'static> {
     let hints = match (c.m.top_modal(), c.m.ui.screen) {
         (Some(Modal::Help), _) => "Esc close  q quit",
         (Some(Modal::Finding { .. }), _) => "j/k scroll  d diff at anchor  t timeline  Esc close",
-        (Some(Modal::Event { .. }), _) => "Esc close",
         (Some(Modal::Confirm { .. }), _) => "y confirm  n/Esc cancel",
         (_, Screen::Inbox) => "j/k pull request  Enter read  / search  ? help  q quit",
         (_, Screen::Review) if c.m.ui.focus == Pane::Sidebar => {
@@ -304,6 +303,9 @@ fn footer_line(c: &Ctx, width: u16) -> Line<'static> {
             "j/k finding  Enter read  d diff  J/K scroll  h pull requests  t timeline  ? help  q quit"
         }
         (_, Screen::Diff) => "j/k line  n/N finding  Enter read  h files  : jump  Esc back  ? help",
+        (_, Screen::Timeline) if c.m.timeline.as_ref().is_some_and(|t| t.open.is_some()) => {
+            "j/k move  Enter fold or read  f scope  v kind  P phase  Esc fold  ? help"
+        }
         (_, Screen::Timeline) => "j/k move  Enter detail  f scope  v kind  P phase  Esc back  ? help",
         (_, Screen::Settings) => "j/k account  Enter select account  r refresh  1-4 views  ? help  q quit",
     };
