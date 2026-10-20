@@ -113,6 +113,14 @@ pub fn hit(m: &Model, x: u16, y: u16) -> Option<Hit> {
     doc::hit(&c, body, x, y)
 }
 
+/// The largest useful help scroll at the current size.
+pub fn help_scroll_limit(m: &Model) -> u16 {
+    let area = Rect::new(0, 0, m.size.0, m.size.1);
+    let c = ctx(m, area.width);
+    let body = regions(&c, area)[3];
+    modals::help_limit(modals::help_lines(&c, body).len(), body.height as usize) as u16
+}
+
 /// The largest useful `doc_scroll` at the current size, so J past the end does not pile up presses K must undo.
 pub fn doc_scroll_limit(m: &Model) -> i32 {
     let area = Rect::new(0, 0, m.size.0, m.size.1);
@@ -283,7 +291,7 @@ fn footer_line(c: &Ctx, width: u16) -> Line<'static> {
         return Line::from(c.span(c.pad(&format!(" {}", n.text), w), Role::Pending));
     }
     let hints = match (c.m.top_modal(), c.m.ui.screen) {
-        (Some(Modal::Help), _) => "Esc close  q quit",
+        (Some(Modal::Help { .. }), _) => "j/k scroll  Esc close  q quit",
         (Some(Modal::Finding { .. }), _) => "j/k scroll  d diff at anchor  t timeline  Esc close",
         (Some(Modal::Confirm { .. }), _) => "y confirm  n/Esc cancel",
         (_, Screen::Inbox) => "j/k pull request  Enter read  / search  ? help  q quit",

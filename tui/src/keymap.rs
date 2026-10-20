@@ -152,7 +152,7 @@ const TABLE: &[(Context, KeyCode, KeyModifiers, Action)] = &[
 
 pub fn context(screen: Screen, modal: Option<&Modal>) -> Context {
     match modal {
-        Some(Modal::Help) => C::Help,
+        Some(Modal::Help { .. }) => C::Help,
         Some(Modal::Finding { .. }) => C::FindingModal,
         Some(Modal::Confirm { .. }) => C::ConfirmModal,
         Some(Modal::Input { .. }) | None => match screen {

@@ -3,7 +3,7 @@
 mod common;
 
 use common::*;
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
 use pr_review_tui::model::{Look, Model, Screen};
 use pr_review_tui::net::NetCmd;
 use pr_review_tui::playback;
@@ -553,6 +553,61 @@ fn the_help_page_shows_every_key_at_80x24() {
         let row = format!("{keys:<11}{}", what.chars().take(12).collect::<String>());
         assert!(frame.contains(&row), "{row} is missing:\n{frame}");
     }
+}
+
+#[test]
+fn scrolling_the_help_page_to_its_end_shows_every_section_at_every_size() {
+    use pr_review_tui::keymap::Context as C;
+    let rows = pr_review_tui::keymap::help_rows();
+    for (w, h) in [(60, 16), (80, 24), (120, 38)] {
+        let mut s = mid_review(Look::default()).key(KeyCode::Char('?'));
+        let (first, _) = render(&mut s.m, w, h);
+        let mut seen = first.clone();
+        let mut last = first.clone();
+        for _ in 0..200 {
+            s = s.key(KeyCode::Char('j'));
+            let (frame, _) = render(&mut s.m, w, h);
+            if frame == last {
+                break;
+            }
+            seen.push_str(&frame);
+            last = frame;
+        }
+        for (_, keys, what) in rows.iter().filter(|r| matches!(r.0, C::Global | C::Review | C::Diff | C::Timeline)) {
+            let row = format!("{keys:<11}{}", what.chars().take(5).collect::<String>());
+            assert!(seen.contains(&row), "{w}x{h}: {row} never shows:\n{seen}");
+        }
+        for text in [
+            "Glyphs",
+            "low",
+            "failed",
+            "findings published on GitHub",
+            "Mouse",
+            "select it.",
+            "The wheel scrolls the page under it.",
+            "Write keys need a capability the server grants.",
+        ] {
+            assert!(last.contains(text), "{w}x{h}: the end of the page lacks {text}:\n{last}");
+        }
+        let overflows = first != last;
+        assert_eq!(first.contains("more below, j scrolls"), overflows, "{w}x{h}: the cue shows only on overflow");
+        assert!(!last.contains("more below"), "{w}x{h}: no cue at the end:\n{last}");
+        let mut k = s.key(KeyCode::Char('k'));
+        assert_eq!(render(&mut k.m, w, h).0 != last, overflows, "{w}x{h}: one k scrolls back from the end");
+        let mut paged = mid_review(Look::default()).key(KeyCode::Char('?'));
+        render(&mut paged.m, w, h);
+        for _ in 0..20 {
+            paged = paged.key(KeyCode::PageDown);
+        }
+        assert_eq!(render(&mut paged.m, w, h).0, last, "{w}x{h}: PgDn reaches the same end");
+    }
+    let mut s = mid_review(Look::default()).key(KeyCode::Char('?'));
+    let (top, _) = render(&mut s.m, 80, 24);
+    let wheel = |kind| MouseEvent { kind, column: 10, row: 10, modifiers: KeyModifiers::NONE };
+    s.apply(Msg::Mouse(wheel(MouseEventKind::ScrollDown)));
+    assert_ne!(render(&mut s.m, 80, 24).0, top, "the wheel scrolls the help page");
+    s.apply(Msg::Mouse(wheel(MouseEventKind::ScrollUp)));
+    assert_eq!(render(&mut s.m, 80, 24).0, top, "and back");
 }
 
 #[test]

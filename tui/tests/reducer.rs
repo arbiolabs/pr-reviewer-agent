@@ -87,7 +87,7 @@ fn the_top_modal_takes_keys_and_esc_pops_one_at_a_time() {
     assert_eq!(sent(&fx), ["diff.get"], "the detail came with the PR; the reader adds the diff at its anchor");
 
     press(&mut m, KeyCode::Char('?'));
-    assert_eq!(m.top_modal(), Some(&Modal::Help));
+    assert_eq!(m.top_modal(), Some(&Modal::Help { scroll: 0 }));
     let before = m.ui.selected_finding.clone();
     press(&mut m, KeyCode::Char('j'));
     assert_eq!(m.ui.selected_finding, before);

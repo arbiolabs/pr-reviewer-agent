@@ -18,7 +18,7 @@ pub fn modal(c: &Ctx, f: &mut Frame, body: Rect, modal: &Modal) {
     match modal {
         Modal::Input { .. } => {}
         Modal::Confirm { title, prompt, command, state } => confirm(c, f, body, title, prompt, command.name(), state),
-        Modal::Help => help(c, f, body),
+        Modal::Help { scroll } => help(c, f, body, *scroll),
         Modal::Finding { id, scroll } => super::doc::finding_page(c, f, body, id, *scroll),
     }
 }
@@ -69,8 +69,31 @@ fn confirm(c: &Ctx, f: &mut Frame, body: Rect, title: &str, prompt: &str, comman
     f.render_widget(Paragraph::new(lines), area);
 }
 
+/// The largest scroll of a `len`-line help page in `height` rows. An overflowing page keeps its last row for the cue.
+pub fn help_limit(len: usize, height: usize) -> usize {
+    if len <= height { 0 } else { len - height.saturating_sub(1) }
+}
+
+/// The help page, scrolled, with a "more below" cue on its last row while it overflows.
+fn help(c: &Ctx, f: &mut Frame, body: Rect, scroll: u16) {
+    let mut lines = help_lines(c, body);
+    let (len, h) = (lines.len(), body.height as usize);
+    if len > h {
+        let start = (scroll as usize).min(help_limit(len, h));
+        let end = (start + h - 1).min(len);
+        lines = lines.drain(start..end).collect();
+        let below = len - end;
+        lines.push(if below > 0 {
+            Line::from(c.span(format!("  {} {below} more below, j scrolls", c.t.g().ellipsis), Role::Muted))
+        } else {
+            Line::raw("")
+        });
+    }
+    page(c, f, body, lines);
+}
+
 /// Every key by where it works, then what the glyphs mean.
-fn help(c: &Ctx, f: &mut Frame, body: Rect) {
+pub fn help_lines(c: &Ctx, body: Rect) -> Vec<Line<'static>> {
     let g = c.t.g();
     let col = column(body);
     let rows = help_rows();
@@ -138,16 +161,18 @@ fn help(c: &Ctx, f: &mut Frame, body: Rect) {
         c.span(format!("{} ", g.ok), Role::Ok),
         c.span("clean   ", Role::Normal),
         c.span(format!("{} ", g.fail), Role::Fail),
-        c.span("failed   ", Role::Normal),
-        c.span(format!("{}2 ", g.arrow), Role::Ok),
-        c.span("findings on GitHub", Role::Normal),
+        c.span("failed", Role::Normal),
+    ]));
+    lines.push(Line::from(vec![
+        c.span(format!("  {}2 ", g.arrow), Role::Ok),
+        c.span("findings published on GitHub", Role::Normal),
     ]));
     lines.push(Line::raw(""));
     lines.push(heading(c, "Mouse"));
-    lines
-        .push(Line::from(c.span("  Click a pull request or a finding to select it; the wheel scrolls.", Role::Normal)));
+    lines.push(Line::from(c.span("  Click a pull request or a finding to select it.", Role::Normal)));
+    lines.push(Line::from(c.span("  The wheel scrolls the page under it.", Role::Normal)));
     lines.push(Line::from(c.span("  Write keys need a capability the server grants.", Role::Muted)));
-    page(c, f, body, lines);
+    lines
 }
 
 /// The GitHub identity the daemon uses.

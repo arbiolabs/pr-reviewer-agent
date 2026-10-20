@@ -877,10 +877,10 @@ fn act(m: &mut Model, a: Action, fx: &mut Vec<Effect>) {
     match a {
         Action::Quit => fx.push(Effect::Quit),
         Action::Help => {
-            if m.top_modal() == Some(&Modal::Help) {
+            if matches!(m.top_modal(), Some(Modal::Help { .. })) {
                 m.ui.modals.pop();
             } else {
-                m.ui.modals.push(Modal::Help);
+                m.ui.modals.push(Modal::Help { scroll: 0 });
             }
         }
         Action::Back => {
@@ -1005,7 +1005,7 @@ fn mouse(m: &mut Model, e: MouseEvent, fx: &mut Vec<Effect>) {
         _ => return,
     };
     match (m.top_modal(), m.ui.screen) {
-        (Some(Modal::Finding { .. }), _) => move_by(m, delta, fx),
+        (Some(Modal::Finding { .. } | Modal::Help { .. }), _) => move_by(m, delta, fx),
         (Some(_), _) => {}
         (None, Screen::Inbox | Screen::Review) => {
             m.ui.doc_scroll = (m.ui.doc_scroll + delta as i32).clamp(0, crate::view::doc_scroll_limit(m));
@@ -1131,9 +1131,12 @@ fn goto(m: &mut Model, s: Screen, fx: &mut Vec<Effect>) {
 }
 
 fn move_by(m: &mut Model, delta: isize, fx: &mut Vec<Effect>) {
+    let help_limit = crate::view::help_scroll_limit(m);
     if let Some(top) = m.ui.modals.last_mut() {
-        if let Modal::Finding { scroll, .. } = top {
-            *scroll = (*scroll as isize + delta).clamp(0, u16::MAX as isize) as u16;
+        match top {
+            Modal::Finding { scroll, .. } => *scroll = (*scroll as isize + delta).clamp(0, u16::MAX as isize) as u16,
+            Modal::Help { scroll } => *scroll = (*scroll as isize + delta).clamp(0, help_limit as isize) as u16,
+            Modal::Input { .. } | Modal::Confirm { .. } => {}
         }
         return;
     }

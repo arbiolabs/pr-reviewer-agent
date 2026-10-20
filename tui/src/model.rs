@@ -177,7 +177,9 @@ pub enum InputPurpose {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Modal {
-    Help,
+    Help {
+        scroll: u16,
+    },
     Finding {
         id: FindingId,
         scroll: u16,
