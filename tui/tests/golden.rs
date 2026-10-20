@@ -284,6 +284,18 @@ fn special_states() {
         ),
         ("accounts_blocked", accounts_blocked(), (120, 38)),
         (
+            "completed_without_findings",
+            {
+                let mut s = Sim::new(Look::default());
+                s.server(ServerMessage::parse(&read("fixtures/server.welcome.json")).unwrap());
+                let mut snap: serde_json::Value = serde_json::from_str(&read("fixtures/server.snapshot.json")).unwrap();
+                snap["findings"] = serde_json::json!([]);
+                s.server(serde_json::from_value(snap).unwrap());
+                s.select("acme/shop#185").key(KeyCode::Enter)
+            },
+            (80, 24),
+        ),
+        (
             "accounts_requested",
             accounts_live(Look::default())
                 .key(KeyCode::Char('A'))

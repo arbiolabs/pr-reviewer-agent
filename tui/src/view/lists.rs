@@ -7,7 +7,7 @@ use ratatui::widgets::Paragraph;
 
 use super::{Ctx, Width, window};
 use crate::model::{Activity, ActivityKind, Link, Pane};
-use crate::protocol::{Finding, Lifecycle, Phase, Pr, Run, RunChange, Severity};
+use crate::protocol::{Finding, Lifecycle, Phase, Pr, Run, RunChange, RunStatus, Severity};
 use crate::text::width;
 use crate::theme::{Role, finding_status, phase_name};
 
@@ -45,9 +45,7 @@ fn run_state(c: &Ctx, pr: &Pr) -> (String, Role) {
     let base = match c.m.domain.latest_run(&pr.id) {
         None => (format!("{} no run", g.idle), Role::Muted),
         Some(r) if r.phase == Phase::Reconcile => (format!("{} PUBLISH?", g.pending), Role::Pending),
-        Some(r) if r.status == crate::protocol::RunStatus::Running => {
-            (format!("{} {}", g.active, phase_name(r.phase)), Role::Active)
-        }
+        Some(r) if r.status == RunStatus::Running => (format!("{} {}", g.active, phase_name(r.phase)), Role::Active),
         Some(r) => {
             let (glyph, word, role) = c.t.run_status(r.status);
             (format!("{glyph} {word}"), role)
@@ -362,7 +360,13 @@ pub fn review(c: &Ctx, f: &mut Frame, area: Rect) {
     let inner = block.inner(findings);
     f.render_widget(block, findings);
     if list.is_empty() {
-        message(c, f, inner, "No findings for this PR yet.", Role::Muted);
+        // SPEC section 12's wording: a finished review with nothing to report is a result, not a pending state.
+        let text = match c.m.domain.latest_run(&pr.id).map(|r| r.status) {
+            Some(RunStatus::Completed) => "No actionable issues found in the reviewed scope",
+            Some(RunStatus::Failed) => "No findings: the latest run failed.",
+            _ => "No findings for this PR yet.",
+        };
+        message(c, f, inner, text, Role::Muted);
     } else {
         let sel = c.m.ui.selected_finding.as_ref().and_then(|id| list.iter().position(|x| &x.id == id));
         let rows: Vec<Line> = window(list.len(), sel, inner.height as usize)
