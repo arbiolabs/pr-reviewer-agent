@@ -113,6 +113,13 @@ pub fn hit(m: &Model, x: u16, y: u16) -> Option<Hit> {
     doc::hit(&c, body, x, y)
 }
 
+/// The largest useful `doc_scroll` at the current size, so J past the end does not pile up presses K must undo.
+pub fn doc_scroll_limit(m: &Model) -> i32 {
+    let area = Rect::new(0, 0, m.size.0, m.size.1);
+    let c = ctx(m, area.width);
+    doc::scroll_limit(&c, regions(&c, area)[3]).map_or(0, |n| n as i32)
+}
+
 pub fn view(m: &Model, f: &mut Frame) {
     let area = f.area();
     let c = ctx(m, area.width);

@@ -554,3 +554,17 @@ fn the_help_page_shows_every_key_at_80x24() {
         assert!(frame.contains(&row), "{row} is missing:\n{frame}");
     }
 }
+
+#[test]
+fn j_past_the_end_stops_so_one_k_scrolls_back() {
+    let mut s = Sim::new(Look::default()).play("showcase", 2).key(KeyCode::Enter);
+    render(&mut s.m, 120, 38);
+    for _ in 0..100 {
+        s = s.key(KeyCode::Char('J'));
+    }
+    let (end, _) = render(&mut s.m, 120, 38);
+    let mut s = s.key(KeyCode::Char('J'));
+    assert_eq!(render(&mut s.m, 120, 38).0, end, "the document is at its end");
+    let mut s = s.key(KeyCode::Char('K'));
+    assert_ne!(render(&mut s.m, 120, 38).0, end, "one K moves back from the end");
+}

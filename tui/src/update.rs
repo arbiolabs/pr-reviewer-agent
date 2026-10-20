@@ -932,7 +932,7 @@ fn act(m: &mut Model, a: Action, fx: &mut Vec<Effect>) {
         }),
         Action::OpenDiff => open_diff(m, fx),
         Action::Watch => watch(m),
-        Action::ScrollDown => m.ui.doc_scroll += 1,
+        Action::ScrollDown => m.ui.doc_scroll = (m.ui.doc_scroll + 1).min(crate::view::doc_scroll_limit(m)),
         Action::ScrollUp => m.ui.doc_scroll = (m.ui.doc_scroll - 1).max(0),
         Action::OpenTimeline => {
             m.ui.modals.retain(|x| !matches!(x, Modal::Finding { .. }));
@@ -1008,7 +1008,7 @@ fn mouse(m: &mut Model, e: MouseEvent, fx: &mut Vec<Effect>) {
         (Some(Modal::Finding { .. }), _) => move_by(m, delta, fx),
         (Some(_), _) => {}
         (None, Screen::Inbox | Screen::Review) => {
-            m.ui.doc_scroll = (m.ui.doc_scroll + delta as i32).max(0);
+            m.ui.doc_scroll = (m.ui.doc_scroll + delta as i32).clamp(0, crate::view::doc_scroll_limit(m));
         }
         (None, Screen::Diff) => {
             m.ui.focus = Pane::Main;

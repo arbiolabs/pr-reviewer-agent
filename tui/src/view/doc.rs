@@ -163,6 +163,14 @@ pub fn hit(c: &Ctx, area: Rect, x: u16, y: u16) -> Option<super::Hit> {
     doc.owners.iter().rev().find(|(start, _)| *start <= line).map(|(_, id)| super::Hit::Finding(id.clone()))
 }
 
+/// How far the reader's own offset can usefully go on the Review or Inbox screen in `area`.
+pub fn scroll_limit(c: &Ctx, area: Rect) -> Option<usize> {
+    let rail_focus = c.m.ui.screen == Screen::Inbox || c.focused(Pane::Sidebar);
+    let col = column(split(area, rail_focus).1?);
+    let doc = document(c, c.m.selected_pr()?, col.width as usize, col.height as usize);
+    Some(doc.scroll_limit(col.height as usize))
+}
+
 // ---------------------------------------------------------------- document
 
 /// The PR rendered as one scrollable document, and where the selected card sits in it.
@@ -179,13 +187,24 @@ pub struct Doc {
 impl Doc {
     /// Scroll so the expanded card shows whole, the PR header kept when it fits too, then the reader's own offset.
     pub fn scroll(&self, c: &Ctx, height: usize) -> u16 {
+        let (auto, max) = self.bounds(height);
+        let own = (c.m.ui.doc_scroll.max(0) as usize).saturating_sub(self.prose_rest);
+        (auto + own).min(max) as u16
+    }
+
+    /// The reader's offset past which J changes nothing: the explanation's rows, then the document's.
+    pub fn scroll_limit(&self, height: usize) -> usize {
+        let (auto, max) = self.bounds(height);
+        self.prose_rest + max.saturating_sub(auto)
+    }
+
+    /// Where the selection puts the document, and the furthest it scrolls.
+    fn bounds(&self, height: usize) -> (usize, usize) {
         let auto = match self.card {
             Some((start, end)) if end > height => end.saturating_sub(height).min(start.saturating_sub(1)),
             _ => 0,
         };
-        let max = self.lines.len().saturating_sub(height.min(self.lines.len()) / 2);
-        let own = (c.m.ui.doc_scroll.max(0) as usize).saturating_sub(self.prose_rest);
-        (auto + own).min(max) as u16
+        (auto, self.lines.len().saturating_sub(height.min(self.lines.len()) / 2))
     }
 }
 
