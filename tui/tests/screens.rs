@@ -149,3 +149,23 @@ fn at_80_columns_the_footer_drops_minor_hints_before_navigation() {
         assert!(footer.contains(hint), "{hint}: {footer}");
     }
 }
+
+#[test]
+fn n_and_shift_n_walk_the_findings_inside_the_reader() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use pr_review_tui::model::Modal;
+    let mut s = showcase(2).key(KeyCode::Enter).key(KeyCode::Enter);
+    let reader = |s: &mut Sim| {
+        let (frame, _) = render(&mut s.m, 120, 38);
+        frame.lines().find(|l| l.contains("finding ") && l.contains(" of ")).map(str::trim).unwrap_or("").to_string()
+    };
+    assert!(reader(&mut s).ends_with("finding 1 of 4"), "{}", reader(&mut s));
+    s = s.key(KeyCode::Char('n'));
+    assert!(reader(&mut s).ends_with("finding 2 of 4"), "{}", reader(&mut s));
+    let Some(Modal::Finding { id, .. }) = s.m.top_modal() else { panic!("the reader closed") };
+    assert!(s.m.details.contains_key(id), "the next finding's detail was fetched");
+    assert_eq!(s.m.ui.selected_finding.as_ref(), Some(id), "the document follows the reader");
+    s.apply(pr_review_tui::update::Msg::Key(KeyEvent::new(KeyCode::Char('N'), KeyModifiers::SHIFT)));
+    s.apply(pr_review_tui::update::Msg::Key(KeyEvent::new(KeyCode::Char('N'), KeyModifiers::SHIFT)));
+    assert!(reader(&mut s).ends_with("finding 1 of 4"), "N stops at the first: {}", reader(&mut s));
+}

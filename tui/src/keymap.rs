@@ -146,6 +146,9 @@ const TABLE: &[(Context, KeyCode, KeyModifiers, Action)] = &[
     (C::Timeline, K::Char('v'), NONE, A::CycleCategory),
     (C::Timeline, K::Char('P'), SHIFT, A::CyclePhase),
     (C::Timeline, K::Char('P'), NONE, A::CyclePhase),
+    (C::FindingModal, K::Char('n'), NONE, A::NextFinding),
+    (C::FindingModal, K::Char('N'), SHIFT, A::PrevFinding),
+    (C::FindingModal, K::Char('N'), NONE, A::PrevFinding),
     (C::ConfirmModal, K::Char('y'), NONE, A::Confirm),
     (C::ConfirmModal, K::Char('n'), NONE, A::Back),
 ];

@@ -1353,6 +1353,19 @@ fn open_diff(m: &mut Model, fx: &mut Vec<Effect>) {
 }
 
 fn next_finding(m: &mut Model, dir: isize, fx: &mut Vec<Effect>) {
+    // In the reader, n and N turn the page to the PR's next or previous finding, and the document follows.
+    if let Some(Modal::Finding { id, .. }) = m.top_modal() {
+        let id = id.clone();
+        let Some(pr) = m.domain.findings.get(&id).map(|f| f.pr_id.clone()) else { return };
+        let ids: Vec<FindingId> = m.domain.pr_findings(&pr).iter().map(|f| f.id.clone()).collect();
+        if let Some(next) = step(&ids, Some(&id), dir).filter(|n| *n != id) {
+            m.ui.modals.pop();
+            m.ui.selected_finding = Some(next.clone());
+            m.ui.doc_scroll = 0;
+            open_finding(m, next, fx);
+        }
+        return;
+    }
     match m.ui.screen {
         Screen::Review => {
             m.ui.focus = Pane::Main;

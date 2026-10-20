@@ -306,7 +306,7 @@ fn footer_line(c: &Ctx, width: u16) -> Line<'static> {
     }
     let hints = match (c.m.top_modal(), c.m.ui.screen) {
         (Some(Modal::Help { .. }), _) => "j/k scroll  Esc close  q quit",
-        (Some(Modal::Finding { .. }), _) => "j/k scroll  d diff at anchor  t timeline  Esc close",
+        (Some(Modal::Finding { .. }), _) => "j/k scroll  n/N finding  d diff at anchor  t timeline  Esc close",
         (Some(Modal::Confirm { .. }), _) => "y confirm  n/Esc cancel",
         (_, Screen::Inbox) => "j/k pull request  Enter read  / search  ? help  q quit",
         (_, Screen::Review) if c.m.ui.focus == Pane::Sidebar => {

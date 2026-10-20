@@ -39,4 +39,4 @@ expression: text
           ┃ Traced book() -> lock(); lock() is advisory and not awaited by the second caller.
           ┃ model-written summary, not a confirmation
           ┃
-   j/k scroll  d diff at anchor  t timeline  Esc close               1 inbox  2 review  3 diff  4 timeline  5 settings
+   j/k scroll  n/N finding  d diff at anchor  t timeline  Esc close  1 inbox  2 review  3 diff  4 timeline  5 settings

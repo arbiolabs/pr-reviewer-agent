@@ -17,4 +17,4 @@ expression: text
   ┃
   ┃ Evidence
   ┃   src/booking.ts  lines 40-43 @ 4444444
-   j/k scroll  d diff at anchor  t timeline  Esc close
+   j/k scroll  n/N finding  d diff at anchor  Esc close
