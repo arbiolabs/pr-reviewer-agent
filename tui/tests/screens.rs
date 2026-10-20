@@ -282,3 +282,13 @@ fn an_open_tool_event_shows_its_whole_summary() {
         summary.split(' ').rev().take(3).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join(" ");
     assert!(shown.contains(&tail), "the summary's end {tail:?} shows at 80 columns:\n{frame}");
 }
+
+#[test]
+fn a_long_hunk_header_wraps_like_the_code_under_it() {
+    use crossterm::event::KeyCode;
+    let mut s = showcase(2).key(KeyCode::Enter).key(KeyCode::Char('d')).key(KeyCode::Char('g'));
+    let (frame, _) = render(&mut s.m, 80, 24);
+    let joined: String = frame.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(joined.contains("@@ -84,8 +85,26 @@"), "{frame}");
+    assert!(joined.contains("export function ordersRouter(db: Db, payments: Payments) {"), "{frame}");
+}

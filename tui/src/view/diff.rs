@@ -254,12 +254,20 @@ fn row_lines(c: &Ctx, row: &DiffRow, hit: Option<&Finding>, w: usize, cursor: bo
                 Some((at, ctx)) => (format!("@@ {} @@", at.trim()), ctx.trim().to_string()),
                 None => (text.to_string(), String::new()),
             };
-            let spans = vec![
-                Span::styled(format!("{:>w$}", "", w = GUTTER - 1), st),
+            // The ranges, then the function name; a long name wraps under itself the way code does.
+            let room = w.saturating_sub(GUTTER - 1).max(1);
+            let head = vec![
                 Span::styled(format!("{at}  "), c.s(Role::Muted).patch(st)),
-                Span::styled(c.fit(&ctx, w.saturating_sub(GUTTER + width(&at) + 1)), c.s(Role::Hunk).patch(st)),
+                Span::styled(c.fit(&ctx, (room * WRAP_ROWS).saturating_sub(width(&at) + 2)), c.s(Role::Hunk).patch(st)),
             ];
-            vec![Line::from(filled(spans, w, st))]
+            wrap_spans(head, room)
+                .into_iter()
+                .map(|piece| {
+                    let mut spans = vec![Span::styled(" ".repeat(GUTTER - 1), st)];
+                    spans.extend(piece);
+                    Line::from(filled(spans, w, st))
+                })
+                .collect()
         }
         DiffRow::Line(l) => {
             let bg = match (cursor, hit.is_some(), l.kind) {
