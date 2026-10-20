@@ -8,6 +8,7 @@ import lockfile from "proper-lockfile";
 import type { Config } from "../config/config.ts";
 import { TERMINAL_REVIEW_STATES } from "../domain/machines.ts";
 import type { PullInfo } from "../domain/types.ts";
+import type { GitHubClient } from "../github/client.ts";
 import type { PullSource } from "../github/pulls.ts";
 import type { JevRoute } from "../jev/decision.ts";
 import { AppStore, type RevisionRow } from "../persistence/store.ts";
@@ -20,13 +21,16 @@ export type AppOptions = {
   dataDir: string;
   config: Config;
   pulls: PullSource;
-  githubToken?: string | undefined;
+  gitToken?: ((installationId: number) => Promise<string | undefined>) | undefined;
+  github?: ((installationId: number) => GitHubClient) | undefined;
   engine: JevRoute;
   models: Models;
   model: ModelRef;
   /** Part of revision identity: a different reviewer (code or model) is a different review. */
   reviewerVersion: string;
   onReport?: (error: unknown) => void;
+  /** How long to wait for another process's data-dir lock before giving up; see `lockDataDir`. */
+  lockWaitMs?: number;
 };
 
 export type App = { store: AppStore; harness: Harness; task: ReviewTask; reviewerVersion: string; close(): Promise<void> };
@@ -39,7 +43,7 @@ const ctx = BACKGROUND_CONTEXT;
  */
 export async function openApp(options: AppOptions): Promise<App> {
   mkdirSync(options.dataDir, { recursive: true });
-  const release = await lockDataDir(options.dataDir);
+  const release = await lockDataDir(options.dataDir, options.lockWaitMs);
   try {
     return await openLocked(options, release);
   } catch (error) {
@@ -53,9 +57,11 @@ export async function openApp(options: AppOptions): Promise<App> {
  * `stale`, so a rerun after kill -9 takes over the dead process's lock. proper-lockfile removes the lock on exit and
  * on signals.
  */
-async function lockDataDir(dir: string): Promise<() => Promise<void>> {
+export async function lockDataDir(dir: string, waitMs = 6000): Promise<() => Promise<void>> {
   try {
-    return await lockfile.lock(dir, { stale: 5000, update: 1000, retries: { retries: 12, minTimeout: 500, maxTimeout: 500 } });
+    // Inside the dir, not proper-lockfile's default sibling `<dir>.lock`: a volume's parent (say `/`) is often read-only.
+    const retries = { retries: Math.ceil(waitMs / 500), minTimeout: 500, maxTimeout: 500 };
+    return await lockfile.lock(dir, { lockfilePath: join(dir, "lock"), stale: 5000, update: 1000, retries });
   } catch (error) {
     if ((error as { code?: unknown }).code === "ELOCKED") throw new Error(`another pr-review is running on ${dir}`);
     throw error;
@@ -100,6 +106,11 @@ async function openLocked(options: AppOptions, release: () => Promise<void>): Pr
   };
 }
 
+const PUBLISH_POLICY = "+publish";
+
+/** Whether a revision was started to publish; recovery recreates its task the same way. */
+export const publishes = (revision: RevisionRow) => revision.policy_version.endsWith(PUBLISH_POLICY);
+
 export type StartedReview = { revision: RevisionRow; taskId: TaskId<ReviewResult> | undefined };
 
 /**
@@ -108,15 +119,31 @@ export type StartedReview = { revision: RevisionRow; taskId: TaskId<ReviewResult
  * reopens a FAILED revision through the audited MANUAL_RETRY override (§4.1); the machine refuses it from any other
  * terminal state.
  */
-export async function startReview(app: App, pull: PullInfo, policyVersion: string, options: { retry?: boolean } = {}): Promise<StartedReview> {
+export async function startReview(
+  app: App,
+  pull: PullInfo,
+  basePolicyVersion: string,
+  options: { retry?: boolean; publish?: boolean; retrySource?: string } = {},
+): Promise<StartedReview> {
   const prId = app.store.upsertPull(pull);
+  // Publishing is part of the policy: a dry run of a head never blocks publishing that head later (§2 invariant 3).
+  const policyVersion = options.publish ? `${basePolicyVersion}${PUBLISH_POLICY}` : basePolicyVersion;
   let revision = app.store.ensureRevision({ prId, baseSha: pull.baseSha, headSha: pull.headSha, policyVersion, reviewerVersion: app.reviewerVersion });
   if (options.retry && TERMINAL_REVIEW_STATES.includes(revision.state)) {
     const n = app.store.retryCount(revision.id) + 1;
-    app.store.advance(revision.id, revision.state, "MANUAL_RETRY", `manual override: pr-review review --retry (retry ${n})`);
+    app.store.advance(revision.id, revision.state, "MANUAL_RETRY", `manual override: ${options.retrySource ?? "pr-review review --retry"} (retry ${n})`);
     revision = app.store.revision(revision.id)!;
   }
-  if (TERMINAL_REVIEW_STATES.includes(revision.state)) return { revision, taskId: undefined };
+  const taskId = await ensureTask(app, revision, options.publish ?? false);
+  return { revision: app.store.revision(revision.id)!, taskId };
+}
+
+/**
+ * The durable task for the revision's current attempt, created only if no task for it exists; `undefined` for a
+ * terminal revision. Recovery calls this for every unfinished revision.
+ */
+export async function ensureTask(app: App, revision: RevisionRow, publish: boolean): Promise<TaskId<ReviewResult> | undefined> {
+  if (TERMINAL_REVIEW_STATES.includes(revision.state)) return undefined;
   const retry = app.store.retryCount(revision.id);
   const root = await app.harness.root(ctx);
   const taskId = await root.commit(async (tx) => {
@@ -130,10 +157,10 @@ export async function startReview(app: App, pull: PullInfo, policyVersion: strin
       if (!page.next) break;
       page = await tx.scanTasks({ kind: REVIEW_TASK_NAME }, 100, page.next);
     }
-    return tx.createTask(app.task, { revisionId: revision.id, retry }, { ownership: { kind: "conversation" } });
+    return tx.createTask(app.task, { revisionId: revision.id, retry, publish }, { ownership: { kind: "conversation" } });
   }, ctx);
   app.store.setDurableTask(revision.id, String(taskId));
-  return { revision: app.store.revision(revision.id)!, taskId };
+  return taskId;
 }
 
 /** Wait for the revision's task; a task that ended without the revision reaching a terminal state fails it. */

@@ -55,7 +55,20 @@ export class PiAuthFileStore implements CredentialStore {
     }, options);
   }
 
-  private async withLock<T>(
+  /** Settles when this store's last queued write does; its writes take the file lock one at a time, in call order. */
+  private tail: Promise<unknown> = Promise.resolve();
+
+  private withLock<T>(
+    fn: (all: Record<string, Credential>) => Promise<{ result: T; write?: Record<string, Credential> }>,
+    options?: AuthOperationOptions,
+  ): Promise<T> {
+    // Without the queue, two writes from this process race for the lock file and the order is whichever mkdir lands first.
+    const run = this.tail.then(() => this.withFileLock(fn, options));
+    this.tail = run.catch(() => {});
+    return run;
+  }
+
+  private async withFileLock<T>(
     fn: (all: Record<string, Credential>) => Promise<{ result: T; write?: Record<string, Credential> }>,
     options?: AuthOperationOptions,
   ): Promise<T> {

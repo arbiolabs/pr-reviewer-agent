@@ -12,6 +12,22 @@ export type Config = {
     base_policy_version: string;
     jev_timeout_ms: number;
     retry_backoff_ms: number;
+    /** A PR's review starts this long after its last triggering event; a later push restarts the wait. */
+    debounce_seconds: number;
+    /** A webhook delivery that keeps failing is retried with exponential backoff, then recorded dead. */
+    webhook_max_attempts: number;
+    webhook_backoff_ms: number;
+  };
+  /** §9.4 rate limits and retries. `max_retries` bounds each request; the client never retries an ambiguous write. */
+  github: {
+    max_retries: number;
+    backoff_ms: number;
+    concurrency_per_installation: number;
+    timeout_ms: number;
+    /** The longest rate-limit wait the worker loop sits through; a longer one fails the delivery, which backs off. */
+    max_rate_limit_sleep_ms: number;
+    /** Our reviews' author for token auth that cannot read `/user`, such as an installation token; else `PR_REVIEW_BOT_LOGIN`. */
+    bot_login: string;
   };
   routing: {
     mandatory_deep_paths: string[];
@@ -45,7 +61,11 @@ export const DEFAULT_CONFIG: Config = {
     base_policy_version: "1",
     jev_timeout_ms: 15_000,
     retry_backoff_ms: 1000,
+    debounce_seconds: 30,
+    webhook_max_attempts: 6,
+    webhook_backoff_ms: 5000,
   },
+  github: { max_retries: 3, backoff_ms: 500, concurrency_per_installation: 2, timeout_ms: 15_000, max_rate_limit_sleep_ms: 30_000, bot_login: "" },
   routing: {
     mandatory_deep_paths: ["**/auth/**", "**/payments/**", "**/booking/**", "**/migrations/**"],
     jev_deep_threshold: 0.7,
@@ -59,10 +79,10 @@ export const DEFAULT_CONFIG: Config = {
   },
 };
 
-/** Overlay `pr-review.config.json` onto the defaults; every key must exist in the defaults with the same JSON type. */
+/** Overlay `pr-review.config.json` (or `PR_REVIEW_CONFIG`) onto the defaults; every key must exist in the defaults with the same JSON type. */
 export const CONFIG_FILE = "pr-review.config.json";
 
-export function loadConfig(path = CONFIG_FILE): Config {
+export function loadConfig(path = process.env.PR_REVIEW_CONFIG || CONFIG_FILE): Config {
   if (!existsSync(path)) return DEFAULT_CONFIG;
   return mergeChecked(DEFAULT_CONFIG, JSON.parse(readFileSync(path, "utf8")), path) as Config;
 }

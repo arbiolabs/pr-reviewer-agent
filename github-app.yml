@@ -1,0 +1,18 @@
+# GitHub App manifest (https://docs.github.com/en/apps/sharing-github-apps/registering-a-github-app-from-a-manifest).
+# The manifest flow takes JSON: convert this file and replace the two example URLs before you register the app.
+# Permissions are SPEC 9.1's minimum plus issues: read, which GitHub requires to subscribe to issue_comment
+# (the @<bot> review mention). The app never writes issues.
+name: durable-pr-review
+url: https://example.com/pr-review
+hook_attributes:
+  url: https://example.com/webhooks/github
+  active: true
+public: false
+default_permissions:
+  metadata: read
+  contents: read
+  pull_requests: write
+  issues: read
+default_events:
+  - pull_request
+  - issue_comment

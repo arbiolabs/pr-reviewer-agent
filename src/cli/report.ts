@@ -1,5 +1,5 @@
 import { type Disposition, SEVERITIES } from "../domain/types.ts";
-import type { AppStore, AuditEvent, FindingView, RevisionRow } from "../persistence/store.ts";
+import type { AppStore, AuditEvent, FindingView, OutboxRow, RevisionRow } from "../persistence/store.ts";
 
 export type ReviewReport = {
   revision: RevisionRow;
@@ -11,6 +11,7 @@ export type ReviewReport = {
   findings: FindingView[];
   dispositions: Disposition[];
   audit: AuditEvent[];
+  outbox: OutboxRow | undefined;
 };
 
 export function loadReport(store: AppStore, revisionId: string): ReviewReport {
@@ -29,25 +30,32 @@ export function loadReport(store: AppStore, revisionId: string): ReviewReport {
       .sort((a, b) => SEVERITIES.indexOf(a.candidate.severity) - SEVERITIES.indexOf(b.candidate.severity)),
     dispositions: store.candidateSet(revisionId)?.dispositions ?? [],
     audit: store.auditEvents(revisionId),
+    outbox: store.outboxForRevision(revisionId),
   };
 }
 
-const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+export const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
 /** Spec §12 summary format. A run that did not complete says so; it is never reported as a clean review. */
 export function renderMarkdown(report: ReviewReport): string {
-  const lines = ["## Automated PR review", "", `Reviewed commit: \`${report.revision.head_sha}\``, ""];
-  if (report.revision.state !== "COMPLETED") {
-    const last = report.audit.at(-1);
-    lines.push(`Review did not complete (${report.revision.state})${last?.detail ? `: ${last.detail}` : ""}.`);
-  } else if (report.findings.length === 0) {
+  const last = report.audit.at(-1);
+  const incomplete = report.revision.state === "COMPLETED" ? undefined : `Review did not complete (${report.revision.state})${last?.detail ? `: ${last.detail}` : ""}.`;
+  return renderSummary(report.revision.head_sha, report.findings, report.limitations, incomplete);
+}
+
+/** The §12 body for a head; `incomplete` replaces the findings line for a run that did not finish. */
+export function renderSummary(headSha: string, findings: FindingView[], limitations: string[], incomplete?: string): string {
+  const lines = ["## Automated PR review", "", `Reviewed commit: \`${headSha}\``, ""];
+  if (incomplete !== undefined) {
+    lines.push(incomplete);
+  } else if (findings.length === 0) {
     lines.push("No actionable issues found in the reviewed scope.");
   } else {
-    const n = report.findings.length;
+    const n = findings.length;
     lines.push(`Found ${n} actionable ${n === 1 ? "issue" : "issues"}.`, "");
-    for (const { candidate: c } of report.findings) lines.push(`- ${capitalize(c.severity)}: ${c.title} (\`${c.file}:${c.newLine}\`)`);
+    for (const { candidate: c } of findings) lines.push(`- ${capitalize(c.severity)}: ${c.title} (\`${c.file}:${c.newLine}\`)`);
   }
-  for (const limitation of report.limitations) lines.push("", `Scope limited: ${limitation}.`);
+  for (const limitation of limitations) lines.push("", `Scope limited: ${limitation}.`);
   lines.push("", "Review performed with isolated read-only tools. Human review is still required.");
   return `${lines.join("\n")}\n`;
 }
@@ -64,6 +72,8 @@ export function renderJson(report: ReviewReport) {
     limitations: report.limitations,
     findings: report.findings.map((f) => ({ findingId: f.findingId, fingerprint: f.fingerprint, status: f.status, ...f.candidate })),
     discarded: report.dispositions.filter((d) => d.state === "DISCARDED"),
-    published: false,
+    published: report.outbox?.status === "published",
+    githubReviewId: report.outbox?.github_review_id ?? null,
+    outboxStatus: report.outbox?.status ?? null,
   };
 }
