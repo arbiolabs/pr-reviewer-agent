@@ -30,7 +30,7 @@ expression: text
                                                ┃   src/booking.ts  lines 40-43 @ 4444444
                                                ┃    40 │ if (slot.free && !slot.held) {
                                                ┃
-                                               ┃ Enter all 5 evidence, the fix and the diff    d diff at this line
+                                               ┃ Enter  5 evidence items · the fix · the diff    d diff at this line
 
 
 

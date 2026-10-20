@@ -560,20 +560,9 @@ fn card(
         body.extend(code_block(c, ev, f, iw, code_lines));
     }
     body.push(vec![]);
-    let mut parts = vec![];
-    if !d.evidence.is_empty() {
-        parts.push(format!("all {} evidence", d.evidence.len()));
-    }
-    if d.suggested_fix.is_some() {
-        parts.push("the fix".into());
-    }
-    let opens = match parts.len() {
-        0 => "read it beside the diff".to_string(),
-        _ => format!("{} and the diff", parts.join(", ")),
-    };
     let mut hint = vec![
         c.span("Enter", Role::Accent),
-        c.span(format!(" {opens}    "), Role::Muted),
+        c.span(format!("  {}    ", opens(d.evidence.len(), d.suggested_fix.is_some(), c.t.g().sep)), Role::Muted),
         c.span("d", Role::Accent),
         c.span(" diff at this line", Role::Muted),
     ];
@@ -582,6 +571,20 @@ fn card(
     }
     body.push(hint);
     (barred(c, f.severity, focused, body), rest)
+}
+
+/// What Enter on an open card opens: `3 evidence items · the fix · the diff`.
+fn opens(evidence: usize, fix: bool, sep: &str) -> String {
+    let mut parts = match evidence {
+        0 => vec!["the reasoning".to_string()],
+        1 => vec!["1 evidence item".to_string()],
+        n => vec![format!("{n} evidence items")],
+    };
+    if fix {
+        parts.push("the fix".into());
+    }
+    parts.push("the diff".into());
+    parts.join(&format!(" {sep} "))
 }
 
 /// How many explanation rows and code lines fit in `room` rows; the code block adds a path row and a cut note.
@@ -892,7 +895,14 @@ fn diff_inset(c: &Ctx, fd: &Finding, w: usize) -> Vec<Vec<Span<'static>>> {
 
 #[cfg(test)]
 mod tests {
-    use super::fold_rule;
+    use super::{fold_rule, opens};
+
+    #[test]
+    fn the_card_hint_counts_evidence_in_the_singular_and_plural() {
+        assert_eq!(opens(1, false, "·"), "1 evidence item · the diff");
+        assert_eq!(opens(3, true, "·"), "3 evidence items · the fix · the diff");
+        assert_eq!(opens(0, false, "|"), "the reasoning | the diff");
+    }
 
     #[test]
     fn the_fold_rule_cuts_the_explanation_to_three_then_the_code_to_five_then_the_explanation_to_one() {

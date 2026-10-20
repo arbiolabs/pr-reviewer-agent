@@ -80,3 +80,12 @@ fn the_disconnect_banner_fits_at_120_columns() {
     let (frame, _) = render(&mut never.m, 80, 24);
     assert_eq!(frame.lines().nth(2).unwrap().trim(), "✗ disconnected · retry in 3s");
 }
+
+#[test]
+fn the_open_card_counts_its_evidence_in_plain_words() {
+    let mut s = showcase(2).key(crossterm::event::KeyCode::Enter);
+    let (frame, _) = render(&mut s.m, 120, 38);
+    let hint =
+        frame.lines().find(|l| l.contains("Enter ") && l.contains("the diff")).unwrap_or_else(|| panic!("{frame}"));
+    assert!(hint.contains("Enter  3 evidence items · the fix · the diff"), "{hint}");
+}
