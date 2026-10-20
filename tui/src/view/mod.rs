@@ -188,16 +188,14 @@ fn status_line(c: &Ctx, width: u16) -> Line<'static> {
                 left.push(c.span(format!("reviewing #{} ", p.number), Role::Normal));
                 left.push(c.span(format!("{} ", doc::phase_label(r.phase)), Role::Accent));
             }
-            let what = match &a.kind {
-                crate::model::ActivityKind::Tool { tool, summary } => format!("{tool} {summary}"),
-                crate::model::ActivityKind::Phase { to, .. } => format!("entered {}", crate::theme::phase_name(*to)),
-                crate::model::ActivityKind::Finding { title, .. } => format!("found: {title}"),
-                crate::model::ActivityKind::Run { .. } => "started".into(),
-            };
-            let more = if running.len() > 1 { format!("  +{} more running", running.len() - 1) } else { String::new() };
             let used: usize = left.iter().chain(&right).map(|s| crate::text::width(&s.content)).sum();
+            let more = match running.len() {
+                1 => String::new(),
+                n if w >= 100 => format!("  +{} more running", n - 1),
+                n => format!("  +{}", n - 1),
+            };
             let room = w.saturating_sub(used + crate::text::width(&more) + 2);
-            left.push(c.span(c.fit(&what, room), Role::Muted));
+            left.push(c.span(whole(activity_words(&a.kind), room), Role::Muted));
             left.push(c.span(more, Role::Muted));
         }
         _ => left.push(c.span(format!("{} PRs tracked {} nothing running", c.m.domain.prs.len(), g.sep), Role::Muted)),
@@ -206,6 +204,25 @@ fn status_line(c: &Ctx, width: u16) -> Line<'static> {
     left.push(Span::raw(" ".repeat(w.saturating_sub(used))));
     left.extend(right);
     Line::from(left)
+}
+
+/// The longest of `options` (longest first) that fits in `room` columns, never cut mid-word.
+fn whole(options: Vec<String>, room: usize) -> String {
+    options.into_iter().find(|o| crate::text::width(o) <= room).unwrap_or_default()
+}
+
+/// What one activity says in the status line, from the most to the least detailed.
+fn activity_words(kind: &crate::model::ActivityKind) -> Vec<String> {
+    use crate::model::ActivityKind as K;
+    match kind {
+        K::Tool { tool, summary } => {
+            let target = summary.as_str().split(": ").next().unwrap_or("");
+            vec![format!("{tool} {summary}"), format!("{tool} {target}"), tool.to_string()]
+        }
+        K::Phase { to, .. } => vec![format!("entered {}", crate::theme::phase_name(*to))],
+        K::Finding { title, .. } => vec![format!("found: {title}"), "new finding".into()],
+        K::Run { .. } => vec!["started".into()],
+    }
 }
 
 fn views_line(c: &Ctx) -> Line<'static> {
@@ -280,12 +297,27 @@ fn footer_line(c: &Ctx, width: u16) -> Line<'static> {
         (Some(Modal::Event { .. }), _) => "Esc close",
         (Some(Modal::Confirm { .. }), _) => "y confirm  n/Esc cancel",
         (_, Screen::Inbox) => "j/k pull request  Enter read  / search  ? help  q quit",
-        (_, Screen::Review) => "j/k finding  Enter read  d diff  t timeline  h pull requests  ? help  q quit",
+        (_, Screen::Review) => {
+            "j/k finding  Enter read  d diff  J/K scroll  h pull requests  t timeline  ? help  q quit"
+        }
         (_, Screen::Diff) => "j/k line  n/N finding  Enter read  h files  : jump  Esc back  ? help",
         (_, Screen::Timeline) => "j/k move  Enter detail  f scope  v kind  P phase  Esc back  ? help",
         (_, Screen::Settings) => "j/k account  Enter select account  r refresh  1-4 views  ? help  q quit",
     };
-    Line::from(c.span(c.fit(&format!("  {hints}"), w), Role::Muted))
+    let running = c.m.domain.runs.values().any(|r| r.status == crate::protocol::RunStatus::Running);
+    let watch = running && c.m.top_modal().is_none();
+    let mut hints: Vec<&str> = hints.split("  ").collect();
+    if watch {
+        hints.insert(2.min(hints.len()), "w watch live");
+    }
+    let mut out = String::from(" ");
+    for hint in hints {
+        if crate::text::width(&out) + crate::text::width(hint) + 2 <= w {
+            out.push_str("  ");
+            out.push_str(hint);
+        }
+    }
+    Line::from(c.span(out, Role::Muted))
 }
 
 fn minimal(c: &Ctx, f: &mut Frame, area: Rect) {

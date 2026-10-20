@@ -104,7 +104,29 @@ pub fn screen(c: &Ctx, f: &mut Frame, area: Rect) {
         return;
     };
     let doc = document(c, pr, col.width as usize, col.height as usize);
-    f.render_widget(Paragraph::new(doc.lines.clone()).scroll((doc.scroll(c, col.height as usize), 0)), col);
+    let scroll = doc.scroll(c, col.height as usize);
+    f.render_widget(Paragraph::new(doc.lines).scroll((scroll, 0)), col);
+    if scroll > 0 && col.height < COMPACT_H {
+        f.render_widget(Paragraph::new(sticky(c, pr, col.width as usize)), Rect { height: 1, ..col });
+    }
+}
+
+/// Below this many rows the PR header scrolls away under an open card, and a one-line sticky header stands in.
+const COMPACT_H: u16 = 28;
+
+/// `#1287 Orders: self-serve…   ●─●─●─●─●─●  ◆1 ▲1 ●1 ○1`: the PR, its run's dot stepper and its counts.
+fn sticky(c: &Ctx, pr: &Pr, w: usize) -> Line<'static> {
+    let base = c.t.bg(Bg::Base);
+    let mut right: Vec<Span<'static>> = Vec::new();
+    if let Some(r) = c.m.domain.latest_run(&pr.id) {
+        right.extend(super::live::stepper(c, r));
+        right.push(Span::raw("  "));
+    }
+    right.extend(super::rail::counts(c, &current(c, pr), base));
+    let num = format!("#{} ", pr.number);
+    let room = w.saturating_sub(spans_w(&right) + width(&num) + 2);
+    let left = vec![c.span(num, Role::Accent), c.span(c.fit(pr.title.as_str(), room), Role::Title)];
+    Line::from(filled(split_row(left, right, w), w, base))
 }
 
 /// The rail and the document areas. Below 100 columns only one shows: the rail while it has focus.
@@ -128,10 +150,8 @@ pub fn column(area: Rect) -> Rect {
 /// The PR rendered as one scrollable document, and where the selected card sits in it.
 pub struct Doc {
     pub lines: Vec<Line<'static>>,
-    /// Lines `[start, end)` of the expanded card.
+    /// Lines `[start, end)` of the expanded card, plus the head of the card after it.
     pub card: Option<(usize, usize)>,
-    /// The finding each line belongs to, for mouse hits.
-    pub owners: Vec<Option<FindingId>>,
 }
 
 impl Doc {
@@ -147,7 +167,7 @@ impl Doc {
 }
 
 pub fn document(c: &Ctx, pr: &Pr, w: usize, height: usize) -> Doc {
-    let compact = height < 28;
+    let compact = height < COMPACT_H as usize;
     let g = c.t.g();
     let sep = format!(" {} ", g.sep);
     let run = c.m.domain.latest_run(&pr.id);
@@ -206,23 +226,31 @@ pub fn document(c: &Ctx, pr: &Pr, w: usize, height: usize) -> Doc {
     if findings.is_empty() && run.is_some_and(|r| r.status == RunStatus::Completed) {
         lines.push(Line::from(c.span(format!("{} No actionable issues found in the reviewed scope.", g.ok), Role::Ok)));
     }
+    // The open card fits under the PR header (the sticky line when compact) with the next card's head still in
+    // view, so at least two cards read at once when the screen has room for both.
     let sel = c.m.ui.selected_finding.as_ref();
     let focused = c.m.ui.screen == Screen::Review && c.m.ui.focus != Pane::Sidebar;
-    let mut owners = vec![None; lines.len()];
+    let above = if compact { 1 } else { lines.len() };
     let mut card_at = None;
-    for f in &findings {
+    for (i, f) in findings.iter().enumerate() {
         let start = lines.len();
         let open = sel == Some(&f.id);
-        let budget = if open { height.saturating_sub(1) } else { 0 };
+        let next = if i + 1 < findings.len() && !compact { NEXT_HEAD } else { 0 };
+        let budget = if open { height.saturating_sub(above + next).max(MIN_CARD) } else { 0 };
         lines.extend(card(c, f, c.m.details.get(&f.id), w, open && focused, budget));
-        if open {
-            card_at = Some((start, lines.len()));
-        }
         lines.push(Line::raw(""));
-        owners.resize(lines.len(), Some(f.id.clone()));
+        if open {
+            card_at = Some((start, lines.len() + next.saturating_sub(1)));
+        }
     }
-    Doc { lines, card: card_at, owners }
+    let card = card_at.map(|(s, e)| (s, e.min(lines.len())));
+    Doc { lines, card }
 }
+
+/// Rows the next card's head needs to stay in view under the open card: its severity, title and location.
+const NEXT_HEAD: usize = 4;
+/// The smallest open card: head, three lines of explanation and five of code.
+const MIN_CARD: usize = 16;
 
 fn rule(c: &Ctx, w: usize) -> String {
     (if c.t.ascii { "-" } else { "─" }).repeat(w)
@@ -440,8 +468,9 @@ fn card_head(c: &Ctx, f: &Finding, w: usize, selected: bool) -> Vec<Vec<Span<'st
 }
 
 /// A finding card. Folded (`budget` 0): the head and the first line of the explanation. Open: the explanation and
-/// the cited code, fitted to `budget` rows by the fold rule: the code keeps at least 5 lines around its anchor, the
-/// explanation keeps at least 3, and whatever is cut says how much and that Enter reads it all.
+/// the cited code, fitted to `budget` rows by the fold rule. The explanation gives way first, down to 3 lines, then
+/// the code, down to 5 lines around its anchor, then the explanation again, down to 1. The explanation scrolls inside
+/// its window with J/K, so the code under it never moves; each cut edge says how much it hides.
 fn card(c: &Ctx, f: &Finding, d: Option<&FindingDetail>, w: usize, focused: bool, budget: usize) -> Vec<Line<'static>> {
     let iw = w.saturating_sub(2);
     let mut body = card_head(c, f, iw, focused || budget > 0);
@@ -449,8 +478,9 @@ fn card(c: &Ctx, f: &Finding, d: Option<&FindingDetail>, w: usize, focused: bool
         body.push(vec![c.span(loading(c, &f.id), Role::Muted)]);
         return barred(c, f.severity, focused, body);
     };
-    let mut prose = rich(c, d.explanation.as_str(), iw, Role::Normal);
+    let prose = rich(c, d.explanation.as_str(), iw, Role::Normal);
     if budget == 0 {
+        let mut prose = prose;
         if prose.len() > 1 {
             prose.truncate(1);
             prose[0] = fold(c, std::mem::take(&mut prose[0]), iw, "");
@@ -459,23 +489,14 @@ fn card(c: &Ctx, f: &Finding, d: Option<&FindingDetail>, w: usize, focused: bool
         return barred(c, f.severity, focused, body);
     }
     let ev = d.evidence.iter().find(|e| e.kind == EvidenceKind::CodeRef);
-    let hint = 2;
-    let fixed = body.len() + 1 + hint;
-    let code_full = ev.map_or(0, |e| e.text.as_str().split('\n').count().min(11) + 2);
-    let room = budget.saturating_sub(fixed);
-    let code_rows = code_full.min(room.saturating_sub(prose.len().min(3) + 1).max(7.min(code_full)));
-    let prose_rows = room.saturating_sub(code_rows + usize::from(ev.is_some())).max(3);
+    let src_len = ev.map_or(0, |e| e.text.as_str().split('\n').count());
+    let room = budget.saturating_sub(body.len() + 4);
+    let (prose_rows, code_lines) = fold_rule(room, prose.len(), src_len.min(11), ev.is_some());
     body.push(vec![]);
-    if prose.len() > prose_rows {
-        let hidden = prose.len() - prose_rows + 1;
-        prose.truncate(prose_rows);
-        let last = prose.pop().unwrap_or_default();
-        prose.push(fold(c, last, iw, &format!("{hidden} more lines, Enter reads all")));
-    }
-    body.extend(prose);
+    body.extend(prose_window(c, prose, prose_rows, c.m.ui.doc_scroll.max(0) as usize, iw));
     if let Some(ev) = ev {
         body.push(vec![]);
-        body.extend(code_block(c, ev, f, iw, code_rows.saturating_sub(2).max(5)));
+        body.extend(code_block(c, ev, f, iw, code_lines));
     }
     body.push(vec![]);
     let fix = if d.suggested_fix.is_some() { ", the fix" } else { "" };
@@ -488,6 +509,48 @@ fn card(c: &Ctx, f: &Finding, d: Option<&FindingDetail>, w: usize, focused: bool
     barred(c, f.severity, focused, body)
 }
 
+/// How many explanation rows and code lines fit in `room` rows; the code block adds a path row and a cut note.
+fn fold_rule(room: usize, prose: usize, code: usize, has_code: bool) -> (usize, usize) {
+    let frame = if has_code { 3 } else { 0 };
+    let (mut p, mut k) = (prose.max(1), code);
+    let fits = |p: usize, k: usize| p + k + frame <= room;
+    while !fits(p, k) && p > 3 {
+        p -= 1;
+    }
+    while !fits(p, k) && k > 5 {
+        k -= 1;
+    }
+    while !fits(p, k) && p > 1 {
+        p -= 1;
+    }
+    (p, k)
+}
+
+/// `rows` lines of the explanation from `offset`, with the cut edges marked.
+fn prose_window(
+    c: &Ctx,
+    prose: Vec<Vec<Span<'static>>>,
+    rows: usize,
+    offset: usize,
+    w: usize,
+) -> Vec<Vec<Span<'static>>> {
+    if prose.len() <= rows {
+        return prose;
+    }
+    let g = c.t.g();
+    let offset = offset.min(prose.len() - rows);
+    let below = prose.len() - rows - offset;
+    let mut out: Vec<_> = prose.into_iter().skip(offset).take(rows).collect();
+    if offset > 0 && rows > 1 {
+        out[0] = vec![c.span(format!("{} {offset} more above, K scrolls back", g.ellipsis), Role::Muted)];
+    }
+    if below > 0 {
+        let last = out.pop().unwrap_or_default();
+        out.push(fold(c, last, w, &format!("{} more, J scrolls", below + 1)));
+    }
+    out
+}
+
 /// Ends a cut line with the fold mark and an optional note, inside `w` columns.
 fn fold(c: &Ctx, mut line: Vec<Span<'static>>, w: usize, note: &str) -> Vec<Span<'static>> {
     let mark = if note.is_empty() { format!(" {}", c.t.g().ellipsis) } else { format!(" {} {note}", c.t.g().ellipsis) };
@@ -496,7 +559,11 @@ fn fold(c: &Ctx, mut line: Vec<Span<'static>>, w: usize, note: &str) -> Vec<Span
         let keep = w.saturating_sub(spans_w(&line) + width(&mark));
         if keep > 0 && !last.content.trim().is_empty() {
             let cut = crate::text::fit_len(&last.content, keep);
-            line.push(Span::styled(last.content[..cut].to_string(), last.style));
+            let head = &last.content[..cut];
+            let word = if cut < last.content.len() { head.rfind(' ').map_or("", |i| &head[..i]) } else { head };
+            if !word.trim().is_empty() {
+                line.push(Span::styled(word.trim_end().to_string(), last.style));
+            }
             break;
         }
     }

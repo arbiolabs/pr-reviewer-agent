@@ -4,6 +4,7 @@
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
+use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
@@ -11,7 +12,7 @@ use super::doc::{current, filled, spinner, split_row};
 use super::live::{per_sec, rate_cell, stepper};
 use super::{Ctx, window};
 use crate::model::{InputPurpose, Modal};
-use crate::protocol::{FindingStatus, Pr, RunStatus, Severity};
+use crate::protocol::{Finding, FindingStatus, Pr, RunStatus, Severity};
 use crate::text::width;
 use crate::theme::{Bg, Role};
 
@@ -112,10 +113,8 @@ fn pr_rows(c: &Ctx, pr: &Pr, w: usize, selected: bool, rh: usize) -> Vec<Line<'s
         Span::styled(c.fit(pr.title.as_str(), title_w), on(if selected { Role::Title } else { Role::Normal })),
     ];
     let repo = pr.repository.as_str().rsplit('/').next().unwrap_or("").to_string();
-    let left = vec![
-        Span::styled(marker.to_string(), on(Role::Accent)),
-        Span::styled(format!("   {repo} "), on(Role::Muted)),
-    ];
+    let left =
+        vec![Span::styled(marker.to_string(), on(Role::Accent)), Span::styled(format!("   {repo} "), on(Role::Muted))];
     let right: Vec<Span<'static>> = match run {
         None => vec![Span::styled("not reviewed ", on(Role::Muted))],
         Some(r) if r.status == RunStatus::Running => {
@@ -127,21 +126,7 @@ fn pr_rows(c: &Ctx, pr: &Pr, w: usize, selected: bool, rh: usize) -> Vec<Line<'s
         }
         Some(r) if r.status == RunStatus::Failed => vec![Span::styled(format!("{} failed ", g.fail), on(Role::Fail))],
         Some(_) if findings.is_empty() => vec![Span::styled(format!("{} clean ", g.ok), on(Role::Ok))],
-        Some(_) => {
-            let mut s = Vec::new();
-            for sev in [Severity::Critical, Severity::High, Severity::Medium, Severity::Low] {
-                let n = findings.iter().filter(|f| f.severity == sev).count();
-                if n > 0 {
-                    let (gl, _, role) = c.t.severity(sev);
-                    s.push(Span::styled(format!("{gl}{n} "), on(role)));
-                }
-            }
-            let published = findings.iter().filter(|f| f.status == FindingStatus::Published).count();
-            if published > 0 {
-                s.push(Span::styled(format!("{}{published} ", g.arrow), on(Role::Ok)));
-            }
-            s
-        }
+        Some(_) => counts(c, &findings, row_bg),
     };
     let sha_room = w.saturating_sub(width(&repo) + 4 + right.iter().map(|s| width(&s.content)).sum::<usize>());
     let mut left = left;
@@ -153,4 +138,21 @@ fn pr_rows(c: &Ctx, pr: &Pr, w: usize, selected: bool, rh: usize) -> Vec<Line<'s
         out.push(Line::from(filled(vec![], w, bg)));
     }
     out
+}
+
+/// `◆1 ▲1 ●1 ○1 →2`: findings per severity, then how many are on GitHub.
+pub fn counts(c: &Ctx, findings: &[Finding], bg: Style) -> Vec<Span<'static>> {
+    let mut s = Vec::new();
+    for sev in [Severity::Critical, Severity::High, Severity::Medium, Severity::Low] {
+        let n = findings.iter().filter(|f| f.severity == sev).count();
+        if n > 0 {
+            let (gl, _, role) = c.t.severity(sev);
+            s.push(Span::styled(format!("{gl}{n} "), c.s(role).patch(bg)));
+        }
+    }
+    let published = findings.iter().filter(|f| f.status == FindingStatus::Published).count();
+    if published > 0 {
+        s.push(Span::styled(format!("{}{published} ", c.t.g().arrow), c.s(Role::Ok).patch(bg)));
+    }
+    s
 }

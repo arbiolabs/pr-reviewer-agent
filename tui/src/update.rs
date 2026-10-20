@@ -586,6 +586,29 @@ fn fetch_detail(m: &mut Model, id: &FindingId, fx: &mut Vec<Effect>) {
 
 // ---- diff ----
 
+/// The finding reader shows the diff at the anchor, so opening a finding loads its revision's diff in the background.
+fn prefetch_diff(m: &mut Model, id: &FindingId, fx: &mut Vec<Effect>) {
+    let Some(key) = finding_diff_key(m, id) else { return };
+    if m.diff.as_ref().is_some_and(|d| d.key == key && d.error.is_none()) {
+        return;
+    }
+    let anchor = m.domain.findings.get(id).map(|f| (f.file.clone(), f.line.map(|l| l.get())));
+    let screen = m.ui.screen;
+    load_diff(m, key, anchor, fx);
+    m.ui.screen = screen;
+}
+
+/// The diff a finding was found against: its run's revision, else the PR's.
+pub fn finding_diff_key(m: &Model, id: &FindingId) -> Option<DiffKey> {
+    let f = m.domain.findings.get(id)?;
+    let (base, head) = match (m.domain.runs.get(&f.run_id), m.domain.prs.get(&f.pr_id)) {
+        (Some(r), _) => (r.base_sha.clone(), r.head_sha.clone()),
+        (None, Some(p)) => (p.base_sha.clone(), p.head_sha.clone()),
+        (None, None) => return None,
+    };
+    Some(DiffKey { pr: f.pr_id.clone(), base, head })
+}
+
 fn load_diff(m: &mut Model, key: DiffKey, anchor: Option<(Text, Option<u32>)>, fx: &mut Vec<Effect>) {
     m.ui.screen = Screen::Diff;
     if let Some(d) = m.diff.as_mut().filter(|d| d.key == key && d.error.is_none()) {
@@ -876,6 +899,9 @@ fn act(m: &mut Model, a: Action, fx: &mut Vec<Effect>) {
             before: String::new(),
         }),
         Action::OpenDiff => open_diff(m, fx),
+        Action::Watch => watch(m),
+        Action::ScrollDown => m.ui.doc_scroll += 1,
+        Action::ScrollUp => m.ui.doc_scroll = (m.ui.doc_scroll - 1).max(0),
         Action::OpenTimeline => {
             m.ui.modals.retain(|x| !matches!(x, Modal::Finding { .. }));
             // The document is the PR, so its timeline is the PR's; f narrows to the run or the finding.
@@ -1049,13 +1075,18 @@ fn move_by(m: &mut Model, delta: isize, fx: &mut Vec<Effect>) {
                 m.ui.selected_pr = next;
                 m.ui.selected_finding = None;
                 m.ui.feed_scroll = 0;
+                m.ui.doc_scroll = 0;
                 reselect(m);
             }
         }
         (Screen::Review, Pane::Main) => {
             let Some(pr) = m.ui.selected_pr.clone() else { return };
             let ids: Vec<FindingId> = m.domain.pr_findings(&pr).iter().map(|f| f.id.clone()).collect();
-            m.ui.selected_finding = step(&ids, m.ui.selected_finding.as_ref(), delta);
+            let next = step(&ids, m.ui.selected_finding.as_ref(), delta);
+            if next != m.ui.selected_finding {
+                m.ui.selected_finding = next;
+                m.ui.doc_scroll = 0;
+            }
         }
         (Screen::Review, Pane::Feed) => {
             m.ui.feed_scroll = (m.ui.feed_scroll as isize - delta).clamp(0, ACTIVITY_CAP as isize) as usize;
@@ -1176,10 +1207,44 @@ fn select_account(m: &mut Model) {
     confirm(m, "account.select", prompt, Command::SelectAccount(AccountParams { account_id: a.id }));
 }
 
+/// `w`: the running review's document, one key from anywhere. Pressed again, it moves on to the next running PR.
+fn watch(m: &mut Model) {
+    let mut running: Vec<(u64, PrId)> = m
+        .domain
+        .runs
+        .values()
+        .filter(|r| r.status == RunStatus::Running)
+        .filter_map(|r| Some((m.domain.prs.get(&r.pr_id)?.number, r.pr_id.clone())))
+        .collect();
+    running.sort();
+    let Some(first) = running.first().map(|r| r.1.clone()) else {
+        notice(m, "no review is running");
+        return;
+    };
+    let at = running.iter().position(|r| Some(&r.1) == m.ui.selected_pr.as_ref());
+    let watching = m.ui.screen == Screen::Review && m.top_modal().is_none();
+    let next = match at {
+        Some(i) if watching => running[(i + 1) % running.len()].1.clone(),
+        Some(i) => running[i].1.clone(),
+        None => first,
+    };
+    m.ui.modals.clear();
+    m.ui.pr_filter.clear();
+    m.ui.screen = Screen::Review;
+    m.ui.focus = Pane::Main;
+    if m.ui.selected_pr.as_ref() != Some(&next) {
+        m.ui.selected_pr = Some(next);
+        m.ui.selected_finding = None;
+        m.ui.doc_scroll = 0;
+    }
+    reselect(m);
+}
+
 fn open_finding(m: &mut Model, id: FindingId, fx: &mut Vec<Effect>) {
     if !m.details.contains_key(&id) {
         fetch_detail(m, &id, fx);
     }
+    prefetch_diff(m, &id, fx);
     m.ui.modals.push(Modal::Finding { id, scroll: 0 });
 }
 
