@@ -502,3 +502,45 @@ fn resync_required_while_resyncing_asks_again_and_ignores_the_stale_snapshot() {
     send(&mut m, &read("fixtures/server.snapshot.json").replace("req-snapshot", second.as_str()));
     assert_eq!((m.link.clone(), m.domain.prs.len()), (Link::Live, 3));
 }
+
+/// Settings -> octo-work -> y: the account.select modal waits in Requested.
+fn account_select_requested() -> (Model, pr_review_tui::protocol::RequestId) {
+    let mut m = accounts_live();
+    press(&mut m, KeyCode::Char('A'));
+    press(&mut m, KeyCode::Char('j'));
+    press(&mut m, KeyCode::Enter);
+    let fx = press(&mut m, KeyCode::Char('y'));
+    let [Effect::Send(ClientMessage::Command(c))] = &fx[..] else { panic!("{fx:?}") };
+    assert!(matches!(m.top_modal(), Some(Modal::Confirm { state: ConfirmState::Requested(_), .. })));
+    (m, c.request_id.clone())
+}
+
+#[test]
+fn a_snapshot_showing_the_selection_settles_an_account_modal_whose_reply_was_dropped() {
+    use pr_review_tui::protocol::{Event, EventBody};
+    let (mut m, _) = account_select_requested();
+    update(&mut m, Msg::Net(NetEvent::Overflow));
+    let mut msgs = script("accounts");
+    let Some(ServerMessage::Event(Event::Sequenced(e))) = msgs.pop() else { panic!() };
+    let EventBody::AccountsUpdated(accounts) = e.body else { panic!() };
+    let ServerMessage::Snapshot(mut snap) = msgs.swap_remove(1) else { panic!() };
+    snap.accounts = Some(accounts);
+    update(&mut m, Msg::Net(NetEvent::Message(ServerMessage::Snapshot(snap))));
+    assert_eq!(m.top_modal(), None);
+    assert_eq!(identity(&m), "selected github.com/octo-work");
+    assert_eq!(
+        m.notice.as_ref().map(|n| n.text.as_str()),
+        Some("GitHub reads and publishing now use octo-work on github.com")
+    );
+}
+
+#[test]
+fn an_account_select_with_no_reply_times_out_and_y_sends_it_again() {
+    let (mut m, first) = account_select_requested();
+    update(&mut m, Msg::Tick(15_000));
+    assert!(matches!(m.top_modal(), Some(Modal::Confirm { state: ConfirmState::TimedOut, .. })), "{:?}", m.top_modal());
+    let fx = press(&mut m, KeyCode::Char('y'));
+    let [Effect::Send(ClientMessage::Command(c))] = &fx[..] else { panic!("{fx:?}") };
+    assert_ne!(c.request_id, first);
+    assert_eq!(c.idempotency_key, "account.select:github.com/octo-work");
+}

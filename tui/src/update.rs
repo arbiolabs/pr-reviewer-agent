@@ -363,6 +363,9 @@ fn apply_snapshot(m: &mut Model, s: Snapshot, fx: &mut Vec<Effect>) {
     m.domain.runs = s.runs.into_iter().map(|r| (r.id.clone(), r)).collect();
     m.domain.findings = s.findings.into_iter().map(|f| (f.id.clone(), f)).collect();
     m.domain.accounts = s.accounts;
+    if let Some(accounts) = m.domain.accounts.clone() {
+        settle_account_select(m, &accounts);
+    }
     m.domain.touched.retain(|id, _| m.domain.prs.contains_key(id));
     m.details.clear();
     // A reply lost to an overflow never comes: ask again for what the screen waits on or failed to get.
@@ -502,11 +505,12 @@ fn apply_body(m: &mut Model, e: &SequencedEvent, fx: &mut Vec<Effect>) {
     reselect(m);
 }
 
-/// The selection shows only once the event reports it: that is what closes a pending account.select modal.
+/// The selection shows only once accounts.updated or a snapshot reports it: that is what closes a pending
+/// account.select modal, even one whose command.result was dropped.
 fn settle_account_select(m: &mut Model, accounts: &[Account]) {
     let done = |modal: &Modal| match modal {
         Modal::Confirm { command: Command::SelectAccount(p), state, .. } => {
-            matches!(state, ConfirmState::Requested(_) | ConfirmState::Accepted(_))
+            matches!(state, ConfirmState::Requested(_) | ConfirmState::Accepted(_) | ConfirmState::TimedOut)
                 && accounts.iter().any(|a| a.selected && a.id == p.account_id)
         }
         _ => false,
