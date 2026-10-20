@@ -316,6 +316,31 @@ fn special_states() {
 }
 
 #[test]
+fn a_connection_error_on_a_long_path_keeps_its_reason_in_view() {
+    let long = format!("/private/tmp/claude-501/{}/pr-review/reviewer.sock", "x".repeat(70));
+    let reason = pr_review_tui::net::check_socket_dir(std::path::Path::new(&long)).unwrap_err();
+    assert_eq!(reason, format!("socket directory does not exist: {}", long.trim_end_matches("/reviewer.sock")));
+    for (w, h) in [(80, 24), (120, 38)] {
+        let mut s = Sim::new(Look::default());
+        s.m.diag.endpoint = format!("unix:{long}");
+        s.apply(Msg::Net(NetEvent::Lost { reason: reason.clone(), retry_in_ms: Some(2_000) }));
+        let (inbox, _) = render(&mut s.m, w, h);
+        insta::assert_snapshot!(format!("state_long_path_error_{w}x{h}"), inbox);
+        let s = s.key(KeyCode::Char('5'));
+        let mut s = s;
+        let (settings, _) = render(&mut s.m, w, h);
+        insta::assert_snapshot!(format!("state_long_path_error_settings_{w}x{h}"), settings);
+        let shows = |frame: &str, prefix: &str| frame.lines().any(|l| l.contains(prefix));
+        assert!(shows(&inbox, "disconnected: socket directory does not exist: /pri"), "banner, {w} cols:\n{inbox}");
+        assert!(shows(&inbox, "unavailable: socket directory does not exist: /pri"), "inbox, {w} cols:\n{inbox}");
+        assert!(
+            shows(&settings, "disconnected: socket directory does not exist: /"),
+            "settings, {w} cols:\n{settings}"
+        );
+    }
+}
+
+#[test]
 fn every_view_survives_every_size() {
     let mut sims: Vec<Sim> = states(Look::default()).into_iter().map(|(_, s)| s).collect();
     sims.push(mid_review(Look::default()).key(KeyCode::Char('5')));

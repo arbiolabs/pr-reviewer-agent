@@ -213,7 +213,7 @@ async fn a_socket_in_a_shared_directory_is_refused() {
     let mut c = client(sock);
     c.until("refusal", |m| matches!(m.link, Link::Disconnected { .. })).await;
     let Link::Disconnected { reason, .. } = &c.model.link else { unreachable!() };
-    assert!(reason.as_str().ends_with("has mode 755; the reviewer socket directory must be 0700"), "{reason}");
+    assert_eq!(reason.as_str(), format!("socket directory has mode 755, must be 0700: {}", dir.display()));
 }
 
 #[tokio::test]

@@ -108,26 +108,40 @@ pub fn check_socket_path(socket: &Path) -> Result<(), String> {
     ))
 }
 
-/// Refuses a socket whose directory another user could tamper with.
+/// Refuses a socket whose directory another user could tamper with. Messages put the reason first and the path last,
+/// so a truncated banner still says what is wrong.
 pub fn check_socket_dir(socket: &Path) -> Result<(), String> {
     let dir = socket.parent().filter(|d| !d.as_os_str().is_empty()).unwrap_or(Path::new("."));
-    let meta = std::fs::symlink_metadata(dir).map_err(|e| format!("{}: {e}", dir.display()))?;
+    let meta = std::fs::symlink_metadata(dir).map_err(|e| match e.kind() {
+        io::ErrorKind::NotFound => format!("socket directory does not exist: {}", dir.display()),
+        _ => format!("socket directory unreadable ({}): {}", io_reason(&e), dir.display()),
+    })?;
     if meta.file_type().is_symlink() {
-        return Err(format!("{} is a symlink", dir.display()));
+        return Err(format!("socket directory is a symlink: {}", dir.display()));
     }
     let mode = meta.permissions().mode() & 0o777;
     if mode & 0o077 != 0 {
-        return Err(format!("{} has mode {mode:o}; the reviewer socket directory must be 0700", dir.display()));
+        return Err(format!("socket directory has mode {mode:o}, must be 0700: {}", dir.display()));
     }
     match std::fs::symlink_metadata(socket) {
-        Ok(m) if !m.file_type().is_socket() => Err(format!("{} is not a socket", socket.display())),
+        Ok(m) if !m.file_type().is_socket() => Err(format!("not a socket: {}", socket.display())),
         _ => Ok(()),
+    }
+}
+
+/// "Connection refused", without the " (os error 61)" that only costs banner width.
+fn io_reason(e: &io::Error) -> String {
+    let text = e.to_string();
+    match text.rfind(" (os error ") {
+        Some(i) => text[..i].to_string(),
+        None => text,
     }
 }
 
 async fn connect(socket: &Path) -> Result<UnixStream, String> {
     check_socket_dir(socket)?;
-    UnixStream::connect(socket).await.map_err(|e| format!("{}: {e}", socket.display()))
+    // The endpoint is on screen already; the path would only push the reason out of view.
+    UnixStream::connect(socket).await.map_err(|e| io_reason(&e))
 }
 
 async fn session(stream: UnixStream, cfg: &NetConfig, tx: &mpsc::Sender<Msg>, rx: &mut mpsc::Receiver<NetCmd>) -> End {
@@ -147,7 +161,7 @@ async fn session(stream: UnixStream, cfg: &NetConfig, tx: &mpsc::Sender<Msg>, rx
                     },
                     Ok(Some(Line::TooLong)) => outbox.deliver_net(tx, NetEvent::LineTooLong).await,
                     Ok(None) => return End::Lost("server closed the connection".into()),
-                    Err(e) => return End::Lost(e.to_string()),
+                    Err(e) => return End::Lost(io_reason(&e)),
                 }
             }
             cmd = rx.recv() => match cmd {
@@ -155,7 +169,7 @@ async fn session(stream: UnixStream, cfg: &NetConfig, tx: &mpsc::Sender<Msg>, rx
                     let mut bytes = serde_json::to_vec(&msg).unwrap_or_default();
                     bytes.push(b'\n');
                     if let Err(e) = write.write_all(&bytes).await {
-                        return End::Lost(e.to_string());
+                        return End::Lost(io_reason(&e));
                     }
                     Ok(())
                 }

@@ -1,0 +1,43 @@
+---
+source: tests/golden.rs
+assertion_line: 328
+expression: inbox
+---
+ PR REVIEWER ✗ disconnected · unix:/private/tmp/claude-501/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx… ? help
+  1 Inbox   2 Review   3 Diff   4 Timeline   5 Settings
+ ✗ disconnected: socket directory does not exist: /private/tmp/claude-501/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…
+┌ › TRACKED PRS (0) ───────────────────────────────────────────────────────────┐┌ SELECTED ────────────────────────────┐
+│                                                                              ││                                      │
+│  Reviewer service unavailable: socket directory does not exist: /private/tmp…││                                      │
+│  Is `pr-review daemon` running?                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+└──────────────────────────────────────────────────────────────────────────────┘└──────────────────────────────────────┘
+ j/k move  Enter open  / search  d diff  t timeline  r refresh  ? help  q quit

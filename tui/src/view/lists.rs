@@ -20,7 +20,7 @@ fn empty_inbox(c: &Ctx) -> (String, Role) {
     if m.domain.prs.is_empty() {
         match &m.link {
             Link::Disconnected { reason, .. } if m.diag.last_snapshot_ms.is_none() => {
-                (format!("Reviewer service unavailable: {reason}. Is `pr-review daemon` running?"), Role::Fail)
+                (format!("Reviewer service unavailable: {reason}\nIs `pr-review daemon` running?"), Role::Fail)
             }
             Link::Incompatible { .. } => ("Incompatible reviewer service; see the banner.".into(), Role::Fail),
             Link::Unusable { .. } => ("Cannot connect to the reviewer service; see the banner.".into(), Role::Fail),
@@ -34,7 +34,8 @@ fn empty_inbox(c: &Ctx) -> (String, Role) {
 
 fn message(c: &Ctx, f: &mut Frame, area: Rect, text: &str, role: Role) {
     let w = area.width as usize;
-    let lines: Vec<Line> = vec![Line::raw(""), Line::from(c.span(c.fit(&format!("  {text}"), w), role))];
+    let mut lines = vec![Line::raw("")];
+    lines.extend(text.split('\n').map(|t| Line::from(c.span(c.fit(&format!("  {t}"), w), role))));
     f.render_widget(Paragraph::new(lines), area);
 }
 

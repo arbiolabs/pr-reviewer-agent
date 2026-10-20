@@ -169,7 +169,7 @@ fn net(m: &mut Model, e: NetEvent, fx: &mut Vec<Effect>) {
         }
         NetEvent::Garbled(err) => m.diag.error(m.now_ms, format!("unreadable server message: {err}")),
         NetEvent::Lost { reason, retry_in_ms } => {
-            m.diag.error(m.now_ms, format!("connection lost: {reason}"));
+            m.diag.error(m.now_ms, format!("disconnected: {reason}"));
             transition(m, LinkInput::Lost { reason: Text::new(&reason), retry_in_ms });
             let lost = Text::new("connection lost before the reply arrived");
             if let Some(t) = &mut m.timeline
