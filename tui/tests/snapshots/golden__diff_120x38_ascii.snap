@@ -1,0 +1,42 @@
+---
+source: tests/golden.rs
+expression: ascii_text
+---
+ PR REVIEWER * live | unix:/run/user/501/pr-review/reviewer.sock                                                 ? help
+  1 Inbox   2 Review   3 Diff   4 Timeline   5 Settings
+#184 | base bbbbbbb -> head 4444444  TRUNCATED
+finding 1/1  1 finding on this revision
++ FILES (4) -----------------------++ > src/booking.ts ----------------------------------------------------------------+
+|> M src/booking.ts        ^  +2 -1||@@ -40,3 +40,4 @@ export function book()                                          |
+|  B assets/logo.png            bin||    40    40 |    const slot = await lock(id);                                    |
+|  R src/slots.ts             +0 -0||    41       | -  if (slot.free) {                                                |
+|  A src/generate~   +4000 -0 trunc||          41 | +  if (slot.free && !slot.held) {                                  |
+| more files: scroll down to load  ||^         42 | +    slot.held = true;                                             |
+|                                  ||    42    43 |    }                                                               |
+|                                  ||                                                                                  |
+|                                  ||                                                                                  |
+|                                  ||                                                                                  |
+|                                  ||                                                                                  |
+|                                  ||                                                                                  |
+|                                  ||                                                                                  |
+|                                  ||                                                                                  |
+|                                  ||                                                                                  |
+|                                  ||                                                                                  |
+|                                  ||                                                                                  |
+|                                  ||                                                                                  |
+|                                  ||                                                                                  |
+|                                  ||                                                                                  |
+|                                  ||                                                                                  |
+|                                  ||                                                                                  |
+|                                  ||                                                                                  |
+|                                  ||                                                                                  |
+|                                  ||                                                                                  |
+|                                  ||                                                                                  |
+|                                  ||                                                                                  |
+|                                  ||                                                                                  |
+|                                  ||                                                                                  |
+|                                  ||                                                                                  |
+|                                  ||                                                                                  |
+|                                  ||                                                                                  |
++----------------------------------++----------------------------------------------------------------------------------+
+ j/k line  h/l pane  n/N finding  : jump  Enter finding  Esc back  ? help  q quit

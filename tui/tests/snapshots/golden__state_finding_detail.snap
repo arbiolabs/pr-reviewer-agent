@@ -1,0 +1,42 @@
+---
+source: tests/golden.rs
+expression: text
+---
+ PR REVIEWER ● live · unix:/run/user/501/pr-review/reviewer.sock                                                 ? help
+  1 Inbox   2 Review   3 Diff   4 Timeline   5 Settings
+┌ TRACKED PRS ───────────────────┐┌ REVIEW ────────────────────────────────────────────────────────────────────────────┐
+│› #184  Booking API            ●││#184 Booking API                                                                    │
+│  #18┌ › FINDING ───────────────────────────────────────────────────────────────────────────────────────────────┐     │
+│  #18│▲ HIGH Finding f-1                                                                                        │     │
+│     │correctness · detected · confidence 82% · 1 evidence                                                      │     │
+│     │anchor src/booking.ts:42 at head 4444444 (run rev-184-a) · fingerprint fp-f-1                             │─────┘
+│     │                                                                                                          │─────┐
+│     │Explanation                                                                                               │     │
+│     │  Two concurrent bookings can both observe `slot.free` before either sets `held`.                         │     │
+│     │                                                                                                          │     │
+│     │Reasoning summary (model-written, not a confirmation)                                                     │     │
+│     │  Traced book() -> lock(); lock() is advisory and not awaited by the second caller.                       │     │
+│     │                                                                                                          │     │
+│     │Suggested fix                                                                                             │     │
+│     │  Take the row lock with SELECT ... FOR UPDATE before checking `free`.                                    │     │
+│     │                                                                                                          │     │
+│     │Evidence (5)                                                                                              │     │
+│     │  [code] src/booking.ts:40-43 @4444444                                                                    │     │
+│     │    if (slot.free && !slot.held) {                                                                        │     │
+│     │  [tool]                                                                                                  │     │
+│     │    grep lock( src/ -> 3 matches                                                                          │     │
+│     │  [test]                                                                                                  │     │
+│     │    booking.race.test.ts: 1 failed                                                                        │     │
+│     │  [scenario]                                                                                              │─────┘
+│     │    Two clients POST /book for slot 9 within 5 ms.                                                        │─────┐
+│     │  [link]                                                                                                  │     │
+│     │    https://example.com/docs/locking                                                                      │     │
+│     │                                                                                                          │     │
+│     │History                                                                                                   │     │
+│     │  2026-10-20T13:00:30Z rev-184-a detected                                                                 │     │
+│     │                                                                                                          │     │
+│     │                                                                                                          │     │
+│     └──────────────────────────────────────────────────────────────────────────────────────────────────────────┘     │
+│                                ││                                                                                    │
+└────────────────────────────────┘└────────────────────────────────────────────────────────────────────────────────────┘
+ j/k scroll  d diff at anchor  t timeline  Esc close

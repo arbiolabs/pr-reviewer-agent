@@ -1,0 +1,1 @@
+Account state is ok or error and scopes is a list; gh's raw words and comma-joined scope string are mapped by the server.

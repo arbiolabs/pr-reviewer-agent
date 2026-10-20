@@ -1,0 +1,5 @@
+{
+  "type": "resync.required",
+  "requestId": "req-resume",
+  "reason": "epoch epoch-0 is no longer available"
+}

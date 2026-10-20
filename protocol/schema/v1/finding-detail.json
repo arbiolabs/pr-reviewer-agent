@@ -1,0 +1,182 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "pr-review/protocol/v1/finding-detail.json",
+  "type": "object",
+  "required": [
+    "id",
+    "prId",
+    "runId",
+    "fingerprint",
+    "title",
+    "category",
+    "severity",
+    "status",
+    "confidence",
+    "file",
+    "line",
+    "evidenceCount",
+    "stale",
+    "explanation",
+    "reasoningSummary",
+    "evidence",
+    "history"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "prId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "runId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "fingerprint": {
+      "type": "string"
+    },
+    "title": {
+      "type": "string"
+    },
+    "category": {
+      "enum": [
+        "security",
+        "concurrency",
+        "correctness",
+        "data_integrity",
+        "performance",
+        "general",
+        "other"
+      ]
+    },
+    "severity": {
+      "enum": [
+        "critical",
+        "high",
+        "medium",
+        "low"
+      ]
+    },
+    "status": {
+      "enum": [
+        "DETECTED",
+        "PUBLISHED",
+        "STILL_PRESENT",
+        "POTENTIALLY_RESOLVED",
+        "OUTDATED",
+        "RESOLVED",
+        "UNCERTAIN"
+      ]
+    },
+    "confidence": {
+      "type": "number",
+      "minimum": 0,
+      "maximum": 1
+    },
+    "file": {
+      "type": "string"
+    },
+    "line": {
+      "anyOf": [
+        {
+          "type": "integer",
+          "minimum": 1
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "description": "head-revision line; null for a file-level finding"
+    },
+    "evidenceCount": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "stale": {
+      "type": "boolean",
+      "description": "the anchor's head SHA is no longer the PR head; never silently remapped"
+    },
+    "explanation": {
+      "type": "string"
+    },
+    "reasoningSummary": {
+      "type": "string"
+    },
+    "suggestedFix": {
+      "type": "string"
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "kind",
+          "text"
+        ],
+        "properties": {
+          "kind": {
+            "enum": [
+              "code_ref",
+              "tool_summary",
+              "test_result",
+              "scenario",
+              "link"
+            ]
+          },
+          "path": {
+            "type": "string"
+          },
+          "start": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "end": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "refSha": {
+            "type": "string",
+            "minLength": 1
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "history": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "runId",
+          "disposition",
+          "at"
+        ],
+        "properties": {
+          "runId": {
+            "type": "string",
+            "minLength": 1
+          },
+          "disposition": {
+            "enum": [
+              "DETECTED",
+              "PUBLISHED",
+              "STILL_PRESENT",
+              "POTENTIALLY_RESOLVED",
+              "OUTDATED",
+              "RESOLVED",
+              "UNCERTAIN"
+            ]
+          },
+          "at": {
+            "type": "string",
+            "description": "RFC 3339 UTC timestamp"
+          }
+        }
+      }
+    }
+  }
+}

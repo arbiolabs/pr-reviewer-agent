@@ -1,0 +1,37 @@
+{
+  "type": "timeline.page",
+  "requestId": "req-tl",
+  "events": [
+    {
+      "type": "event",
+      "streamEpoch": "epoch-1",
+      "sequence": 100,
+      "prevSequence": 99,
+      "occurredAt": "2026-10-20T13:01:40Z",
+      "prId": "acme/shop#184",
+      "runId": "rev-184-a",
+      "eventType": "review.phase_changed",
+      "data": {
+        "from": "ANALYZE",
+        "to": "VERIFY",
+        "event": "CANDIDATES_PERSISTED",
+        "detail": null
+      }
+    },
+    {
+      "type": "event",
+      "streamEpoch": "epoch-1",
+      "sequence": 99,
+      "prevSequence": 98,
+      "occurredAt": "2026-10-20T13:01:39Z",
+      "prId": "acme/shop#184",
+      "runId": "rev-184-a",
+      "eventType": "tool.activity",
+      "data": {
+        "tool": "search",
+        "summary": "lock("
+      }
+    }
+  ],
+  "nextBeforeSequence": 99
+}

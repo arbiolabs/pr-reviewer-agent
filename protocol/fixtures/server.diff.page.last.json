@@ -1,0 +1,9 @@
+{
+  "type": "diff.page",
+  "requestId": "req-diff",
+  "prId": "acme/shop#184",
+  "baseSha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "headSha": "4444444444444444444444444444444444444444",
+  "files": [],
+  "truncated": false
+}

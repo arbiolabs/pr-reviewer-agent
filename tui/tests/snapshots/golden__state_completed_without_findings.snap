@@ -1,0 +1,29 @@
+---
+source: tests/golden.rs
+assertion_line: 326
+expression: text
+---
+ PR REVIEWER ● live · unix:/run/user/501/pr-review/reviewer.sock         ? help
+  1 Inbox   2 Review   3 Diff   4 Timeline   5 Settings
+┌ TRACKED PRS ─────────────┐┌ REVIEW ──────────────────────────────────────────┐
+│  #186  Bump deps        ·││#185 Fix cache eviction                           │
+│› #185  Fix cache evict… ✓││acme/shop · base bbbbbbb → head 5555555           │
+│  #184  Booking API      ●││✓ completed · run rev-185-a · claude-opus-5-5 · s…│
+│                          ││Col ✓  Tri ✓  Ana ✓  Ver ✓  Prep ✓  Pub ✓  ✓ done │
+│                          │└──────────────────────────────────────────────────┘
+│                          │┌ › FINDINGS (0) ──────────────────────────────────┐
+│                          ││                                                  │
+│                          ││  No actionable issues found in the reviewed scope│
+│                          ││                                                  │
+│                          ││                                                  │
+│                          ││                                                  │
+│                          ││                                                  │
+│                          │└──────────────────────────────────────────────────┘
+│                          │┌ RECENT ACTIVITY ─────────────────────────────────┐
+│                          ││                                                  │
+│                          ││  No activity since the client attached.          │
+│                          ││                                                  │
+│                          ││                                                  │
+│                          ││                                                  │
+└──────────────────────────┘└──────────────────────────────────────────────────┘
+ j/k move  Tab pane  Enter inspect  d diff  t timeline  n/N finding  ? help  q …

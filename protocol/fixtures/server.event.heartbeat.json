@@ -1,0 +1,6 @@
+{
+  "type": "event",
+  "eventType": "heartbeat",
+  "streamEpoch": "epoch-1",
+  "occurredAt": "2026-10-20T13:01:50Z"
+}

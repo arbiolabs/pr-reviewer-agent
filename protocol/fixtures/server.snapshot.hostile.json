@@ -1,0 +1,35 @@
+{
+  "type": "snapshot",
+  "requestId": "req-snapshot",
+  "streamEpoch": "epoch-1",
+  "sequence": 5,
+  "prs": [
+    {
+      "id": "acme/shop#1",
+      "repository": "acme/shop",
+      "number": 1,
+      "title": "\u001b[31mred\u001b[0m \u001b]8;;https://evil.example\u0007click\u001b]8;;\u0007 \u009b2J\u0085done",
+      "headSha": "1111111111111111111111111111111111111111",
+      "baseSha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+      "lifecycle": "ACTIVE"
+    }
+  ],
+  "runs": [],
+  "findings": [
+    {
+      "id": "f-h",
+      "prId": "acme/shop#184",
+      "runId": "rev-184-a",
+      "fingerprint": "fp-f-h",
+      "title": "safe\rEVIL\u001bc",
+      "category": "correctness",
+      "severity": "high",
+      "status": "DETECTED",
+      "confidence": 0.82,
+      "file": "src/booking.ts",
+      "line": 42,
+      "evidenceCount": 1,
+      "stale": false
+    }
+  ]
+}

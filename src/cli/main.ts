@@ -1,11 +1,13 @@
-import { readFileSync } from "node:fs";
+import { mkdirSync, readFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
 import type { AuthInteraction, CredentialStore, Models } from "@earendil-works/pi-ai";
 import { createTypeSafeClient, createZenClient } from "jev-systemone";
 import { type Config, loadConfig, saveDefaultModel } from "../config/config.ts";
+import { runDaemon, runTui } from "../control/daemon.ts";
+import { type Account, ACCOUNT_KEY, chooseAccount, detectGh, listAccounts, planGithubAuth, resolveGithubAuth } from "../github/accounts.ts";
 import { clientFor, type GitHubClient } from "../github/client.ts";
-import { GitHubPullSource, parsePullRef, parsePullUrl, type PullSource, resolveGitHubToken } from "../github/pulls.ts";
+import { GitHubPullSource, parsePullRef, parsePullUrl, type PullSource } from "../github/pulls.ts";
 import { type DecisionEngine, JevDecisionEngine, type JevRoute, jevSkipReason } from "../jev/decision.ts";
 import { PiAuthFileStore } from "../models/credential-store.ts";
 import { buildModels, detectModels } from "../models/detect.ts";
@@ -37,7 +39,11 @@ const USAGE = `usage:
   pr-review serve
   pr-review inspect --pr owner/repo#123 [--json]
   pr-review models [--json]
-  pr-review login [provider] [--api-key]`;
+  pr-review accounts [--json]
+  pr-review accounts use <host/login | login>
+  pr-review login [provider] [--api-key]
+  pr-review daemon [--socket PATH] [--fixture NAME] [--data DIR] [--heartbeat SECONDS]
+  pr-review tui [args for pr-review-tui]`;
 
 /** Text output; `json` writes the value unchanged, so a JSON consumer gets the raw strings (JSON escapes C0 itself). */
 type Out = ((text: string) => void) & { json(value: unknown): void };
@@ -65,8 +71,14 @@ export async function main(argv: string[], deps: CliDeps = {}): Promise<number> 
         return inspect(rest, dataDir, out);
       case "models":
         return await models(rest, out);
+      case "accounts":
+        return await accounts(rest, dataDir, out);
       case "login":
         return await login(rest, deps, out);
+      case "daemon":
+        return await runDaemon(rest, dataDir, err);
+      case "tui":
+        return runTui(rest);
       default:
         err(`${USAGE}\n`);
         return 2;
@@ -90,8 +102,10 @@ async function review(args: string[], deps: CliDeps, dataDir: string, out: Out, 
   const config = loadConfig();
   const ref = parsePullUrl(positionals[0]!);
   // A test's fake pull source serves local repositories; only the real GitHub source needs the token.
-  const githubToken = deps.pulls || deps.github ? undefined : await resolveGitHubToken();
-  if (values.publish && !deps.github && githubToken === undefined) throw new Error("--publish needs a GitHub token: set GITHUB_TOKEN or run gh auth login");
+  const auth = deps.pulls || deps.github ? undefined : await withStore(dataDir, (store) => resolveGithubAuth(store));
+  if (auth) err(`github: ${auth.account ?? "no token, public repositories only"} (${auth.source})\n`);
+  const githubToken = auth?.token;
+  if (values.publish && !deps.github && githubToken === undefined) throw new Error("--publish needs a GitHub token: set GITHUB_TOKEN, run gh auth login, or pick one with pr-review accounts use");
   const github = deps.github ?? clientFor(config.github, { kind: "token", token: githubToken });
   const pulls = deps.pulls ?? new GitHubPullSource(() => github);
   const pull = await pulls.getPull(ref);
@@ -148,12 +162,13 @@ async function resolveModel(config: Config, deps: CliDeps, flag: string | undefi
 
 /**
  * GitHub clients per installation from the environment: a GitHub App (`GITHUB_APP_ID` plus `GITHUB_APP_PRIVATE_KEY`
- * or `GITHUB_APP_PRIVATE_KEY_FILE`), else one token client (`GITHUB_TOKEN` or `gh auth token`).
+ * or `GITHUB_APP_PRIVATE_KEY_FILE`), else one token client resolved by `resolveGithubAuth` (`GITHUB_TOKEN`, the selected
+ * gh account, or gh's active account).
  */
-async function githubFromEnv(config: Config): Promise<{ clientFor: (installationId: number) => GitHubClient; kind: "app" | "token" }> {
+async function githubFromEnv(config: Config, store: { getMeta(key: string): string | undefined }): Promise<{ clientFor: (installationId: number) => GitHubClient; kind: "app" | "token" }> {
   const appId = process.env.GITHUB_APP_ID;
   if (!appId) {
-    const client = clientFor(config.github, { kind: "token", token: await resolveGitHubToken() });
+    const client = clientFor(config.github, { kind: "token", token: (await resolveGithubAuth(store)).token });
     return { clientFor: () => client, kind: "token" };
   }
   const pem = process.env.GITHUB_APP_PRIVATE_KEY?.replaceAll("\\n", "\n") ?? (process.env.GITHUB_APP_PRIVATE_KEY_FILE ? readFileSync(process.env.GITHUB_APP_PRIVATE_KEY_FILE, "utf8") : undefined);
@@ -186,7 +201,7 @@ async function reconcile(args: string[], deps: CliDeps, dataDir: string, out: Ou
       return 0;
     }
     const pr = store.pullById(revision.pr_id)!;
-    const client = deps.github ?? (await githubFromEnv(config)).clientFor(pr.installation_id);
+    const client = deps.github ?? (await githubFromEnv(config, store)).clientFor(pr.installation_id);
     const verdict = await reconcileOutbox(store, client, { fullName: pr.repo_full_name, number: pr.number }, outbox);
     const state = store.revision(revision.id)!.state;
     if (verdict.kind === "found") out(`found review ${verdict.reviewId}; publication published, revision ${state}\n`);
@@ -204,7 +219,7 @@ async function serve(deps: CliDeps, dataDir: string, err: (t: string) => void): 
   const config = loadConfig();
   const webhookSecret = process.env.GITHUB_WEBHOOK_SECRET;
   if (!webhookSecret) throw new Error("serve needs GITHUB_WEBHOOK_SECRET");
-  const github = await githubFromEnv(config);
+  const github = await withStore(dataDir, (store) => githubFromEnv(config, store));
   const pulls = new GitHubPullSource(github.clientFor);
   const { models, ref } = await resolveModel(config, deps, undefined, false, err);
   // One engine serves every repository, so the keyless Jev tier is used only when private diffs may go there.
@@ -306,6 +321,55 @@ async function models(args: string[], out: Out): Promise<number> {
   out(`\nAvailable models (${detected.models.length}):\n`);
   for (const m of detected.models) out(`  ${m.ref.padEnd(44)} ${String(m.contextWindow).padStart(8)}  ${m.authSource}\n`);
   return 0;
+}
+
+async function withStore<T>(dataDir: string, fn: (store: AppStore) => Promise<T> | T): Promise<T> {
+  mkdirSync(dataDir, { recursive: true });
+  const store = AppStore.open(`${dataDir}/app.sqlite`);
+  try {
+    return await fn(store);
+  } finally {
+    store.close();
+  }
+}
+
+function using(list: Account[]): { ok: boolean; text: string } {
+  try {
+    const plan = planGithubAuth(list);
+    if (plan.source === "env") return { ok: true, text: `${plan.account.login} from the environment (overrides gh accounts)` };
+    if (plan.source === "none") return { ok: true, text: "no token, public repositories only" };
+    return { ok: true, text: `${plan.account.id} (${plan.source === "selected" ? "selected" : "gh active account"})` };
+  } catch (error) {
+    return { ok: false, text: error instanceof Error ? error.message : String(error) };
+  }
+}
+
+/** `pr-review accounts`: gh's accounts as this data dir sees them; `accounts use` selects one. Never fetches a token. */
+async function accounts(args: string[], dataDir: string, out: Out): Promise<number> {
+  const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { json: { type: "boolean" } } });
+  const [sub, requested, ...extra] = positionals;
+  if ((sub !== undefined && sub !== "use") || (sub === "use" && (requested === undefined || extra.length > 0))) throw new Error("usage: pr-review accounts [--json] | pr-review accounts use <host/login | login>");
+  const detection = await detectGh();
+  return withStore(dataDir, (store) => {
+    if (sub === "use") {
+      const choice = chooseAccount(detection, requested!);
+      if (!choice.ok) throw new Error(choice.message);
+      store.journalMeta("ACCOUNT_SELECTED", choice.account.id, { [ACCOUNT_KEY]: choice.account.id });
+      out(`selected ${choice.account.id} for GitHub reads and publishing in ${dataDir}\n`);
+      return 0;
+    }
+    const list = listAccounts(detection, store.getMeta(ACCOUNT_KEY));
+    const use = using(list);
+    if (values.json) {
+      out.json({ gh: detection.installed ? { installed: true, path: detection.path } : { installed: false }, accounts: list, using: use.ok ? use.text : null, error: use.ok ? undefined : use.text });
+      return use.ok ? 0 : 1;
+    }
+    out(detection.installed ? `gh: ${detection.path}\n` : "gh: not on PATH\n");
+    for (const a of list) out(`  ${a.id.padEnd(40)} ${a.state.padEnd(6)} ${a.ghActive ? "active" : "      "} ${a.selected ? "selected" : "        "} ${a.scopes.join(", ")}\n`.replace(/ +\n$/, "\n"));
+    if (list.length === 0) out("  no accounts; run `gh auth login`\n");
+    out(use.ok ? `using: ${use.text}\n` : `error: ${use.text}\n`);
+    return use.ok ? 0 : 1;
+  });
 }
 
 async function login(args: string[], deps: CliDeps, out: (t: string) => void): Promise<number> {

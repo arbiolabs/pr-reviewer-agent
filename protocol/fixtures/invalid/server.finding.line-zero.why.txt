@@ -1,0 +1,1 @@
+Lines are 1-based; a file-level finding uses null.

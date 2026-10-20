@@ -1,0 +1,7 @@
+{
+  "type": "command",
+  "requestId": "r",
+  "command": "review.delete",
+  "params": {},
+  "idempotencyKey": "k"
+}

@@ -1,0 +1,6 @@
+{
+  "type": "command.result",
+  "requestId": "req-cmd",
+  "status": "accepted",
+  "operationId": "op-1"
+}

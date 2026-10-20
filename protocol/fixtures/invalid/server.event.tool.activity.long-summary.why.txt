@@ -1,0 +1,1 @@
+tool.activity summaries are capped at 200 chars.

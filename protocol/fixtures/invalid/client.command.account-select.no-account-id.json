@@ -1,0 +1,7 @@
+{
+  "type": "command",
+  "requestId": "req-cmd",
+  "command": "account.select",
+  "params": {},
+  "idempotencyKey": "account.select:github.com/octo-work"
+}

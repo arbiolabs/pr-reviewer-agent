@@ -1,0 +1,92 @@
+{
+  "type": "diff.page",
+  "requestId": "req-diff",
+  "prId": "acme/shop#184",
+  "baseSha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "headSha": "4444444444444444444444444444444444444444",
+  "files": [
+    {
+      "path": "src/booking.ts",
+      "status": "modified",
+      "additions": 2,
+      "deletions": 1,
+      "hunks": [
+        {
+          "header": "@@ -40,3 +40,4 @@ export function book()",
+          "oldStart": 40,
+          "newStart": 40,
+          "lines": [
+            {
+              "kind": "context",
+              "old": 40,
+              "new": 40,
+              "text": "  const slot = await lock(id);"
+            },
+            {
+              "kind": "del",
+              "old": 41,
+              "text": "  if (slot.free) {"
+            },
+            {
+              "kind": "add",
+              "new": 41,
+              "text": "  if (slot.free && !slot.held) {"
+            },
+            {
+              "kind": "add",
+              "new": 42,
+              "text": "    slot.held = true;"
+            },
+            {
+              "kind": "context",
+              "old": 42,
+              "new": 43,
+              "text": "  }"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "assets/logo.png",
+      "status": "binary",
+      "additions": 0,
+      "deletions": 0,
+      "hunks": [],
+      "truncated": false
+    },
+    {
+      "path": "src/slots.ts",
+      "oldPath": "src/slot.ts",
+      "status": "renamed",
+      "additions": 0,
+      "deletions": 0,
+      "hunks": [],
+      "truncated": false
+    },
+    {
+      "path": "src/generated/schema.ts",
+      "status": "added",
+      "additions": 4000,
+      "deletions": 0,
+      "hunks": [
+        {
+          "header": "@@ -0,0 +1,4000 @@",
+          "oldStart": 0,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "// generated"
+            }
+          ]
+        }
+      ],
+      "truncated": true
+    }
+  ],
+  "nextCursor": "c-2",
+  "truncated": true
+}

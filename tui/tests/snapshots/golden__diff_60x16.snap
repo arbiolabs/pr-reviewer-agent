@@ -1,0 +1,20 @@
+---
+source: tests/golden.rs
+expression: text
+---
+ PR REVIEWER ● live · unix:/run/user/501/pr-review/… ? help
+  1 Inbox   2 Review   3 Diff   4 Timeline   5 Settings
+#184 · base bbbbbbb → head 4444444  TRUNCATED
+finding 1/1  1 finding on this revision
+┌ › src/booking.ts ────────────────────────────────────────┐
+│@@ -40,3 +40,4 @@ export function book()                  │
+│    40    40 │    const slot = await lock(id);            │
+│    41       │ -  if (slot.free) {                        │
+│          41 │ +  if (slot.free && !slot.held) {          │
+│▲         42 │ +    slot.held = true;                     │
+│    42    43 │    }                                       │
+│                                                          │
+│                                                          │
+│                                                          │
+└──────────────────────────────────────────────────────────┘
+ j/k line  h/l pane  n/N finding  : jump  Enter finding  Es…

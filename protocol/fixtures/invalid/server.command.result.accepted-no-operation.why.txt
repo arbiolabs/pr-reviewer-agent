@@ -1,0 +1,1 @@
+An accepted command names the operation that later events confirm.

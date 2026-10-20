@@ -1,0 +1,1 @@
+Sequenced events carry prevSequence; the client detects gaps with it.

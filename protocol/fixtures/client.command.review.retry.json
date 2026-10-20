@@ -1,0 +1,9 @@
+{
+  "type": "command",
+  "requestId": "req-cmd",
+  "command": "review.retry",
+  "params": {
+    "runId": "rev-184-a"
+  },
+  "idempotencyKey": "k2"
+}

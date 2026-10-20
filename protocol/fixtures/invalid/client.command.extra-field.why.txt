@@ -1,0 +1,1 @@
+Command messages are closed: identity comes from the connection, never from a caller-chosen field.

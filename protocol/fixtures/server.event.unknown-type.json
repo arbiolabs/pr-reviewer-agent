@@ -1,0 +1,16 @@
+{
+  "type": "event",
+  "streamEpoch": "epoch-1",
+  "sequence": 109,
+  "prevSequence": 108,
+  "occurredAt": "2026-10-20T13:01:49Z",
+  "prId": "acme/shop#184",
+  "eventType": "review.publication_changed",
+  "data": {
+    "state": "PENDING",
+    "whatever": [
+      1,
+      2
+    ]
+  }
+}
