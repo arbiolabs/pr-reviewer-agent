@@ -170,9 +170,34 @@ pub enum InputPurpose {
 #[derive(Clone, Debug, PartialEq)]
 pub enum Modal {
     Help,
-    Finding { id: FindingId, scroll: u16 },
-    Event { sequence: u64 },
-    Input { purpose: InputPurpose, buffer: String, before: String },
+    Finding {
+        id: FindingId,
+        scroll: u16,
+    },
+    Event {
+        sequence: u64,
+    },
+    Input {
+        purpose: InputPurpose,
+        buffer: String,
+        before: String,
+    },
+    /// The only place `y` acts. Generic over the command it confirms.
+    Confirm {
+        title: String,
+        prompt: String,
+        command: Command,
+        state: ConfirmState,
+    },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum ConfirmState {
+    Asking,
+    Requested(RequestId),
+    /// Accepted is not completed: a later event confirms the effect.
+    Accepted(Text),
+    Failed(Text),
 }
 
 #[derive(Clone, Debug, PartialEq)]

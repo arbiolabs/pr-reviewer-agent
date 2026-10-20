@@ -625,6 +625,27 @@ pub enum Command {
     Publish(PublishParams),
 }
 
+impl Command {
+    pub fn name(&self) -> &'static str {
+        match self {
+            Command::Start(_) => "review.start",
+            Command::Cancel(_) => "review.cancel",
+            Command::Retry(_) => "review.retry",
+            Command::Publish(_) => "review.publish",
+        }
+    }
+
+    /// Same command, same target, same key: a retried request cannot act twice.
+    pub fn idempotency_key(&self) -> String {
+        match self {
+            Command::Start(p) => format!("review.start:{}:{}", p.pr_id, p.expected_head_sha),
+            Command::Cancel(p) => format!("review.cancel:{}", p.run_id),
+            Command::Retry(p) => format!("review.retry:{}", p.run_id),
+            Command::Publish(p) => format!("review.publish:{}:{}", p.run_id, p.preview_id),
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StartParams {

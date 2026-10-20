@@ -1,0 +1,20 @@
+---
+source: tests/golden.rs
+expression: ascii_text
+---
+ PR REVIEWER * live | unix:/run/user/501/pr-review/~ ? help
+  1 Inbox   2 Review   3 Diff   4 Timeline   5 Settings
+scope PR acme/shop#184 (f) | category all (v) | phase all (~
++ > TIMELINE (2 of 2) -------------------------------------+
+|>   12 13:00:12 f-1 ^ HIGH Finding f-1: detected          |
+|    11 13:00:11 read_file src/booking.ts:1-120            |
+|                                                          |
+|                                                          |
+|                                                          |
+|                                                          |
+|                                                          |
+|                                                          |
+|                                                          |
+|                                                          |
++----------------------------------------------------------+
+ j/k move  Enter detail  f scope  v category  P phase  Esc ~

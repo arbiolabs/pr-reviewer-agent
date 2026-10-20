@@ -1,0 +1,268 @@
+//! Golden frames (insta + ratatui TestBackend) and the all-sizes no-panic sweep.
+
+mod common;
+
+use common::*;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use pr_review_tui::model::{Look, Model, Screen};
+use pr_review_tui::net::NetCmd;
+use pr_review_tui::playback;
+use pr_review_tui::protocol::{Event, PrId, SequencedEvent, ServerMessage};
+use pr_review_tui::text::width;
+use pr_review_tui::update::{Effect, Msg, NetEvent, update};
+use pr_review_tui::view::view;
+use ratatui::Terminal;
+use ratatui::backend::TestBackend;
+use ratatui::style::Color;
+
+/// A model driven only through messages, answering its requests the way the playback driver does.
+struct Sim {
+    m: Model,
+    played: Vec<SequencedEvent>,
+}
+
+impl Sim {
+    fn new(look: Look) -> Sim {
+        let mut s = Sim {
+            m: Model::new("unix:/run/user/501/pr-review/reviewer.sock", look, Screen::Inbox, None),
+            played: vec![],
+        };
+        s.apply(Msg::Net(NetEvent::Opened));
+        s
+    }
+
+    fn apply(&mut self, msg: Msg) {
+        let fx = update(&mut self.m, msg);
+        for e in fx {
+            if let Effect::Send(req) = e {
+                let dir = protocol_dir().join("fixtures");
+                if let Some(reply) = playback::answer(&dir, &self.played, &req) {
+                    self.apply(Msg::Net(NetEvent::Message(reply)));
+                }
+            }
+        }
+    }
+
+    fn server(&mut self, msg: ServerMessage) {
+        if let ServerMessage::Event(Event::Sequenced(e)) = &msg {
+            self.played.push(e.clone());
+        }
+        self.apply(Msg::Net(NetEvent::Message(msg)));
+    }
+
+    fn play(mut self, name: &str, lines: usize) -> Sim {
+        for msg in script(name).into_iter().take(lines) {
+            self.server(msg);
+        }
+        self
+    }
+
+    fn key(mut self, code: KeyCode) -> Sim {
+        self.apply(Msg::Key(KeyEvent::new(code, KeyModifiers::NONE)));
+        self
+    }
+
+    fn select(mut self, pr: &str) -> Sim {
+        self = self.key(KeyCode::Char('g'));
+        for _ in 0..10 {
+            if self.m.ui.selected_pr == Some(PrId::new(pr)) {
+                return self;
+            }
+            self = self.key(KeyCode::Char('j'));
+        }
+        panic!("{pr} not reachable");
+    }
+}
+
+fn render(m: &mut Model, w: u16, h: u16) -> (String, Terminal<TestBackend>) {
+    update(m, Msg::Resize(w, h));
+    let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+    term.draw(|f| view(m, f)).unwrap();
+    let buf = term.backend().buffer().clone();
+    let mut out = String::new();
+    for y in 0..h {
+        let mut line = String::new();
+        let mut skip = 0;
+        for x in 0..w {
+            let sym = buf[(x, y)].symbol();
+            if skip > 0 {
+                skip -= 1;
+                continue;
+            }
+            skip = width(sym).saturating_sub(1);
+            line.push_str(sym);
+        }
+        out.push_str(line.trim_end());
+        out.push('\n');
+    }
+    (out, term)
+}
+
+const SIZES: [(u16, u16); 4] = [(60, 16), (80, 24), (120, 38), (160, 45)];
+
+fn mid_review(look: Look) -> Sim {
+    // welcome, snapshot, tool activity, heartbeat, finding f-1: rev-184-a is in VERIFY.
+    Sim::new(look).play("normal", 5)
+}
+
+fn states(look: Look) -> Vec<(&'static str, Sim)> {
+    vec![
+        ("inbox", mid_review(look)),
+        ("review", mid_review(look).select("acme/shop#184").key(KeyCode::Enter)),
+        ("diff", mid_review(look).select("acme/shop#184").key(KeyCode::Enter).key(KeyCode::Char('d'))),
+        ("timeline", mid_review(look).select("acme/shop#184").key(KeyCode::Enter).key(KeyCode::Char('4'))),
+    ]
+}
+
+fn colorless(term: &Terminal<TestBackend>) -> bool {
+    term.backend().buffer().content.iter().all(|c| c.fg == Color::Reset && c.bg == Color::Reset)
+}
+
+#[test]
+fn views_at_every_breakpoint() {
+    let ascii = Look { ascii: true, ..Look::default() };
+    let mono = Look { color: false, ..Look::default() };
+    for ((name, mut s), ((_, mut a), (_, mut n))) in
+        states(Look::default()).into_iter().zip(states(ascii).into_iter().zip(states(mono)))
+    {
+        for (w, h) in SIZES {
+            let (text, term) = render(&mut s.m, w, h);
+            insta::assert_snapshot!(format!("{name}_{w}x{h}"), text);
+            assert!(!colorless(&term), "{name} {w}x{h} has no color in color mode");
+
+            let (ascii_text, _) = render(&mut a.m, w, h);
+            insta::assert_snapshot!(format!("{name}_{w}x{h}_ascii"), ascii_text);
+            assert!(ascii_text.is_ascii(), "{name} {w}x{h} --ascii frame has non-ASCII glyphs");
+
+            // NO_COLOR keeps every label and only drops color.
+            let (mono_text, term) = render(&mut n.m, w, h);
+            assert_eq!(mono_text, text, "{name} {w}x{h}: NO_COLOR changed the text");
+            assert!(colorless(&term), "{name} {w}x{h}: NO_COLOR frame has colors");
+        }
+    }
+}
+
+#[test]
+fn special_states() {
+    let mut cases: Vec<(&str, Sim, (u16, u16))> = vec![
+        ("loading", Sim::new(Look::default()), (80, 24)),
+        (
+            "empty",
+            {
+                let mut s = Sim::new(Look::default());
+                s.server(ServerMessage::parse(&read("fixtures/server.welcome.json")).unwrap());
+                s.server(ServerMessage::parse(&read("fixtures/server.snapshot.empty.json")).unwrap());
+                s
+            },
+            (80, 24),
+        ),
+        (
+            "unavailable",
+            {
+                let mut s = Sim::new(Look::default());
+                s.apply(Msg::Net(NetEvent::Lost { reason: "connection refused".into(), retry_in_ms: Some(2_000) }));
+                s
+            },
+            (80, 24),
+        ),
+        (
+            "disconnected_mid_review",
+            {
+                let mut s = mid_review(Look::default()).select("acme/shop#184").key(KeyCode::Enter);
+                s.apply(Msg::Net(NetEvent::Lost {
+                    reason: "no message for 30s (heartbeat timeout)".into(),
+                    retry_in_ms: Some(1_000),
+                }));
+                s
+            },
+            (120, 38),
+        ),
+        (
+            "stale_review",
+            Sim::new(Look::default()).play("superseded", 6).select("acme/shop#184").key(KeyCode::Enter),
+            (120, 38),
+        ),
+        (
+            "stale_diff",
+            Sim::new(Look::default())
+                .play("superseded", 6)
+                .select("acme/shop#184")
+                .key(KeyCode::Enter)
+                .key(KeyCode::Char('j'))
+                .key(KeyCode::Char('d')),
+            (120, 38),
+        ),
+        (
+            "long_title",
+            Sim::new(Look::default()).play("hostile", 5).select("acme/shop#2").key(KeyCode::Enter),
+            (80, 24),
+        ),
+        ("hostile_inbox", Sim::new(Look::default()).play("hostile", 5), (120, 38)),
+        (
+            "binary_diff",
+            mid_review(Look::default())
+                .select("acme/shop#184")
+                .key(KeyCode::Char('3'))
+                .key(KeyCode::Char('h'))
+                .key(KeyCode::Char('j')),
+            (120, 38),
+        ),
+        (
+            "finding_detail",
+            mid_review(Look::default()).select("acme/shop#184").key(KeyCode::Enter).key(KeyCode::Enter),
+            (120, 38),
+        ),
+        (
+            "finding_detail_narrow",
+            mid_review(Look::default()).select("acme/shop#184").key(KeyCode::Enter).key(KeyCode::Enter),
+            (60, 16),
+        ),
+        ("help", mid_review(Look::default()).key(KeyCode::Char('?')), (80, 24)),
+        ("settings", mid_review(Look::default()).key(KeyCode::Char('5')), (80, 24)),
+        (
+            "incompatible",
+            {
+                let mut s = Sim::new(Look::default());
+                s.server(ServerMessage::parse(&read("fixtures/server.error.protocol-mismatch.json")).unwrap());
+                s
+            },
+            (80, 24),
+        ),
+        ("minimal", mid_review(Look::default()), (59, 15)),
+        (
+            "confirm",
+            {
+                let mut s = Sim::new(Look::default());
+                let welcome = read("fixtures/server.welcome.json")
+                    .replace("\"capabilities\": []", "\"capabilities\": [\"review.start\"]");
+                s.server(ServerMessage::parse(&welcome).unwrap());
+                s.server(ServerMessage::parse(&read("fixtures/server.snapshot.json")).unwrap());
+                s.key(KeyCode::Char('g')).key(KeyCode::Char('s'))
+            },
+            (80, 24),
+        ),
+    ];
+    for (name, s, (w, h)) in cases.iter_mut() {
+        let (text, _) = render(&mut s.m, *w, *h);
+        insta::assert_snapshot!(format!("state_{name}"), text);
+    }
+}
+
+#[test]
+fn every_view_survives_every_size() {
+    let mut sims: Vec<Sim> = states(Look::default()).into_iter().map(|(_, s)| s).collect();
+    sims.push(mid_review(Look::default()).key(KeyCode::Char('5')));
+    sims.push(mid_review(Look::default()).select("acme/shop#184").key(KeyCode::Enter).key(KeyCode::Enter));
+    sims.push(Sim::new(Look::default()).play("hostile", 5).select("acme/shop#2").key(KeyCode::Enter));
+    let mut term = Terminal::new(TestBackend::new(0, 0)).unwrap();
+    for s in &sims {
+        for w in 0..=200u16 {
+            for h in 0..=60u16 {
+                term.backend_mut().resize(w, h);
+                term.resize(ratatui::layout::Rect::new(0, 0, w, h)).unwrap();
+                term.draw(|f| view(&s.m, f)).unwrap();
+            }
+        }
+    }
+    let _ = NetCmd::Close;
+}

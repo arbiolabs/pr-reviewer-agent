@@ -244,6 +244,19 @@ fn server_message(m: &mut Model, msg: ServerMessage, fx: &mut Vec<Effect>) {
             }
         }
         ServerMessage::CommandResult(r) => {
+            let confirm = m.ui.modals.iter_mut().find_map(|x| match x {
+                Modal::Confirm { state, .. } if *state == ConfirmState::Requested(r.request_id.clone()) => Some(state),
+                _ => None,
+            });
+            if let Some(state) = confirm {
+                *state = match r.outcome {
+                    CommandOutcome::Accepted { operation_id } => ConfirmState::Accepted(operation_id),
+                    CommandOutcome::Rejected { code, message } => {
+                        ConfirmState::Failed(Text::new(&format!("{code:?}: {message}")))
+                    }
+                };
+                return;
+            }
             let text = match r.outcome {
                 CommandOutcome::Accepted { operation_id } => {
                     format!("request accepted ({operation_id}); waiting for events")
@@ -788,6 +801,7 @@ fn act(m: &mut Model, a: Action, fx: &mut Vec<Effect>) {
                 reselect(m);
             }
         }
+        Action::Confirm => send_confirmed(m, fx),
         Action::InputSubmit => {
             if let Some(Modal::Input { purpose, buffer, .. }) = m.ui.modals.pop()
                 && purpose == InputPurpose::JumpTo
@@ -805,9 +819,48 @@ fn mutation(m: &mut Model, mu: Mutation) {
     } else if !m.may_write(cap) {
         "the server grants no write capability (read-only)"
     } else {
-        "this client version has no write commands yet"
+        let pr = m.selected_pr().cloned();
+        let run = pr.as_ref().and_then(|p| m.domain.latest_run(&p.id)).cloned();
+        let ask = match (mu, pr, run) {
+            (Mutation::Start, Some(p), _) => Some((
+                format!("Start a review of #{} at {}?", p.number, p.head_sha.short()),
+                Command::Start(StartParams { pr_id: p.id, expected_head_sha: p.head_sha }),
+            )),
+            (Mutation::Retry, _, Some(r)) => {
+                Some((format!("Retry run {}?", r.id), Command::Retry(RunParams { run_id: r.id })))
+            }
+            (Mutation::Cancel, _, Some(r)) => {
+                Some((format!("Cancel run {}?", r.id), Command::Cancel(RunParams { run_id: r.id })))
+            }
+            _ => None,
+        };
+        let Some((prompt, command)) = ask else {
+            notice(m, format!("{cap} unavailable: nothing selected it applies to, or no preview yet"));
+            return;
+        };
+        confirm(m, cap, prompt, command);
+        return;
     };
     notice(m, format!("{cap} unavailable: {why}"));
+}
+
+/// Opens the generic confirmation modal; `y` inside it sends `command`.
+pub fn confirm(m: &mut Model, title: &str, prompt: String, command: Command) {
+    m.ui.modals.push(Modal::Confirm { title: title.into(), prompt, command, state: ConfirmState::Asking });
+}
+
+fn send_confirmed(m: &mut Model, fx: &mut Vec<Effect>) {
+    let Some(Modal::Confirm { command, state: ConfirmState::Asking, .. }) = m.top_modal().cloned() else { return };
+    let request_id = request(m);
+    let idempotency_key = command.idempotency_key();
+    fx.push(Effect::Send(ClientMessage::Command(CommandRequest {
+        request_id: request_id.clone(),
+        idempotency_key,
+        command,
+    })));
+    if let Some(Modal::Confirm { state, .. }) = m.ui.modals.last_mut() {
+        *state = ConfirmState::Requested(request_id);
+    }
 }
 
 fn edit_input(m: &mut Model, f: impl FnOnce(&mut String)) {

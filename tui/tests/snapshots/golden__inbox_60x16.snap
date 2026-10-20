@@ -1,0 +1,20 @@
+---
+source: tests/golden.rs
+expression: text
+---
+ PR REVIEWER ● live · unix:/run/user/501/pr-review/… ? help
+  1 Inbox   2 Review   3 Diff   4 Timeline   5 Settings
+┌ › TRACKED PRS (3) ───────────────────────────────────────┐
+│  #184  Booking API                               ● VERIFY│
+│› #186  Bump deps                     · no run (quiescing)│
+│  #185  Fix cache eviction                     ✓ completed│
+│                                                          │
+│                                                          │
+│                                                          │
+│                                                          │
+│                                                          │
+│                                                          │
+│                                                          │
+│                                                          │
+└──────────────────────────────────────────────────────────┘
+ j/k move  Enter open  / search  d diff  t timeline  r refr…

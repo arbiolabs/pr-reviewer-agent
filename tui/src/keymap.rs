@@ -16,6 +16,7 @@ pub enum Context {
     Help,
     FindingModal,
     EventModal,
+    ConfirmModal,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -69,6 +70,7 @@ pub enum Action {
     InputBackspace,
     InputSubmit,
     InputCancel,
+    Confirm,
 }
 
 const NONE: KeyModifiers = KeyModifiers::NONE;
@@ -134,6 +136,8 @@ const TABLE: &[(Context, KeyCode, KeyModifiers, Action)] = &[
     (C::Timeline, K::Char('v'), NONE, A::CycleCategory),
     (C::Timeline, K::Char('P'), SHIFT, A::CyclePhase),
     (C::Timeline, K::Char('P'), NONE, A::CyclePhase),
+    (C::ConfirmModal, K::Char('y'), NONE, A::Confirm),
+    (C::ConfirmModal, K::Char('n'), NONE, A::Back),
 ];
 
 pub fn context(screen: Screen, modal: Option<&Modal>) -> Context {
@@ -141,6 +145,7 @@ pub fn context(screen: Screen, modal: Option<&Modal>) -> Context {
         Some(Modal::Help) => C::Help,
         Some(Modal::Finding { .. }) => C::FindingModal,
         Some(Modal::Event { .. }) => C::EventModal,
+        Some(Modal::Confirm { .. }) => C::ConfirmModal,
         Some(Modal::Input { .. }) | None => match screen {
             Screen::Inbox => C::Inbox,
             Screen::Review => C::Review,
@@ -177,27 +182,26 @@ pub fn resolve(screen: Screen, modal: Option<&Modal>, key: KeyEvent) -> Option<A
 pub fn help_rows() -> Vec<(String, &'static str)> {
     let describe = |a: Action| -> Option<&'static str> {
         Some(match a {
-            A::Quit => "quit the client (reviews keep running)",
+            A::Quit => "quit; reviews keep running",
             A::Help => "this help",
-            A::Back => "close modal / back",
-            A::Down => "move down",
-            A::Up => "move up",
-            A::Left | A::Right => "focus left / right pane",
+            A::Back => "close / back",
+            A::Down | A::Up => "move",
+            A::PageDown | A::PageUp => "page down / up",
+            A::Top | A::Bottom => "first / last",
+            A::Left | A::Right => "pane left / right",
             A::FocusNext => "cycle panes",
-            A::Open => "open selected item",
-            A::Goto(_) => "Inbox / Review / Diff / Timeline / Settings",
-            A::Search => "search / filter",
-            A::OpenDiff => "diff at the selected finding",
-            A::OpenTimeline => "timeline for the selection",
-            A::Refresh => "refresh the authoritative snapshot",
-            A::Mutation(_) => "start / retry / cancel / publish (server must allow)",
+            A::Open => "open selected",
+            A::Goto(_) => "views (see tabs)",
+            A::Search => "search PRs",
+            A::OpenDiff => "diff at the finding",
+            A::OpenTimeline => "timeline for selection",
+            A::Refresh => "refresh snapshot",
+            A::Mutation(_) => "start/retry/cancel/publish",
             A::NextFinding | A::PrevFinding => "next / previous finding",
             A::JumpTo => "jump to path:line (Diff)",
-            A::CycleScope => "timeline scope: PR / run / finding",
-            A::CycleCategory => "timeline category filter",
-            A::CyclePhase => "timeline phase filter",
-            A::Top | A::Bottom => "first / last",
-            A::PageDown | A::PageUp => "page down / up",
+            A::CycleScope => "timeline scope",
+            A::CycleCategory => "timeline category",
+            A::CyclePhase => "timeline phase",
             _ => return None,
         })
     };
@@ -214,7 +218,7 @@ pub fn help_rows() -> Vec<(String, &'static str)> {
             _ => continue,
         };
         match rows.iter_mut().find(|(_, t)| *t == text) {
-            Some((keys, _)) if !keys.split('/').any(|k| k == key) => keys.push_str(&format!("/{key}")),
+            Some((keys, _)) if !keys.split(' ').any(|k| k == key) => keys.push_str(&format!(" {key}")),
             Some(_) => {}
             None => rows.push((key, text)),
         }

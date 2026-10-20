@@ -203,3 +203,35 @@ fn finding_to_diff_pins_the_findings_revision_and_lands_on_its_line() {
     // Row 0 is the hunk header; head line 42 is the fifth row ("slot.held = true").
     assert_eq!(d.cursor, 4);
 }
+
+#[test]
+fn y_confirms_only_inside_the_confirmation_modal_and_sends_the_command_once() {
+    let mut m = model();
+    update(&mut m, Msg::Net(NetEvent::Opened));
+    send(
+        &mut m,
+        &read("fixtures/server.welcome.json").replace("\"capabilities\": []", "\"capabilities\": [\"review.start\"]"),
+    );
+    send(&mut m, &read("fixtures/server.snapshot.json"));
+    press(&mut m, KeyCode::Char('g'));
+    assert_eq!(press(&mut m, KeyCode::Char('y')), []);
+
+    assert_eq!(press(&mut m, KeyCode::Char('s')), []);
+    assert!(matches!(m.top_modal(), Some(Modal::Confirm { .. })), "{:?}", m.top_modal());
+    let fx = press(&mut m, KeyCode::Char('y'));
+    let [Effect::Send(ClientMessage::Command(c))] = &fx[..] else { panic!("{fx:?}") };
+    assert_eq!(c.idempotency_key, "review.start:acme/shop#186:6666666666666666666666666666666666666666");
+    assert_eq!(press(&mut m, KeyCode::Char('y')), [], "a second y must not resend");
+
+    let rejected = read("fixtures/server.command.result.rejected.json").replace("req-cmd", c.request_id.as_str());
+    send(&mut m, &rejected);
+    let Some(Modal::Confirm { state, .. }) = m.top_modal() else { panic!() };
+    assert_eq!(
+        state,
+        &pr_review_tui::model::ConfirmState::Failed(pr_review_tui::protocol::Text::new(
+            "CapabilityDenied: review.start is not available in this version"
+        ))
+    );
+    press(&mut m, KeyCode::Esc);
+    assert_eq!(m.top_modal(), None);
+}

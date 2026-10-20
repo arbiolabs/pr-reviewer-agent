@@ -8,4 +8,7 @@ pub mod net;
 pub mod playback;
 pub mod protocol;
 pub mod sanitize;
+pub mod text;
+pub mod theme;
 pub mod update;
+pub mod view;
