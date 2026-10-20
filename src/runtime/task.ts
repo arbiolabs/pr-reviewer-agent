@@ -241,8 +241,9 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
         store.ensureOutbox({ revisionId: revision.id, idempotencyKey: `${revision.id}:${PUBLISHER_VERSION}`, payloadHash: hash, payloadJson: JSON.stringify(payload) });
       });
     }
-    // This attempt ends here; the approved attempt (or the one a rerun finds already approved) owns the rest.
-    if (approval) return finished(revision.id, store.revision(revision.id)!.state);
+    // The decision to park is the revision's state, not the live config: a rerun after a crash (even under another
+    // publish_mode) ends this attempt here, and the approved attempt owns the rest.
+    if (store.revision(revision.id)!.state === "AWAITING_APPROVAL") return finished(revision.id, "AWAITING_APPROVAL");
     const outbox = store.outboxForRevision(revision.id);
     if (outbox) return { phase: "publish", revisionId: revision.id, outboxId: outbox.id };
     store.advance(revision.id, "PUBLISH", "NO_PUBLICATION_RECORDED", input.publish ? "no findings: silent_no_findings" : "dry run: nothing published");
@@ -277,6 +278,8 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
         });
         return toReconcile(revision, outbox.id);
       case "pending": {
+        // Only an attempt whose revision is in PUBLISH may post; a stale one (resumed for a parked revision) ends with no POST.
+        if (revision.state !== "PUBLISH") return finished(revision.id, revision.state);
         const { headSha, state, merged } = await livePull(revision);
         if (state !== "open") {
           store.advance(revision.id, "PUBLISH", "PR_NOT_OPEN", `pr_not_open: ${merged ? "merged" : "closed"}`);

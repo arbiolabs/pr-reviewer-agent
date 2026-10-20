@@ -6,7 +6,7 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { type FauxResponseStep, fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { main } from "../src/cli/main.ts";
-import { DEFAULT_CONFIG } from "../src/config/config.ts";
+import { type Config, DEFAULT_CONFIG } from "../src/config/config.ts";
 import { GitHubClient } from "../src/github/client.ts";
 import { GitHubPullSource } from "../src/github/pulls.ts";
 import { AppStore } from "../src/persistence/store.ts";
@@ -34,10 +34,10 @@ afterEach(async () => {
 const config = { ...DEFAULT_CONFIG, review: { ...DEFAULT_CONFIG.review, publish_mode: "approval" as const, retry_backoff_ms: 10 }, github: { ...DEFAULT_CONFIG.github, timeout_ms: 300 } };
 const client = () => new GitHubClient({ auth: { kind: "token", token: "ghp_test" }, baseUrl: fake.url, maxRetries: 2, backoffMs: 1, concurrency: 2, timeoutMs: 5000 });
 
-async function openApproving(responses: FauxResponseStep[] = [readDiff(), submitDefect(fixture)], dataDir = mkdtempSync(join(tmpdir(), "approval-"))) {
+async function openApproving(responses: FauxResponseStep[] = [readDiff(), submitDefect(fixture)], dataDir = mkdtempSync(join(tmpdir(), "approval-")), cfg: Config = config) {
   const github = client();
   const pulls = new GitHubPullSource(() => github);
-  const app = await openApp({ dataDir, config, pulls, github: () => github, engine: { skipped: "test" }, models: fauxModels(responses), model: { provider: "faux", modelId: "reviewer" }, reviewerVersion: "m1+faux/reviewer" });
+  const app = await openApp({ dataDir, config: cfg, pulls, github: () => github, engine: { skipped: "test" }, models: fauxModels(responses), model: { provider: "faux", modelId: "reviewer" }, reviewerVersion: "m1+faux/reviewer" });
   apps.push(app);
   app.harness.resume();
   return { app, pulls, dataDir };
@@ -177,6 +177,51 @@ it("reports a later abort with its own reason, not the cancel that ended the ear
   await h.app.harness.abortTask(retried.taskId!, BACKGROUND_CONTEXT);
   const revision = await finishReview(h.app, retried);
   expect([revision.state, h.app.store.auditEvents(revision.id).at(-1)]).toEqual(["FAILED", expect.objectContaining({ from_state: "ANALYZE", event: "TERMINAL_ERROR", detail: "durable task aborted" })]);
+}, 30_000);
+
+const until = async (check: () => boolean | Promise<boolean>, timeoutMs = 10_000) => {
+  const deadline = Date.now() + timeoutMs;
+  while (!(await check())) {
+    if (Date.now() > deadline) throw new Error("timed out");
+    await new Promise((resolve) => setTimeout(resolve, 20));
+  }
+};
+
+it("keeps a parked revision parked when its task resumes after a crash under a switched publish_mode", async () => {
+  const slow = { ...config, review: { ...config.review, retry_backoff_ms: 3000 } };
+  const dataDir = mkdtempSync(join(tmpdir(), "approval-switch-"));
+  const first = await openApproving(undefined, dataDir, slow);
+  // The park commits, then the process dies before the durable checkpoint: the task will rerun PREPARE.
+  const advance = first.app.store.advance.bind(first.app.store);
+  first.app.store.advance = (id, from, event, detail, writes) => {
+    const state = advance(id, from, event, detail, writes);
+    if (event === "APPROVAL_REQUIRED") throw new Error("crashed after parking");
+    return state;
+  };
+  const started = await startReview(first.app, fixture.pull, "1", { publish: true });
+  await until(() => first.app.store.revision(started.revision.id)?.state === "AWAITING_APPROVAL");
+  apps.splice(apps.indexOf(first.app), 1);
+  await first.app.close();
+
+  const comment = { ...slow, review: { ...slow.review, publish_mode: "comment" as const } };
+  const second = await openApproving([], dataDir, comment);
+  await until(async () => fake.postAttempts > 0 || (await taskCount(second.app)).every((s) => s === "terminal"));
+  expect([fake.postAttempts, second.app.store.revision(started.revision.id)!.state, await taskCount(second.app)]).toEqual([0, "AWAITING_APPROVAL", ["terminal"]]);
+}, 30_000);
+
+it("never posts from a publish attempt whose revision is not in PUBLISH", async () => {
+  const h = await openApproving();
+  const { revision, outbox } = await park(h);
+  // A stale attempt at the publish checkpoint, as a resumed task of a parked revision would be.
+  const root = await h.app.harness.root(BACKGROUND_CONTEXT);
+  const taskId = await root.commit(async (tx) => tx.createTask(h.app.task, { revisionId: revision.id, retry: 9, publish: true, approvedOutboxId: outbox.id }, { ownership: { kind: "conversation" } }), BACKGROUND_CONTEXT);
+  const settled = await h.app.harness.waitForTask(taskId, BACKGROUND_CONTEXT);
+  expect([settled.state.outcome, fake.postAttempts, h.app.store.revision(revision.id)!.state, h.app.store.outbox(outbox.id)!.status]).toEqual([
+    { status: "completed", result: { revisionId: revision.id, state: "AWAITING_APPROVAL" } },
+    0,
+    "AWAITING_APPROVAL",
+    "pending",
+  ]);
 }, 30_000);
 
 const SCRIPT = new URL("./fixtures/cli-publish.ts", import.meta.url).pathname;
