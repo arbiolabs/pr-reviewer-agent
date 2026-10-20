@@ -17,10 +17,10 @@ use crate::theme::{Bg, Role, finding_status, phase_name};
 /// The reading column's widest: room for code and about 15 words of prose a line.
 pub const COLUMN: u16 = 112;
 
-/// A turning half circle: no frame reads as the `·` separator or the `●` of a finished phase, and every frame is in
-/// the geometric-shapes block that monospace fonts carry (braille is missing from many).
+/// A quadrant turning clockwise: no frame reads as the `·` separator or the `●` of a finished phase, and block
+/// elements are in every monospace font (braille and the half circles are missing from some, freeze's among them).
 pub fn spinner(c: &Ctx) -> &'static str {
-    const U: &[&str] = &["◐", "◓", "◑", "◒"];
+    const U: &[&str] = &["▘", "▝", "▗", "▖"];
     const A: &[&str] = &["-", "\\", "|", "/"];
     let set = if c.t.ascii { A } else { U };
     set[(c.m.now_ms / 125) as usize % set.len()]
