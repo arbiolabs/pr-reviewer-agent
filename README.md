@@ -1,122 +1,131 @@
 # pr-review
 
-pr-review is a durable PR reviewer built on Pi Durable, Jev and pi-ai. It reviews a GitHub pull request revision and reports evidence-backed findings. It can print them (`--dry-run`) or post them as one `COMMENT` review (`--publish`), and it can run as a GitHub App service that reviews PRs from webhooks. `docs/SPEC.md` is the engine design and `docs/TUI_SPEC.md` the terminal client's. `main` implements engine milestones M1 and M2 and TUI milestones M0 to M2.
+pr-review reviews GitHub pull requests and reports only findings it can back with evidence from the code. It tracks each PR across its commits, so a crash or restart resumes the review instead of starting over. Publishing is designed to post at most one review per commit, even when a write to GitHub times out or the process is killed partway through.
 
-## Run
+You can run it three ways:
 
-Node 22.19 or later and pnpm.
+- As a CLI that reviews one PR and prints the result, or posts it as a `COMMENT` review.
+- As a GitHub App service that reviews PRs when webhooks arrive.
+- From a terminal workstation, `pr-review tui`, that shows what the reviewer is doing, its findings, and the diff behind each one.
 
-```bash
-pnpm install
-node bin/pr-review.mjs models                          # agent CLIs found on PATH, and the models you can use
-node bin/pr-review.mjs review https://github.com/owner/repo/pull/123 [--dry-run | --publish] [--json] [--no-jev] [--model anthropic/claude-opus-5-5] [--retry]
-node bin/pr-review.mjs reconcile --revision <revision-id>   # decide an uncertain publication; never posts
-node bin/pr-review.mjs serve                            # webhook receiver, worker and reviews; see "Service" below
-node bin/pr-review.mjs inspect --pr owner/repo#123      # every phase transition, the routing decision, findings and discards
-node bin/pr-review.mjs login anthropic [--api-key]      # store a credential in pi's auth file (OAuth where offered)
-node bin/pr-review.mjs accounts [--json]                # gh's GitHub accounts, and which one reviews use
-node bin/pr-review.mjs accounts use octo-work           # use this gh account (host/login or login) in this data dir
-pnpm typecheck && pnpm test
+```text
+$ node bin/pr-review.mjs review https://github.com/diego-arbio-dev/pr-reviewer/pull/2 --publish --model anthropic/claude-opus-5-5
+model: anthropic/claude-opus-5-5 (--model)
+revision d3defce78587d5d2fc4c3febae2da604 (diego-arbio-dev/pr-reviewer#2 @ 7683015c4b62) durable task 7
+publication published: review 5586025680
+## Automated PR review
+
+Reviewed commit: `7683015c4b62b1b3ba765daa799368e4e073c52f`
+
+Found 1 actionable issue.
+
+- Critical: DELETE /orders/:id has no authentication or authorization (`src/routes/orders.js:16`)
+
+Review performed with isolated read-only tools. Human review is still required.
 ```
 
-- **GitHub access.** The token comes from the first of: `GITHUB_TOKEN`; `GH_TOKEN`; the account selected with `accounts use` (stored per data dir, read with `gh auth token --hostname --user`); gh's active `github.com` account. If the selected account is gone from gh or has an auth problem, the review fails and names it; it never falls back to another identity. Only `github.com` accounts can be selected. `accounts use` does not change gh's own active account, and no command prints a token. Without a token the tool can read public repositories only. With a token it can review private repositories: the token goes to the GitHub API, and to `git clone` and `git fetch` as a header given on that one command. It is not put in the environment, not written to the bare clone's config, and redacted from git error messages.
-- **Closed and merged PRs.** `review` does not check whether the PR is open, so you can review historic PRs. The service never starts a review for a closed or merged PR.
-- **Models.** Credentials come from `~/.pi/agent/auth.json`, which pi shares, or from provider environment variables such as `ANTHROPIC_API_KEY`. The tool picks the model in this order: `--model`, then `PR_REVIEW_MODEL`, then `models.default` in `pr-review.config.json`. If none of these is set, a TTY shows a picker. Without a TTY, the tool takes the first available model in `models.preferred`. The model is part of the reviewer identity, so reviewing the same head with another model creates a new revision.
-- **Jev.** By default the tool uses the keyless OpenCode Zen tier. If `TYPESAFE_API_KEY` is set, it uses TypeSafe instead. `--no-jev` skips Jev and uses the fallback route.
-- **Jev and private repositories.** The PR title, description and a diff excerpt go to Jev. For a private repository without `TYPESAFE_API_KEY`, the tool does not call the keyless endpoint: it takes the fallback route and records the reason `jev_skipped_private_repo`. To allow the keyless endpoint for private repositories, set `"jev": { "allow_keyless_for_private": true }` in `pr-review.config.json`.
-- **Config.** `pr-review.config.json` is optional. It overrides the defaults in `src/config/config.ts`. An unknown key or a wrong type is an error.
-- **State.** All state lives in `.data/` (or `PR_REVIEW_DATA_DIR`):
-  - `app.sqlite` holds business records.
-  - `durable.sqlite` holds Pi Durable checkpoints and conversations.
-  - `repos/` holds the bare clones.
+## How a review works
 
-If you kill the process and run the same command again, the review resumes. A revision that already finished prints its stored result. Only one `pr-review review` can use a data directory at a time. A second one exits with "another pr-review is running on <dir>". After a `kill -9`, the next run takes over the lock within about 5 seconds.
+Each review runs as a durable task with fixed phases: collect context, triage, analyze, verify, prepare, and publish. Every phase saves a checkpoint before the next one starts.
 
-A revision that FAILED stays failed. A rerun prints the failure reason and tells you to use `--retry`. `review <url> --retry` reopens a FAILED revision. This is a manual override: the audit log records it as `FAILED --MANUAL_RETRY--> COLLECT_CONTEXT`, and the retry runs as a new durable task. It reuses the stored context, routing decision and candidates where they exist. `--retry` is refused for a COMPLETED or SUPERSEDED revision.
+- **Triage.** Jev, a fast classifier, scores the risk of the change. It can raise the review depth above standard, never lower it. Path rules force a deeper review for areas such as auth, payments, and migrations.
+- **Analyze.** A reasoning model reads the change through read-only tools: the diff, files and search at the pinned commit, and git history. It cannot write files, run commands, or post to GitHub.
+- **Verify.** Code, not the model, checks every candidate finding. The finding must sit on a line in the diff, and its evidence must exist at the cited commit. Candidates that fail are discarded and their reasons recorded.
+- **Publish.** The review goes through an outbox. pr-review checks GitHub for its own earlier review before posting. When a write's result is uncertain, it reconciles against GitHub instead of retrying blindly.
 
-## Publishing
+[`docs/SPEC.md`](docs/SPEC.md) is the full design.
 
-`review --publish` needs a GitHub token with write access to pull requests (resolved as described under GitHub access). It posts at most one review per revision, through an outbox in `app.sqlite`:
+## Get started
 
-1. PREPARE_PUBLICATION re-reads the PR head and stores the payload with the transition into PUBLISH. The payload has the summary body, the marker `<!-- durable-review:<revision>:<payload-hash> -->`, `commit_id` set to the head, `event: COMMENT`, and an inline comment for each verified finding whose line is in the diff.
-2. PUBLISH re-reads the PR again. If it is no longer open (`pr_not_open`) or the head moved, the revision is SUPERSEDED and nothing is posted. A dry run of a closed PR still works. Then it lists every page of the PR's reviews. If one of ours on the head commit carries this revision's marker, with any payload hash, the revision completes with that review's ID and nothing is posted. This holds for a rerun from a fresh data dir, whose model answer differs. If the listing fails, nothing is posted. PUBLISH retries under `max_retries_per_phase`, then leaves the outbox `needs_reconciliation`.
-3. The outbox is set to `sending` and committed before the POST. The returned review ID is saved after it.
-4. If the result is uncertain (a 5xx, a dropped connection, a timeout, or a crash that left the outbox in `sending`), RECONCILE lists every page of the PR's reviews. It looks for one with the revision's marker, the head commit and our author.
-   - If one is found, the revision completes with that ID.
-   - A timed-out write can still land, so RECONCILE first waits `github.timeout_ms`. It claims the review absent only after two complete listings at least that far apart. Then PUBLISH tries again, up to `max_retries_per_phase` more times.
-   - If the listing fails, the outbox stays `needs_reconciliation` and the revision FAILS with `cannot_safely_decide`. Then run `reconcile --revision <id>` when GitHub is reachable. If that proves the review absent, `review <url> --publish --retry` posts it.
+You need Node 22.19 or later, pnpm, and git. The terminal client also needs a Rust toolchain.
 
-Reconciliation matches our reviews by author. A token's author comes from `GET /user`, which an installation token (`ghs_...`) cannot read. With such a token, set `github.bot_login` in the config or `PR_REVIEW_BOT_LOGIN` to the app's bot login, such as `my-app[bot]`. Without it, reconciliation cannot decide and leaves the outbox `needs_reconciliation`.
+1. Install the dependencies:
 
-Publishing is part of the policy version (`1+publish`), so an earlier dry run of a head does not block publishing it. A 429 or a rate-limit 403 is retried after `Retry-After` or the reset time. GitHub answers these before it processes the request, so a retry cannot post a second review. Retries and the per-installation concurrency cap are in the `github` config section.
+	```bash
+	pnpm install
+	```
 
-## Service
+2. List the models you can use:
 
-`serve` runs the webhook receiver, the worker loop and the reviews in one process. Configure it with environment variables, listed in `.env.example`:
+	```bash
+	node bin/pr-review.mjs models
+	```
 
-- `GITHUB_WEBHOOK_SECRET` is required.
-- `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY_FILE` (or `GITHUB_APP_PRIVATE_KEY`) select GitHub App auth. Without them, the service uses token auth.
-- `PR_REVIEW_ADMIN_TOKEN` guards the admin endpoints.
-- `PR_REVIEW_MODEL` and the provider's key select the review model.
-- `PORT` sets the listening port.
-- `PR_REVIEW_CONFIG` points at the config file. The default `publish_mode` is `dry_run`, so set `{"review": {"publish_mode": "comment"}}` there to post reviews.
+	pr-review finds credentials in `~/.pi/agent/auth.json`, which it shares with the `pi` CLI, and in provider environment variables such as `ANTHROPIC_API_KEY`. If nothing is listed, run `node bin/pr-review.mjs login anthropic`.
 
-The service uses Jev only with `TYPESAFE_API_KEY`, or with `jev.allow_keyless_for_private`. One engine serves every repository, so the keyless tier would otherwise receive private diffs.
+3. Review a PR without posting anything:
 
-| Endpoint | Auth | |
-|---|---|---|
-| `POST /webhooks/github` | `X-Hub-Signature-256` | Verified over the raw body, stored once per delivery ID, answered 202 (200 for a redelivery) |
-| `GET /healthz` | none | Process is up |
-| `GET /readyz` | admin bearer | DB, worker loop and data dir |
-| `GET /reviews/:revisionId` | admin bearer | State, transitions, findings, outbox and its events |
-| `POST /reviews/:revisionId/retry` | admin bearer | Audited MANUAL_RETRY of a FAILED revision |
-| `GET /webhooks/dead` | admin bearer | Deliveries that failed every attempt, with the last error |
+	```bash
+	node bin/pr-review.mjs review https://github.com/owner/repo/pull/123
+	```
 
-The worker handles `pull_request` events (opened, reopened, synchronize, closed, review_requested). It also handles an `issue_comment` that mentions `@<app-slug> review` on a PR. It ignores bot senders and its own comments. A review request or mention for a head that already has a final review starts nothing, and the delivery's outcome is `already_reviewed:<state>`. Only `POST /reviews/:revisionId/retry` reopens a FAILED one. For each event, it reads the PR from GitHub, and GitHub's state decides open, closed and merged, whatever order the deliveries arrive in. The review of the live head starts `debounce_seconds` after the last event. A new head marks older revisions `superseded_requested` and aborts their tasks, unless they are already publishing. Closing or merging the PR does the same to every in-flight revision. A per-PR lease in `app.sqlite` serializes this. The lease owner is stored once per data dir (in the `meta` table), so a restarted process takes back the leases it left at once. Any other owner's lease expires after 5 minutes.
+	Public repositories need no GitHub token. For private ones, pr-review uses `GITHUB_TOKEN`, or your `gh` login.
 
-A delivery whose handling fails waits `webhook_backoff_ms`, doubled after each failure, and only due deliveries are fetched, so a failing one never holds up fresh ones. After `webhook_max_attempts` (6) it is recorded dead with its reason. A PR that GitHub answers 401, 403 or 404 for is dead at once. Aborts run beside the worker loop, and its GitHub reads give up on a rate-limit wait longer than `github.max_rate_limit_sleep_ms` (30 s), so the delivery backs off instead of stalling every PR.
+4. See every phase transition, the routing decision, and the discarded candidates:
 
-On startup, the service resumes durable tasks and recreates a task for any unfinished revision. It also reconciles outboxes of finished revisions whose write may have reached GitHub, before anything new is posted.
+	```bash
+	node bin/pr-review.mjs inspect --pr owner/repo#123
+	```
 
-**Deploy.** The `Dockerfile` runs `serve` as the non-root `node` user, with git installed and state on the `/data` volume. Register the app from `github-app.yml`, which lists the permissions and events. Then install the app on a repository and point its webhook URL at `/webhooks/github`. For a local test, a forwarding tunnel such as smee.io or `cloudflared` works. The receiver accepts bodies up to 25 MB, GitHub's maximum payload, so on a public address put a reverse proxy with connection and rate limits in front of it.
+To post the review to the PR, add `--publish`. pr-review posts one `COMMENT` review with inline comments. It never approves, requests changes, or merges.
 
-## Control daemon and TUI
+## Commands
 
-`pr-review daemon` serves the TUI protocol (`protocol/README.md`) on a Unix socket. It runs in the foreground until SIGINT or SIGTERM, so run it under your own supervisor.
+| Command | What it does |
+|---|---|
+| `review <pr-url> [--dry-run \| --publish] [--json] [--model provider/id] [--no-jev] [--retry]` | Review one PR. Dry run is the default. Rerunning resumes an interrupted review or prints the stored result. |
+| `inspect --pr owner/repo#N [--json]` | Show a PR's revisions, transitions, routing, findings, and discards. |
+| `reconcile --revision <id>` | Decide an uncertain publication by listing the PR's reviews. Never posts. |
+| `serve` | Run the webhook receiver, the worker, and the reviews in one process. |
+| `models [--json]` | List the installed agent CLIs and the models you can use. |
+| `login [provider] [--api-key]` | Store a model credential in pi's auth file. |
+| `accounts [--json]` | List your `gh` accounts and show which one pr-review uses. |
+| `accounts use <login>` | Use that `gh` account for GitHub reads and publishing in this data directory. |
+| `daemon [--socket PATH] [--data DIR] [--fixture NAME]` | Serve review state to the terminal client over a Unix socket. |
+| `tui [args]` | Start the terminal client, `pr-review-tui`. |
+
+Run every command as `node bin/pr-review.mjs <command>`.
+
+## Documentation
+
+- [Configuration](docs/configuration.md) covers GitHub tokens and accounts, model choice, Jev, the config file, and where state lives.
+- [Publishing](docs/publishing.md) explains how pr-review avoids posting a review twice, and how to recover an uncertain publication.
+- [Running the service](docs/service.md) covers GitHub App setup, environment variables, endpoints, and deployment.
+- [The terminal client](docs/tui.md) covers the daemon, the TUI's views and keys, and the account selector.
+- [Protocol v1](protocol/README.md) is the reference for the messages between the daemon and the TUI.
+- [`docs/SPEC.md`](docs/SPEC.md) and [`docs/TUI_SPEC.md`](docs/TUI_SPEC.md) are the design specifications.
+
+## Develop
 
 ```bash
-node bin/pr-review.mjs daemon [--data .data] [--socket PATH] [--heartbeat 15]   # reads the app DB of a data dir
-node bin/pr-review.mjs daemon --fixture normal                                   # plays protocol/playback/normal.ndjson; no GitHub, no model
-node bin/pr-review.mjs tui [args]                                                # runs pr-review-tui from PATH or tui/target/release/
+pnpm typecheck && pnpm test             # TypeScript engine, daemon, and protocol
+(cd tui && cargo test && cargo clippy --all-targets -- -D warnings && cargo fmt --check)
+pnpm protocol:emit                      # regenerate protocol/schema, fixtures, and playback after changing src/protocol
 ```
 
-- **Socket.** The default path is `$XDG_RUNTIME_DIR/pr-review/reviewer.sock`, else `~/Library/Application Support/pr-review/reviewer.sock` on macOS, else `~/.local/state/pr-review/reviewer.sock`. The daemon creates the directory with mode 0700 and the socket with mode 0600. It refuses a directory that is a symlink, belongs to another user, or has a looser mode. It replaces a socket file that nothing listens on, and exits if another daemon is listening.
-- **Read-only for reviews.** The daemon reads `app.sqlite` on a read-only connection and takes no data-dir lock, so it runs beside `pr-review review`. It writes only migrations at start, the selected account, and a journal row when the selection or gh's account list changes. It never opens `durable.sqlite`. Disconnecting or closing the TUI changes nothing in a running review.
-- **Commands.** The only write capability is `account.select`, the same as `accounts use`. gh is asked again on `snapshot.get` when its last answer is over 30 seconds old, and every 60 seconds. Every other `command` gets `CAPABILITY_DENIED`.
-- **Fixtures.** `--fixture` takes any script in `protocol/playback/`. The script clock starts at the first snapshot request. Fixture strings are not sanitized, because `hostile` exists to test the client.
-
-## Layout
+The TypeScript code lives in `src/`, one directory per part of the system:
 
 | Directory | Contents |
 |---|---|
-| `src/domain` | Pure transition tables for the review, outbox, coordinator, candidate and finding machines |
-| `src/persistence` | The app SQLite store. Every revision transition is audited in the same transaction |
-| `src/source` | Git reads pinned by SHA (`git show`, `grep`, `log`, `diff`). Nothing reads a working tree |
-| `src/github` | The GitHub client (token or App auth, rate limits, one response classifier) and the PR reader |
-| `src/publish` | The review payload, the POST and reconciliation against the PR's reviews |
-| `src/coordinator` | Webhook routing, the PR coordinator machine, debounce, leases and supersede requests |
-| `src/server` | The HTTP endpoints and the service that wires them to the worker and recovery |
-| `src/jev` | The Jev adapter and the deterministic routing policy |
-| `src/reasoning` | Read-only model tools, the candidate schema, the request text and deterministic verification |
-| `src/runtime` | The `pr-review.revision` durable task and how it is wired |
-| `src/models` | The credential store over pi's auth file, harness and model detection, and model choice |
-| `src/cli` | The command-line interface and the report rendering |
-| `src/protocol` | The TUI protocol v1 schemas (TypeBox), fixtures and playback scripts |
-| `src/control` | The control daemon: socket server, the app DB and fixture sources, diff paging |
+| `src/domain` | State machines for reviews, the outbox, the PR coordinator, candidates, and findings |
+| `src/runtime` | The durable review task and the phases it runs |
+| `src/reasoning` | The model's read-only tools, the candidate schema, and verification |
+| `src/jev` | The Jev adapter and the routing policy |
+| `src/source` | Git reads pinned by commit SHA |
+| `src/github` | The GitHub client, PR reads, and `gh` account detection |
+| `src/publish` | The review payload, posting, and reconciliation |
+| `src/coordinator` | Webhook routing, debounce, leases, and superseding older revisions |
+| `src/server` | HTTP endpoints and the service loop |
+| `src/persistence` | The application SQLite store and its audit log |
+| `src/models` | Model and harness detection, and the shared credential store |
+| `src/protocol`, `src/control` | The TUI protocol and the control daemon |
+| `src/cli` | The command-line interface |
 
-## What M2 does not do
+The Rust terminal client is in `tui/`. Migrations are in `migrations/`. Commits follow [Conventional Commits](https://www.conventionalcommits.org/).
 
-- It runs no tests in a sandbox. Verification is static. There is no second verification pass by an LLM.
-- It does not re-review across revisions, classify findings as resolved, or reply to review threads. That is M3.
-- It has no evals.
-- A review started from the CLI is keyed by installation 0, and one started by the App by its installation ID. So the same PR reviewed both ways has two PR records.
+## Limits
+
+- Verification is static. pr-review runs no tests against PR code, and no second model double-checks a finding.
+- Each commit gets a fresh review. Tracking a finding across commits, marking it resolved, and replying in review threads are not built yet.
+- The terminal client is read-only, apart from choosing a GitHub account. Starting, cancelling, and approving reviews from the TUI are not built yet.
+- There is no labeled benchmark yet, so precision and recall are not measured.
