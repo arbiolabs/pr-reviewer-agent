@@ -86,6 +86,7 @@ pub fn modal(c: &Ctx, f: &mut Frame, body: Rect, modal: &Modal) {
 fn draw(c: &Ctx, f: &mut Frame, area: Rect, title: &str, lines: Vec<Line<'static>>, scroll: u16) {
     let block = c.pane(title, true);
     f.render_widget(Clear, area);
+    f.render_widget(Paragraph::new("").style(c.t.bg(crate::theme::Bg::Base)), area);
     f.render_widget(Paragraph::new(lines).block(block).wrap(Wrap { trim: false }).scroll((scroll, 0)), area);
 }
 

@@ -19,7 +19,7 @@ pub const COLUMN: u16 = 100;
 const RAIL_W: u16 = 32;
 
 pub fn spinner(c: &Ctx) -> &'static str {
-    const U: [&str; 4] = ["·", "•", "●", "•"];
+    const U: [&str; 4] = ["•", "●", "●", "•"];
     const A: [&str; 4] = ["-", "\\", "|", "/"];
     let n = (c.m.now_ms / 125) as usize;
     if c.t.ascii { A[n % 4] } else { U[n % 4] }
@@ -265,7 +265,7 @@ fn summary_line(c: &Ctx, pr: &Pr, findings: &[&Finding], w: usize) -> Line<'stat
     let words = |compact: bool| {
     let mut left = vec![c.span(
         match live.len() {
-            0 => "No findings".to_string(),
+            0 => "No findings yet".to_string(),
             1 => "1 finding".to_string(),
             n => format!("{n} findings"),
         },
@@ -539,6 +539,7 @@ fn code_block(c: &Ctx, ev: &Evidence, f: &Finding, w: usize, max: usize) -> Vec<
 /// Enter on a card: the whole finding as an article, every piece of evidence in full.
 pub fn finding_page(c: &Ctx, f: &mut Frame, area: Rect, id: &FindingId, scroll: u16) {
     f.render_widget(Clear, area);
+    f.render_widget(Paragraph::new("").style(c.t.bg(Bg::Base)), area);
     let col = column(area);
     let w = col.width as usize;
     let Some(fd) = c.m.domain.findings.get(id) else {

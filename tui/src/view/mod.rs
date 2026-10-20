@@ -91,6 +91,7 @@ pub fn view(m: &Model, f: &mut Frame) {
         minimal(&c, f, area);
         return;
     }
+    f.render_widget(Paragraph::new("").style(t.bg(crate::theme::Bg::Base)), area);
     let banner = banner(&c, area.width);
     let [title, tabs, banner_area, body, footer] = Layout::vertical([
         Constraint::Length(1),

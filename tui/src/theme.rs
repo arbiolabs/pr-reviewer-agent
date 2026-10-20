@@ -46,7 +46,7 @@ pub enum Bg {
 /// "Ink": the editorial palette. Every foreground reaches 4.5:1 on every background (see the test below).
 pub const PALETTE: &[(&str, u32, bool)] = &[
     // backgrounds
-    ("base", 0x14161b, true),
+    ("base", 0x171717, true),
     ("surface", 0x1b1e25, true),
     ("anchor", 0x262b36, true),
     ("select", 0x232a3a, true),
