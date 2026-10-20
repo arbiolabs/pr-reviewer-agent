@@ -7,7 +7,7 @@ import { ACCOUNT_KEY, chooseAccount, detectGh, type Env, type GhDetection, listA
 import { AppStore, type PullRow, type RevisionRow } from "../persistence/store.ts";
 import { sanitize } from "../protocol/sanitize.ts";
 import type { Account, Finding, FindingDetail, Pr, Run, SequencedEvent } from "../protocol/v1.ts";
-import { PinnedRepo } from "../source/git.ts";
+import { isMissingObject, offlineReadsSupported, PinnedRepo } from "../source/git.ts";
 import { type DiffPage, pageDiff, parseDiffFiles } from "./diff.ts";
 import { ControlError, type ControlSource, type DiffRequest, type Snapshot, type TimelinePage, type TimelineRequest } from "./source.ts";
 
@@ -40,6 +40,19 @@ const SEEN_KEY = "github.accounts_seen";
 const EXCERPT_LINES = 40;
 const EXCERPT_BYTES = 8 * 1024;
 const BLOB_CACHE_ENTRIES = 64;
+const NEEDS_GIT = "git 2.45 or newer is needed to read code without fetching";
+
+/** The longest prefix of `text` within `max` UTF-8 bytes, never splitting a code point. */
+function cutToBytes(text: string, max: number): string {
+  let bytes = 0;
+  let out = "";
+  for (const ch of text) {
+    bytes += Buffer.byteLength(ch);
+    if (bytes > max) break;
+    out += ch;
+  }
+  return out;
+}
 
 /** Lines `start..end` of `content`, capped at EXCERPT_LINES and EXCERPT_BYTES with a closing `… N more lines`; `undefined` past the end. */
 export function excerpt(content: string, start: number, end: number): string | undefined {
@@ -50,7 +63,7 @@ export function excerpt(content: string, start: number, end: number): string | u
   for (const line of lines.slice(0, EXCERPT_LINES)) {
     bytes += Buffer.byteLength(line) + 1;
     if (bytes > EXCERPT_BYTES) {
-      if (kept.length === 0) kept.push(Buffer.from(line).subarray(0, EXCERPT_BYTES).toString());
+      if (kept.length === 0) kept.push(`${cutToBytes(line, EXCERPT_BYTES)} … line truncated`);
       break;
     }
     kept.push(line);
@@ -194,26 +207,31 @@ export class AppDbSource implements ControlSource {
       return { repo: row.repo_full_name, refs: candidate.codeEvidence, detail: finding };
     });
     const evidence: FindingDetail["evidence"] = [];
+    const canRead = await offlineReadsSupported();
     for (const { path, start, end, refSha } of refs) {
-      const content = await this.blob(repo, refSha, path);
-      const code = content === undefined ? undefined : excerpt(content, start, end);
-      evidence.push({ kind: "code_ref", path, start, end, refSha, text: code ?? `${path}:${start}-${end} (code unavailable offline)` });
+      const code = canRead ? await this.excerptAt(repo, refSha, path, start, end) : undefined;
+      const why = canRead ? "code unavailable offline" : NEEDS_GIT;
+      evidence.push({ kind: "code_ref", path, start, end, refSha, text: code ?? `${path}:${start}-${end} (${why})` });
     }
     return clean({ ...detail, evidence });
   }
 
-  /** Read from the local bare repo only: the daemon never fetches. Any failure reads as unavailable. */
-  private async blob(repo: string, sha: string, path: string): Promise<string | undefined> {
-    const key = `${repo}\0${sha}\0${path}`;
-    let content = this.blobs.get(key);
-    if (content === undefined) {
-      content = await new PinnedRepo(join(this.dataDir, "repos", `${repo}.git`), sha, sha).show(sha, path, { offline: true }).catch(() => undefined);
-      if (content === undefined) return undefined;
+  /**
+   * The cited lines, read from the local bare repo only: the daemon never fetches. Any failure reads as unavailable.
+   * The cache holds excerpts, not files, so each entry stays under EXCERPT_BYTES.
+   */
+  private async excerptAt(repo: string, sha: string, path: string, start: number, end: number): Promise<string | undefined> {
+    const key = `${repo}\0${sha}\0${path}\0${start}\0${end}`;
+    let text = this.blobs.get(key);
+    if (text === undefined) {
+      const content = await new PinnedRepo(join(this.dataDir, "repos", `${repo}.git`), sha, sha).show(sha, path, { offline: true }).catch(() => undefined);
+      text = content === undefined ? undefined : excerpt(content, start, end);
+      if (text === undefined) return undefined;
     }
     this.blobs.delete(key);
-    this.blobs.set(key, content);
+    this.blobs.set(key, text);
     if (this.blobs.size > BLOB_CACHE_ENTRIES) this.blobs.delete(this.blobs.keys().next().value!);
-    return content;
+    return text;
   }
 
   async diff(request: DiffRequest): Promise<DiffPage> {
@@ -223,8 +241,10 @@ export class AppDbSource implements ControlSource {
     if (!found) throw new ControlError("NOT_FOUND", `no review of ${request.prId} at ${request.baseSha}...${request.headSha}`);
     const key = `${request.prId}\0${request.baseSha}\0${request.headSha}`;
     if (this.diffCache?.key !== key) {
+      if (!(await offlineReadsSupported())) throw new ControlError("TEMPORARILY_UNAVAILABLE", `diff unavailable: ${NEEDS_GIT}`);
       const repo = new PinnedRepo(join(this.dataDir, "repos", `${found.repo_full_name}.git`), request.baseSha, request.headSha);
-      const text = await repo.diff(undefined, { offline: true }).catch(() => {
+      const text = await repo.diff(undefined, { offline: true }).catch((error: unknown) => {
+        if (!isMissingObject(error)) throw error;
         throw new ControlError("TEMPORARILY_UNAVAILABLE", `the diff of ${request.baseSha.slice(0, 7)}...${request.headSha.slice(0, 7)} is not in the local clone; the daemon never fetches`);
       });
       this.diffCache = { key, files: parseDiffFiles(text) };

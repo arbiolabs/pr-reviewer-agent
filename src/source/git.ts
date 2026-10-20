@@ -14,6 +14,31 @@ export const DEFAULT_OUTPUT_CAP = 64 * 1024;
 // A blob-less clone fetches a missing blob from origin on demand; readers that must stay off the network turn that off.
 const OFFLINE_ENV = { ...GIT_ENV, GIT_NO_LAZY_FETCH: "1" };
 
+/** Git ignores GIT_NO_LAZY_FETCH before 2.45, so older versions would lazy-fetch blobs from origin despite it. */
+export const OFFLINE_GIT_MIN = [2, 45] as const;
+
+let offlineCheck: Promise<boolean> | undefined;
+/** Whether this machine's git honours GIT_NO_LAZY_FETCH. Asked once per process. */
+export function offlineReadsSupported(): Promise<boolean> {
+  offlineCheck ??= run("git", ["--version"], { env: GIT_ENV, encoding: "utf8" }).then(
+    ({ stdout }) => gitVersionAtLeast(stdout, OFFLINE_GIT_MIN),
+    () => false,
+  );
+  return offlineCheck;
+}
+
+export function gitVersionAtLeast(versionOutput: string, [major, minor]: readonly [number, number]): boolean {
+  const m = /git version (\d+)\.(\d+)/.exec(versionOutput);
+  if (!m) return false;
+  const [have, haveMinor] = [Number(m[1]), Number(m[2])];
+  return have > major || (have === major && haveMinor >= minor);
+}
+
+/** True when git failed only because a blob is not in the local clone. */
+export function isMissingObject(error: unknown): boolean {
+  return /bad object|unable to read|could not read|missing blob|promisor/i.test(String((error as { stderr?: unknown }).stderr ?? ""));
+}
+
 async function git(dir: string, args: string[], maxBuffer = 64 * 1024 * 1024, env = GIT_ENV): Promise<string> {
   const { stdout } = await run("git", ["-C", dir, "-c", "core.quotePath=false", ...args], { env, maxBuffer, encoding: "utf8" });
   return stdout;
