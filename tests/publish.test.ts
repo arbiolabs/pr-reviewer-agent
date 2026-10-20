@@ -7,6 +7,7 @@ import { main } from "../src/cli/main.ts";
 import { DEFAULT_CONFIG } from "../src/config/config.ts";
 import { GitHubClient } from "../src/github/client.ts";
 import { GitHubPullSource } from "../src/github/pulls.ts";
+import { postReview } from "../src/publish/publisher.ts";
 import { type App, finishReview, openApp, startReview } from "../src/runtime/app.ts";
 import { FakeGitHub } from "./fake-github.ts";
 import { createFixture, type Fixture } from "./fixture.ts";
@@ -241,4 +242,22 @@ it("supersedes a revision whose PR was merged before the POST, with zero POSTs",
   const { revision, outbox } = await publish(app);
   expect([revision.state, outbox.status, fake.postAttempts]).toEqual(["SUPERSEDED", "failed", 0]);
   expect(app.store.auditEvents(revision.id).at(-1)).toMatchObject({ from_state: "PUBLISH", event: "PR_NOT_OPEN", to_state: "SUPERSEDED", detail: "pr_not_open: merged" });
+}, 30_000);
+
+it("reports a POST aborted before it was sent as not sent, never as uncertain", async () => {
+  const signal = AbortSignal.abort(new Error("shutting down"));
+  const payload = { commit_id: fixture.headSha, body: "x", event: "COMMENT" as const, comments: [] };
+  expect(await postReview(testClient(), { fullName: "acme/shop", number: 1 }, payload, signal)).toEqual({
+    kind: "not_sent",
+    error: "POST /repos/acme/shop/pulls/1/reviews: connection failed",
+  });
+  expect(fake.postAttempts).toBe(0);
+});
+
+it("puts the outbox back to pending when every try of a POST was rate-limited, then posts once", async () => {
+  fake.postBehaviors = ["rate-limited", "rate-limited", "rate-limited"];
+  const app = await openPublishing();
+  const { revision, outbox, outboxEvents } = await publish(app);
+  expect([revision.state, outbox.status, fake.postAttempts, fake.reviews.length]).toEqual(["COMPLETED", "published", 4, 1]);
+  expect(outboxEvents).toEqual(["pending SEND sending", "sending NOT_SENT pending", "pending SEND sending", "sending SENT published"]);
 }, 30_000);

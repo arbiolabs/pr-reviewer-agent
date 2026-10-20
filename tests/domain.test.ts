@@ -99,6 +99,7 @@ matrix("publication outbox", OUTBOX_MACHINE, OUTBOX_STATES, OUTBOX_EVENTS, [
   "pending FOUND published",
   "pending UNDECIDED needs_reconciliation",
   "sending SENT published",
+  "sending NOT_SENT pending",
   "sending UNCERTAIN needs_reconciliation",
   "sending REJECTED failed",
   "needs_reconciliation FOUND published",

@@ -94,7 +94,7 @@ export type AuditEvent = { seq: number; from_state: string; event: string; to_st
 const now = () => new Date().toISOString();
 
 /** Outbox events whose detail is why publication is not done; `last_error` keeps the latest one. */
-const OUTBOX_ERRORS: readonly OutboxEvent[] = ["UNCERTAIN", "REJECTED", "ABANDON", "UNDECIDED"];
+const OUTBOX_ERRORS: readonly OutboxEvent[] = ["NOT_SENT", "UNCERTAIN", "REJECTED", "ABANDON", "UNDECIDED"];
 
 export class AppStore {
   readonly db: DatabaseSync;

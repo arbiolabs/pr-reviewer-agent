@@ -43,16 +43,25 @@ export function buildPayload(input: {
   return { payload: { commit_id: input.headSha, body: `${body}\n${marker(input.revisionId, hash)}\n`, event: "COMMENT", comments }, hash };
 }
 
-export type PostOutcome = { kind: "posted"; reviewId: number } | { kind: "rejected"; error: string } | { kind: "uncertain"; error: string };
+export type PostOutcome =
+  | { kind: "posted"; reviewId: number }
+  | { kind: "rejected"; error: string }
+  | { kind: "not_sent"; error: string }
+  | { kind: "uncertain"; error: string };
 
-/** §9.3 step 4. Only a definite GitHub refusal is `rejected`; anything that may have landed is `uncertain`. */
+/**
+ * §9.3 step 4. Only a definite GitHub refusal is `rejected`. A retryable write error is one GitHub never processed (a
+ * rate limit, or a request that never left), so it is `not_sent`. Anything that may have landed is `uncertain`.
+ */
 export async function postReview(client: GitHubClient, pr: PullTarget, payload: ReviewPayload, signal?: AbortSignal): Promise<PostOutcome> {
   try {
     const { data } = await client.request<{ id: number }>("POST", `/repos/${pr.fullName}/pulls/${pr.number}/reviews`, { body: payload, ...(signal ? { signal } : {}) });
     return { kind: "posted", reviewId: data.id };
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    return error instanceof GitHubError && error.class === "fatal" ? { kind: "rejected", error: message } : { kind: "uncertain", error: message };
+    if (error instanceof GitHubError && error.class === "fatal") return { kind: "rejected", error: message };
+    if (error instanceof GitHubError && error.class === "retryable") return { kind: "not_sent", error: message };
+    return { kind: "uncertain", error: message };
   }
 }
 

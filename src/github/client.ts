@@ -156,6 +156,8 @@ export class GitHubClient {
   }
 
   private async attempt(method: string, url: string, credential: string | undefined, options: RequestOptions): Promise<Attempt> {
+    // Aborted before fetch was called: no byte left this process.
+    if (options.signal?.aborted) return { kind: "network", sent: false };
     const signal = AbortSignal.any([AbortSignal.timeout(this.options.timeoutMs), ...(options.signal ? [options.signal] : [])]);
     try {
       const response = await fetch(url, {

@@ -310,6 +310,11 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
           });
           return finished(revision.id, "COMPLETED");
         }
+        if (result.kind === "not_sent") {
+          // GitHub never saw it: the outbox is pending again, and the phase retries (or the abort takes over).
+          store.advanceOutbox(outbox.id, "NOT_SENT", result.error);
+          throw new Error(result.error);
+        }
         if (result.kind === "rejected") {
           store.tx(() => {
             store.advanceOutbox(outbox.id, "REJECTED", result.error);
