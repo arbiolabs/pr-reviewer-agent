@@ -77,6 +77,8 @@ pub(crate) fn window(len: usize, selected: Option<usize>, height: usize) -> std:
 pub enum Hit {
     Pr(crate::protocol::PrId),
     Finding(crate::protocol::FindingId),
+    /// A parked run's "Ready to publish" line.
+    Ready,
     /// A file in the Diff screen's list, by path.
     DiffFile(crate::protocol::Text),
     /// A row of the selected file's patch: a hunk header, a line, or a finding written under it.

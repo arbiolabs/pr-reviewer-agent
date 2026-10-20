@@ -665,8 +665,10 @@ fn reselect(m: &mut Model) {
         return;
     };
     let findings = m.domain.pr_findings(&pr);
-    let keep = m.ui.selected_finding.as_ref().is_some_and(|id| findings.iter().any(|f| &f.id == id));
+    let keep =
+        m.on_ready_line() || m.ui.selected_finding.as_ref().is_some_and(|id| findings.iter().any(|f| &f.id == id));
     if !keep {
+        m.ui.ready_line = None;
         m.ui.selected_finding = findings.first().map(|f| f.id.clone());
     }
 }
@@ -1175,6 +1177,15 @@ fn click(m: &mut Model, x: u16, y: u16, fx: &mut Vec<Effect>) {
                 reselect(m);
             }
         }
+        Some(crate::view::Hit::Ready) => {
+            if let Some(r) = m.parked_run().cloned() {
+                m.ui.screen = Screen::Review;
+                m.ui.focus = Pane::Main;
+                m.ui.ready_line = Some(r.id.clone());
+                m.ui.selected_finding = None;
+                open_publication(m, r, fx);
+            }
+        }
         Some(crate::view::Hit::Finding(id)) => {
             m.ui.screen = Screen::Review;
             m.ui.focus = Pane::Main;
@@ -1410,9 +1421,18 @@ fn move_by(m: &mut Model, delta: isize, fx: &mut Vec<Effect>) {
         }
         (Screen::Review, Pane::Main) => {
             let Some(pr) = m.ui.selected_pr.clone() else { return };
-            let ids: Vec<FindingId> = m.domain.pr_findings(&pr).iter().map(|f| f.id.clone()).collect();
-            let next = step(&ids, m.ui.selected_finding.as_ref(), delta);
-            if next != m.ui.selected_finding {
+            // A parked run's ready line sits above the findings, as `None`.
+            let parked = m.parked_run().map(|r| r.id.clone());
+            let ids: Vec<Option<FindingId>> = parked
+                .iter()
+                .map(|_| None)
+                .chain(m.domain.pr_findings(&pr).iter().map(|f| Some(f.id.clone())))
+                .collect();
+            let current = if m.on_ready_line() { None } else { m.ui.selected_finding.clone() };
+            if let Some(next) = step(&ids, Some(&current), delta)
+                && next != current
+            {
+                m.ui.ready_line = if next.is_none() { parked } else { None };
                 m.ui.selected_finding = next;
                 m.ui.doc_scroll = 0;
             }
@@ -1486,7 +1506,9 @@ fn open(m: &mut Model, fx: &mut Vec<Effect>) {
         }
         (Screen::Review, Pane::Sidebar) => m.ui.focus = Pane::Main,
         (Screen::Review, _) => {
-            if let Some(id) = m.ui.selected_finding.clone() {
+            if let Some(r) = m.parked_run().filter(|_| m.on_ready_line()).cloned() {
+                open_publication(m, r, fx);
+            } else if let Some(id) = m.ui.selected_finding.clone() {
                 open_finding(m, id, fx);
             }
         }

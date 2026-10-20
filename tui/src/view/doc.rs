@@ -164,6 +164,9 @@ pub fn hit(c: &Ctx, area: Rect, x: u16, y: u16) -> Option<super::Hit> {
     let pr = c.m.selected_pr()?;
     let doc = document(c, pr, col.width as usize, col.height as usize);
     let line = (y.checked_sub(col.y)? + doc.scroll(c, col.height as usize)) as usize;
+    if doc.ready == Some(line) {
+        return Some(super::Hit::Ready);
+    }
     doc.owners.iter().rev().find(|(start, _)| *start <= line).map(|(_, id)| super::Hit::Finding(id.clone()))
 }
 
@@ -184,6 +187,8 @@ pub struct Doc {
     pub card: Option<(usize, usize)>,
     /// The first line of each finding's card, in order, so a click resolves to the card under it.
     pub owners: Vec<(usize, FindingId)>,
+    /// The "Ready to publish" line of a parked run.
+    pub ready: Option<usize>,
     /// Rows the open card's explanation scrolls through before J moves the document itself.
     pub prose_rest: usize,
 }
@@ -269,9 +274,12 @@ pub fn document(c: &Ctx, pr: &Pr, w: usize, height: usize) -> Doc {
         let log = if findings.is_empty() { height.saturating_sub(lines.len() + 6).max(5) } else { 4 };
         live(c, pr, w, log, &mut lines);
     }
+    let mut ready = None;
     if run.is_some_and(|r| r.parked()) {
+        ready = Some(lines.len());
+        let on = c.m.on_ready_line() && c.m.ui.screen == Screen::Review && c.m.ui.focus != Pane::Sidebar;
         lines.push(Line::from(vec![
-            c.span(format!("{} Ready to publish", g.pending), Role::Pending),
+            c.span(format!("{} Ready to publish", g.pending), if on { Role::Selected } else { Role::Pending }),
             c.span(format!(" {} ", g.sep), Role::Muted),
             c.span("p", Role::Accent),
             c.span(" previews", Role::Muted),
@@ -304,7 +312,7 @@ pub fn document(c: &Ctx, pr: &Pr, w: usize, height: usize) -> Doc {
         }
     }
     let card = card_at.map(|(s, e)| (s, e.min(lines.len())));
-    Doc { lines, card, owners, prose_rest }
+    Doc { lines, card, owners, ready, prose_rest }
 }
 
 /// Rows the next card's head needs to stay in view under the open card: its severity, title and location.

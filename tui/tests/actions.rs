@@ -404,3 +404,35 @@ fn publication_rows_sit_under_publish_though_the_run_ends_with_no_phase_change()
     assert!(!rows[publishing].contains("https://"), "{f}");
     assert!(rows[publishing + 1].ends_with("https://github.com/acme/shop/pull/184#pullrequestreview-3141"), "{f}");
 }
+
+fn asks_for_the_preview(fx: &[Effect]) -> bool {
+    fx.iter().any(
+        |e| matches!(e, Effect::Send(ClientMessage::PublicationGet { run_id, .. }) if run_id.as_str() == "rev-184-a"),
+    )
+}
+
+#[test]
+fn the_ready_to_publish_line_takes_the_cursor_and_enter_or_a_click_opens_the_preview() {
+    let mut m = parked();
+    m.ui.screen = pr_review_tui::model::Screen::Review;
+    m.ui.focus = pr_review_tui::model::Pane::Main;
+    assert!(m.ui.selected_finding.is_some(), "the first finding holds the cursor");
+    press(&mut m, KeyCode::Char('k'));
+    assert_eq!(m.ui.selected_finding, None, "k from the first finding moves onto the ready line");
+    assert!(asks_for_the_preview(&press(&mut m, KeyCode::Enter)));
+    press(&mut m, KeyCode::Esc);
+    press(&mut m, KeyCode::Char('j'));
+    assert!(m.ui.selected_finding.is_some(), "j moves back to the first finding");
+
+    let (f, _) = render(&mut m, 120, 50);
+    let row = f.lines().position(|l| l.contains("Ready to publish")).expect("the ready line") as u16;
+    let line = f.lines().nth(row as usize).unwrap();
+    let col = line[..line.find("Ready").unwrap()].chars().count() as u16;
+    let click = crossterm::event::MouseEvent {
+        kind: crossterm::event::MouseEventKind::Down(crossterm::event::MouseButton::Left),
+        column: col,
+        row,
+        modifiers: KeyModifiers::NONE,
+    };
+    assert!(asks_for_the_preview(&update(&mut m, Msg::Mouse(click))));
+}

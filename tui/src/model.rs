@@ -442,6 +442,8 @@ pub struct Ui {
     pub modals: Vec<Modal>,
     pub selected_pr: Option<PrId>,
     pub selected_finding: Option<FindingId>,
+    /// The parked run whose "Ready to publish" line holds the cursor, above the findings; see `Model::on_ready_line`.
+    pub ready_line: Option<RunId>,
     /// Lines the reader scrolled the document past where the selection puts it; reset when the selection moves.
     pub doc_scroll: i32,
     pub pr_filter: String,
@@ -505,6 +507,7 @@ impl Model {
                 modals: Vec::new(),
                 selected_pr: None,
                 selected_finding: None,
+                ready_line: None,
                 doc_scroll: 0,
                 pr_filter: String::new(),
                 wanted_pr,
@@ -540,6 +543,18 @@ impl Model {
 
     pub fn selected_pr(&self) -> Option<&Pr> {
         self.ui.selected_pr.as_ref().and_then(|id| self.domain.prs.get(id))
+    }
+
+    /// The selected PR's latest run while it waits for approval.
+    pub fn parked_run(&self) -> Option<&Run> {
+        self.domain.latest_run(self.ui.selected_pr.as_ref()?).filter(|r| r.parked())
+    }
+
+    /// The cursor is on the ready line only while that run is still the selected PR's parked one.
+    pub fn on_ready_line(&self) -> bool {
+        self.ui.selected_finding.is_none()
+            && self.ui.ready_line.is_some()
+            && self.parked_run().map(|r| &r.id) == self.ui.ready_line.as_ref()
     }
 
     pub fn selected_finding(&self) -> Option<&Finding> {
