@@ -1,6 +1,6 @@
 {
   "streamEpoch": "epoch-1",
-  "lastSequence": 19,
+  "lastSequence": 18,
   "resyncRequested": false,
   "toolActivityCount": 0,
   "prs": [

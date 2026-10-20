@@ -1084,16 +1084,15 @@ const approval = lines(40, [
   welcome(10, EPOCH, ["account.select", ...REVIEW_COMMANDS], "engine"),
   snapshot(10, [pr1, pr2, pr3], [run1, run2], [f1, f2], EPOCH, [personal, work]),
   phase({ seq: 11 }, run1, "VERIFY", "PREPARE_PUBLICATION", "CANDIDATES_DISPOSED"),
-  publicationChanged({ seq: 12 }, run1, "publishing"),
-  phase({ seq: 13 }, run1, "PREPARE_PUBLICATION", "AWAITING_APPROVAL", "APPROVAL_REQUIRED"),
-  publicationChanged({ seq: 14 }, run1, "awaiting_approval"),
+  phase({ seq: 12 }, run1, "PREPARE_PUBLICATION", "AWAITING_APPROVAL", "APPROVAL_REQUIRED"),
+  publicationChanged({ seq: 13 }, run1, "awaiting_approval"),
   preview,
   { type: "command.result", requestId: "req-cmd", status: "accepted", operationId: `review.publish:${run1.id}` },
-  phase({ seq: 15 }, run1, "AWAITING_APPROVAL", "PUBLISH", "APPROVED"),
-  publicationChanged({ seq: 16 }, run1, "publishing"),
-  publicationChanged({ seq: 17 }, run1, "published", 3141),
-  phase({ seq: 18 }, run1, "PUBLISH", "COMPLETED", "REVIEW_RECONCILED"),
-  runEvent({ seq: 19 }, "review.completed", { ...run1, phase: "COMPLETED", status: "COMPLETED", completedAt: at(19) }),
+  phase({ seq: 14 }, run1, "AWAITING_APPROVAL", "PUBLISH", "APPROVED"),
+  publicationChanged({ seq: 15 }, run1, "publishing"),
+  publicationChanged({ seq: 16 }, run1, "published", 3141),
+  phase({ seq: 17 }, run1, "PUBLISH", "COMPLETED", "REVIEW_RECONCILED"),
+  runEvent({ seq: 18 }, "review.completed", { ...run1, phase: "COMPLETED", status: "COMPLETED", completedAt: at(18) }),
 ]);
 
 // Each step's occurredAt is the script clock, so the timestamps match the cadence the TUI plays at.
@@ -1236,7 +1235,7 @@ export const playback: Record<string, { script: PlaybackLine[]; expect: Expect }
   approval: {
     script: approval,
     expect: baseExpect({
-      lastSequence: 19,
+      lastSequence: 18,
       runs: [runRow(run1, "COMPLETED", "COMPLETED"), runRow(run2)],
       findings: [
         { id: f1.id, title: f1.title, status: f1.status, stale: false },

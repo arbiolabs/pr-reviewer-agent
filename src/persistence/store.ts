@@ -275,20 +275,18 @@ export class AppStore {
       .run(status, at, revisionId);
   }
 
-  /** Insert the canonical payload once per idempotency key; a rerun gets the row that won. */
+  /**
+   * Insert the canonical payload once per idempotency key; a rerun gets the row that won. Called inside the transition
+   * out of PREPARE_PUBLICATION, which journals the publication status once the revision is in its new state.
+   */
   ensureOutbox(row: { revisionId: string; idempotencyKey: string; payloadHash: string; payloadJson: string }): OutboxRow {
-    return this.tx(() => {
-      const at = now();
-      this.db
-        .prepare(
-          `INSERT INTO publication_outbox (id, revision_id, idempotency_key, payload_hash, payload_json, status, updated_at)
-           VALUES (?, ?, ?, ?, ?, 'pending', ?) ON CONFLICT (idempotency_key) DO NOTHING`,
-        )
-        .run(stableId("outbox", row.idempotencyKey), row.revisionId, row.idempotencyKey, row.payloadHash, row.payloadJson, at);
-      const outbox = this.db.prepare("SELECT * FROM publication_outbox WHERE idempotency_key = ?").get(row.idempotencyKey) as OutboxRow;
-      this.journalPublication(row.revisionId, publicationStatus(this.revision(row.revisionId)!.state, outbox.status), at);
-      return outbox;
-    });
+    this.db
+      .prepare(
+        `INSERT INTO publication_outbox (id, revision_id, idempotency_key, payload_hash, payload_json, status, updated_at)
+         VALUES (?, ?, ?, ?, ?, 'pending', ?) ON CONFLICT (idempotency_key) DO NOTHING`,
+      )
+      .run(stableId("outbox", row.idempotencyKey), row.revisionId, row.idempotencyKey, row.payloadHash, row.payloadJson, now());
+    return this.db.prepare("SELECT * FROM publication_outbox WHERE idempotency_key = ?").get(row.idempotencyKey) as OutboxRow;
   }
 
   outbox(id: string): OutboxRow | undefined {

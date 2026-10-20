@@ -115,7 +115,6 @@ const UP_TO_APPROVAL = [
   "phase ANALYZE -> VERIFY",
   "finding Order deletion endpoint skips the admin check",
   "phase VERIFY -> PREPARE_PUBLICATION",
-  "publication publishing",
   "phase PREPARE_PUBLICATION -> AWAITING_APPROVAL",
   "publication awaiting_approval",
 ];

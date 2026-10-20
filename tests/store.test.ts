@@ -108,11 +108,11 @@ function revisionAwaitingApproval(store: AppStore) {
 const publicationJournal = (store: AppStore, revisionId: string) =>
   (store.db.prepare("SELECT detail FROM audit_events WHERE revision_id = ? AND event = 'PUBLICATION_CHANGED' ORDER BY seq").all(revisionId) as { detail: string }[]).map((r) => r.detail);
 
-it("journals one publication status row per change, from the outbox insert to the posted review", () => {
+it("journals one publication status row per change, from the park to the posted review", () => {
   const { store } = openFresh();
   const { revision, outbox } = revisionAwaitingApproval(store);
   expect(store.revision(revision.id)!.state).toBe("AWAITING_APPROVAL");
-  expect(publicationJournal(store, revision.id)).toEqual(["publishing", "awaiting_approval"]);
+  expect(publicationJournal(store, revision.id)).toEqual(["awaiting_approval"]);
   store.advance(revision.id, "AWAITING_APPROVAL", "APPROVED", "approved");
   store.advanceOutbox(outbox.id, "SEND");
   store.advanceOutbox(outbox.id, "NOT_SENT", "429");
@@ -121,7 +121,7 @@ it("journals one publication status row per change, from the outbox insert to th
     store.advanceOutbox(outbox.id, "SENT", "review 7", 7);
     store.advance(revision.id, "PUBLISH", "REVIEW_RECONCILED", "review 7 posted");
   });
-  expect(publicationJournal(store, revision.id)).toEqual(["publishing", "awaiting_approval", "publishing", "published"]);
+  expect(publicationJournal(store, revision.id)).toEqual(["awaiting_approval", "publishing", "published"]);
   expect(store.reopenings(revision.id)).toEqual(["APPROVED"]);
   // Status rows are stream-only: the audit trail keeps the machine's transitions.
   expect(store.auditEvents(revision.id).map((e) => e.event)).toEqual(["APPROVAL_REQUIRED", "APPROVED", "REVIEW_RECONCILED"]);
@@ -132,7 +132,7 @@ it("abandons the unsent outbox when an awaiting revision is superseded or cancel
   const superseded = revisionAwaitingApproval(store);
   expect(store.advanceFromCurrent(superseded.revision.id, "NEWER_HEAD", "head moved")).toBe("SUPERSEDED");
   expect(store.outbox(superseded.outbox.id)).toMatchObject({ status: "failed", last_error: "superseded" });
-  expect(publicationJournal(store, superseded.revision.id)).toEqual(["publishing", "awaiting_approval", "failed"]);
+  expect(publicationJournal(store, superseded.revision.id)).toEqual(["awaiting_approval", "failed"]);
 
   const other = { ...pull, number: 8 };
   const prId = store.upsertPull(other);
