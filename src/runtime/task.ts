@@ -21,7 +21,7 @@ import { TargetDoc, type Workspace } from "../reasoning/tools.ts";
 import { verifyCandidates } from "../reasoning/verify.ts";
 import { PinnedRepo, syncRepo } from "../source/git.ts";
 import type { GitHubClient } from "../github/client.ts";
-import { buildPayload, postReview, PUBLISHER_VERSION, type ReviewPayload, reconcileOutbox } from "../publish/publisher.ts";
+import { buildPayload, findReview, postReview, PUBLISHER_VERSION, type ReviewPayload, reconcileOutbox } from "../publish/publisher.ts";
 import { parseDiff } from "../source/diff.ts";
 
 export const REVIEW_TASK_NAME = "pr-review.revision";
@@ -253,7 +253,8 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
 
   /**
    * §9.3 steps 2, 4 and 5. What to do is decided by the outbox status alone, so a rerun after a crash at any point
-   * converges: `sending` means a POST may have happened and goes to reconciliation, never to a second POST.
+   * converges: `sending` means a POST may have happened and goes to reconciliation, never to a second POST. Before
+   * any POST, a complete listing must show no review of this revision; a failed listing never leads to a POST.
    */
   const publishPhase: PhaseBody<"publish"> = async (cp, revision, runtime) => {
     const outbox = store.outbox(cp.outboxId)!;
@@ -277,6 +278,24 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
           return finished(revision.id, "SUPERSEDED");
         }
         const { client, pr } = target(revision);
+        // The revision's review may already be on GitHub (posted from another data dir, or by a lost run): adopt it.
+        const existing = await findReview(client, pr, outbox);
+        if (existing.kind === "found") {
+          store.tx(() => {
+            store.advanceOutbox(outbox.id, "FOUND", `review ${existing.reviewId} already on GitHub`, existing.reviewId);
+            store.markFindingsPublished(revision.id);
+            store.advance(revision.id, "PUBLISH", "REVIEW_RECONCILED", `review ${existing.reviewId} already on GitHub`);
+          });
+          return finished(revision.id, "COMPLETED");
+        }
+        if (existing.kind === "undecided") {
+          if ((cp.attempt ?? 0) < config.review.max_retries_per_phase) throw new Error(`cannot list reviews before posting: ${existing.reason}`);
+          store.tx(() => {
+            store.advanceOutbox(outbox.id, "UNDECIDED", `cannot_safely_decide: ${existing.reason}`);
+            store.advance(revision.id, "PUBLISH", "TERMINAL_ERROR", `cannot_safely_decide before posting: ${existing.reason}`);
+          });
+          return finished(revision.id, "FAILED");
+        }
         store.advanceOutbox(outbox.id, "SEND", `attempt ${outbox.attempt_count + 1}`);
         const result = await postReview(client, pr, JSON.parse(outbox.payload_json) as ReviewPayload, runtime.signal);
         if (result.kind === "posted") {

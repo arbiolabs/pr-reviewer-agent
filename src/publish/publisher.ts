@@ -13,6 +13,8 @@ export type ReviewPayload = { commit_id: string; body: string; event: "COMMENT";
 export type PullTarget = { fullName: string; number: number };
 
 export const marker = (revisionId: string, payloadHash: string) => `<!-- durable-review:${revisionId}:${payloadHash} -->`;
+/** What every payload of one revision shares: a rerun builds a different payload, but it is the same review. */
+const revisionMarker = (revisionId: string) => `<!-- durable-review:${revisionId}:`;
 
 // Model text cannot open an HTML comment, so it cannot forge another revision's marker.
 const inert = (text: string) => text.replaceAll("<!--", "&lt;!--");
@@ -59,12 +61,12 @@ export type ReconcileVerdict = { kind: "found"; reviewId: number } | { kind: "ab
 type ListedReview = { id: number; body: string | null; commit_id: string | null; user: { login: string } | null };
 
 /**
- * §9.3 step 6: every page of the PR's reviews, matched by marker, author and commit. Absent is only claimed after a
- * complete listing; a failed page or an unknown author is `undecided`.
+ * §9.3 step 6: every page of the PR's reviews, matched by the revision's marker (any payload hash), author and commit.
+ * Absent is only claimed after a complete listing; a failed page or an unknown author is `undecided`.
  */
 export async function findReview(client: GitHubClient, pr: PullTarget, outbox: OutboxRow): Promise<ReconcileVerdict> {
   const payload = JSON.parse(outbox.payload_json) as ReviewPayload;
-  const wanted = marker(outbox.revision_id, outbox.payload_hash);
+  const wanted = revisionMarker(outbox.revision_id);
   try {
     const author = await client.viewerLogin();
     const reviews = await client.paginate<ListedReview>(`/repos/${pr.fullName}/pulls/${pr.number}/reviews`);

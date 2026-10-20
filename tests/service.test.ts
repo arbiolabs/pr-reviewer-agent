@@ -129,7 +129,7 @@ it("turns duplicate webhooks into exactly one review task and one published revi
 it("reconciles a failed revision's uncertain outbox on restart before posting anything", async () => {
   const dataDir = mkdtempSync(join(tmpdir(), "service-restart-"));
   fake.postBehaviors = ["store-then-drop"];
-  fake.listStatus = 500;
+  fake.onPost = () => void (fake.listStatus = 500);
   const first = await serve(dataDir);
   await deliver(first.service.url, "d-1", "pull_request", { action: "opened", pull_request: { number: 1 } });
   await until(() => first.app.store.db.prepare("SELECT count(*) AS n FROM review_revisions WHERE state = 'FAILED'").get()?.n === 1);

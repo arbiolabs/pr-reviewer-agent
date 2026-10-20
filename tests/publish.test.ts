@@ -1,7 +1,7 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { FauxResponseStep } from "@earendil-works/pi-ai";
+import { type FauxResponseStep, fauxAssistantMessage, fauxToolCall } from "@earendil-works/pi-ai";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { main } from "../src/cli/main.ts";
 import { DEFAULT_CONFIG } from "../src/config/config.ts";
@@ -99,7 +99,7 @@ it("(b) reconciles a review GitHub stored before dropping the connection, across
     1003,
     1,
     4,
-    2,
+    4,
   ]);
   expect(outboxEvents).toEqual(["pending SEND sending", "sending UNCERTAIN needs_reconciliation", "needs_reconciliation FOUND published"]);
   expect(transitions(app, revision.id)).toEqual([
@@ -111,7 +111,7 @@ it("(b) reconciles a review GitHub stored before dropping the connection, across
 
 it("(d) leaves an ambiguous write in needs_reconciliation when the listing fails, and never POSTs again", async () => {
   fake.postBehaviors = ["bad-gateway"];
-  fake.listStatus = 500;
+  fake.onPost = () => void (fake.listStatus = 500);
   const app = await openPublishing();
   const { revision, outbox } = await publish(app);
   expect([revision.state, outbox.status, fake.postAttempts]).toEqual(["FAILED", "needs_reconciliation", 1]);
@@ -152,7 +152,7 @@ it("fails the revision when GitHub rejects the review outright", async () => {
 
 it("recovers a needs_reconciliation revision by hand: reconcile proves absence, then review --publish --retry posts once", async () => {
   fake.postBehaviors = ["bad-gateway"];
-  fake.listStatus = 500;
+  fake.onPost = () => void (fake.listStatus = 500);
   const dataDir = mkdtempSync(join(tmpdir(), "publish-manual-"));
   const app = await openPublishing(undefined, dataDir);
   const { revision } = await publish(app);
@@ -165,6 +165,7 @@ it("recovers a needs_reconciliation revision by hand: reconcile proves absence, 
   try {
     expect(await main(["reconcile", "--revision", revision.id], deps)).toBe(1);
     fake.listStatus = 200;
+    fake.onPost = undefined;
     expect(await main(["reconcile", "--revision", revision.id], deps)).toBe(0);
     expect(output.slice(-1)).toEqual(["no review with the marker on GitHub; publication pending, revision FAILED; rerun review --publish --retry to post it\n"]);
     expect(await main(["review", "https://github.com/acme/shop/pull/1", "--publish", "--retry", "--no-jev", "--model", "faux/reviewer"], deps)).toBe(0);
@@ -174,4 +175,30 @@ it("recovers a needs_reconciliation revision by hand: reconcile proves absence, 
     delete process.env.PR_REVIEW_DATA_DIR;
   }
   expect([fake.postAttempts, fake.reviews.length]).toEqual([2, 1]);
+}, 60_000);
+
+it("posts one review per revision across data dirs: a fresh rerun with a different model answer adopts the first review", async () => {
+  const emptySubmission = fauxAssistantMessage([fauxToolCall("submit_candidates", { candidates: [] })], { stopReason: "toolUse" });
+  const runs: string[][] = [];
+  for (const responses of [[readDiff(), submitDefect(fixture)], [readDiff(), emptySubmission]]) {
+    const output: string[] = [];
+    process.env.PR_REVIEW_DATA_DIR = mkdtempSync(join(tmpdir(), "publish-fresh-"));
+    try {
+      const deps = { github: testClient(), models: fauxModels(responses), isTTY: false, out: () => {}, err: (t: string) => output.push(t) };
+      expect(await main(["review", "https://github.com/acme/shop/pull/1", "--publish", "--no-jev", "--model", "faux/reviewer"], deps)).toBe(0);
+    } finally {
+      delete process.env.PR_REVIEW_DATA_DIR;
+    }
+    runs.push(output.filter((line) => line.startsWith("publication ")));
+  }
+  expect([fake.postAttempts, fake.reviews.length]).toEqual([1, 1]);
+  expect(runs).toEqual([["publication published: review 1000\n"], ["publication published: review 1000\n"]]);
+}, 60_000);
+
+it("never POSTs when the listing before the first POST keeps failing, and leaves the outbox to reconciliation", async () => {
+  fake.listStatus = 500;
+  const app = await openPublishing();
+  const { revision, outbox, outboxEvents } = await publish(app);
+  expect([revision.state, outbox.status, fake.postAttempts, fake.listCalls]).toEqual(["FAILED", "needs_reconciliation", 0, 4 * 3]);
+  expect(outboxEvents).toEqual(["pending UNDECIDED needs_reconciliation"]);
 }, 60_000);

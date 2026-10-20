@@ -90,6 +90,8 @@ matrix("review task machine", REVIEW_MACHINE, REVIEW_STATES, REVIEW_EVENTS, [
 matrix("publication outbox", OUTBOX_MACHINE, OUTBOX_STATES, OUTBOX_EVENTS, [
   "pending SEND sending",
   "pending ABANDON failed",
+  "pending FOUND published",
+  "pending UNDECIDED needs_reconciliation",
   "sending SENT published",
   "sending UNCERTAIN needs_reconciliation",
   "sending REJECTED failed",

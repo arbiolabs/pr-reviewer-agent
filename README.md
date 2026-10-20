@@ -37,9 +37,9 @@ A revision that FAILED stays failed. A rerun prints the failure reason and tells
 `review --publish` needs a GitHub token with write access to pull requests (`GITHUB_TOKEN` or `gh auth token`). It posts at most one review per revision, through an outbox in `app.sqlite`:
 
 1. PREPARE_PUBLICATION re-reads the PR head and stores the payload with the transition into PUBLISH. The payload has the summary body, the marker `<!-- durable-review:<revision>:<payload-hash> -->`, `commit_id` set to the head, `event: COMMENT`, and an inline comment for each verified finding whose line is in the diff.
-2. PUBLISH re-reads the head again. If the head moved, the revision is SUPERSEDED and nothing is posted.
+2. PUBLISH re-reads the head again. If the head moved, the revision is SUPERSEDED and nothing is posted. Then it lists every page of the PR's reviews. If one of ours on the head commit carries this revision's marker, with any payload hash, the revision completes with that review's ID and nothing is posted. This holds for a rerun from a fresh data dir, whose model answer differs. If the listing fails, nothing is posted. PUBLISH retries under `max_retries_per_phase`, then leaves the outbox `needs_reconciliation`.
 3. The outbox is set to `sending` and committed before the POST. The returned review ID is saved after it.
-4. If the result is uncertain (a 5xx, a dropped connection, a timeout, or a crash that left the outbox in `sending`), RECONCILE lists every page of the PR's reviews. It looks for one with the marker, the head commit and our author.
+4. If the result is uncertain (a 5xx, a dropped connection, a timeout, or a crash that left the outbox in `sending`), RECONCILE lists every page of the PR's reviews. It looks for one with the revision's marker, the head commit and our author.
    - If one is found, the revision completes with that ID.
    - If a complete listing proves it absent, PUBLISH tries again, up to `max_retries_per_phase` more times.
    - If the listing fails, the outbox stays `needs_reconciliation` and the revision FAILS with `cannot_safely_decide`. Then run `reconcile --revision <id>` when GitHub is reachable. If that proves the review absent, `review <url> --publish --retry` posts it.

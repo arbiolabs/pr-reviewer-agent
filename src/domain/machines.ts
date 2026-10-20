@@ -59,6 +59,7 @@ export const TERMINAL_REVIEW_STATES: readonly ReviewState[] = ["COMPLETED", "FAI
 
 // §9.3 publication outbox. `sending` is committed before the POST, so a crash leaves proof that a write may have
 // happened; from there only reconciliation, never a second POST, decides. MANUAL_RETRY reopens a definite failure.
+// A pending outbox is listed before its POST: FOUND adopts a review already there, UNDECIDED means the listing failed.
 export const OUTBOX_STATES = ["pending", "sending", "published", "needs_reconciliation", "failed"] as const;
 export type OutboxStatus = (typeof OUTBOX_STATES)[number];
 
@@ -66,7 +67,7 @@ export const OUTBOX_EVENTS = ["SEND", "SENT", "UNCERTAIN", "REJECTED", "ABANDON"
 export type OutboxEvent = (typeof OUTBOX_EVENTS)[number];
 
 export const OUTBOX_MACHINE: Table<OutboxStatus, OutboxEvent> = {
-  pending: { SEND: "sending", ABANDON: "failed" },
+  pending: { SEND: "sending", ABANDON: "failed", FOUND: "published", UNDECIDED: "needs_reconciliation" },
   sending: { SENT: "published", UNCERTAIN: "needs_reconciliation", REJECTED: "failed" },
   needs_reconciliation: { FOUND: "published", ABSENT: "pending", UNDECIDED: "needs_reconciliation" },
   published: {},
