@@ -1,0 +1,29 @@
+---
+source: tests/golden.rs
+assertion_line: 314
+expression: text
+---
+ PR REVIEWER ● live · unix:/run/user/501/pr-review/reviewer.sock         ? help
+  1 Inbox   2 Review   3 Diff   4 Timeline   5 Settings
+┌ › TRACKED PRS (3) ───────────────────────────────────────────────────────────┐
+│  PR    TITLE                 REVIEW                HEAD     FINDINGS         │
+│  #184  Booking API           ● VERIFY              4444444  ▲1               │
+┌ › HELP ──────────────────────────────────────────────────────────────────────┐
+│ q C-c     quit; reviews keep running   d         diff at the finding         │
+│ ?         this help                    t         timeline for selection      │
+│ Esc n     close / back                 r         refresh snapshot            │
+│ j k       move                         A         GitHub accounts (Settings)  │
+│ C-d C-u   page down / up               s R c p   start/retry/cancel/publish  │
+│ g G       first / last                 n N       next / previous finding     │
+│ h l       pane left / right            : /       jump to path:line (Diff)    │
+│ Tab       cycle panes                  f         timeline scope              │
+│ Enter     open selected                v         timeline category           │
+│ 1 2 3 4 5 views (see tabs)             P         timeline phase              │
+│ /         search PRs                                                         │
+│ Write keys need a capability the server grants.                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+│                                                                              │
+│                                                                              │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+ Esc close  q quit

@@ -1,0 +1,42 @@
+---
+source: tests/golden.rs
+expression: text
+---
+ PR REVIEWER ● live · unix:/run/user/501/pr-review/reviewer.sock                                                 ? help
+  1 Inbox   2 Review   3 Diff   4 Timeline   5 Settings
+┌ › TRACKED PRS (3) ───────────────────────────────────────────────────────────┐┌ SELECTED ────────────────────────────┐
+│  PR    TITLE                 REVIEW                HEAD     FINDINGS         ││#3 修复竞态条件 🔥 👩‍💻 ｗｉｄｅ!       │
+│› #3    修复竞态条件 🔥 👩‍💻 …  · no run              3333333  none             ││acme/shop · base bbbbbbb → head 33333…│
+│  #1    red click done        ● VERIFY              1111111  ▲1               ││no review run yet                     │
+│  #2    Refactor booking Ref… · no run              2222222  none             ││                                      │
+│                                                                              ││findings: none                        │
+│                                                                              ││Enter opens the review                │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+│                                                                              ││                                      │
+└──────────────────────────────────────────────────────────────────────────────┘└──────────────────────────────────────┘
+ j/k move  Enter open  / search  d diff  t timeline  r refresh  ? help  q quit

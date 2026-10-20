@@ -1,0 +1,8 @@
+---
+source: tests/golden.rs
+expression: text
+---
+PR REVIEWER ● live
+Terminal is 59x15.
+Resize to at least 60x16.
+q quit  ? help

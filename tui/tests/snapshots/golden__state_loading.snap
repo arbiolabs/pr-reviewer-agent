@@ -1,0 +1,28 @@
+---
+source: tests/golden.rs
+expression: text
+---
+ PR REVIEWER ◐ negotiating · unix:/run/user/501/pr-review/reviewer.sock  ? help
+  1 Inbox   2 Review   3 Diff   4 Timeline   5 Settings
+┌ › TRACKED PRS (0) ───────────────────────────────────────────────────────────┐
+│                                                                              │
+│  Loading snapshot...                                                         │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+│                                                                              │
+└──────────────────────────────────────────────────────────────────────────────┘
+ j/k move  Enter open  / search  d diff  t timeline  r refresh  ? help  q quit
