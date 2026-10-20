@@ -1,0 +1,38 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "pr-review/protocol/v1/evidence.json",
+  "type": "object",
+  "required": [
+    "kind",
+    "text"
+  ],
+  "properties": {
+    "kind": {
+      "enum": [
+        "code_ref",
+        "tool_summary",
+        "test_result",
+        "scenario",
+        "link"
+      ]
+    },
+    "path": {
+      "type": "string"
+    },
+    "start": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "end": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "refSha": {
+      "type": "string",
+      "minLength": 1
+    },
+    "text": {
+      "type": "string"
+    }
+  }
+}

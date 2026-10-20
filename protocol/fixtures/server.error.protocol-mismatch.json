@@ -1,0 +1,9 @@
+{
+  "type": "error",
+  "requestId": "req-hello",
+  "code": "PROTOCOL_MISMATCH",
+  "message": "unsupported protocolVersion 2",
+  "supported": [
+    1
+  ]
+}

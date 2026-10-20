@@ -1,0 +1,374 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "pr-review/protocol/v1/client-message.json",
+  "anyOf": [
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "requestId",
+        "protocolVersion",
+        "client",
+        "capabilities"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "hello"
+        },
+        "requestId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "protocolVersion": {
+          "type": "integer",
+          "description": "any integer, so a mismatch is parseable and answered with PROTOCOL_MISMATCH"
+        },
+        "client": {
+          "type": "string"
+        },
+        "capabilities": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "requestId"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "snapshot.get"
+        },
+        "requestId": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "requestId",
+        "streamEpoch",
+        "afterSequence"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "resume"
+        },
+        "requestId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "streamEpoch": {
+          "type": "string",
+          "minLength": 1
+        },
+        "afterSequence": {
+          "type": "integer",
+          "minimum": 0
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "requestId",
+        "prId",
+        "baseSha",
+        "headSha"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "diff.get"
+        },
+        "requestId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "prId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "baseSha": {
+          "type": "string",
+          "minLength": 1
+        },
+        "headSha": {
+          "type": "string",
+          "minLength": 1
+        },
+        "file": {
+          "type": "string"
+        },
+        "cursor": {
+          "type": "string"
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 500
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "requestId",
+        "findingId"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "finding.get"
+        },
+        "requestId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "findingId": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "requestId",
+        "limit"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "timeline.get"
+        },
+        "requestId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "prId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "runId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "findingId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "beforeSequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "limit": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 500
+        }
+      }
+    },
+    {
+      "anyOf": [
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "requestId",
+            "command",
+            "params",
+            "idempotencyKey"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "command"
+            },
+            "requestId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "command": {
+              "type": "string",
+              "const": "review.start"
+            },
+            "params": {
+              "type": "object",
+              "required": [
+                "prId",
+                "expectedHeadSha"
+              ],
+              "properties": {
+                "prId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "expectedHeadSha": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "additionalProperties": false
+            },
+            "idempotencyKey": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "requestId",
+            "command",
+            "params",
+            "idempotencyKey"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "command"
+            },
+            "requestId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "command": {
+              "type": "string",
+              "const": "review.cancel"
+            },
+            "params": {
+              "type": "object",
+              "required": [
+                "runId"
+              ],
+              "properties": {
+                "runId": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "additionalProperties": false
+            },
+            "idempotencyKey": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "requestId",
+            "command",
+            "params",
+            "idempotencyKey"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "command"
+            },
+            "requestId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "command": {
+              "type": "string",
+              "const": "review.retry"
+            },
+            "params": {
+              "type": "object",
+              "required": [
+                "runId"
+              ],
+              "properties": {
+                "runId": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "additionalProperties": false
+            },
+            "idempotencyKey": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "requestId",
+            "command",
+            "params",
+            "idempotencyKey"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "command"
+            },
+            "requestId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "command": {
+              "type": "string",
+              "const": "review.publish"
+            },
+            "params": {
+              "type": "object",
+              "required": [
+                "runId",
+                "previewId",
+                "expectedHeadSha"
+              ],
+              "properties": {
+                "runId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "previewId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "expectedHeadSha": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "additionalProperties": false
+            },
+            "idempotencyKey": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    }
+  ]
+}

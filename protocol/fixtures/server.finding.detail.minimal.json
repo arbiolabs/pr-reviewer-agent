@@ -1,0 +1,23 @@
+{
+  "type": "finding.detail",
+  "requestId": "req-finding",
+  "finding": {
+    "id": "f-2",
+    "prId": "acme/shop#185",
+    "runId": "rev-185-a",
+    "fingerprint": "fp-f-2",
+    "title": "Finding f-2",
+    "category": "performance",
+    "severity": "low",
+    "status": "DETECTED",
+    "confidence": 0.82,
+    "file": "src/cache.ts",
+    "line": null,
+    "evidenceCount": 1,
+    "stale": false,
+    "explanation": "e",
+    "reasoningSummary": "r",
+    "evidence": [],
+    "history": []
+  }
+}

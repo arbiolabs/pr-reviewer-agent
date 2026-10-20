@@ -1,0 +1,49 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "pr-review/protocol/v1/pr.json",
+  "type": "object",
+  "required": [
+    "id",
+    "repository",
+    "number",
+    "title",
+    "headSha",
+    "baseSha",
+    "lifecycle"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "repository": {
+      "type": "string"
+    },
+    "number": {
+      "type": "integer",
+      "minimum": 1
+    },
+    "title": {
+      "type": "string"
+    },
+    "author": {
+      "type": "string"
+    },
+    "headSha": {
+      "type": "string",
+      "minLength": 1
+    },
+    "baseSha": {
+      "type": "string",
+      "minLength": 1
+    },
+    "lifecycle": {
+      "enum": [
+        "ACTIVE",
+        "QUIESCING",
+        "CLOSED",
+        "MERGED"
+      ]
+    }
+  }
+}

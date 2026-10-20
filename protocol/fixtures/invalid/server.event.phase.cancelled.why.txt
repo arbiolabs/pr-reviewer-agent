@@ -1,0 +1,1 @@
+Phases are the engine's states; CANCELLED does not exist (an abort is FAILED with a reason).

@@ -1,0 +1,5 @@
+{
+  "type": "finding.get",
+  "requestId": "req-finding",
+  "findingId": "f-1"
+}

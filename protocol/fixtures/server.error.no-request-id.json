@@ -1,0 +1,5 @@
+{
+  "type": "error",
+  "code": "INVALID_REQUEST",
+  "message": "line is not valid JSON"
+}

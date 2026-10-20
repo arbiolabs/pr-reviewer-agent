@@ -1,0 +1,9 @@
+{
+  "type": "timeline.get",
+  "requestId": "req-tl",
+  "prId": "acme/shop#184",
+  "runId": "rev-184-a",
+  "findingId": "f-1",
+  "beforeSequence": 100,
+  "limit": 50
+}

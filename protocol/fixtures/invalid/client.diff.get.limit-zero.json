@@ -1,0 +1,8 @@
+{
+  "type": "diff.get",
+  "requestId": "req-diff",
+  "prId": "acme/shop#184",
+  "baseSha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+  "headSha": "4444444444444444444444444444444444444444",
+  "limit": 0
+}

@@ -1,0 +1,26 @@
+{
+  "streamEpoch": "epoch-2",
+  "lastSequence": 4,
+  "resyncRequested": true,
+  "toolActivityCount": 1,
+  "prs": [
+    {
+      "id": "acme/shop#184",
+      "headSha": "4444444444444444444444444444444444444444",
+      "title": "Booking API"
+    },
+    {
+      "id": "acme/shop#185",
+      "headSha": "5555555555555555555555555555555555555555",
+      "title": "Fix cache eviction"
+    }
+  ],
+  "runs": [
+    {
+      "id": "rev-184-a",
+      "phase": "VERIFY",
+      "status": "RUNNING"
+    }
+  ],
+  "findings": []
+}

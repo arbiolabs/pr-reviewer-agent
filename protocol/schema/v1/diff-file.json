@@ -1,0 +1,106 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "pr-review/protocol/v1/diff-file.json",
+  "type": "object",
+  "required": [
+    "path",
+    "status",
+    "additions",
+    "deletions",
+    "hunks",
+    "truncated"
+  ],
+  "properties": {
+    "path": {
+      "type": "string"
+    },
+    "oldPath": {
+      "type": "string",
+      "description": "set when status is renamed"
+    },
+    "status": {
+      "enum": [
+        "added",
+        "modified",
+        "deleted",
+        "renamed",
+        "binary"
+      ]
+    },
+    "additions": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "deletions": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "hunks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": [
+          "header",
+          "oldStart",
+          "newStart",
+          "lines"
+        ],
+        "properties": {
+          "header": {
+            "type": "string"
+          },
+          "oldStart": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "newStart": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "lines": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "required": [
+                "kind",
+                "text"
+              ],
+              "properties": {
+                "kind": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "const": "context"
+                    },
+                    {
+                      "type": "string",
+                      "const": "add"
+                    },
+                    {
+                      "type": "string",
+                      "const": "del"
+                    }
+                  ]
+                },
+                "old": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "new": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "text": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "truncated": {
+      "type": "boolean"
+    }
+  }
+}

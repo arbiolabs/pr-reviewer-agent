@@ -1,0 +1,69 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "pr-review/protocol/v1/run.json",
+  "type": "object",
+  "required": [
+    "id",
+    "prId",
+    "baseSha",
+    "headSha",
+    "phase",
+    "status",
+    "model",
+    "startedAt"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "prId": {
+      "type": "string",
+      "minLength": 1
+    },
+    "baseSha": {
+      "type": "string",
+      "minLength": 1
+    },
+    "headSha": {
+      "type": "string",
+      "minLength": 1
+    },
+    "phase": {
+      "enum": [
+        "COLLECT_CONTEXT",
+        "TRIAGE",
+        "ANALYZE",
+        "VERIFY",
+        "PREPARE_PUBLICATION",
+        "PUBLISH",
+        "RECONCILE",
+        "COMPLETED",
+        "FAILED",
+        "SUPERSEDED"
+      ]
+    },
+    "status": {
+      "enum": [
+        "RUNNING",
+        "COMPLETED",
+        "FAILED",
+        "SUPERSEDED"
+      ]
+    },
+    "model": {
+      "type": "string"
+    },
+    "startedAt": {
+      "type": "string",
+      "description": "RFC 3339 UTC timestamp"
+    },
+    "completedAt": {
+      "type": "string",
+      "description": "RFC 3339 UTC timestamp"
+    },
+    "failureReason": {
+      "type": "string"
+    }
+  }
+}

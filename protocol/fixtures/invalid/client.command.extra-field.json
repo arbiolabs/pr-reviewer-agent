@@ -1,0 +1,10 @@
+{
+  "type": "command",
+  "requestId": "req-cmd",
+  "command": "review.cancel",
+  "params": {
+    "runId": "rev-184-a"
+  },
+  "idempotencyKey": "k1",
+  "actor": "admin"
+}

@@ -1,0 +1,7 @@
+{
+  "type": "command.result",
+  "requestId": "req-cmd",
+  "status": "rejected",
+  "code": "CAPABILITY_DENIED",
+  "message": "review.start is not available in this version"
+}

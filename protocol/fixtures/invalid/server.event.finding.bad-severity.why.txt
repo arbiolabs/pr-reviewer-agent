@@ -1,0 +1,1 @@
+A known eventType with malformed data does not fall through to the unknown-event shape.

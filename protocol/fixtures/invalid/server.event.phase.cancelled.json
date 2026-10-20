@@ -1,0 +1,16 @@
+{
+  "type": "event",
+  "streamEpoch": "epoch-1",
+  "sequence": 109,
+  "prevSequence": 108,
+  "occurredAt": "2026-10-20T13:01:49Z",
+  "prId": "acme/shop#184",
+  "runId": "rev-184-a",
+  "eventType": "review.phase_changed",
+  "data": {
+    "from": "VERIFY",
+    "to": "CANCELLED",
+    "event": "X",
+    "detail": null
+  }
+}

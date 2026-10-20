@@ -1,0 +1,963 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "pr-review/protocol/v1/event.json",
+  "anyOf": [
+    {
+      "anyOf": [
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "streamEpoch",
+            "sequence",
+            "prevSequence",
+            "occurredAt",
+            "prId",
+            "eventType",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "event"
+            },
+            "streamEpoch": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sequence": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "prevSequence": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "sequence of the previous event this server emitted, or the snapshot's sequence"
+            },
+            "occurredAt": {
+              "type": "string",
+              "description": "RFC 3339 UTC timestamp"
+            },
+            "prId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "eventType": {
+              "type": "string",
+              "const": "pr.updated"
+            },
+            "data": {
+              "type": "object",
+              "required": [
+                "id",
+                "repository",
+                "number",
+                "title",
+                "headSha",
+                "baseSha",
+                "lifecycle"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "repository": {
+                  "type": "string"
+                },
+                "number": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "title": {
+                  "type": "string"
+                },
+                "author": {
+                  "type": "string"
+                },
+                "headSha": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "baseSha": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "lifecycle": {
+                  "enum": [
+                    "ACTIVE",
+                    "QUIESCING",
+                    "CLOSED",
+                    "MERGED"
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "streamEpoch",
+            "sequence",
+            "prevSequence",
+            "occurredAt",
+            "prId",
+            "runId",
+            "eventType",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "event"
+            },
+            "streamEpoch": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sequence": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "prevSequence": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "sequence of the previous event this server emitted, or the snapshot's sequence"
+            },
+            "occurredAt": {
+              "type": "string",
+              "description": "RFC 3339 UTC timestamp"
+            },
+            "prId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "runId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "eventType": {
+              "type": "string",
+              "const": "run.started"
+            },
+            "data": {
+              "type": "object",
+              "required": [
+                "id",
+                "prId",
+                "baseSha",
+                "headSha",
+                "phase",
+                "status",
+                "model",
+                "startedAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "prId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "baseSha": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "headSha": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "phase": {
+                  "enum": [
+                    "COLLECT_CONTEXT",
+                    "TRIAGE",
+                    "ANALYZE",
+                    "VERIFY",
+                    "PREPARE_PUBLICATION",
+                    "PUBLISH",
+                    "RECONCILE",
+                    "COMPLETED",
+                    "FAILED",
+                    "SUPERSEDED"
+                  ]
+                },
+                "status": {
+                  "enum": [
+                    "RUNNING",
+                    "COMPLETED",
+                    "FAILED",
+                    "SUPERSEDED"
+                  ]
+                },
+                "model": {
+                  "type": "string"
+                },
+                "startedAt": {
+                  "type": "string",
+                  "description": "RFC 3339 UTC timestamp"
+                },
+                "completedAt": {
+                  "type": "string",
+                  "description": "RFC 3339 UTC timestamp"
+                },
+                "failureReason": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "streamEpoch",
+            "sequence",
+            "prevSequence",
+            "occurredAt",
+            "prId",
+            "runId",
+            "eventType",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "event"
+            },
+            "streamEpoch": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sequence": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "prevSequence": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "sequence of the previous event this server emitted, or the snapshot's sequence"
+            },
+            "occurredAt": {
+              "type": "string",
+              "description": "RFC 3339 UTC timestamp"
+            },
+            "prId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "runId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "eventType": {
+              "type": "string",
+              "const": "review.phase_changed"
+            },
+            "data": {
+              "type": "object",
+              "required": [
+                "from",
+                "to",
+                "event",
+                "detail"
+              ],
+              "properties": {
+                "from": {
+                  "enum": [
+                    "COLLECT_CONTEXT",
+                    "TRIAGE",
+                    "ANALYZE",
+                    "VERIFY",
+                    "PREPARE_PUBLICATION",
+                    "PUBLISH",
+                    "RECONCILE",
+                    "COMPLETED",
+                    "FAILED",
+                    "SUPERSEDED"
+                  ]
+                },
+                "to": {
+                  "enum": [
+                    "COLLECT_CONTEXT",
+                    "TRIAGE",
+                    "ANALYZE",
+                    "VERIFY",
+                    "PREPARE_PUBLICATION",
+                    "PUBLISH",
+                    "RECONCILE",
+                    "COMPLETED",
+                    "FAILED",
+                    "SUPERSEDED"
+                  ]
+                },
+                "event": {
+                  "type": "string"
+                },
+                "detail": {
+                  "anyOf": [
+                    {
+                      "type": "string"
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ]
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "streamEpoch",
+            "sequence",
+            "prevSequence",
+            "occurredAt",
+            "prId",
+            "runId",
+            "eventType",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "event"
+            },
+            "streamEpoch": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sequence": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "prevSequence": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "sequence of the previous event this server emitted, or the snapshot's sequence"
+            },
+            "occurredAt": {
+              "type": "string",
+              "description": "RFC 3339 UTC timestamp"
+            },
+            "prId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "runId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "eventType": {
+              "type": "string",
+              "const": "finding.updated"
+            },
+            "data": {
+              "type": "object",
+              "required": [
+                "id",
+                "prId",
+                "runId",
+                "fingerprint",
+                "title",
+                "category",
+                "severity",
+                "status",
+                "confidence",
+                "file",
+                "line",
+                "evidenceCount",
+                "stale"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "prId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "runId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "fingerprint": {
+                  "type": "string"
+                },
+                "title": {
+                  "type": "string"
+                },
+                "category": {
+                  "enum": [
+                    "security",
+                    "concurrency",
+                    "correctness",
+                    "data_integrity",
+                    "performance",
+                    "general",
+                    "other"
+                  ]
+                },
+                "severity": {
+                  "enum": [
+                    "critical",
+                    "high",
+                    "medium",
+                    "low"
+                  ]
+                },
+                "status": {
+                  "enum": [
+                    "DETECTED",
+                    "PUBLISHED",
+                    "STILL_PRESENT",
+                    "POTENTIALLY_RESOLVED",
+                    "OUTDATED",
+                    "RESOLVED",
+                    "UNCERTAIN"
+                  ]
+                },
+                "confidence": {
+                  "type": "number",
+                  "minimum": 0,
+                  "maximum": 1
+                },
+                "file": {
+                  "type": "string"
+                },
+                "line": {
+                  "anyOf": [
+                    {
+                      "type": "integer",
+                      "minimum": 1
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "head-revision line; null for a file-level finding"
+                },
+                "evidenceCount": {
+                  "type": "integer",
+                  "minimum": 0
+                },
+                "stale": {
+                  "type": "boolean",
+                  "description": "the anchor's head SHA is no longer the PR head; never silently remapped"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "streamEpoch",
+            "sequence",
+            "prevSequence",
+            "occurredAt",
+            "prId",
+            "runId",
+            "eventType",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "event"
+            },
+            "streamEpoch": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sequence": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "prevSequence": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "sequence of the previous event this server emitted, or the snapshot's sequence"
+            },
+            "occurredAt": {
+              "type": "string",
+              "description": "RFC 3339 UTC timestamp"
+            },
+            "prId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "runId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "eventType": {
+              "type": "string",
+              "const": "tool.activity"
+            },
+            "data": {
+              "type": "object",
+              "required": [
+                "tool",
+                "summary"
+              ],
+              "properties": {
+                "tool": {
+                  "type": "string"
+                },
+                "summary": {
+                  "type": "string",
+                  "maxLength": 200
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "streamEpoch",
+            "sequence",
+            "prevSequence",
+            "occurredAt",
+            "prId",
+            "runId",
+            "eventType",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "event"
+            },
+            "streamEpoch": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sequence": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "prevSequence": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "sequence of the previous event this server emitted, or the snapshot's sequence"
+            },
+            "occurredAt": {
+              "type": "string",
+              "description": "RFC 3339 UTC timestamp"
+            },
+            "prId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "runId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "eventType": {
+              "type": "string",
+              "const": "review.completed"
+            },
+            "data": {
+              "type": "object",
+              "required": [
+                "id",
+                "prId",
+                "baseSha",
+                "headSha",
+                "phase",
+                "status",
+                "model",
+                "startedAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "prId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "baseSha": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "headSha": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "phase": {
+                  "enum": [
+                    "COLLECT_CONTEXT",
+                    "TRIAGE",
+                    "ANALYZE",
+                    "VERIFY",
+                    "PREPARE_PUBLICATION",
+                    "PUBLISH",
+                    "RECONCILE",
+                    "COMPLETED",
+                    "FAILED",
+                    "SUPERSEDED"
+                  ]
+                },
+                "status": {
+                  "enum": [
+                    "RUNNING",
+                    "COMPLETED",
+                    "FAILED",
+                    "SUPERSEDED"
+                  ]
+                },
+                "model": {
+                  "type": "string"
+                },
+                "startedAt": {
+                  "type": "string",
+                  "description": "RFC 3339 UTC timestamp"
+                },
+                "completedAt": {
+                  "type": "string",
+                  "description": "RFC 3339 UTC timestamp"
+                },
+                "failureReason": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "streamEpoch",
+            "sequence",
+            "prevSequence",
+            "occurredAt",
+            "prId",
+            "runId",
+            "eventType",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "event"
+            },
+            "streamEpoch": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sequence": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "prevSequence": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "sequence of the previous event this server emitted, or the snapshot's sequence"
+            },
+            "occurredAt": {
+              "type": "string",
+              "description": "RFC 3339 UTC timestamp"
+            },
+            "prId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "runId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "eventType": {
+              "type": "string",
+              "const": "run.superseded"
+            },
+            "data": {
+              "type": "object",
+              "required": [
+                "id",
+                "prId",
+                "baseSha",
+                "headSha",
+                "phase",
+                "status",
+                "model",
+                "startedAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "prId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "baseSha": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "headSha": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "phase": {
+                  "enum": [
+                    "COLLECT_CONTEXT",
+                    "TRIAGE",
+                    "ANALYZE",
+                    "VERIFY",
+                    "PREPARE_PUBLICATION",
+                    "PUBLISH",
+                    "RECONCILE",
+                    "COMPLETED",
+                    "FAILED",
+                    "SUPERSEDED"
+                  ]
+                },
+                "status": {
+                  "enum": [
+                    "RUNNING",
+                    "COMPLETED",
+                    "FAILED",
+                    "SUPERSEDED"
+                  ]
+                },
+                "model": {
+                  "type": "string"
+                },
+                "startedAt": {
+                  "type": "string",
+                  "description": "RFC 3339 UTC timestamp"
+                },
+                "completedAt": {
+                  "type": "string",
+                  "description": "RFC 3339 UTC timestamp"
+                },
+                "failureReason": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "streamEpoch",
+            "sequence",
+            "prevSequence",
+            "occurredAt",
+            "prId",
+            "runId",
+            "eventType",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "event"
+            },
+            "streamEpoch": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sequence": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "prevSequence": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "sequence of the previous event this server emitted, or the snapshot's sequence"
+            },
+            "occurredAt": {
+              "type": "string",
+              "description": "RFC 3339 UTC timestamp"
+            },
+            "prId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "runId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "eventType": {
+              "type": "string",
+              "const": "run.failed"
+            },
+            "data": {
+              "type": "object",
+              "required": [
+                "id",
+                "prId",
+                "baseSha",
+                "headSha",
+                "phase",
+                "status",
+                "model",
+                "startedAt"
+              ],
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "prId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "baseSha": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "headSha": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "phase": {
+                  "enum": [
+                    "COLLECT_CONTEXT",
+                    "TRIAGE",
+                    "ANALYZE",
+                    "VERIFY",
+                    "PREPARE_PUBLICATION",
+                    "PUBLISH",
+                    "RECONCILE",
+                    "COMPLETED",
+                    "FAILED",
+                    "SUPERSEDED"
+                  ]
+                },
+                "status": {
+                  "enum": [
+                    "RUNNING",
+                    "COMPLETED",
+                    "FAILED",
+                    "SUPERSEDED"
+                  ]
+                },
+                "model": {
+                  "type": "string"
+                },
+                "startedAt": {
+                  "type": "string",
+                  "description": "RFC 3339 UTC timestamp"
+                },
+                "completedAt": {
+                  "type": "string",
+                  "description": "RFC 3339 UTC timestamp"
+                },
+                "failureReason": {
+                  "type": "string"
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "eventType",
+        "streamEpoch",
+        "occurredAt"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "event"
+        },
+        "eventType": {
+          "type": "string",
+          "const": "heartbeat"
+        },
+        "streamEpoch": {
+          "type": "string",
+          "minLength": 1
+        },
+        "occurredAt": {
+          "type": "string",
+          "description": "RFC 3339 UTC timestamp"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "streamEpoch",
+        "sequence",
+        "prevSequence",
+        "occurredAt",
+        "eventType",
+        "data"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "event"
+        },
+        "streamEpoch": {
+          "type": "string",
+          "minLength": 1
+        },
+        "sequence": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "prevSequence": {
+          "type": "integer",
+          "minimum": 0,
+          "description": "sequence of the previous event this server emitted, or the snapshot's sequence"
+        },
+        "occurredAt": {
+          "type": "string",
+          "description": "RFC 3339 UTC timestamp"
+        },
+        "prId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "runId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "eventType": {
+          "type": "string",
+          "not": {
+            "enum": [
+              "pr.updated",
+              "run.started",
+              "review.phase_changed",
+              "finding.updated",
+              "tool.activity",
+              "review.completed",
+              "run.superseded",
+              "run.failed",
+              "heartbeat"
+            ]
+          }
+        },
+        "data": {}
+      }
+    }
+  ]
+}
