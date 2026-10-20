@@ -387,6 +387,7 @@ fn apply_snapshot(m: &mut Model, s: Snapshot, fx: &mut Vec<Effect>) {
         settle_account_select(m, &accounts);
     }
     m.details.clear();
+    m.detail_errors.clear();
     // A reply lost to an overflow never comes: ask again for what the screen waits on or failed to get.
     m.detail_requests.clear();
     let retry_diff = m

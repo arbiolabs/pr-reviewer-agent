@@ -512,8 +512,9 @@ fn an_unanswered_request_times_out_and_clears_its_pending_marker() {
     assert!(m.detail_requests.is_empty());
 
     assert_eq!(sent(&press(&mut m, KeyCode::Char('r'))), ["snapshot.get"]);
-    assert_eq!(sent(&send(&mut m, &read("fixtures/server.snapshot.json"))), ["diff.get"]);
+    assert_eq!(sent(&send(&mut m, &read("fixtures/server.snapshot.json"))), ["diff.get", "finding.get"]);
     assert!(m.diff.as_ref().unwrap().pending.is_some());
+    assert!(m.detail_errors.is_empty(), "r retries the card's evidence too");
 }
 
 #[test]
