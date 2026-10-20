@@ -154,7 +154,7 @@ export async function startControlServer(options: ServerOptions): Promise<Contro
         return;
       }
       case "finding.get":
-        send(c, { type: "finding.detail", requestId, finding: source.finding(message.findingId) });
+        send(c, { type: "finding.detail", requestId, finding: await source.finding(message.findingId) });
         return;
       case "timeline.get":
         send(c, { type: "timeline.page", requestId, ...source.timeline(message) });
