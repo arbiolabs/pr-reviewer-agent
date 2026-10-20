@@ -5,7 +5,7 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
-use super::lists::time_of;
+use super::doc::time_of;
 use super::{Ctx, Width, window};
 use crate::model::{EventCategory, Pane, TimelineScope};
 use crate::protocol::{EventBody, Phase, PrId, RunChange, SequencedEvent};

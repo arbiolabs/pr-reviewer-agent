@@ -114,8 +114,6 @@ pub struct DomainCache {
     pub accounts: Option<Vec<Account>>,
     pub activity: VecDeque<Activity>,
     pub tool_activity_count: u64,
-    /// The journal sequence that last touched each PR, for "most recently changed" ordering.
-    pub touched: BTreeMap<PrId, u64>,
 }
 
 impl DomainCache {
@@ -470,20 +468,19 @@ impl Model {
         }
     }
 
-    /// Tracked PRs matching the search filter, most recently changed first.
+    /// Tracked PRs matching the search filter, in an order that never moves under the cursor: open before closed, then
+    /// by repository, newest number first. Activity shows in the row's glyph, not in its position.
     pub fn inbox(&self) -> Vec<&Pr> {
-        let needle = self.ui.pr_filter.to_lowercase();
-        let mut v: Vec<_> = self
-            .domain
-            .prs
-            .values()
-            .filter(|p| {
-                needle.is_empty()
-                    || format!("#{} {} {}", p.number, p.title, p.repository).to_lowercase().contains(&needle)
-            })
-            .collect();
-        let touched = |p: &Pr| self.domain.touched.get(&p.id).copied().unwrap_or(0);
-        v.sort_by(|a, b| (touched(b), b.number, &b.id).cmp(&(touched(a), a.number, &a.id)));
+        let mut v: Vec<_> = self.domain.prs.values().filter(|p| fuzzy(&self.ui.pr_filter, &pr_haystack(p))).collect();
+        let done = |p: &Pr| matches!(p.lifecycle, Lifecycle::Closed | Lifecycle::Merged);
+        v.sort_by(|a, b| {
+            (done(a), &a.repository, std::cmp::Reverse(a.number), &a.id).cmp(&(
+                done(b),
+                &b.repository,
+                std::cmp::Reverse(b.number),
+                &b.id,
+            ))
+        });
         v
     }
 
@@ -547,5 +544,27 @@ impl Model {
 
     pub fn top_modal(&self) -> Option<&Modal> {
         self.ui.modals.last()
+    }
+}
+
+fn pr_haystack(p: &Pr) -> String {
+    format!("#{} {} {} {}", p.number, p.title, p.repository, p.author.as_ref().map_or("", |a| a.as_str()))
+}
+
+/// Case-insensitive subsequence match: `sgn back` finds "Sign-in: send users back".
+pub fn fuzzy(needle: &str, haystack: &str) -> bool {
+    let hay = haystack.to_lowercase();
+    let mut chars = hay.chars();
+    needle.to_lowercase().chars().filter(|c| !c.is_whitespace()).all(|n| chars.any(|h| h == n))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn fuzzy_matches_subsequences_and_rejects_out_of_order() {
+        assert!(super::fuzzy("", "anything"));
+        assert!(super::fuzzy("ordref", "#1287 Orders: self-serve refunds"));
+        assert!(super::fuzzy("1287", "#1287 Orders"));
+        assert!(!super::fuzzy("refo", "#1287 Orders: refunds"));
     }
 }

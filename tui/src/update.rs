@@ -383,7 +383,6 @@ fn apply_snapshot(m: &mut Model, s: Snapshot, fx: &mut Vec<Effect>) {
     if let Some(accounts) = m.domain.accounts.clone() {
         settle_account_select(m, &accounts);
     }
-    m.domain.touched.retain(|id, _| m.domain.prs.contains_key(id));
     m.details.clear();
     // A reply lost to an overflow never comes: ask again for what the screen waits on or failed to get.
     m.detail_requests.clear();
@@ -518,9 +517,6 @@ fn apply_body(m: &mut Model, e: &SequencedEvent, fx: &mut Vec<Effect>) {
         EventBody::FindingUpdated(f) => Some(f.pr_id.clone()),
         _ => e.pr_id.clone(),
     };
-    if let Some(pr) = &pr {
-        d.touched.insert(pr.clone(), seq);
-    }
     if let Some(kind) = kind {
         d.push_activity(Activity { sequence: seq, at: e.occurred_at.clone(), pr_id: pr, kind });
     }

@@ -7,9 +7,8 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Clear, Paragraph};
 
-use super::code::{highlight, rich};
-use super::lists::time_of;
 use super::Ctx;
+use super::code::{highlight, rich};
 use crate::model::{ActivityKind, Pane, Screen};
 use crate::protocol::{Evidence, EvidenceKind, Finding, FindingDetail, FindingId, Phase, Pr, Run, RunStatus, Severity};
 use crate::text::width;
@@ -31,7 +30,7 @@ fn secs(at: &str) -> Option<i64> {
     (p.len() == 3).then(|| p[0] * 3600 + p[1] * 60 + p[2])
 }
 
-fn sev_word(s: Severity) -> &'static str {
+pub fn sev_word(s: Severity) -> &'static str {
     match s {
         Severity::Critical => "CRITICAL",
         Severity::High => "HIGH",
@@ -39,6 +38,26 @@ fn sev_word(s: Severity) -> &'static str {
         Severity::Low => "LOW",
         Severity::Unknown => "UNKNOWN",
     }
+}
+
+pub fn phase_label(p: Phase) -> &'static str {
+    match p {
+        Phase::CollectContext => "collect",
+        Phase::Triage => "triage",
+        Phase::Analyze => "analyze",
+        Phase::Verify => "verify",
+        Phase::PreparePublication => "prepare",
+        Phase::Publish => "publish",
+        Phase::Reconcile => "reconcile",
+        Phase::Completed => "done",
+        Phase::Failed => "failed",
+        Phase::Superseded => "superseded",
+        Phase::Unknown => "?",
+    }
+}
+
+pub fn time_of(at: &str) -> &str {
+    at.get(11..19).unwrap_or(at)
 }
 
 fn spans_w(spans: &[Span]) -> usize {
@@ -123,11 +142,7 @@ fn rail(c: &Ctx, f: &mut Frame, area: Rect, focused: bool) {
     let head_role = if focused { Role::Accent } else { Role::Muted };
     let mut lines = vec![
         Line::raw(""),
-        Line::from(filled(
-            vec![Span::raw("  "), c.span("PULL REQUESTS", head_role).patch_style(bg)],
-            w,
-            bg,
-        )),
+        Line::from(filled(vec![Span::raw("  "), c.span("PULL REQUESTS", head_role).patch_style(bg)], w, bg)),
         Line::raw(""),
     ];
     for pr in c.m.inbox() {
@@ -212,7 +227,8 @@ fn document(c: &Ctx, pr: &Pr, w: usize, compact: bool) -> (Vec<Line<'static>>, V
     }
     lines.push(phase_line(c, run, w));
     if let Some(r) = run.filter(|r| r.head_sha != pr.head_sha) {
-        let t = format!("{} stale: reviewed {}, the PR head is now {}", g.pending, r.head_sha.short(), pr.head_sha.short());
+        let t =
+            format!("{} stale: reviewed {}, the PR head is now {}", g.pending, r.head_sha.short(), pr.head_sha.short());
         lines.push(Line::from(c.span(c.fit(&t, w), Role::Pending)));
     }
     lines.push(Line::raw(""));
@@ -263,27 +279,27 @@ fn summary_line(c: &Ctx, pr: &Pr, findings: &[&Finding], w: usize) -> Line<'stat
     let g = c.t.g();
     let live: Vec<_> = findings.iter().filter(|f| !f.stale).collect();
     let words = |compact: bool| {
-    let mut left = vec![c.span(
-        match live.len() {
-            0 => "No findings yet".to_string(),
-            1 => "1 finding".to_string(),
-            n => format!("{n} findings"),
-        },
-        Role::Title,
-    )];
-    for s in [Severity::Critical, Severity::High, Severity::Medium, Severity::Low] {
-        let n = live.iter().filter(|f| f.severity == s).count();
-        if n > 0 {
-            let (glyph, _, role) = c.t.severity(s);
-            let word = if compact { String::new() } else { format!(" {}", sev_word(s).to_lowercase()) };
-            left.push(c.span(format!("{}{glyph} {n}{word}", if compact { "  " } else { "   " }), role));
+        let mut left = vec![c.span(
+            match live.len() {
+                0 => "No findings yet".to_string(),
+                1 => "1 finding".to_string(),
+                n => format!("{n} findings"),
+            },
+            Role::Title,
+        )];
+        for s in [Severity::Critical, Severity::High, Severity::Medium, Severity::Low] {
+            let n = live.iter().filter(|f| f.severity == s).count();
+            if n > 0 {
+                let (glyph, _, role) = c.t.severity(s);
+                let word = if compact { String::new() } else { format!(" {}", sev_word(s).to_lowercase()) };
+                left.push(c.span(format!("{}{glyph} {n}{word}", if compact { "  " } else { "   " }), role));
+            }
         }
-    }
-    let stale = findings.len() - live.len();
-    if stale > 0 {
-        left.push(c.span(format!("   {stale} from an older head"), Role::Pending));
-    }
-    left
+        let stale = findings.len() - live.len();
+        if stale > 0 {
+            left.push(c.span(format!("   {stale} from an older head"), Role::Pending));
+        }
+        left
     };
     let left = words(false);
     let published = live.iter().filter(|f| f.status == crate::protocol::FindingStatus::Published).count();
@@ -327,7 +343,13 @@ fn phase_line(c: &Ctx, run: Option<&Run>, w: usize) -> Line<'static> {
             _ if i == cur => (g.pending, Role::Pending),
             _ => (todo, Role::Muted),
         };
-        let label_role = if i == cur && cur < 6 { Role::Focus } else if i < cur { Role::Normal } else { Role::Muted };
+        let label_role = if i == cur && cur < 6 {
+            Role::Focus
+        } else if i < cur {
+            Role::Normal
+        } else {
+            Role::Muted
+        };
         spans.push(c.span(format!("{glyph} "), role));
         spans.push(c.span(*name, label_role));
     }
@@ -357,7 +379,8 @@ fn phase_line(c: &Ctx, run: Option<&Run>, w: usize) -> Line<'static> {
 /// The running review: the newest tool calls for this PR, newest last, with the spinner on the newest.
 fn live(c: &Ctx, pr: &Pr, w: usize, lines: &mut Vec<Line<'static>>) {
     let g = c.t.g();
-    lines.push(Line::from(vec![c.span(format!("{} ", spinner(c)), Role::Accent), c.span("Reviewing now", Role::Title)]));
+    lines
+        .push(Line::from(vec![c.span(format!("{} ", spinner(c)), Role::Accent), c.span("Reviewing now", Role::Title)]));
     lines.push(Line::raw(""));
     let items: Vec<_> = c.m.domain.activity.iter().filter(|a| a.pr_id.as_ref() == Some(&pr.id)).collect();
     let take = 12;
@@ -367,7 +390,9 @@ fn live(c: &Ctx, pr: &Pr, w: usize, lines: &mut Vec<Line<'static>>) {
         let at = time_of(a.at.as_str()).to_string();
         let (tool, text, role) = match &a.kind {
             ActivityKind::Tool { tool, summary } => (tool.to_string(), summary.to_string(), Role::Normal),
-            ActivityKind::Phase { to, .. } => ("phase".into(), format!("{} {}", g.arrow, phase_name(*to)), Role::Accent),
+            ActivityKind::Phase { to, .. } => {
+                ("phase".into(), format!("{} {}", g.arrow, phase_name(*to)), Role::Accent)
+            }
             ActivityKind::Finding { title, severity, .. } => {
                 let (glyph, sev, role) = c.t.severity(*severity);
                 ("finding".into(), format!("{glyph} {sev} {title}"), role)
@@ -419,11 +444,10 @@ fn card_head(c: &Ctx, f: &Finding, w: usize, selected: bool) -> Vec<Vec<Span<'st
     let (glyph, _, role) = c.t.severity(f.severity);
     let (status, srole) = finding_status(f.status);
     let cat = format!("{:?}", f.category).to_lowercase();
-    let left = vec![c.span(format!("{glyph} {}", sev_word(f.severity)), role), c.span(format!("   {cat}"), Role::Muted)];
-    let right = vec![
-        c.span(status, srole),
-        c.span(format!(" {} {:.0}% confident", g.sep, f.confidence * 100.0), Role::Muted),
-    ];
+    let left =
+        vec![c.span(format!("{glyph} {}", sev_word(f.severity)), role), c.span(format!("   {cat}"), Role::Muted)];
+    let right =
+        vec![c.span(status, srole), c.span(format!(" {} {:.0}% confident", g.sep, f.confidence * 100.0), Role::Muted)];
     let title_role = if selected { Role::Title } else { Role::Normal };
     let loc = match f.line {
         Some(l) => format!("{}:{l}", f.file),
@@ -440,7 +464,14 @@ fn card_head(c: &Ctx, f: &Finding, w: usize, selected: bool) -> Vec<Vec<Span<'st
     out
 }
 
-fn card(c: &Ctx, f: &Finding, d: Option<&FindingDetail>, w: usize, selected: bool, compact: bool) -> Vec<Line<'static>> {
+fn card(
+    c: &Ctx,
+    f: &Finding,
+    d: Option<&FindingDetail>,
+    w: usize,
+    selected: bool,
+    compact: bool,
+) -> Vec<Line<'static>> {
     let iw = w.saturating_sub(2);
     let mut body = card_head(c, f, iw, selected);
     body.push(vec![]);
@@ -580,8 +611,10 @@ pub fn finding_page(c: &Ctx, f: &mut Frame, area: Rect, id: &FindingId, scroll: 
                         EvidenceKind::Link => "link",
                         _ => "note",
                     };
-                    for (k, l) in rich(c, ev.text.as_str(), iw.saturating_sub(14), Role::Normal).into_iter().enumerate() {
-                        let mut s = vec![c.span(if k == 0 { format!("{tag:<14}") } else { " ".repeat(14) }, Role::Muted)];
+                    for (k, l) in rich(c, ev.text.as_str(), iw.saturating_sub(14), Role::Normal).into_iter().enumerate()
+                    {
+                        let mut s =
+                            vec![c.span(if k == 0 { format!("{tag:<14}") } else { " ".repeat(14) }, Role::Muted)];
                         s.extend(l);
                         body.push(s);
                     }

@@ -17,7 +17,10 @@ use crate::update::diff_findings;
 pub fn diff(c: &Ctx, f: &mut Frame, area: Rect) {
     let Some(d) = &c.m.diff else {
         let text = if c.m.selected_pr().is_some() { "Press 3 to load the diff." } else { "No PR selected." };
-        f.render_widget(Paragraph::new(vec![Line::raw(""), Line::from(c.span(format!("  {text}"), Role::Muted))]), area);
+        f.render_widget(
+            Paragraph::new(vec![Line::raw(""), Line::from(c.span(format!("  {text}"), Role::Muted))]),
+            area,
+        );
         return;
     };
     let anchored = diff_findings(c.m, d);
@@ -51,10 +54,11 @@ fn header(c: &Ctx, d: &DiffView, anchored: &[&Finding], w: usize) -> Vec<Line<'s
         first.push(c.span(format!(" -{}", file.deletions), Role::Del));
     }
     let number = pr.map_or(String::new(), |p| format!("{} #{}", p.repository, p.number));
-    let mut second = vec![c.span(
-        format!("{number} {} {} {} {}", g.sep, d.key.base.short(), g.arrow, d.key.head.short()),
-        Role::Muted,
-    )];
+    let mut second =
+        vec![c.span(
+            format!("{number} {} {} {} {}", g.sep, d.key.base.short(), g.arrow, d.key.head.short()),
+            Role::Muted,
+        )];
     if let Some(p) = pr.filter(|p| p.head_sha != d.key.head || p.base_sha != d.key.base) {
         second.push(c.span(format!("   historical revision; head is now {}", p.head_sha.short()), Role::Pending));
     }
@@ -104,7 +108,13 @@ fn tree(c: &Ctx, f: &mut Frame, area: Rect, d: &DiffView, anchored: &[&Finding],
     };
     let mut lines = vec![
         fill(vec![], bg),
-        fill(vec![Span::styled(format!("  FILES  {}", d.files.len()), c.s(if focused { Role::Accent } else { Role::Muted }).patch(bg))], bg),
+        fill(
+            vec![Span::styled(
+                format!("  FILES  {}", d.files.len()),
+                c.s(if focused { Role::Accent } else { Role::Muted }).patch(bg),
+            )],
+            bg,
+        ),
         fill(vec![], bg),
     ];
     let sel = d.selected_file.as_ref().and_then(|p| d.files.iter().position(|x| &x.path == p));
@@ -177,14 +187,15 @@ fn hunks(c: &Ctx, f: &mut Frame, area: Rect, d: &DiffView, anchored: &[&Finding]
         lines.push(row_line(c, file, &rows[i], anchored, w, cursor));
         // A finding reads like a review comment under the line it is about.
         if let DiffRow::Line(l) = &rows[i]
-            && let Some(x) = anchored.iter().find(|x| x.file == file.path && l.new.is_some() && x.line.map(|n| n.get()) == l.new)
+            && let Some(x) =
+                anchored.iter().find(|x| x.file == file.path && l.new.is_some() && x.line.map(|n| n.get()) == l.new)
         {
             let (glyph, _, role) = c.t.severity(x.severity);
             let bar = if c.t.ascii { "|" } else { "┃" };
             let pad = " ".repeat(14);
             lines.push(Line::from(vec![
                 c.span(format!("{pad}{bar} "), role),
-                c.span(format!("{glyph} {} ", super::lists::sev_label(x.severity)), role),
+                c.span(format!("{glyph} {} ", super::doc::sev_word(x.severity)), role),
                 c.span(c.fit(x.title.as_str(), w.saturating_sub(30)), Role::Title),
             ]));
             lines.push(Line::from(vec![
@@ -197,7 +208,9 @@ fn hunks(c: &Ctx, f: &mut Frame, area: Rect, d: &DiffView, anchored: &[&Finding]
     if file.truncated {
         let shown: usize = file.hunks.iter().map(|h| h.lines.len()).sum();
         let total = (file.additions + file.deletions) as usize;
-        lines.push(Line::from(c.span(format!("TRUNCATED by the server: {shown} of about {total} changed lines shown"), Role::Pending)));
+        lines.push(Line::from(
+            c.span(format!("TRUNCATED by the server: {shown} of about {total} changed lines shown"), Role::Pending),
+        ));
     }
     f.render_widget(Paragraph::new(lines), area);
 }
@@ -216,7 +229,8 @@ fn row_line(c: &Ctx, file: &DiffFile, row: &DiffRow, anchored: &[&Finding], w: u
             ])
         }
         DiffRow::Line(l) => {
-            let hit = anchored.iter().find(|x| x.file == file.path && l.new.is_some() && x.line.map(|n| n.get()) == l.new);
+            let hit =
+                anchored.iter().find(|x| x.file == file.path && l.new.is_some() && x.line.map(|n| n.get()) == l.new);
             let bg = match (cursor, hit.is_some(), l.kind) {
                 (true, _, _) => Bg::Select,
                 (_, true, _) => Bg::Anchor,

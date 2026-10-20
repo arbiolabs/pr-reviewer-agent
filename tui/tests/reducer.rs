@@ -42,19 +42,19 @@ fn pr_event(seq: u64, number: u64, title: &str) -> String {
 }
 
 #[test]
-#[ignore = "design prototype C: evidence prefetch, landing selection and start view change reducer output"]
-fn selection_follows_the_id_across_a_reorder() {
+fn the_inbox_order_holds_still_while_prs_change_and_selection_follows_the_id() {
     let mut m = live();
     let order = |m: &Model| m.inbox().iter().map(|p| p.number).collect::<Vec<_>>();
     assert_eq!(order(&m), [186, 185, 184]);
-    press(&mut m, KeyCode::Char('j'));
+    // The client lands on the PR with the most severe current finding.
+    assert_eq!(m.ui.selected_pr, Some(PrId::new("acme/shop#184")));
+    press(&mut m, KeyCode::Char('k'));
     assert_eq!(m.ui.selected_pr, Some(PrId::new("acme/shop#185")));
 
+    // Activity on #184 does not move it: the row under the cursor stays the one the user pressed toward.
     send(&mut m, &pr_event(109, 184, "Booking API v2"));
-    assert_eq!(order(&m), [184, 186, 185]);
+    assert_eq!(order(&m), [186, 185, 184]);
     assert_eq!(m.ui.selected_pr, Some(PrId::new("acme/shop#185")));
-
-    // Moving down from the re-sorted position lands on the PR now below it, not on a stale index.
     press(&mut m, KeyCode::Char('k'));
     assert_eq!(m.ui.selected_pr, Some(PrId::new("acme/shop#186")));
 }

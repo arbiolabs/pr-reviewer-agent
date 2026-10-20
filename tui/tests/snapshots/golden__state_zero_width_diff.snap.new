@@ -1,0 +1,43 @@
+---
+source: tests/golden.rs
+assertion_line: 361
+expression: "text.replace('\\u{200b}', \"\")"
+---
+  pr-review · • reviewing #184 verify found: Finding f-1                                                        ● live
+
+                                    src/booking.ts   +2 -1
+  FILES  4                          acme/shop #184 · bbbbbbb → 4444444   TRUNCATED
+
+▌ ▲ booking.ts                                  … -40,3 +40,4  export function book()
+▌   M src/ +2 -1                        40   40     const slot = await lock(id);
+    logo.png                            41      -   if (slot.free) {
+    B assets/ binary                         41 +   if (slot.free && !slot.held) {
+    slots.ts                        ▲        42 +     abcdefghij…
+    R src/ +0 -0                                  ┃ ▲ HIGH Finding f-1
+    schema.ts                                     ┃ Enter reads the finding   n next finding
+    A src/generated/ +4000 -0           42   43     }
+  more files below
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  j/k line  n/N finding  Enter read  h files  : jump  Esc back  ? help           1 inbox  2 review  3 diff  4 timeline

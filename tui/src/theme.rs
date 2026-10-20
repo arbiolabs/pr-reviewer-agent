@@ -75,9 +75,7 @@ pub fn hex(name: &str) -> u32 {
 
 fn truecolor() -> bool {
     static TC: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
-    *TC.get_or_init(|| {
-        std::env::var("COLORTERM").is_ok_and(|v| v.contains("truecolor") || v.contains("24bit"))
-    })
+    *TC.get_or_init(|| std::env::var("COLORTERM").is_ok_and(|v| v.contains("truecolor") || v.contains("24bit")))
 }
 
 /// Truecolor when the terminal says so, else the nearest xterm-256 cube or gray entry.
@@ -94,7 +92,11 @@ pub fn rgb(h: u32) -> Color {
     let avg = (r as i32 + g as i32 + b as i32) / 3;
     let gi = ((avg - 8).max(0) / 10).min(23);
     let gv = 8 + 10 * gi;
-    if dist((gv, gv, gv)) < dist(cube) { Color::Indexed(232 + gi as u8) } else { Color::Indexed(16 + 36 * qr + 6 * qg + qb) }
+    if dist((gv, gv, gv)) < dist(cube) {
+        Color::Indexed(232 + gi as u8)
+    } else {
+        Color::Indexed(16 + 36 * qr + 6 * qg + qb)
+    }
 }
 
 pub struct Glyphs {

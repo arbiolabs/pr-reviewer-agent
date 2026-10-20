@@ -1,0 +1,29 @@
+---
+source: tests/golden.rs
+assertion_line: 375
+expression: inbox
+---
+  pr-review · 0 PRs tracked · nothing running                   ✗ disconnected
+
+ ✗ disconnected: socket directory does not exist: /private/tmp/claude-501/xxxxx…
+
+  PULL REQUESTS
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+  j/k pull request  Enter read  / search  ? help  q quit

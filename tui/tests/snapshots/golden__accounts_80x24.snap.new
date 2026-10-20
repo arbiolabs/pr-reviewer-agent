@@ -1,0 +1,29 @@
+---
+source: tests/golden.rs
+assertion_line: 177
+expression: text
+---
+  pr-review · 3 PRs tracked · nothing running                           ● live
+
+ GITHUB ACCOUNTS
+    diego-arbio-dev  github.com  ✓ ok    gh active           Enter selects
+  › octo-work        github.com  ✓ ok                        Enter selects
+ CONNECTION
+  endpoint              unix:/run/user/501/pr-review/reviewer.sock
+  state                 ● live
+  protocol              client 1, server 1
+  server version        0.1.0
+  session               session-1
+  capabilities          account.select
+ DIAGNOSTICS
+  stream epoch          epoch-1
+  last applied sequence 10
+  last snapshot         0.0s ago
+  last heartbeat        never
+  resyncs / reconnects  0 / 0
+  activity              0 feed entries kept (cap 2000); 0 tool events applied
+ DISPLAY
+  glyphs / color        unicode / color
+ RECENT ERRORS
+  none
+  j/k account  Enter select account  r refresh  1-4 views  ? help  q quit

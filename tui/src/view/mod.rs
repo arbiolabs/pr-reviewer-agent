@@ -4,7 +4,6 @@
 mod code;
 mod diff;
 mod doc;
-mod lists;
 mod modals;
 mod timeline;
 
@@ -175,10 +174,9 @@ fn status_line(c: &Ctx, width: u16) -> Line<'static> {
     let (link, link_role) = link_status(c);
     let right = vec![c.span(format!("{link}  "), link_role)];
     let mut left = vec![c.span("  pr-review", Role::Title), c.span(format!(" {} ", g.sep), Role::Muted)];
-    let running: Vec<_> = c.m.domain.runs.values().filter(|r| r.status == crate::protocol::RunStatus::Running).collect();
-    let newest = c.m.domain.activity.iter().rev().find(|a| {
-        running.iter().any(|r| a.pr_id.as_ref() == Some(&r.pr_id))
-    });
+    let running: Vec<_> =
+        c.m.domain.runs.values().filter(|r| r.status == crate::protocol::RunStatus::Running).collect();
+    let newest = c.m.domain.activity.iter().rev().find(|a| running.iter().any(|r| a.pr_id.as_ref() == Some(&r.pr_id)));
     match (running.first(), newest) {
         (Some(_), Some(a)) => {
             let pr = a.pr_id.as_ref().and_then(|id| c.m.domain.prs.get(id));
@@ -186,7 +184,7 @@ fn status_line(c: &Ctx, width: u16) -> Line<'static> {
             left.push(c.span(format!("{} ", doc::spinner(c)), Role::Accent));
             if let (Some(p), Some(r)) = (pr, run) {
                 left.push(c.span(format!("reviewing #{} ", p.number), Role::Normal));
-                left.push(c.span(format!("{} ", lists::phase_label(r.phase)), Role::Accent));
+                left.push(c.span(format!("{} ", doc::phase_label(r.phase)), Role::Accent));
             }
             let what = match &a.kind {
                 crate::model::ActivityKind::Tool { tool, summary } => format!("{tool} {summary}"),
