@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it } from "vitest";
@@ -33,6 +33,8 @@ async function killThenRestart(kill: "before-post" | "after-response") {
   const killed = store.db.prepare("SELECT r.state, o.status, o.attempt_count, o.github_review_id FROM publication_outbox o JOIN review_revisions r ON r.id = o.revision_id").all();
   const reviewsAfterKill = fake.reviews.length;
   store.close();
+  // The killed run's data-dir lock would make the restart wait 5 s for it to go stale; cli.test covers that takeover.
+  rmSync(join(dataDir, "lock"), { recursive: true });
   const second = await run(env);
   const after = AppStore.open(join(dataDir, "app.sqlite"));
   const outbox = after.db.prepare("SELECT * FROM publication_outbox").get() as { id: string; status: string; github_review_id: number };
