@@ -88,6 +88,9 @@ export type AuditEvent = { seq: number; from_state: string; event: string; to_st
 
 const now = () => new Date().toISOString();
 
+/** Outbox events whose detail is why publication is not done; `last_error` keeps the latest one. */
+const OUTBOX_ERRORS: readonly OutboxEvent[] = ["UNCERTAIN", "REJECTED", "ABANDON", "UNDECIDED"];
+
 export class AppStore {
   readonly db: DatabaseSync;
 
@@ -273,7 +276,7 @@ export class AppStore {
           `UPDATE publication_outbox SET status = ?, updated_at = ?, attempt_count = attempt_count + ?,
              github_review_id = coalesce(?, github_review_id), last_error = ? WHERE id = ?`,
         )
-        .run(result.state, at, event === "SEND" ? 1 : 0, githubReviewId ?? null, detail, id);
+        .run(result.state, at, event === "SEND" ? 1 : 0, githubReviewId ?? null, OUTBOX_ERRORS.includes(event) ? detail : null, id);
       this.db
         .prepare("INSERT INTO outbox_events (outbox_id, from_status, event, to_status, detail, at) VALUES (?, ?, ?, ?, ?, ?)")
         .run(id, current, event, result.state, detail, at);
