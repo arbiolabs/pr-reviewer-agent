@@ -21,7 +21,7 @@ import { TargetDoc, type Workspace } from "../reasoning/tools.ts";
 import { verifyCandidates } from "../reasoning/verify.ts";
 import { PinnedRepo, syncRepo } from "../source/git.ts";
 import type { GitHubClient } from "../github/client.ts";
-import { buildPayload, findReview, postReview, PUBLISHER_VERSION, type ReviewPayload, reconcileOutbox } from "../publish/publisher.ts";
+import { buildPayload, findReview, postReview, PUBLISHER_VERSION, type ReviewPayload, recordVerdict } from "../publish/publisher.ts";
 import { parseDiff } from "../source/diff.ts";
 
 export const REVIEW_TASK_NAME = "pr-review.revision";
@@ -322,8 +322,12 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
     }
   };
 
-  /** §9.3 steps 6 and 7. Never posts; absence leads back to PUBLISH only while the attempt budget lasts. */
-  const reconcile: PhaseBody<"reconcile"> = async (cp, revision) => {
+  /**
+   * §9.3 steps 6 and 7. Never posts; absence leads back to PUBLISH only while the attempt budget lasts. A write that
+   * timed out can still land, so the first listing waits a client timeout, and absence needs two complete listings
+   * that far apart.
+   */
+  const reconcile: PhaseBody<"reconcile"> = async (cp, revision, runtime, context) => {
     let outbox = store.outbox(cp.outboxId)!;
     if (outbox.status === "published") {
       store.advance(revision.id, "RECONCILE", "REVIEW_RECONCILED", `review ${outbox.github_review_id}`);
@@ -331,7 +335,14 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
     }
     if (outbox.status !== "pending") {
       const { client, pr } = target(revision);
-      const verdict = await reconcileOutbox(store, client, pr, outbox);
+      const gap = config.github.timeout_ms;
+      await runtime.sleep(runtime.now() + gap, context);
+      let verdict = await findReview(client, pr, outbox);
+      if (verdict.kind === "absent") {
+        await runtime.sleep(runtime.now() + gap, context);
+        verdict = await findReview(client, pr, outbox);
+      }
+      recordVerdict(store, outbox, verdict);
       if (verdict.kind === "found") return finished(revision.id, "COMPLETED");
       if (verdict.kind === "undecided") {
         store.advance(revision.id, "RECONCILE", "TERMINAL_ERROR", `cannot_safely_decide: ${verdict.reason}`);
@@ -346,7 +357,7 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
       });
       return finished(revision.id, "FAILED");
     }
-    store.advance(revision.id, "RECONCILE", "CONFIRMED_NOT_POSTED", "complete listing has no review with the marker");
+    store.advance(revision.id, "RECONCILE", "CONFIRMED_NOT_POSTED", `two complete listings, ${config.github.timeout_ms} ms apart, have no review with the marker`);
     return { phase: "publish", revisionId: revision.id, outboxId: outbox.id };
   };
 

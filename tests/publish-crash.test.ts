@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it } from "vitest";
@@ -23,7 +23,10 @@ async function killThenRestart(kill: "before-post" | "after-response") {
   const fixture = createFixture();
   fake.setPull(fixture.pull);
   const dataDir = mkdtempSync(join(tmpdir(), "publish-kill-"));
-  const env = { FIXTURE_JSON: JSON.stringify(fixture), PR_REVIEW_DATA_DIR: dataDir, FAKE_URL: fake.url };
+  // Reconciliation waits a client timeout before each listing; keep it short.
+  const configPath = join(dataDir, "config.json");
+  writeFileSync(configPath, JSON.stringify({ github: { timeout_ms: 300 } }));
+  const env = { FIXTURE_JSON: JSON.stringify(fixture), PR_REVIEW_DATA_DIR: dataDir, FAKE_URL: fake.url, PR_REVIEW_CONFIG: configPath };
   const first = await run({ ...env, KILL: kill });
   expect(first.signal).toBe("SIGKILL");
   const store = AppStore.open(join(dataDir, "app.sqlite"));

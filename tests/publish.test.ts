@@ -28,6 +28,9 @@ afterEach(async () => {
   await fake.close();
 });
 
+// The client timeout is also how long reconciliation waits before it may claim a review absent.
+const config = { ...DEFAULT_CONFIG, github: { ...DEFAULT_CONFIG.github, timeout_ms: 300 } };
+
 function testClient() {
   return new GitHubClient({
     auth: { kind: "token", token: "ghp_test" },
@@ -35,7 +38,7 @@ function testClient() {
     maxRetries: 2,
     backoffMs: 1,
     concurrency: 2,
-    timeoutMs: 5000,
+    timeoutMs: config.github.timeout_ms,
     sleep: async (ms) => void sleeps.push(ms),
   });
 }
@@ -44,7 +47,7 @@ async function openPublishing(responses: FauxResponseStep[] = [readDiff(), submi
   const client = testClient();
   const app = await openApp({
     dataDir,
-    config: DEFAULT_CONFIG,
+    config,
     pulls: new GitHubPullSource(() => client),
     github: () => client,
     engine: { skipped: "Jev disabled by --no-jev" },
@@ -202,3 +205,30 @@ it("never POSTs when the listing before the first POST keeps failing, and leaves
   expect([revision.state, outbox.status, fake.postAttempts, fake.listCalls]).toEqual(["FAILED", "needs_reconciliation", 0, 4 * 3]);
   expect(outboxEvents).toEqual(["pending UNDECIDED needs_reconciliation"]);
 }, 60_000);
+
+it("waits out the client timeout before reconciling, so a review GitHub stores late is found, not posted twice", async () => {
+  fake.postBehaviors = ["slow-insert"];
+  fake.slowInsertMs = 450;
+  const app = await openPublishing();
+  const { revision, outbox, outboxEvents } = await publish(app);
+  expect([revision.state, outbox.status, outbox.github_review_id, fake.postAttempts, fake.reviews.length]).toEqual(["COMPLETED", "published", 1000, 1, 1]);
+  expect(outboxEvents).toEqual(["pending SEND sending", "sending UNCERTAIN needs_reconciliation", "needs_reconciliation FOUND published"]);
+}, 30_000);
+
+it("claims a review absent only after two complete listings a client timeout apart", async () => {
+  fake.postBehaviors = ["bad-gateway"];
+  const listedAt: number[] = [];
+  const list = fake.server.listeners("request")[0] as (req: { method?: string; url?: string }, res: unknown) => void;
+  fake.server.removeAllListeners("request");
+  fake.server.on("request", (req, res) => {
+    if (req.method === "GET" && req.url?.includes("/reviews")) listedAt.push(Date.now());
+    list(req, res);
+  });
+  const app = await openPublishing();
+  const { revision } = await publish(app);
+  expect([revision.state, fake.postAttempts, fake.reviews.length]).toEqual(["COMPLETED", 2, 1]);
+  // Listings: before the first POST, the two reconcile listings, and before the second POST.
+  expect(listedAt.length).toBe(4);
+  expect(listedAt[2]! - listedAt[1]!).toBeGreaterThanOrEqual(config.github.timeout_ms);
+  expect(app.store.auditEvents(revision.id).find((e) => e.event === "CONFIRMED_NOT_POSTED")!.detail).toBe("two complete listings, 300 ms apart, have no review with the marker");
+}, 30_000);

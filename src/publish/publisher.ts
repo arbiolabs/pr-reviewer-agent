@@ -84,7 +84,11 @@ export async function findReview(client: GitHubClient, pr: PullTarget, outbox: O
  */
 export async function reconcileOutbox(store: AppStore, client: GitHubClient, pr: PullTarget, outbox: OutboxRow): Promise<ReconcileVerdict> {
   if (outbox.status === "sending") store.advanceOutbox(outbox.id, "UNCERTAIN", "found in sending: the last POST may have reached GitHub");
-  const verdict = await findReview(client, pr, outbox);
+  return recordVerdict(store, outbox, await findReview(client, pr, outbox));
+}
+
+/** Write a reconciliation verdict onto an outbox in needs_reconciliation, and onto its revision when found. */
+export function recordVerdict(store: AppStore, outbox: OutboxRow, verdict: ReconcileVerdict): ReconcileVerdict {
   store.tx(() => {
     if (verdict.kind === "found") {
       store.advanceOutbox(outbox.id, "FOUND", `review ${verdict.reviewId} found by marker`, verdict.reviewId);

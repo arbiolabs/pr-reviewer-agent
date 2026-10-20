@@ -41,7 +41,7 @@ A revision that FAILED stays failed. A rerun prints the failure reason and tells
 3. The outbox is set to `sending` and committed before the POST. The returned review ID is saved after it.
 4. If the result is uncertain (a 5xx, a dropped connection, a timeout, or a crash that left the outbox in `sending`), RECONCILE lists every page of the PR's reviews. It looks for one with the revision's marker, the head commit and our author.
    - If one is found, the revision completes with that ID.
-   - If a complete listing proves it absent, PUBLISH tries again, up to `max_retries_per_phase` more times.
+   - A timed-out write can still land, so RECONCILE first waits `github.timeout_ms`. It claims the review absent only after two complete listings at least that far apart. Then PUBLISH tries again, up to `max_retries_per_phase` more times.
    - If the listing fails, the outbox stays `needs_reconciliation` and the revision FAILS with `cannot_safely_decide`. Then run `reconcile --revision <id>` when GitHub is reachable. If that proves the review absent, `review <url> --publish --retry` posts it.
 
 Publishing is part of the policy version (`1+publish`), so an earlier dry run of a head does not block publishing it. A 429 or a rate-limit 403 is retried after `Retry-After` or the reset time. GitHub answers these before it processes the request, so a retry cannot post a second review. Retries and the per-installation concurrency cap are in the `github` config section.

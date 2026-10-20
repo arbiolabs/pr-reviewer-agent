@@ -5,7 +5,7 @@ import type { PullInfo } from "../src/domain/types.ts";
 export type StoredReview = { id: number; body: string; commit_id: string; event: string; comments: unknown[]; user: { login: string } };
 
 /** What the server does with one POST of a review: store it and answer, or fail in a way the publisher must survive. */
-export type PostBehavior = "ok" | "rate-limited" | "store-then-drop" | "bad-gateway" | "unprocessable";
+export type PostBehavior = "ok" | "rate-limited" | "store-then-drop" | "bad-gateway" | "unprocessable" | "slow-insert";
 
 /** An in-process GitHub: pulls, reviews (paginated), the token user, and the App endpoints. It counts review POSTs. */
 export class FakeGitHub {
@@ -18,6 +18,8 @@ export class FakeGitHub {
   listCalls = 0;
   pageSize = 100;
   viewer = "reviewer-bot";
+  /** How long a `slow-insert` POST holds the request before it stores the review. */
+  slowInsertMs = 0;
   appSlug = "durable-review";
   tokensMinted = 0;
   requests: { method: string; path: string; authorization: string | undefined }[] = [];
@@ -96,10 +98,11 @@ export class FakeGitHub {
     json(404, { message: "Not Found" });
   }
 
-  private post(raw: string, req: IncomingMessage, res: ServerResponse, json: (status: number, body: unknown, headers?: Record<string, string>) => void) {
+  private async post(raw: string, req: IncomingMessage, res: ServerResponse, json: (status: number, body: unknown, headers?: Record<string, string>) => void) {
     this.postAttempts++;
     this.onPost?.();
     const behavior = this.postBehaviors.shift() ?? "ok";
+    if (behavior === "slow-insert") await new Promise((resolve) => setTimeout(resolve, this.slowInsertMs));
     if (behavior === "rate-limited") return json(429, { message: "You have exceeded a secondary rate limit" }, { "retry-after": "1" });
     if (behavior === "bad-gateway") return json(502, { message: "Bad Gateway" });
     if (behavior === "unprocessable") return json(422, { message: "Line could not be resolved" });

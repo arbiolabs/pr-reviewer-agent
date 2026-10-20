@@ -17,7 +17,11 @@ import { fauxModels, readDiff, submitDefect } from "./helpers.ts";
 const SECRET = "s3cret";
 const ADMIN = "admin";
 const KEY = generateKeyPairSync("rsa", { modulusLength: 2048 }).privateKey.export({ type: "pkcs8", format: "pem" }).toString();
-const config = { ...DEFAULT_CONFIG, review: { ...DEFAULT_CONFIG.review, debounce_seconds: 0, publish_mode: "comment" as const } };
+const config = {
+  ...DEFAULT_CONFIG,
+  review: { ...DEFAULT_CONFIG.review, debounce_seconds: 0, publish_mode: "comment" as const },
+  github: { ...DEFAULT_CONFIG.github, timeout_ms: 300 },
+};
 
 let fake: FakeGitHub;
 let fixture: Fixture;
