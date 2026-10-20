@@ -1,6 +1,6 @@
-# pr-review (M2)
+# pr-review
 
-pr-review is a durable PR reviewer built on Pi Durable, Jev and pi-ai. It reviews a GitHub pull request revision and reports evidence-backed findings. It can print them (`--dry-run`) or post them as one `COMMENT` review (`--publish`), and it can run as a GitHub App service that reviews PRs from webhooks. `SPEC.md` is the full design. This branch implements milestones M1 and M2.
+pr-review is a durable PR reviewer built on Pi Durable, Jev and pi-ai. It reviews a GitHub pull request revision and reports evidence-backed findings. It can print them (`--dry-run`) or post them as one `COMMENT` review (`--publish`), and it can run as a GitHub App service that reviews PRs from webhooks. `docs/SPEC.md` is the engine design and `docs/TUI_SPEC.md` the terminal client's. `main` implements engine milestones M1 and M2 and TUI milestones M0 to M2.
 
 ## Run
 

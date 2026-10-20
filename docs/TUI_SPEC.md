@@ -2,7 +2,7 @@
 
 **Status:** Implementation-ready proposal · v1.0  
 **Date:** 2026-10-20  
-**Companion:** `PR_REVIEW_AGENT_SPEC.md` (Durable PR Review Agent)  
+**Companion:** `SPEC.md` (Durable PR Review Agent)  
 **Primary language:** Rust  
 **UI:** Ratatui + Crossterm + Tokio  
 **Existing engine:** TypeScript, Pi Durable, state machines, Jev, GitHub App  
@@ -371,9 +371,9 @@ pr-reviewer/
 │   ├── agent/
 │   ├── github/
 │   └── storage/
-└── specs/
-    ├── PR_REVIEW_AGENT_SPEC.md
-    └── PR_REVIEW_TUI_SPEC.md
+└── docs/
+    ├── SPEC.md
+    └── TUI_SPEC.md
 ```
 
 If toolchains do not share a build system, use a small workspace script to run schema checks, TypeScript tests, Cargo tests and formatting. Do not force Rust into the TypeScript bundler.
@@ -473,7 +473,7 @@ Environment and paths should follow XDG conventions on Linux and sensible applic
 
 ## 16. First coding session checklist
 
-- [ ] Read `PR_REVIEW_AGENT_SPEC.md` and inspect existing repo before creating files.
+- [ ] Read `SPEC.md` and inspect existing repo before creating files.
 - [ ] Define `v1` JSON schemas for `hello`, `welcome`, snapshot, event envelope, command and result.
 - [ ] Add TypeScript fixture server and Rust protocol tests.
 - [ ] Scaffold Ratatui app with terminal RAII cleanup, Tokio channels and reducer architecture.
