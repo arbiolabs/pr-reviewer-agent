@@ -51,7 +51,11 @@ pub fn summary(c: &Ctx, e: &SequencedEvent) -> (String, Role) {
             (format!("GitHub accounts updated: {} listed, selected {selected}", accounts.len()), Role::Normal)
         }
         EventBody::PublicationChanged(p) => {
-            let url = p.url.as_ref().map_or(String::new(), |u| format!(" {u}"));
+            let url = p
+                .url
+                .as_ref()
+                .filter(|_| p.status == crate::protocol::PublicationStatus::Published)
+                .map_or(String::new(), |u| format!(" {u}"));
             (
                 format!("publication {}{url}", crate::theme::publication_status(p.status).0),
                 crate::theme::publication_status(p.status).1,
@@ -174,7 +178,12 @@ fn event_line(c: &Ctx, e: &SequencedEvent, w: usize, selected: bool) -> Line<'st
                 crate::protocol::PublicationStatus::Failed => g.fail,
                 _ => g.pending,
             };
-            let url = p.url.as_ref().map_or(String::new(), |u| format!("  {u}"));
+            // A URL belongs to the review once published; a daemon may attach today's to older rows.
+            let url = p
+                .url
+                .as_ref()
+                .filter(|_| p.status == crate::protocol::PublicationStatus::Published)
+                .map_or(String::new(), |u| format!("  {u}"));
             (gl, role, c.pad("publication", 13), format!("{word}{url}"), role)
         }
         EventBody::Run(change, r) => {

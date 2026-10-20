@@ -917,6 +917,15 @@ pub fn event_phases(m: &Model, events: &[SequencedEvent]) -> Vec<Option<Phase>> 
                 later_from.insert(run, p.from);
                 return Some(p.to);
             }
+            // The publisher's own statuses belong to PUBLISH, even when the journal wrote the run's next phase first.
+            if let EventBody::PublicationChanged(p) = &e.body
+                && matches!(
+                    p.status,
+                    PublicationStatus::Publishing | PublicationStatus::Published | PublicationStatus::Uncertain
+                )
+            {
+                return Some(Phase::Publish);
+            }
             later_from.get(run).copied().or_else(|| m.domain.runs.get(run).map(|r| r.phase))
         })
         .collect()

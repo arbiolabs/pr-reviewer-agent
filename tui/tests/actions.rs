@@ -364,3 +364,35 @@ fn publication_events_show_in_the_timeline_and_a_pr_update_between_runs_is_under
     assert!(f.lines().nth(update - 1).unwrap().trim_start().starts_with("PR ─"), "{f}");
     assert!(!f.lines().skip(update.saturating_sub(2)).any(|l| l.contains("BEFORE THE RUN")), "{f}");
 }
+
+#[test]
+fn publication_rows_sit_under_publish_and_carry_a_url_only_once_published_whatever_order_the_journal_wrote() {
+    // The daemon's journal: the run's PUBLISH -> COMPLETED first, then the publisher's statuses, each with the URL.
+    let url = r#","reviewId":3141,"url":"https://github.com/acme/shop/pull/184#pullrequestreview-3141""#;
+    let mut s = Sim::new(pr_review_tui::model::Look::default()).play("approval", 5);
+    for (seq, kind, data) in [
+        (
+            14,
+            "review.phase_changed",
+            r#"{"from":"AWAITING_APPROVAL","to":"PUBLISH","event":"APPROVED","detail":null}"#.to_string(),
+        ),
+        (
+            15,
+            "review.phase_changed",
+            r#"{"from":"PUBLISH","to":"COMPLETED","event":"REVIEW_RECONCILED","detail":null}"#.to_string(),
+        ),
+        (16, "review.publication_changed", format!(r#"{{"runId":"rev-184-a","status":"publishing"{url}}}"#)),
+        (17, "review.publication_changed", format!(r#"{{"runId":"rev-184-a","status":"published"{url}}}"#)),
+    ] {
+        s.server(ServerMessage::parse(&event(seq, "acme/shop#184", "rev-184-a", kind, &data)).unwrap());
+    }
+    let mut s = s.select("acme/shop#184").key(KeyCode::Char('4'));
+    let (f, _) = render(&mut s.m, 120, 50);
+    let rows: Vec<&str> = f.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    let at = |needle: &str| rows.iter().position(|l| l.contains(needle)).unwrap_or_else(|| panic!("{needle}:\n{f}"));
+    let publishing = at("publication   publishing");
+    assert!(rows[publishing - 1].starts_with("PUBLISH ─"), "{f}");
+    assert_eq!(at("publication   published"), publishing + 1, "{f}");
+    assert!(!rows[publishing].contains("https://"), "{f}");
+    assert!(rows[publishing + 1].ends_with("https://github.com/acme/shop/pull/184#pullrequestreview-3141"), "{f}");
+}
