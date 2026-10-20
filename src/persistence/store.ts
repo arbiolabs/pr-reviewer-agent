@@ -448,4 +448,25 @@ export class AppStore {
   countFindings(prId: string): number {
     return (this.db.prepare("SELECT count(*) AS n FROM findings WHERE pr_id = ?").get(prId) as { n: number }).n;
   }
+
+  /** §9.2 step 2: false for a delivery already in the inbox, which makes a redelivery a no-op. */
+  recordWebhook(event: { deliveryId: string; eventType: string; payloadHash: string; payloadJson: string }): boolean {
+    const info = this.db
+      .prepare(
+        `INSERT INTO webhook_events (delivery_id, event_type, payload_hash, payload_json, received_at)
+         VALUES (?, ?, ?, ?, ?) ON CONFLICT (delivery_id) DO NOTHING`,
+      )
+      .run(event.deliveryId, event.eventType, event.payloadHash, event.payloadJson, now());
+    return info.changes === 1;
+  }
+
+  unprocessedWebhooks(limit = 100): { delivery_id: string; event_type: string; payload_json: string }[] {
+    return this.db
+      .prepare("SELECT delivery_id, event_type, payload_json FROM webhook_events WHERE processed_at IS NULL ORDER BY received_at, delivery_id LIMIT ?")
+      .all(limit) as never;
+  }
+
+  markWebhookProcessed(deliveryId: string, outcome: string): void {
+    this.db.prepare("UPDATE webhook_events SET processed_at = ?, outcome = ? WHERE delivery_id = ?").run(now(), outcome, deliveryId);
+  }
 }
