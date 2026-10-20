@@ -229,6 +229,74 @@ pub enum AccountState {
     Unknown,
 }
 
+/// `welcome.mode`: an engine daemon may grant the review commands; a read-only one (another pr-review holds the
+/// data dir) grants `account.select` only.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DaemonMode {
+    Engine,
+    ReadOnly,
+    #[serde(other)]
+    Unknown,
+}
+
+/// A run's publication as `review.publication_changed` and `publication.preview` report it. Only `Published` means
+/// the review is on GitHub; `command.result accepted` never does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PublicationStatus {
+    AwaitingApproval,
+    Publishing,
+    Published,
+    Uncertain,
+    Failed,
+    #[serde(other)]
+    Unknown,
+}
+
+/// Data of a `review.publication_changed` event. The M3 wiring step adds it to `EventBody`; until then it parses from
+/// the event's `data` (see tests/contract.rs).
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicationChanged {
+    pub run_id: RunId,
+    pub status: PublicationStatus,
+    pub review_id: Option<u64>,
+    pub url: Option<Text>,
+}
+
+/// One inline comment of the stored payload, exactly as it will be posted.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct ReviewComment {
+    pub path: Text,
+    pub line: NonZeroU32,
+    pub side: Text,
+    pub body: Text,
+}
+
+/// The `publication.preview` reply (TUI_SPEC §5.5): the exact summary and inline comments, the target SHA, and the
+/// `preview_id` a `review.publish` must name. The M3 wiring step adds it to `ServerMessage`.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicationPreview {
+    pub request_id: Option<RequestId>,
+    pub run_id: RunId,
+    pub preview_id: Text,
+    pub head_sha: Sha,
+    pub body: Text,
+    pub comments: Vec<ReviewComment>,
+    pub event: Text,
+    pub status: PublicationStatus,
+}
+
+/// The `publication.get` request. The M3 wiring step adds it to `ClientMessage`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "type", rename = "publication.get", rename_all = "camelCase")]
+pub struct PublicationGet {
+    pub request_id: RequestId,
+    pub run_id: RunId,
+}
+
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Account {
@@ -404,6 +472,12 @@ pub enum ServerMessage {
         server_version: Text,
         session_id: Text,
         capabilities: Vec<Text>,
+        /// `None` from a daemon that predates engine mode.
+        #[serde(default)]
+        mode: Option<DaemonMode>,
+        /// Why a read-only daemon is read-only, for display; `None` in engine mode and from older daemons.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        read_only_reason: Option<Text>,
         stream_epoch: Epoch,
         latest_sequence: u64,
     },

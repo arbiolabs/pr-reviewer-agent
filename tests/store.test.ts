@@ -33,7 +33,7 @@ it("derives the same revision id on reopen and applies migrations once", () => {
   store.close();
   const reopened = AppStore.open(path);
   expect(reopened.ensureRevision(key).id).toBe(first.id);
-  expect(reopened.db.prepare("SELECT name FROM schema_migrations").all()).toEqual([{ name: "001_init.sql" }, { name: "002_code_read.sql" }, { name: "003_publication.sql" }, { name: "004_coordinator.sql" }, { name: "005_webhook_retry.sql" }, { name: "006_meta.sql" }, { name: "050_stream_meta.sql" }, { name: "051_journal_without_revision.sql" }]);
+  expect(reopened.db.prepare("SELECT name FROM schema_migrations").all()).toEqual([{ name: "001_init.sql" }, { name: "002_code_read.sql" }, { name: "003_publication.sql" }, { name: "004_coordinator.sql" }, { name: "005_webhook_retry.sql" }, { name: "006_meta.sql" }, { name: "050_stream_meta.sql" }, { name: "051_journal_without_revision.sql" }, { name: "052_control_commands.sql" }, { name: "053_control_command_attempt.sql" }]);
   expect(reopened.revisionsForPr(prId).length).toBe(1);
 });
 
@@ -93,6 +93,71 @@ it("abandons a pending outbox with its superseded revision", () => {
   const { revision, outbox } = revisionInPublish(store);
   expect(store.advanceFromCurrent(revision.id, "NEWER_HEAD", "head moved")).toBe("SUPERSEDED");
   expect(store.outboxEvents(outbox.id)).toEqual([{ from_status: "pending", event: "ABANDON", to_status: "failed", detail: "superseded" }]);
+});
+
+function revisionAwaitingApproval(store: AppStore) {
+  const prId = store.upsertPull(pull);
+  const revision = store.ensureRevision({ prId, baseSha: pull.baseSha, headSha: pull.headSha, policyVersion: "1+publish", reviewerVersion: "m3" });
+  store.db.prepare("UPDATE review_revisions SET state = 'PREPARE_PUBLICATION' WHERE id = ?").run(revision.id);
+  store.advance(revision.id, "PREPARE_PUBLICATION", "APPROVAL_REQUIRED", "head still h", () => {
+    store.ensureOutbox({ revisionId: revision.id, idempotencyKey: `${revision.id}:p1`, payloadHash: "h", payloadJson: "{}" });
+  });
+  return { revision, outbox: store.outboxForRevision(revision.id)! };
+}
+
+const publicationJournal = (store: AppStore, revisionId: string) =>
+  (store.db.prepare("SELECT detail FROM audit_events WHERE revision_id = ? AND event = 'PUBLICATION_CHANGED' ORDER BY seq").all(revisionId) as { detail: string }[]).map((r) => r.detail);
+
+it("journals one publication status row per change, from the park to the posted review", () => {
+  const { store } = openFresh();
+  const { revision, outbox } = revisionAwaitingApproval(store);
+  expect(store.revision(revision.id)!.state).toBe("AWAITING_APPROVAL");
+  expect(publicationJournal(store, revision.id)).toEqual(["awaiting_approval"]);
+  store.advance(revision.id, "AWAITING_APPROVAL", "APPROVED", "approved");
+  store.advanceOutbox(outbox.id, "SEND");
+  store.advanceOutbox(outbox.id, "NOT_SENT", "429");
+  store.advanceOutbox(outbox.id, "SEND");
+  store.tx(() => {
+    store.advanceOutbox(outbox.id, "SENT", "review 7", 7);
+    store.advance(revision.id, "PUBLISH", "REVIEW_RECONCILED", "review 7 posted");
+  });
+  expect(publicationJournal(store, revision.id)).toEqual(["awaiting_approval", "publishing", "published"]);
+  expect(store.reopenings(revision.id)).toEqual(["APPROVED"]);
+  // Status rows are stream-only: the audit trail keeps the machine's transitions.
+  expect(store.auditEvents(revision.id).map((e) => e.event)).toEqual(["APPROVAL_REQUIRED", "APPROVED", "REVIEW_RECONCILED"]);
+});
+
+it("abandons the unsent outbox when an awaiting revision is superseded or cancelled", () => {
+  const { store } = openFresh();
+  const superseded = revisionAwaitingApproval(store);
+  expect(store.advanceFromCurrent(superseded.revision.id, "NEWER_HEAD", "head moved")).toBe("SUPERSEDED");
+  expect(store.outbox(superseded.outbox.id)).toMatchObject({ status: "failed", last_error: "superseded" });
+  expect(publicationJournal(store, superseded.revision.id)).toEqual(["awaiting_approval", "failed"]);
+
+  const other = { ...pull, number: 8 };
+  const prId = store.upsertPull(other);
+  const revision = store.ensureRevision({ prId, baseSha: other.baseSha, headSha: other.headSha, policyVersion: "1+publish", reviewerVersion: "m3" });
+  store.db.prepare("UPDATE review_revisions SET state = 'AWAITING_APPROVAL' WHERE id = ?").run(revision.id);
+  const outbox = store.ensureOutbox({ revisionId: revision.id, idempotencyKey: `${revision.id}:p1`, payloadHash: "h", payloadJson: "{}" });
+  expect(store.advance(revision.id, "AWAITING_APPROVAL", "CANCELLED", "cancelled from the TUI")).toBe("FAILED");
+  expect(store.outboxEvents(outbox.id)).toEqual([{ from_status: "pending", event: "ABANDON", to_status: "failed", detail: "cancelled" }]);
+  expect(store.advance(revision.id, "FAILED", "MANUAL_RETRY", "retry 1")).toBe("COLLECT_CONTEXT");
+  expect([store.outbox(outbox.id)!.status, store.reopenings(revision.id)]).toEqual(["pending", ["MANUAL_RETRY"]]);
+});
+
+it("records an accepted command per idempotency key and attempt, and keeps a cancel reason", () => {
+  const { store } = openFresh();
+  expect(store.commandResult("review.retry:r")).toBe(undefined);
+  store.recordCommand("review.retry:r", { command: "review.retry", operationId: "review.retry:r", attempt: 1 });
+  expect(store.commandResult("review.retry:r")).toEqual({ command: "review.retry", operationId: "review.retry:r", attempt: 1 });
+  // The same key accepted for a later attempt replaces the record.
+  store.recordCommand("review.retry:r", { command: "review.retry", operationId: "review.retry:r", attempt: 2 });
+  expect(store.commandResult("review.retry:r")).toEqual({ command: "review.retry", operationId: "review.retry:r", attempt: 2 });
+  const prId = store.upsertPull(pull);
+  const rev = store.ensureRevision({ prId, baseSha: pull.baseSha, headSha: pull.headSha, policyVersion: "1", reviewerVersion: "m1" });
+  expect(store.revision(rev.id)!.cancel_reason).toBe(null);
+  store.requestCancel(rev.id, "cancelled from the TUI");
+  expect(store.revision(rev.id)!.cancel_reason).toBe("cancelled from the TUI");
 });
 
 it("journals tool activity and revision creation without adding to the audit trail", () => {

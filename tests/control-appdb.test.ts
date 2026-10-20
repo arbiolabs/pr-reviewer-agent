@@ -218,6 +218,30 @@ it("maps failure, manual retry and supersession, and sanitizes repository text",
   expect(await c.waitFor((m) => m.type === "resync.required")).toMatchObject({ requestId: "r" });
 });
 
+it("keeps a failed run's reason after its publication is reconciled", async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "ctl-reason-"));
+  const store = AppStore.open(join(dataDir, "app.sqlite"));
+  cleanup.push(() => store.close());
+  const prId = store.upsertPull(createFixture().pull);
+  const rev = store.ensureRevision({ prId, baseSha: "b".repeat(40), headSha: "h".repeat(40), policyVersion: "1", reviewerVersion: "m1+faux/reviewer" });
+  for (const event of ["CONTEXT_PERSISTED", "ROUTING_PERSISTED", "CANDIDATES_PERSISTED", "CANDIDATES_DISPOSED", "HEAD_VERIFIED"] as const) store.advanceFromCurrent(rev.id, event);
+  const outbox = store.ensureOutbox({ revisionId: rev.id, idempotencyKey: `${rev.id}:1`, payloadHash: "p", payloadJson: "{}" });
+  store.advanceOutbox(outbox.id, "SEND");
+  store.advanceFromCurrent(rev.id, "TERMINAL_ERROR", "GitHub timed out");
+  // Reconciliation finds nothing on GitHub: the outbox returns to pending, and the journal notes the publication failed.
+  store.advanceOutbox(outbox.id, "ABSENT");
+  expect(store.db.prepare("SELECT event, detail FROM audit_events WHERE revision_id = ? AND to_state = 'FAILED' ORDER BY seq").all(rev.id)).toEqual([
+    { event: "TERMINAL_ERROR", detail: "GitHub timed out" },
+    { event: "PUBLICATION_CHANGED", detail: "failed" },
+  ]);
+
+  const server = await daemon(dataDir);
+  const c = await attach(server.path);
+  c.send({ type: "snapshot.get", requestId: "s" });
+  const snapshot = await c.waitFor<Extract<ServerMessage, { type: "snapshot" }>>((m) => m.type === "snapshot");
+  expect(snapshot.runs.map((r) => [r.status, r.failureReason])).toEqual([["FAILED", "GitHub timed out"]]);
+});
+
 it("pages a diff by nextCursor, caps it per page, and gives binary files metadata only", async () => {
   const fixture = createFixture();
   const git = (...args: string[]) => execFileSync("git", ["-C", fixture.repoDir, "-c", "user.name=F", "-c", "user.email=f@x", ...args], { encoding: "utf8" }).trim();

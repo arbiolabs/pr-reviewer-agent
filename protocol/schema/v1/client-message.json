@@ -149,6 +149,28 @@
       "required": [
         "type",
         "requestId",
+        "runId"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "publication.get"
+        },
+        "requestId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "runId": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "requestId",
         "limit"
       ],
       "properties": {

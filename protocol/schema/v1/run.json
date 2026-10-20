@@ -36,6 +36,7 @@
         "ANALYZE",
         "VERIFY",
         "PREPARE_PUBLICATION",
+        "AWAITING_APPROVAL",
         "PUBLISH",
         "RECONCILE",
         "COMPLETED",

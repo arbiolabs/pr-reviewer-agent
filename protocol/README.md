@@ -17,17 +17,19 @@ also arrive unsolicited (`snapshot`, `resync.required`, `error`) have an optiona
 | `resume` | `streamEpoch`, `afterSequence` | replayed then live `event`s, or `resync.required` |
 | `diff.get` | `prId`, `baseSha`, `headSha`, `file?`, `cursor?`, `limit?` (1..500) | `diff.page` |
 | `finding.get` | `findingId` | `finding.detail` |
+| `publication.get` | `runId` | `publication.preview`, or `error NOT_FOUND` for a run with no stored payload |
 | `timeline.get` | `prId?`, `runId?`, `findingId?`, `beforeSequence?`, `limit` (1..500) | `timeline.page` (newest first; pass `nextBeforeSequence` back to page) |
-| `command` | `command`, `params`, `idempotencyKey` | `command.result`. Only `account.select` can be accepted; every other command is `rejected` with code `CAPABILITY_DENIED`. |
+| `command` | `command`, `params`, `idempotencyKey` | `command.result`. A command the `welcome` did not grant is `rejected` with code `CAPABILITY_DENIED`. |
 
 | Server → client | Fields |
 | --- | --- |
-| `welcome` | `protocolVersion: 1`, `serverVersion`, `sessionId`, `capabilities[]` (`account.select` or nothing), `streamEpoch`, `latestSequence` |
+| `welcome` | `protocolVersion: 1`, `serverVersion`, `sessionId`, `capabilities[]`, `mode?` (`engine` or `read-only`; absent from older servers), `readOnlyReason?` (display text, present in `read-only` mode), `streamEpoch`, `latestSequence` |
 | `snapshot` | `streamEpoch`, `sequence`, `prs[]`, `runs[]`, `findings[]`, `accounts[]?` (absent from older servers) |
 | `event` | see below |
 | `resync.required` | `reason` (display text) |
 | `diff.page` | `prId`, `baseSha`, `headSha`, `files[]`, `nextCursor?`, `truncated` |
 | `finding.detail` | `finding`: a `Finding` plus `explanation`, `reasoningSummary`, `suggestedFix?`, `evidence[]`, `history[]` |
+| `publication.preview` | `runId`, `previewId` (the payload hash the approval must name), `headSha`, `body` (the exact review text, marker included), `comments[]` (`path`, `line`, `side: RIGHT`, `body`), `event: COMMENT`, `status` |
 | `timeline.page` | `events[]` (sequenced events), `nextBeforeSequence?` |
 | `command.result` | `status: accepted` with `operationId`, or `status: rejected` with `code` and `message` |
 | `error` | `code`, `message`, `supported?` |
@@ -38,14 +40,40 @@ a line that is not JSON, is over 1 MiB, or fails the client schema with `INVALID
 
 Entities are in `schema/v1/{pr,run,finding,finding-detail,evidence,diff-file,account,event}.json`. A run is one engine revision
 (`id` is the revision id). `phase` is the engine state: `COLLECT_CONTEXT TRIAGE ANALYZE VERIFY PREPARE_PUBLICATION
-PUBLISH RECONCILE COMPLETED FAILED SUPERSEDED`. A `Finding.line` of `null` means a file-level finding.
+AWAITING_APPROVAL PUBLISH RECONCILE COMPLETED FAILED SUPERSEDED`. `AWAITING_APPROVAL` is a run whose review is stored and
+parked for a human (publish mode `approval`); its `status` is still `RUNNING`. A `Finding.line` of `null` means a file-level finding.
+
+## Commands
 
 The command shapes are the only closed objects in the protocol: an unknown param or field makes the command invalid.
+The `idempotencyKey` is fixed by the command and its params, so a replayed key is the same request: the server answers
+the recorded `operationId` and does nothing again. A key in any other form is `INVALID_REQUEST`.
 
-| `command` | `params` | `idempotencyKey` |
-| --- | --- | --- |
-| `review.start`, `review.cancel`, `review.retry`, `review.publish` | see `schema/v1/client-message.json` | reserved: always `CAPABILITY_DENIED` |
-| `account.select` | `accountId` | `account.select:<accountId>` |
+| `command` | `params` | `idempotencyKey` | `operationId` |
+| --- | --- | --- | --- |
+| `review.start` | `prId`, `expectedHeadSha` | `review.start:<prId>:<expectedHeadSha>` | `review.start:<runId>` of the run started or found |
+| `review.retry` | `runId` | `review.retry:<runId>` | `review.retry:<runId>` |
+| `review.cancel` | `runId` | `review.cancel:<runId>` | `review.cancel:<runId>` |
+| `review.publish` | `runId`, `previewId`, `expectedHeadSha` | `review.publish:<runId>:<previewId>` | `review.publish:<runId>` |
+| `account.select` | `accountId` | `account.select:<accountId>` | `account.select:<journal seq>` |
+
+`welcome.capabilities` lists what this daemon grants. A daemon in `read-only` mode (the default, or another pr-review
+holds the data dir, or the engine failed to open; `welcome.readOnlyReason` says which) grants `account.select` only.
+A daemon started with `--allow-commands` or `control.allow_commands` runs in `engine` mode and grants the review
+commands, and `review.publish` only under `review.publish_mode: "approval"`.
+Every command is checked by the server whatever the client showed:
+
+- `review.start`: the PR must be tracked (`NOT_FOUND`), `expectedHeadSha` must be GitHub's head now (`REVISION_STALE`,
+  with the live head in the message), the PR must be open, and the head must not already have a finished or parked
+  review (`CONFLICT`). The run then appears through `run.started` and the usual events.
+- `review.retry`: only from `FAILED` (`INVALID_TRANSITION` elsewhere), through the audited manual retry.
+- `review.cancel`: refused with `CONFLICT` in `PUBLISH` and `RECONCILE`, where a GitHub write may be in flight;
+  `INVALID_TRANSITION` for a finished run. A parked run fails at once; a running one has its task aborted. Either way
+  the run ends `FAILED` with reason `cancelled from the TUI`, unless its head moved meanwhile (`SUPERSEDED`).
+- `review.publish`: the run must be `AWAITING_APPROVAL` (`INVALID_TRANSITION`), `previewId` must equal the stored
+  payload's hash (`CONFLICT`), and `expectedHeadSha` must be the run's head and GitHub's open head now
+  (`REVISION_STALE`; a moved head or closed PR supersedes the run, with nothing posted). Accepted means the audited
+  approval is recorded and the exactly-once publisher owns the rest; `review.publication_changed` says what happened.
 
 ## Accounts
 
@@ -79,8 +107,9 @@ A sequenced event has `streamEpoch`, `sequence` (the journal's `audit_events.seq
 | `review.phase_changed` | `prId`, `runId` | `{ from, to, event, detail }` | set that run's `phase` to `to` |
 | `finding.updated` | `prId`, `runId` | `Finding` | upsert the finding |
 | `tool.activity` | `prId`, `runId` | `{ tool, summary }` (summary at most 200 chars) | append to the activity feed |
+| `review.publication_changed` | `prId`, `runId` | `{ runId, status, reviewId?, url? }` with `status` one of `awaiting_approval`, `publishing`, `published`, `uncertain`, `failed` | set that run's publication status; a publication is done only on `published`, never on `command.result accepted` |
 | `accounts.updated` | none | `{ accounts }` | replace the account list |
-| anything else, `review.publication_changed` included (reserved) | optional | any | nothing, but it still advances `lastApplied` |
+| anything else | optional | any | nothing, but it still advances `lastApplied` |
 
 `heartbeat` is `{ type: "event", eventType: "heartbeat", streamEpoch, occurredAt }`. It has no sequence, is never
 durable, and never changes state. A missed heartbeat means a stale connection, never a failed run.
@@ -132,11 +161,13 @@ The fixtures write control bytes as JSON `\u` escapes.
 - `playback/<name>.expect.json` is the client state after the whole script: `streamEpoch`, `lastSequence`,
   `resyncRequested`, `toolActivityCount` (the number of activity events applied), and `prs`, `runs` and `findings`
   sorted by `id`, plus `accounts` (`id`, `state`, `ghActive`, `selected`, sorted by `id`) when the script's snapshot
-  carries accounts. Titles in this file are already sanitized. The reference reducer in `tests/protocol.test.ts`
-  produces exactly this state.
+  carries accounts, plus `publications` (the latest `status` per `runId`, sorted) when the script carries a
+  `review.publication_changed`. Titles in this file are already sanitized. The reference reducer in
+  `tests/protocol.test.ts` produces exactly this state.
 - `--playback` answers `diff.get` with the `fixtures/server.diff.page*.json` whose `prId`, `baseSha` and `headSha` match
-  (`server.diff.page.last.json` for a request with a `cursor`), and `finding.get` with the
-  `fixtures/server.finding.detail*.json` whose finding id matches. Anything else is `NOT_FOUND`.
+  (`server.diff.page.last.json` for a request with a `cursor`), `finding.get` with the
+  `fixtures/server.finding.detail*.json` whose finding id matches, and `publication.get` with
+  `fixtures/server.publication.preview.json` when its run id matches. Anything else is `NOT_FOUND`.
 
 | Script | Exercises |
 | --- | --- |
@@ -148,4 +179,5 @@ The fixtures write control bytes as JSON `\u` escapes.
 | `hostile` | ANSI, OSC 8 and 52, C1 CSI and DCS, CR overwrite, a 2,000-char title, CJK and emoji |
 | `burst` | 5,000 `tool.activity` events with no delay |
 | `accounts` | a snapshot with 2 accounts, `command.result accepted` for `account.select`, then `accounts.updated` with the new selection |
+| `approval` | an engine-mode welcome, a run reaching `AWAITING_APPROVAL`, its `publication.preview`, `command.result accepted` for `review.publish`, then `publishing`, `published` with the review id, and `review.completed` |
 | `showcase` | a realistic session for judging TUI designs: 5 PRs in `acme/shop` and `acme/api` (completed with 4 findings, completed clean, one review advancing live for about 18 s, superseded with a stale finding, failed), 2 accounts |

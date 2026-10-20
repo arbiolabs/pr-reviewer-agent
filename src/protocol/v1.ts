@@ -1,6 +1,6 @@
 import Type, { type Static, type TSchema } from "typebox";
 import { CATEGORIES, SEVERITIES } from "../domain/types.ts";
-import { COORDINATOR_STATES, FINDING_STATES, REVIEW_STATES } from "../domain/machines.ts";
+import { COORDINATOR_STATES, FINDING_STATES, PUBLICATION_STATUSES, REVIEW_STATES } from "../domain/machines.ts";
 
 export const PROTOCOL_VERSION = 1;
 export const MAX_LINE_BYTES = 1024 * 1024;
@@ -27,6 +27,10 @@ export const ERROR_CODES = [
 export type ErrorCode = (typeof ERROR_CODES)[number];
 
 export const RUN_STATUSES = ["RUNNING", "COMPLETED", "FAILED", "SUPERSEDED"] as const;
+/** Engine mode hosts the review engine and may grant the review commands; read-only mode only reads the app DB. */
+export const DAEMON_MODES = ["engine", "read-only"] as const;
+/** The commands a daemon in engine mode can grant (`welcome.capabilities`), besides `account.select`. */
+export const REVIEW_COMMANDS = ["review.start", "review.retry", "review.cancel", "review.publish"] as const;
 export const DIFF_FILE_STATUSES = ["added", "modified", "deleted", "renamed", "binary"] as const;
 export const EVIDENCE_KINDS = ["code_ref", "tool_summary", "test_result", "scenario", "link"] as const;
 
@@ -143,6 +147,21 @@ export const Account = Type.Object({
 });
 export type Account = Static<typeof Account>;
 
+/** One inline comment of the stored review payload, exactly as it will be posted. */
+export const ReviewComment = Type.Object({ path: Type.String(), line: Type.Integer({ minimum: 1 }), side: Type.Literal("RIGHT"), body: Type.String() });
+
+/**
+ * What a run's publication looks like now: `awaiting_approval` holds the exact payload for a human, `publishing`
+ * means the exactly-once publisher owns it, `uncertain` means a write may have landed and reconciliation decides.
+ */
+export const PublicationChange = Type.Object({
+  runId: Id,
+  status: oneOf(PUBLICATION_STATUSES),
+  reviewId: Type.Optional(Type.Integer({ minimum: 1, description: "the GitHub review, once one is known" })),
+  url: Type.Optional(Type.String()),
+});
+export type PublicationChange = Static<typeof PublicationChange>;
+
 // ---------- events ----------
 
 const sequenced = {
@@ -165,6 +184,7 @@ export const KNOWN_EVENT_TYPES = [
   "review.completed",
   "run.superseded",
   "run.failed",
+  "review.publication_changed",
   "accounts.updated",
   "heartbeat",
 ] as const;
@@ -184,6 +204,7 @@ export const KnownEvent = Type.Union([
   event("review.completed", Run, { prId: Id, runId: Id }),
   event("run.superseded", Run, { prId: Id, runId: Id }),
   event("run.failed", Run, { prId: Id, runId: Id }),
+  event("review.publication_changed", PublicationChange, { prId: Id, runId: Id }),
   event("accounts.updated", Type.Object({ accounts: Type.Array(Account) }), {}),
 ]);
 
@@ -235,6 +256,23 @@ export const Command = Type.Union([
   command("account.select", { accountId: Id }),
 ]);
 export type Command = Static<typeof Command>;
+export type ReviewCommand = Exclude<Command, { command: "account.select" }>;
+
+/** The one key a command may carry: it binds the key to the target, so a replayed key is the same request. */
+export function idempotencyKey(c: Command): string {
+  switch (c.command) {
+    case "review.start":
+      return `review.start:${c.params.prId}:${c.params.expectedHeadSha}`;
+    case "review.cancel":
+      return `review.cancel:${c.params.runId}`;
+    case "review.retry":
+      return `review.retry:${c.params.runId}`;
+    case "review.publish":
+      return `review.publish:${c.params.runId}:${c.params.previewId}`;
+    case "account.select":
+      return `account.select:${c.params.accountId}`;
+  }
+}
 
 export const ClientMessage = Type.Union([
   req("hello", {
@@ -253,6 +291,7 @@ export const ClientMessage = Type.Union([
     limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 500 })),
   }),
   req("finding.get", { findingId: Id }),
+  req("publication.get", { runId: Id }),
   req("timeline.get", {
     prId: Type.Optional(Id),
     runId: Type.Optional(Id),
@@ -276,6 +315,8 @@ export const ServerMessage = Type.Union([
     serverVersion: Type.String(),
     sessionId: Id,
     capabilities: Type.Array(Type.String()),
+    mode: Type.Optional(oneOf(DAEMON_MODES)),
+    readOnlyReason: Type.Optional(Type.String({ description: "why a read-only daemon is read-only (commands off, another pr-review holds the data dir, or the engine failed to open), for display" })),
     streamEpoch: Id,
     latestSequence: Seq,
   }),
@@ -300,6 +341,16 @@ export const ServerMessage = Type.Union([
     truncated: Type.Boolean(),
   }),
   reply("finding.detail", { finding: FindingDetail }),
+  // TUI_SPEC §5.5: the exact summary and inline comments, the target SHA, and the hash the approval must name.
+  reply("publication.preview", {
+    runId: Id,
+    previewId: Id,
+    headSha: Sha,
+    body: Type.String(),
+    comments: Type.Array(ReviewComment),
+    event: Type.Literal("COMMENT"),
+    status: oneOf(PUBLICATION_STATUSES),
+  }),
   reply("timeline.page", {
     events: Type.Array(Type.Union([KnownEvent, UnknownEvent]), { description: "newest first" }),
     nextBeforeSequence: Type.Optional(Type.Integer({ minimum: 1 })),
@@ -315,5 +366,6 @@ export const ServerMessage = Type.Union([
   }),
 ]);
 export type ServerMessage = Static<typeof ServerMessage>;
+export type PublicationPreview = Omit<Extract<ServerMessage, { type: "publication.preview" }>, "type" | "requestId">;
 
 export const ENTITIES = { pr: Pr, run: Run, finding: Finding, "finding-detail": FindingDetail, evidence: Evidence, "diff-file": DiffFile, account: Account, event: Event } as const;

@@ -5,6 +5,7 @@ import type { AuthInteraction, CredentialStore, Models } from "@earendil-works/p
 import { createTypeSafeClient, createZenClient } from "jev-systemone";
 import { type Config, loadConfig, saveDefaultModel } from "../config/config.ts";
 import { runDaemon, runTui } from "../control/daemon.ts";
+import { EngineSource } from "../control/engine.ts";
 import { type Account, ACCOUNT_KEY, chooseAccount, detectGh, listAccounts, planGithubAuth, resolveGithubAuth } from "../github/accounts.ts";
 import { clientFor, type GitHubClient } from "../github/client.ts";
 import { GitHubPullSource, parsePullRef, parsePullUrl, type PullSource } from "../github/pulls.ts";
@@ -15,6 +16,7 @@ import { chooseModel, listAvailableModels, splitRef } from "../models/select.ts"
 import { AppStore } from "../persistence/store.ts";
 import { reconcileOutbox } from "../publish/publisher.ts";
 import { finishReview, lockDataDir, openApp, startReview } from "../runtime/app.ts";
+import { approve as approvePublication, Refused, resumeApproved } from "../runtime/commands.ts";
 import { startService } from "../server/service.ts";
 import { loadReport, renderJson, renderMarkdown } from "./report.ts";
 
@@ -36,13 +38,14 @@ export type CliDeps = {
 const USAGE = `usage:
   pr-review review <pr-url> [--dry-run | --publish] [--json] [--no-jev] [--model provider/id] [--retry]
   pr-review reconcile --revision <revision-id>
+  pr-review approve --revision <revision-id> --preview <payload-hash>
   pr-review serve
   pr-review inspect --pr owner/repo#123 [--json]
   pr-review models [--json]
   pr-review accounts [--json]
   pr-review accounts use <host/login | login>
   pr-review login [provider] [--api-key]
-  pr-review daemon [--socket PATH] [--fixture NAME] [--data DIR] [--heartbeat SECONDS]
+  pr-review daemon [--socket PATH] [--fixture NAME] [--data DIR] [--heartbeat SECONDS] [--allow-commands]
   pr-review tui [args for pr-review-tui]`;
 
 /** Text output; `json` writes the value unchanged, so a JSON consumer gets the raw strings (JSON escapes C0 itself). */
@@ -65,6 +68,8 @@ export async function main(argv: string[], deps: CliDeps = {}): Promise<number> 
         return await review(rest, deps, dataDir, out, err);
       case "reconcile":
         return await reconcile(rest, deps, dataDir, out);
+      case "approve":
+        return await approve(rest, deps, dataDir, out, err);
       case "serve":
         return await serve(deps, dataDir, err);
       case "inspect":
@@ -76,7 +81,7 @@ export async function main(argv: string[], deps: CliDeps = {}): Promise<number> 
       case "login":
         return await login(rest, deps, out);
       case "daemon":
-        return await runDaemon(rest, dataDir, err);
+        return await runDaemon(rest, dataDir, err, { openEngine: (dir) => openEngine(dir, deps, err), commandsConfigured: () => loadConfig().control.allow_commands });
       case "tui":
         return runTui(rest);
       default:
@@ -141,9 +146,63 @@ async function review(args: string[], deps: CliDeps, dataDir: string, out: Out, 
     const report = loadReport(app.store, revision.id);
     if (report.outbox) err(`publication ${report.outbox.status}${report.outbox.github_review_id ? `: review ${report.outbox.github_review_id}` : ""}${report.outbox.last_error ? ` (${report.outbox.last_error})` : ""}\n`);
     if (revision.state === "FAILED") err(`revision ${revision.id} FAILED: ${report.audit.at(-1)?.detail ?? "no reason recorded"}; rerun with --retry to try again\n`);
+    if (revision.state === "AWAITING_APPROVAL") err(`revision ${revision.id} awaits approval: pr-review approve --revision ${revision.id} --preview ${report.outbox?.payload_hash}\n`);
     if (values.json) out.json(renderJson(report));
     else out(renderMarkdown(report));
-    return revision.state === "COMPLETED" ? 0 : 1;
+    return revision.state === "COMPLETED" || revision.state === "AWAITING_APPROVAL" ? 0 : 1;
+  } finally {
+    await app.close();
+  }
+}
+
+/**
+ * `approve --revision <id> --preview <hash>`: the headless twin of the TUI's review.publish. Publishes exactly the
+ * stored payload through the exactly-once outbox. A rerun after a crash resumes the approved attempt instead.
+ */
+async function approve(args: string[], deps: CliDeps, dataDir: string, out: Out, err: (t: string) => void): Promise<number> {
+  const { values } = parseArgs({ args, options: { revision: { type: "string" }, preview: { type: "string" } } });
+  if (!values.revision || !values.preview) throw new Error("approve needs --revision <revision-id> --preview <payload-hash>");
+  const config = loadConfig();
+  const auth = deps.github ? undefined : await withStore(dataDir, (store) => resolveGithubAuth(store));
+  if (!deps.github && auth?.token === undefined) throw new Error("approve needs a GitHub token: set GITHUB_TOKEN, run gh auth login, or pick one with pr-review accounts use");
+  const github = deps.github ?? clientFor(config.github, { kind: "token", token: auth!.token });
+  const pulls = deps.pulls ?? new GitHubPullSource(() => github);
+  // The approved attempt only publishes, so the revision's own reviewer identity serves; no model is resolved.
+  const reviewerVersion = await withStore(dataDir, (store) => {
+    const revision = store.revision(values.revision!);
+    if (!revision) throw new Error(`no revision ${values.revision}`);
+    return revision.reviewer_version;
+  });
+  const app = await openApp({
+    dataDir,
+    config,
+    pulls,
+    gitToken: async () => auth?.token,
+    github: () => github,
+    engine: { skipped: "approve does not triage" },
+    models: deps.models ?? buildModels(deps.credentials ?? new PiAuthFileStore()),
+    model: splitRef(reviewerVersion.slice(reviewerVersion.indexOf("+") + 1)),
+    reviewerVersion,
+    onReport: (error) => err(`note: ${error instanceof Error ? error.message : String(error)}\n`),
+  });
+  try {
+    app.harness.resume();
+    const revision = app.store.revision(values.revision)!;
+    let started = await resumeApproved(app, revision);
+    if (started) err(`revision ${revision.id} was already approved; waiting for its publication\n`);
+    else {
+      try {
+        started = await approvePublication(app, pulls, { revisionId: revision.id, previewId: values.preview }, "pr-review approve");
+      } catch (error) {
+        if (error instanceof Refused) throw new Error(`${error.code}: ${error.message}`);
+        throw error;
+      }
+      err(`revision ${revision.id} approved; durable task ${started.taskId}\n`);
+    }
+    const finished = await finishReview(app, started);
+    const outbox = app.store.outboxForRevision(finished.id);
+    out(`publication ${outbox?.status}${outbox?.github_review_id ? `: review ${outbox.github_review_id}` : ""}${outbox?.last_error ? ` (${outbox.last_error})` : ""}; revision ${finished.state}\n`);
+    return finished.state === "COMPLETED" ? 0 : 1;
   } finally {
     await app.close();
   }
@@ -214,6 +273,37 @@ async function reconcile(args: string[], deps: CliDeps, dataDir: string, out: Ou
   }
 }
 
+/** One Jev engine serves every repository, so the keyless tier is used only when private diffs may go there. */
+function jevFromEnv(config: Config, deps: CliDeps): JevRoute {
+  if (process.env.TYPESAFE_API_KEY) return deps.engine ?? new JevDecisionEngine(createTypeSafeClient());
+  return config.jev.allow_keyless_for_private ? (deps.engine ?? new JevDecisionEngine(createZenClient())) : { skipped: "jev_skipped_private_repo" };
+}
+
+/**
+ * The daemon's engine, configured like `serve` from the environment: the GitHub auth `resolveGithubAuth` picks, the
+ * model resolved without a prompt, and the data-dir lock. Throws while another pr-review holds that lock.
+ */
+async function openEngine(dataDir: string, deps: CliDeps, err: (t: string) => void): Promise<EngineSource> {
+  const config = loadConfig();
+  const github = await withStore(dataDir, (store) => githubFromEnv(config, store));
+  const pulls = deps.pulls ?? new GitHubPullSource(github.clientFor);
+  const { models, ref } = await resolveModel(config, deps, undefined, false, err);
+  const report = (error: unknown) => err(`note: ${error instanceof Error ? error.message : String(error)}\n`);
+  const app = await openApp({
+    dataDir,
+    config,
+    pulls,
+    gitToken: (installationId) => github.clientFor(installationId).token(),
+    github: github.clientFor,
+    engine: jevFromEnv(config, deps),
+    models,
+    model: splitRef(ref),
+    reviewerVersion: `${REVIEWER_CODE_VERSION}+${ref}`,
+    onReport: report,
+  });
+  return EngineSource.host(dataDir, app, { config, pulls, github: github.clientFor, report });
+}
+
 /** `serve`: webhook receiver, worker and reviews in one process, configured from the environment. */
 async function serve(deps: CliDeps, dataDir: string, err: (t: string) => void): Promise<number> {
   const config = loadConfig();
@@ -222,13 +312,6 @@ async function serve(deps: CliDeps, dataDir: string, err: (t: string) => void): 
   const github = await withStore(dataDir, (store) => githubFromEnv(config, store));
   const pulls = new GitHubPullSource(github.clientFor);
   const { models, ref } = await resolveModel(config, deps, undefined, false, err);
-  // One engine serves every repository, so the keyless Jev tier is used only when private diffs may go there.
-  const keyed = Boolean(process.env.TYPESAFE_API_KEY);
-  const engine: JevRoute = keyed
-    ? new JevDecisionEngine(createTypeSafeClient())
-    : config.jev.allow_keyless_for_private
-      ? new JevDecisionEngine(createZenClient())
-      : { skipped: "jev_skipped_private_repo" };
   const report = (error: unknown) => err(`note: ${error instanceof Error ? error.message : String(error)}\n`);
   const app = await openApp({
     dataDir,
@@ -236,7 +319,7 @@ async function serve(deps: CliDeps, dataDir: string, err: (t: string) => void): 
     pulls,
     gitToken: (installationId) => github.clientFor(installationId).token(),
     github: github.clientFor,
-    engine,
+    engine: jevFromEnv(config, deps),
     models,
     model: splitRef(ref),
     reviewerVersion: `${REVIEWER_CODE_VERSION}+${ref}`,

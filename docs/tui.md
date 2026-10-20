@@ -32,7 +32,7 @@ To try the client without GitHub or a model, play a scripted session:
 ./tui/target/release/pr-review-tui --playback protocol/playback/normal.ndjson
 ```
 
-`protocol/playback/` has more scripts: a missing event, a duplicate, a stream reset, a superseded run, hostile text, a burst of 5,000 events, and account selection. You can also serve a script to a real client with `node bin/pr-review.mjs daemon --fixture <name>`.
+`protocol/playback/` has more scripts: a missing event, a duplicate, a stream reset, a superseded run, hostile text, a burst of 5,000 events, account selection, and an approved publication. You can also serve a script to a real client with `node bin/pr-review.mjs daemon --fixture <name>`.
 
 ## Client options
 
@@ -149,7 +149,34 @@ Settings shows the GitHub identity the reviewer uses on its **publishes as** row
 
 The client shows the new account only after the daemon confirms the change. The daemon checks the account against `gh` before accepting it. While `GITHUB_TOKEN` or `GH_TOKEN` is set, every account shows `env token wins`, because the environment token takes precedence. [Configuration](configuration.md#github-token) describes the full precedence.
 
-Starting, cancelling, retrying, and publishing reviews from the client are not built yet. Their keys show the action as unavailable.
+## Take actions
+
+The daemon can start, retry, cancel, and publish reviews on the client's behalf. These commands are off by default. The client shows an action as unavailable until the daemon grants it.
+
+1. Start the daemon with commands enabled:
+
+	```bash
+	node bin/pr-review.mjs daemon --allow-commands
+	```
+
+	Or set `"control": { "allow_commands": true }` in `pr-review.config.json`.
+
+2. With commands enabled, the daemon runs in **engine mode**: it takes the data directory lock at startup and runs reviews itself. Without them it is **read-only**: it takes no lock, runs nothing, and grants only the account selector. A daemon with commands enabled is also read-only while `pr-review serve` or `pr-review review` holds the lock. The daemon's start line reports the mode, and the `welcome` message carries it as `mode`, with `readOnlyReason` saying why a read-only daemon is read-only. The client's Settings view will show both once its action screens land.
+
+3. To approve publications from the client, set `"review": { "publish_mode": "approval" }`. [Publishing](publishing.md#approval-mode) describes the approval flow.
+
+The daemon checks every command itself, whatever the client showed:
+
+| Command | Does | Refuses |
+|---|---|---|
+| Start | Reviews the PR at the head the client saw, with the configured publish mode. The run appears in the client through its events. | A PR the daemon has not seen (`NOT_FOUND`). A head that is no longer GitHub's head (`REVISION_STALE`, with the live head). A head that already has a finished or parked review, or a closed PR (`CONFLICT`). |
+| Retry | Reopens a failed run as a new attempt, recorded as a manual override. | A run that is not failed (`INVALID_TRANSITION`). |
+| Cancel | Fails a running or parked run with the reason `cancelled from the TUI`. A parked run always fails. A running run whose head moved meanwhile, or whose PR closed, is superseded instead. | A run in `PUBLISH` or `RECONCILE`, where a GitHub write may be in flight (`CONFLICT`). A finished run (`INVALID_TRANSITION`). |
+| Publish | Approves exactly the preview the client showed, for exactly the head it showed, and posts it once through the outbox. | A run that is not awaiting approval (`INVALID_TRANSITION`). A preview that is not the stored payload (`CONFLICT`). A head that moved or a PR that closed, which supersedes the run with nothing posted (`REVISION_STALE`). |
+
+A repeated command, for example after a reconnect, answers the first result and does nothing again, as long as the run is still on the attempt that command ended or opened. Once a retry or an approval has opened a later attempt, the same command acts on that attempt: a run that failed twice can be retried twice, and a retried run can be cancelled again. An accepted command means the daemon recorded the request. The client shows the outcome when the events arrive: a published review only on the `published` publication status, never on the acceptance.
+
+Quitting the client never stops the daemon or its reviews. Stopping the daemon suspends the reviews in flight; they resume when the daemon, `serve`, or `review` next opens the data directory.
 
 ## Daemon
 
@@ -157,5 +184,6 @@ The daemon serves [protocol v1](../protocol/README.md) on a Unix socket.
 
 - **Socket path.** The default is `$XDG_RUNTIME_DIR/pr-review/reviewer.sock`. Without that variable, it is `~/Library/Application Support/pr-review/reviewer.sock` on macOS and `~/.local/state/pr-review/reviewer.sock` elsewhere. A socket path can be at most 103 bytes on macOS and 107 bytes on Linux.
 - **Permissions.** The daemon creates the socket directory with mode 0700 and the socket with mode 0600. It refuses a directory that is a symlink, belongs to another user, or has a looser mode. It replaces a leftover socket file only when nothing listens on it.
-- **Read-only for reviews.** The daemon reads `app.sqlite` on a read-only connection, takes no data-directory lock, and never opens `durable.sqlite`. It writes only migrations at startup, the selected GitHub account, and a log row when the account list changes.
-- **Commands.** `account.select` is the only command the daemon accepts. It answers every other command with `CAPABILITY_DENIED`.
+- **Read-only mode.** The default. The daemon reads `app.sqlite` on a read-only connection, takes no lock, and never opens `durable.sqlite`. It writes only migrations at startup, the selected GitHub account, and a log row when the account list changes. A daemon started with commands enabled is also read-only while another `pr-review` holds the lock, or when its engine fails to open; `welcome.readOnlyReason` says which.
+- **Engine mode.** With `--allow-commands` or `control.allow_commands`, the daemon takes the data directory lock and opens the review engine with the GitHub token and model that `review` would use, resumes unfinished reviews, and reconciles uncertain publications. It needs a model credential; without one it falls back to read-only mode and says why.
+- **Commands.** `account.select` is always accepted. The review commands need engine mode; the daemon answers an ungranted command with `CAPABILITY_DENIED` and the reason.

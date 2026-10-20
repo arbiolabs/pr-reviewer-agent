@@ -1,0 +1,17 @@
+{
+  "type": "welcome",
+  "requestId": "req-hello",
+  "protocolVersion": 1,
+  "serverVersion": "0.1.0",
+  "sessionId": "session-1",
+  "capabilities": [
+    "account.select",
+    "review.start",
+    "review.retry",
+    "review.cancel",
+    "review.publish"
+  ],
+  "mode": "engine",
+  "streamEpoch": "epoch-1",
+  "latestSequence": 108
+}

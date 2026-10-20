@@ -4,8 +4,8 @@
   "command": "review.publish",
   "params": {
     "runId": "rev-184-a",
-    "previewId": "preview-1",
+    "previewId": "8984214f9b29fcaf2ced0509cf489c6b44205df8bf23ee27c492494f5a09a956",
     "expectedHeadSha": "4444444444444444444444444444444444444444"
   },
-  "idempotencyKey": "k3"
+  "idempotencyKey": "review.publish:rev-184-a:8984214f9b29fcaf2ced0509cf489c6b44205df8bf23ee27c492494f5a09a956"
 }

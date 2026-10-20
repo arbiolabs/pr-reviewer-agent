@@ -27,10 +27,11 @@ import { parseDiff } from "../source/diff.ts";
 export const REVIEW_TASK_NAME = "pr-review.revision";
 
 /**
- * `retry` counts the MANUAL_RETRY overrides before this task: each override gets its own durable task. `publish` posts
- * the review through the outbox; without it PUBLISH records the intentional no-publication (dry run).
+ * `retry` counts the reopenings (MANUAL_RETRY or APPROVED) before this task: each gets its own durable task. `publish`
+ * posts the review through the outbox; without it PUBLISH records the intentional no-publication (dry run).
+ * `approvedOutboxId` is the attempt a human approval opens: it starts at the publish phase of that outbox.
  */
-export type ReviewInput = { revisionId: string; retry?: number; publish?: boolean };
+export type ReviewInput = { revisionId: string; retry?: number; publish?: boolean; approvedOutboxId?: string };
 export type ReviewResult = { revisionId: string; state: ReviewState };
 export type ReviewTask = Task<ReviewInput, ReviewCheckpoint, ReviewResult, object>;
 
@@ -224,20 +225,25 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
   const prepare: PhaseBody<"prepare"> = async (cp, revision, _runtime, _context, input) => {
     const findings = store.findingsForRevision(revision.id);
     const publish = input.publish === true && !(config.review.publish_mode === "silent_no_findings" && findings.length === 0);
+    // Approval mode stores the payload the same way, then parks the revision for a human instead of posting.
+    const approval = publish && config.review.publish_mode === "approval";
     if (revision.state === "PREPARE_PUBLICATION") {
       const { headSha } = await livePull(revision);
       if (headSha !== revision.head_sha) {
         store.advance(revision.id, "PREPARE_PUBLICATION", "NEWER_HEAD", `head moved to ${headSha}`);
         return finished(revision.id, "SUPERSEDED");
       }
-      // §9.3 step 1: the canonical payload is persisted with the transition into PUBLISH.
-      store.advance(revision.id, "PREPARE_PUBLICATION", "HEAD_VERIFIED", `head still ${revision.head_sha}`, () => {
+      // §9.3 step 1: the canonical payload is persisted with the transition into PUBLISH (or AWAITING_APPROVAL).
+      store.advance(revision.id, "PREPARE_PUBLICATION", approval ? "APPROVAL_REQUIRED" : "HEAD_VERIFIED", `head still ${revision.head_sha}`, () => {
         if (!publish) return;
         const snapshot = store.snapshot(revision.id)!;
         const { payload, hash } = buildPayload({ revisionId: revision.id, headSha: revision.head_sha, findings, limitations: snapshot.limitations, files: parseDiff(snapshot.diff) });
         store.ensureOutbox({ revisionId: revision.id, idempotencyKey: `${revision.id}:${PUBLISHER_VERSION}`, payloadHash: hash, payloadJson: JSON.stringify(payload) });
       });
     }
+    // The decision to park is the revision's state, not the live config: a rerun after a crash (even under another
+    // publish_mode) ends this attempt here, and the approved attempt owns the rest.
+    if (store.revision(revision.id)!.state === "AWAITING_APPROVAL") return finished(revision.id, "AWAITING_APPROVAL");
     const outbox = store.outboxForRevision(revision.id);
     if (outbox) return { phase: "publish", revisionId: revision.id, outboxId: outbox.id };
     store.advance(revision.id, "PUBLISH", "NO_PUBLICATION_RECORDED", input.publish ? "no findings: silent_no_findings" : "dry run: nothing published");
@@ -272,6 +278,8 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
         });
         return toReconcile(revision, outbox.id);
       case "pending": {
+        // Only an attempt whose revision is in PUBLISH may post; a stale one (resumed for a parked revision) ends with no POST.
+        if (revision.state !== "PUBLISH") return finished(revision.id, revision.state);
         const { headSha, state, merged } = await livePull(revision);
         if (state !== "open") {
           store.advance(revision.id, "PUBLISH", "PR_NOT_OPEN", `pr_not_open: ${merged ? "merged" : "closed"}`);
@@ -373,12 +381,13 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
   return defineTask<ReviewInput, ReviewCheckpoint, ReviewResult>({
     name: REVIEW_TASK_NAME,
     version: 1,
-    initial: (input) => ({ phase: "collect", revisionId: input.revisionId }),
+    initial: (input) =>
+      input.approvedOutboxId ? { phase: "publish", revisionId: input.revisionId, outboxId: input.approvedOutboxId } : { phase: "collect", revisionId: input.revisionId },
     phases: { collect: phase(collect), triage: phase(triage), analyze: phase(analyze), verify: phase(verify), prepare: phase(prepare), publish: phase(publishPhase), reconcile: phase(reconcile) },
     // An abort is SUPERSEDED only when the live head really moved or the PR closed; otherwise the revision FAILED.
     abort: async (task, runtime, context) => {
       const id = task.input.revisionId;
-      const reason = `durable task aborted${task.abortReason ? ` (${task.abortReason})` : ""}`;
+      const reason = store.revision(id)?.cancel_reason ?? `durable task aborted${task.abortReason ? ` (${task.abortReason})` : ""}`;
       let event: "NEWER_HEAD" | "PR_NOT_OPEN" | "TERMINAL_ERROR" = "TERMINAL_ERROR";
       let detail = reason;
       try {

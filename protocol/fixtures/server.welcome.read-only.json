@@ -1,0 +1,14 @@
+{
+  "type": "welcome",
+  "requestId": "req-hello",
+  "protocolVersion": 1,
+  "serverVersion": "0.1.0",
+  "sessionId": "session-1",
+  "capabilities": [
+    "account.select"
+  ],
+  "mode": "read-only",
+  "readOnlyReason": "another pr-review is running on /srv/pr-review/.data",
+  "streamEpoch": "epoch-1",
+  "latestSequence": 108
+}

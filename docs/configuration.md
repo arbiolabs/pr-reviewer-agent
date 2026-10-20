@@ -62,11 +62,27 @@ When Jev fails, times out, or is skipped, the review runs at standard depth. Jev
 	"review": { "publish_mode": "comment", "max_retries_per_phase": 3, "debounce_seconds": 30 },
 	"routing": { "mandatory_deep_paths": ["**/auth/**", "**/payments/**", "**/booking/**", "**/migrations/**"] },
 	"models": { "default": "anthropic/claude-opus-5-5" },
-	"jev": { "allow_keyless_for_private": false }
+	"jev": { "allow_keyless_for_private": false },
+	"control": { "allow_commands": false }
 }
 ```
 
 `src/config/config.ts` lists every key and its default.
+
+### Publish mode
+
+`review.publish_mode` decides what happens to a finished review:
+
+| Value | Effect |
+|---|---|
+| `dry_run` | The default. Records the review and posts nothing. |
+| `comment` | Posts one `COMMENT` review per revision through the outbox. |
+| `silent_no_findings` | As `comment`, but posts nothing for a review with no findings. |
+| `approval` | Stores the payload and parks the run in `AWAITING_APPROVAL` until `pr-review approve` or the terminal client approves it. See [Publishing](publishing.md#approval-mode). |
+
+### Control commands
+
+`control.allow_commands` lets `pr-review daemon` accept the review commands (start, retry, cancel, publish) from the terminal client. The default is `false`: the daemon stays read-only, takes no lock on the data directory, runs no review, and grants only the account selector. `pr-review daemon --allow-commands` enables them for one daemon, which then hosts the review engine. The daemon grants `review.publish` only under `publish_mode: "approval"`. See [Take actions](tui.md#take-actions).
 
 ## State
 
@@ -78,4 +94,4 @@ All state lives in `.data/`, or in the directory that `PR_REVIEW_DATA_DIR` names
 | `durable.sqlite` | Pi Durable checkpoints and the model conversations |
 | `repos/` | Bare git clones, one per repository |
 
-Only one `pr-review` process can use a data directory at a time. A second one exits with `another pr-review is running on <dir>`. After a `kill -9`, the next run takes over the lock within about 5 seconds. The control daemon only reads `app.sqlite`, so it runs beside a review.
+Only one `pr-review` process can use a data directory at a time. A second one exits with `another pr-review is running on <dir>`. After a `kill -9`, the next run takes over the lock within about 5 seconds. The control daemon takes the lock only with commands enabled, and only when it can; otherwise it runs in read-only mode beside the process that holds it.

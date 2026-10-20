@@ -6,6 +6,7 @@ import {
   OUTBOX_MACHINE,
   type OutboxEvent,
   type OutboxStatus,
+  publicationStatus,
   REVIEW_EVENTS,
   REVIEW_MACHINE,
   type ReviewEvent,
@@ -29,7 +30,16 @@ export type RevisionRow = {
   code_read_at: string | null;
   created_at: string;
   completed_at: string | null;
+  /** Set by a TUI cancel before its abort; the abort handler reports it as the failure reason. */
+  cancel_reason: string | null;
 };
+
+/** The audited events that reopen a revision; each starts its own durable task attempt. */
+export const REOPENINGS = ["MANUAL_RETRY", "APPROVED"] as const;
+export type Reopening = (typeof REOPENINGS)[number];
+
+/** `attempt` is the run attempt the key is bound to (migration 053); null when the key names a head, not an attempt. */
+export type CommandRecord = { command: string; operationId: string; attempt: number | null };
 
 export type PullRow = {
   id: string;
@@ -93,12 +103,15 @@ export type DeadWebhookRow = { delivery_id: string; event_type: string; attempts
 
 export type AuditEvent = { seq: number; from_state: string; event: string; to_state: string; detail: string | null; at: string };
 
+/** The revision is not where the caller believed: another actor moved it, or a publication guard refused the step. */
+export class StateConflict extends Error {}
+
 const now = () => new Date().toISOString();
 
 /** Outbox events whose detail is why publication is not done; `last_error` keeps the latest one. */
 const OUTBOX_ERRORS: readonly OutboxEvent[] = ["NOT_SENT", "UNCERTAIN", "REJECTED", "ABANDON", "UNDECIDED"];
-// The journal also holds stream-only rows (tool activity, migration 050's triggers); a revision's audit trail is its transitions.
-const TRANSITIONS = `event IN (${REVIEW_EVENTS.map((e) => `'${e}'`).join(", ")})`;
+/** The journal also holds stream-only rows (tool activity, publication status); a revision's audit trail is its transitions. */
+export const TRANSITIONS = `event IN (${REVIEW_EVENTS.map((e) => `'${e}'`).join(", ")})`;
 
 export class AppStore {
   readonly db: DatabaseSync;
@@ -202,9 +215,9 @@ export class AppStore {
     return this.tx(() => {
       const current = this.revision(revisionId)?.state;
       if (current === result.state) return current;
-      if (current !== from) throw new Error(`revision ${revisionId} is ${current}, expected ${from} for ${event}`);
+      if (current !== from) throw new StateConflict(`revision ${revisionId} is ${current}, expected ${from} for ${event}`);
       writes?.();
-      if (!this.recordTransition(revisionId, from, event, result.state, detail)) throw new Error(`${event} refused in ${from}: a review write may have reached GitHub`);
+      if (!this.recordTransition(revisionId, from, event, result.state, detail)) throw new StateConflict(`${event} refused in ${from}: a review write may have reached GitHub`);
       return result.state;
     });
   }
@@ -226,30 +239,53 @@ export class AppStore {
     this.db
       .prepare("UPDATE review_revisions SET state = ?, completed_at = ? WHERE id = ?")
       .run(to, TERMINAL_REVIEW_STATES.includes(to) ? at : null, revisionId);
+    // The new attempt's abort must report its own reason, not the cancel that ended the last one.
+    if ((REOPENINGS as readonly string[]).includes(event)) this.db.prepare("UPDATE review_revisions SET cancel_reason = NULL WHERE id = ?").run(revisionId);
     this.db
       .prepare("INSERT INTO audit_events (revision_id, from_state, event, to_state, detail, at) VALUES (?, ?, ?, ?, ?, ?)")
       .run(revisionId, from, event, to, detail, at);
+    const outbox = this.outboxForRevision(revisionId);
+    if (outbox) this.journalPublication(revisionId, publicationStatus(to, outbox.status), at);
     return true;
   }
 
   /**
-   * §4.4 guards between a revision and its outbox. A superseded PUBLISH is only legal while nothing was sent, and then
-   * the outbox is abandoned with it. A revision that fails while a POST is in flight leaves the outbox to reconciliation.
-   * A manual retry reopens an outbox GitHub definitely rejected.
+   * §4.4 guards between a revision and its outbox. A superseded or cancelled publication is only legal while nothing
+   * was sent, and then the outbox is abandoned with it. A revision that fails while a POST is in flight leaves the
+   * outbox to reconciliation. A manual retry reopens an outbox GitHub definitely rejected.
    */
   private guardPublication(revisionId: string, from: ReviewState, event: ReviewEvent): boolean {
     const outbox = this.outboxForRevision(revisionId);
     if (!outbox) return true;
-    if (from === "PUBLISH" && (event === "NEWER_HEAD" || event === "PR_NOT_OPEN")) {
+    const unsent = from === "PUBLISH" || from === "AWAITING_APPROVAL";
+    if (unsent && (event === "NEWER_HEAD" || event === "PR_NOT_OPEN" || event === "CANCELLED")) {
       if (outbox.status !== "pending") return false;
-      this.advanceOutbox(outbox.id, "ABANDON", "superseded");
+      this.advanceOutbox(outbox.id, "ABANDON", event === "CANCELLED" ? "cancelled" : "superseded");
     }
     if (event === "TERMINAL_ERROR" && outbox.status === "sending") this.advanceOutbox(outbox.id, "UNCERTAIN", "revision failed while the POST was in flight");
     if (event === "MANUAL_RETRY" && outbox.status === "failed") this.advanceOutbox(outbox.id, "MANUAL_RETRY", "manual retry of the revision");
     return true;
   }
 
-  /** Insert the canonical payload once per idempotency key; a rerun gets the row that won. */
+  /**
+   * One journal row (`PUBLICATION_CHANGED`, detail = the derived status) per change of a revision's publication status,
+   * for the control stream's `review.publication_changed`. Written from every outbox write and revision transition, and
+   * deduplicated against the last row, so a replay of either converges.
+   */
+  private journalPublication(revisionId: string, status: string, at: string): void {
+    const last = this.db
+      .prepare("SELECT detail FROM audit_events WHERE revision_id = ? AND event = 'PUBLICATION_CHANGED' ORDER BY seq DESC LIMIT 1")
+      .get(revisionId) as { detail: string } | undefined;
+    if (last?.detail === status) return;
+    this.db
+      .prepare("INSERT INTO audit_events (revision_id, from_state, event, to_state, detail, at) SELECT id, state, 'PUBLICATION_CHANGED', state, ?, ? FROM review_revisions WHERE id = ?")
+      .run(status, at, revisionId);
+  }
+
+  /**
+   * Insert the canonical payload once per idempotency key; a rerun gets the row that won. Called inside the transition
+   * out of PREPARE_PUBLICATION, which journals the publication status once the revision is in its new state.
+   */
   ensureOutbox(row: { revisionId: string; idempotencyKey: string; payloadHash: string; payloadJson: string }): OutboxRow {
     this.db
       .prepare(
@@ -289,6 +325,8 @@ export class AppStore {
       this.db
         .prepare("INSERT INTO outbox_events (outbox_id, from_status, event, to_status, detail, at) VALUES (?, ?, ?, ?, ?, ?)")
         .run(id, current, event, result.state, detail, at);
+      const revisionId = this.outbox(id)!.revision_id;
+      this.journalPublication(revisionId, publicationStatus(this.revision(revisionId)!.state, result.state), at);
       return result.state;
     });
   }
@@ -309,6 +347,34 @@ export class AppStore {
 
   retryCount(revisionId: string): number {
     return (this.db.prepare("SELECT count(*) AS n FROM audit_events WHERE revision_id = ? AND event = 'MANUAL_RETRY'").get(revisionId) as { n: number }).n;
+  }
+
+  /** The revision's reopenings in order; their count is the durable task attempt, and the last one says where it starts. */
+  reopenings(revisionId: string): Reopening[] {
+    return (this.db.prepare(`SELECT event FROM audit_events WHERE revision_id = ? AND event IN (${REOPENINGS.map((e) => `'${e}'`).join(", ")}) ORDER BY seq`).all(revisionId) as { event: Reopening }[]).map((r) => r.event);
+  }
+
+  /** Mark a revision as cancelled by a human before its durable task is aborted; the abort handler reports `reason`. */
+  requestCancel(revisionId: string, reason: string): void {
+    this.db.prepare("UPDATE review_revisions SET cancel_reason = ? WHERE id = ?").run(reason, revisionId);
+  }
+
+  /** The accepted result recorded under a control command's idempotency key, if any. */
+  commandResult(idempotencyKey: string): CommandRecord | undefined {
+    const row = this.db.prepare("SELECT command, result_json, attempt FROM control_commands WHERE idempotency_key = ?").get(idempotencyKey) as
+      | { command: string; result_json: string; attempt: number | null }
+      | undefined;
+    return row ? { command: row.command, operationId: (JSON.parse(row.result_json) as { operationId: string }).operationId, attempt: row.attempt } : undefined;
+  }
+
+  /** Record an accepted control command for its attempt; a replay of the key on that attempt answers this result and does nothing else. */
+  recordCommand(idempotencyKey: string, record: CommandRecord): void {
+    this.db
+      .prepare(
+        `INSERT INTO control_commands (idempotency_key, command, result_json, attempt, created_at) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (idempotency_key) DO UPDATE SET result_json = excluded.result_json, attempt = excluded.attempt, created_at = excluded.created_at`,
+      )
+      .run(idempotencyKey, record.command, JSON.stringify({ operationId: record.operationId }), record.attempt, now());
   }
 
   auditEvents(revisionId: string): AuditEvent[] {

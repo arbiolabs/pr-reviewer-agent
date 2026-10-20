@@ -1,0 +1,18 @@
+{
+  "type": "publication.preview",
+  "requestId": "req-pub",
+  "runId": "rev-184-a",
+  "previewId": "8984214f9b29fcaf2ced0509cf489c6b44205df8bf23ee27c492494f5a09a956",
+  "headSha": "4444444444444444444444444444444444444444",
+  "body": "## Automated PR review\n\nReviewed commit: `4444444444444444444444444444444444444444`\n\nFound 1 actionable issue.\n\n- High: Finding f-1 (`src/booking.ts:42`)\n\nReview performed with isolated read-only tools. Human review is still required.\n<!-- durable-review:rev-184-a:8984214f9b29fcaf2ced0509cf489c6b44205df8bf23ee27c492494f5a09a956 -->\n",
+  "comments": [
+    {
+      "path": "src/booking.ts",
+      "line": 42,
+      "side": "RIGHT",
+      "body": "**High: Finding f-1**\n\nTwo concurrent bookings can both observe `slot.free` before either sets `held`."
+    }
+  ],
+  "event": "COMMENT",
+  "status": "awaiting_approval"
+}
