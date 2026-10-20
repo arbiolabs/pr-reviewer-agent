@@ -34,6 +34,7 @@ pub struct Glyphs {
     pub ellipsis: &'static str,
     pub arrow: &'static str,
     pub vbar: &'static str,
+    pub sev_crit: &'static str,
     pub sev_high: &'static str,
     pub sev_med: &'static str,
     pub sev_low: &'static str,
@@ -50,6 +51,7 @@ const UNICODE: Glyphs = Glyphs {
     ellipsis: "…",
     arrow: "→",
     vbar: "│",
+    sev_crit: "◆",
     sev_high: "▲",
     sev_med: "●",
     sev_low: "○",
@@ -66,6 +68,7 @@ const ASCII: Glyphs = Glyphs {
     ellipsis: "~",
     arrow: "->",
     vbar: "|",
+    sev_crit: "!",
     sev_high: "^",
     sev_med: "*",
     sev_low: "o",
@@ -123,7 +126,7 @@ impl Theme {
     pub fn severity(&self, s: Severity) -> (&'static str, &'static str, Role) {
         let g = self.g();
         match s {
-            Severity::Critical => (g.sev_high, "CRIT", Role::Fail),
+            Severity::Critical => (g.sev_crit, "CRIT", Role::Fail),
             Severity::High => (g.sev_high, "HIGH", Role::Fail),
             Severity::Medium => (g.sev_med, "MED", Role::Pending),
             Severity::Low => (g.sev_low, "LOW", Role::Muted),
@@ -169,5 +172,21 @@ pub fn phase_name(p: Phase) -> &'static str {
         Phase::Failed => "FAILED",
         Phase::Superseded => "SUPERSEDED",
         Phase::Unknown => "UNKNOWN",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn every_severity_has_its_own_glyph_in_both_glyph_sets() {
+        for ascii in [false, true] {
+            let t = Theme { color: false, ascii };
+            let glyphs: Vec<&str> =
+                [Severity::Critical, Severity::High, Severity::Medium, Severity::Low].map(|s| t.severity(s).0).to_vec();
+            let expected = if ascii { vec!["!", "^", "*", "o"] } else { vec!["◆", "▲", "●", "○"] };
+            assert_eq!(glyphs, expected, "ascii={ascii}");
+        }
     }
 }
