@@ -1,7 +1,7 @@
 -- Control stream (TUI protocol v1). audit_events is the journal: its seq is the stream sequence. These triggers journal
 -- the writes no review transition carries, in the transaction that makes them. Journal-only rows keep
 -- from_state = to_state, and AppStore.auditEvents leaves them out.
-CREATE TABLE meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT NOT NULL);
 INSERT OR IGNORE INTO meta (key, value) VALUES ('stream_epoch', lower(hex(randomblob(16))));
 
 CREATE TRIGGER journal_revision_created AFTER INSERT ON review_revisions BEGIN

@@ -1,5 +1,3 @@
-import { execFile } from "node:child_process";
-import { promisify } from "node:util";
 import type { PullInfo } from "../domain/types.ts";
 
 export type PullRef = { owner: string; repo: string; number: number };
@@ -18,17 +16,6 @@ export function parsePullRef(ref: string): PullRef {
   const match = /^([\w.-]+)\/([\w.-]+)#(\d+)$/.exec(ref.trim());
   if (!match) throw new Error(`expected owner/repo#number, got: ${ref}`);
   return { owner: match[1]!, repo: match[2]!, number: Number(match[3]) };
-}
-
-/** `GITHUB_TOKEN`, else `gh auth token`, else none (public repositories only, at a low rate limit). */
-export async function resolveGitHubToken(): Promise<string | undefined> {
-  if (process.env.GITHUB_TOKEN) return process.env.GITHUB_TOKEN;
-  try {
-    const { stdout } = await promisify(execFile)("gh", ["auth", "token"], { timeout: 5000 });
-    return stdout.trim() || undefined;
-  } catch {
-    return undefined;
-  }
 }
 
 type GitHubPull = {
@@ -59,7 +46,7 @@ export class GitHubPullSource implements PullSource {
       signal: AbortSignal.timeout(15_000),
     });
     if (response.status === 401 || response.status === 403 || response.status === 404) {
-      throw new Error(`cannot read ${ref.owner}/${ref.repo}#${ref.number}: HTTP ${response.status} (${this.token ? "token lacks access" : "no GitHub token; set GITHUB_TOKEN or run gh auth login"})`);
+      throw new Error(`cannot read ${ref.owner}/${ref.repo}#${ref.number}: HTTP ${response.status} (${this.token ? "token lacks access" : "no GitHub token; set GITHUB_TOKEN, run gh auth login, or pick one with pr-review accounts use"})`);
     }
     if (!response.ok) throw new Error(`GitHub API error ${response.status} for ${ref.owner}/${ref.repo}#${ref.number}`);
     const pull = (await response.json()) as GitHubPull;

@@ -31,6 +31,10 @@ export interface ControlSource {
   diff(request: DiffRequest): Promise<DiffPage>;
   finding(findingId: string): FindingDetail;
   timeline(request: TimelineRequest): TimelinePage;
+  /** Present on sources that can select a GitHub account; the server offers the account.select capability only then. */
+  refreshAccounts?(maxAgeMs: number): Promise<void>;
+  /** Journal the selection and return the operation id, or throw ControlError NOT_FOUND / CONFLICT. */
+  selectAccount?(accountId: string): Promise<string>;
   close(): void;
 }
 
@@ -41,7 +45,7 @@ export function timelinePage(events: SequencedEvent[], request: TimelineRequest,
   const matching = events
     .filter(
       (e) =>
-        (request.prId === undefined || e.prId === request.prId) &&
+        (request.prId === undefined || ("prId" in e && e.prId === request.prId)) &&
         (request.runId === undefined || ("runId" in e && e.runId === request.runId)) &&
         (request.findingId === undefined || findingIdOf(e) === request.findingId) &&
         (request.beforeSequence === undefined || e.sequence < request.beforeSequence),
