@@ -1,5 +1,5 @@
 // Source of protocol/fixtures and protocol/playback. Edit here, then run `pnpm protocol:emit`.
-import type { ClientMessage, DiffFile, Finding, FindingDetail, Pr, Run, ServerMessage } from "./v1.ts";
+import type { Account, ClientMessage, DiffFile, Finding, FindingDetail, Pr, Run, ServerMessage } from "./v1.ts";
 
 const EPOCH = "epoch-1";
 const T0 = Date.parse("2026-10-20T13:00:00Z");
@@ -52,7 +52,7 @@ const ev = <E extends Sequenced["eventType"]>(
   s: Seq,
   eventType: E,
   data: Extract<Sequenced, { eventType: E }>["data"],
-  ids: { prId: string; runId?: string },
+  ids: { prId?: string; runId?: string },
 ): ServerMessage =>
   ({
     type: "event",
@@ -73,17 +73,17 @@ const findingUpdated = (s: Seq, f: Finding) => ev(s, "finding.updated", f, { prI
 const runEvent = (s: Seq, type: "run.started" | "review.completed" | "run.superseded" | "run.failed", r: Run) =>
   ev(s, type, r, { prId: r.prId, runId: r.id });
 
-const welcome = (latestSequence: number, epoch = EPOCH): ServerMessage => ({
+const welcome = (latestSequence: number, epoch = EPOCH, capabilities: string[] = []): ServerMessage => ({
   type: "welcome",
   requestId: "req-hello",
   protocolVersion: 1,
   serverVersion: "0.1.0",
   sessionId: "session-1",
-  capabilities: [],
+  capabilities,
   streamEpoch: epoch,
   latestSequence,
 });
-const snapshot = (sequence: number, prs: Pr[], runs: Run[], findings: Finding[], epoch = EPOCH): ServerMessage => ({
+const snapshot = (sequence: number, prs: Pr[], runs: Run[], findings: Finding[], epoch = EPOCH, accounts?: Account[]): ServerMessage => ({
   type: "snapshot",
   requestId: "req-snapshot",
   streamEpoch: epoch,
@@ -91,6 +91,7 @@ const snapshot = (sequence: number, prs: Pr[], runs: Run[], findings: Finding[],
   prs,
   runs,
   findings,
+  ...(accounts ? { accounts } : {}),
 });
 
 // ---------- shared world ----------
@@ -102,6 +103,28 @@ const run1 = run("rev-184-a", pr1);
 const run2 = run("rev-185-a", pr2, { phase: "COMPLETED", status: "COMPLETED", completedAt: at(-60) });
 const f1 = finding("f-1", run1);
 const f2 = finding("f-2", run2, { severity: "low", category: "performance", line: null, file: "src/cache.ts" });
+
+const account = (host: string, login: string, extra: Partial<Account> = {}): Account => ({
+  id: `${host}/${login}`,
+  host,
+  login,
+  state: "ok",
+  ghActive: false,
+  selected: false,
+  scopes: ["gist", "read:org", "repo", "workflow"],
+  ...extra,
+});
+const personal = account("github.com", "diego-arbio-dev", { ghActive: true });
+const work = account("github.com", "octo-work", { scopes: ["repo"] });
+const expired = account("github.com", "old-bot", { state: "error", scopes: [] });
+const accountsUpdated = (s: Seq, accounts: Account[]) => ev(s, "accounts.updated", { accounts }, {});
+const selectCommand = (a: Account) => ({
+  type: "command" as const,
+  requestId: "req-cmd",
+  command: "account.select" as const,
+  params: { accountId: a.id },
+  idempotencyKey: `account.select:${a.id}`,
+});
 
 // ---------- message fixtures ----------
 
@@ -191,9 +214,16 @@ export const fixtures: Record<string, ClientMessage | ServerMessage | Record<str
     params: { runId: run1.id, previewId: "preview-1", expectedHeadSha: pr1.headSha },
     idempotencyKey: "k3",
   },
+  "client.command.account-select": selectCommand(work),
 
   "server.welcome": welcome(108),
   "server.snapshot": snapshot(108, [pr1, pr2, pr3], [run1, run2], [f1, f2]),
+  "server.snapshot.accounts": snapshot(108, [pr1], [run1], [f1], EPOCH, [
+    account("env", "GITHUB_TOKEN", { scopes: [] }),
+    personal,
+    { ...work, selected: true },
+    expired,
+  ]),
   "server.snapshot.empty": { type: "snapshot", streamEpoch: EPOCH, sequence: 0, prs: [], runs: [], findings: [] },
   "server.snapshot.hostile": snapshot(5, [pr(1, { title: hostileTitle })], [], [finding("f-h", run1, { title: "safe\rEVIL\u001bc" })]),
   "server.event.pr.updated": ev({ seq: 109 }, "pr.updated", pr1, { prId: pr1.id }),
@@ -210,6 +240,7 @@ export const fixtures: Record<string, ClientMessage | ServerMessage | Record<str
     completedAt: at(109),
     failureReason: "aborted by operator",
   }),
+  "server.event.accounts-updated": accountsUpdated({ seq: 109 }, [personal, { ...work, selected: true }]),
   "server.event.heartbeat": { type: "event", eventType: "heartbeat", streamEpoch: EPOCH, occurredAt: at(110) },
   "server.event.unknown-type": {
     type: "event",
@@ -293,6 +324,14 @@ export const invalidFixtures: Record<string, [unknown, string]> = {
   "client.hello.no-request-id": [{ type: "hello", protocolVersion: 1, client: "ratatui", capabilities: [] }, "Every request carries a requestId."],
   "client.diff.get.limit-zero": [{ ...(fixtures["client.diff.get.minimal"] as object), limit: 0 }, "limit is 1..500."],
   "client.unknown-type": [{ type: "subscribe", requestId: "r" }, "Unknown client message types are invalid requests."],
+  "client.command.account-select.no-account-id": [
+    { ...selectCommand(work), params: {} },
+    "account.select names the account to use.",
+  ],
+  "server.snapshot.account-bad-shape": [
+    { ...(fixtures["server.snapshot.accounts"] as object), accounts: [{ ...personal, state: "success", scopes: "gist, repo" }] },
+    "Account state is ok or error and scopes is a list; gh's raw words and comma-joined scope string are mapped by the server.",
+  ],
   "server.welcome.version-2": [{ ...(fixtures["server.welcome"] as object), protocolVersion: 2 }, "A v1 welcome always says protocolVersion 1."],
   "server.event.missing-prev-sequence": [
     (({ prevSequence: _, ...rest }) => rest)(fixtures["server.event.tool.activity"] as Record<string, unknown>),
@@ -334,6 +373,8 @@ export type Expect = {
   prs: { id: string; headSha: string; title: string }[];
   runs: { id: string; phase: string; status: string }[];
   findings: { id: string; title: string; status: string; stale: boolean }[];
+  /** Present only when the script's snapshot carries accounts. */
+  accounts?: { id: string; state: string; ghActive: boolean; selected: boolean }[];
 };
 
 const lines = (delayMs: number, messages: ServerMessage[]): PlaybackLine[] => messages.map((message) => ({ delayMs, message }));
@@ -422,6 +463,14 @@ const burst: PlaybackLine[] = [
   })),
 ];
 
+// The client shows a selection only once accounts.updated confirms it, never on command.result accepted.
+const accounts = lines(40, [
+  welcome(10, EPOCH, ["account.select"]),
+  snapshot(10, [pr1, pr2, pr3], [run1, run2], [f2], EPOCH, [personal, work]),
+  { type: "command.result", requestId: "req-cmd", status: "accepted", operationId: "account.select:11" },
+  accountsUpdated({ seq: 11 }, [personal, { ...work, selected: true }]),
+]);
+
 const runRow = (r: Run, phase = r.phase, status = r.status) => ({ id: r.id, phase, status });
 const baseExpect = (over: Partial<Expect>): Expect => ({
   streamEpoch: EPOCH,
@@ -499,6 +548,16 @@ export const playback: Record<string, { script: PlaybackLine[]; expect: Expect }
       runs: [runRow(hostileRun)],
       findings: [{ id: "f-h", title: "safeEVIL  tail", status: "DETECTED", stale: false }],
     },
+  },
+  accounts: {
+    script: accounts,
+    expect: baseExpect({
+      lastSequence: 11,
+      accounts: [
+        { id: personal.id, state: "ok", ghActive: true, selected: false },
+        { id: work.id, state: "ok", ghActive: false, selected: true },
+      ],
+    }),
   },
   burst: { script: burst, expect: baseExpect({ lastSequence: 5010, toolActivityCount: 5000 }) },
 };
