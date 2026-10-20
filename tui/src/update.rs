@@ -607,9 +607,7 @@ fn prefetch_diff(m: &mut Model, id: &FindingId, fx: &mut Vec<Effect>) {
         return;
     }
     let anchor = m.domain.findings.get(id).map(|f| (f.file.clone(), f.line.map(|l| l.get())));
-    let screen = m.ui.screen;
     load_diff(m, key, anchor, fx);
-    m.ui.screen = screen;
 }
 
 /// The diff a finding was found against: its run's revision, else the PR's.
@@ -624,7 +622,6 @@ pub fn finding_diff_key(m: &Model, id: &FindingId) -> Option<DiffKey> {
 }
 
 fn load_diff(m: &mut Model, key: DiffKey, anchor: Option<(Text, Option<u32>)>, fx: &mut Vec<Effect>) {
-    m.ui.screen = Screen::Diff;
     if let Some(d) = m.diff.as_mut().filter(|d| d.key == key && d.error.is_none()) {
         if anchor.is_some() {
             d.anchor = anchor;
@@ -695,7 +692,10 @@ fn apply_diff_page(m: &mut Model, p: DiffPage, fx: &mut Vec<Effect>) {
     resolve_anchor(m, fx);
 }
 
+/// Moves the diff cursor to the anchor once its file has loaded. Only on the Diff screen does it take focus or say
+/// the file is missing: a prefetch behind the finding reader stays silent.
 fn resolve_anchor(m: &mut Model, fx: &mut Vec<Effect>) {
+    let shown = m.ui.screen == Screen::Diff;
     let Some(d) = &mut m.diff else { return };
     let Some((path, line)) = d.anchor.clone() else { return };
     let p = path.as_str();
@@ -710,13 +710,17 @@ fn resolve_anchor(m: &mut Model, fx: &mut Vec<Effect>) {
             d.stack = 0;
             d.selected_file = Some(d.files[i].path.clone());
             d.anchor = None;
-            m.ui.focus = Pane::Main;
+            if shown {
+                m.ui.focus = Pane::Main;
+            }
         }
         None if d.next_cursor.is_some() => load_more_diff(m, fx),
         None if d.pending.is_some() => {}
         None => {
             d.anchor = None;
-            notice(m, format!("{path} is not in this diff"));
+            if shown {
+                notice(m, format!("{path} is not in this diff"));
+            }
         }
     }
 }
@@ -1338,6 +1342,7 @@ fn open_diff(m: &mut Model, fx: &mut Vec<Effect>) {
         Some((key, f)) => {
             m.ui.selected_pr = Some(f.pr_id.clone());
             m.ui.selected_finding = Some(f.id.clone());
+            m.ui.screen = Screen::Diff;
             load_diff(m, key, Some((f.file, f.line.map(|l| l.get()))), fx);
         }
         None => goto(m, Screen::Diff, fx),

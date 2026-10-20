@@ -757,3 +757,29 @@ fn nothing_but_hello_goes_out_before_the_welcome_and_a_snapshot_reissues_what_wa
     let fx = send(&mut m, &read("fixtures/server.snapshot.json"));
     assert_eq!(sent(&fx), ["diff.get", "timeline.get", "finding.get"]);
 }
+
+#[test]
+fn the_diff_a_finding_prefetches_changes_nothing_on_the_review_screen() {
+    let mut m = showcase(0);
+    press(&mut m, KeyCode::Enter);
+    let fx = press(&mut m, KeyCode::Enter);
+    let [Effect::Send(ClientMessage::DiffGet { request_id, pr_id, base_sha, head_sha, .. })] = &fx[..] else {
+        panic!("{fx:?}")
+    };
+    let page = read("fixtures/server.diff.page.json")
+        .replace("req-diff", request_id.as_str())
+        .replace("acme/shop#184", pr_id.as_str())
+        .replace("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", base_sha.as_str())
+        .replace("4444444444444444444444444444444444444444", head_sha.as_str())
+        .replace("\"nextCursor\": \"c-2\"", "\"nextCursor\": null");
+    press(&mut m, KeyCode::Esc);
+    press(&mut m, KeyCode::Char('h'));
+    send(&mut m, &page);
+    assert_eq!((m.ui.screen, m.ui.focus), (Screen::Review, Pane::Sidebar));
+    assert_eq!(m.notice, None, "the finding's file is not in this diff, and only d says so");
+
+    press(&mut m, KeyCode::Char('l'));
+    press(&mut m, KeyCode::Char('d'));
+    assert_eq!(m.ui.screen, Screen::Diff);
+    assert!(m.notice.as_ref().is_some_and(|n| n.text.ends_with("is not in this diff")), "{:?}", m.notice);
+}
