@@ -3,8 +3,15 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use pr_review_tui::model::{Look, Model, Screen};
-use pr_review_tui::protocol::ServerMessage;
+use pr_review_tui::playback;
+use pr_review_tui::protocol::{Event, PrId, SequencedEvent, ServerMessage};
+use pr_review_tui::text::width;
+use pr_review_tui::update::{Effect, Msg, NetEvent, update};
+use pr_review_tui::view::view;
+use ratatui::Terminal;
+use ratatui::backend::TestBackend;
 use serde_json::{Value, json};
 
 pub fn protocol_dir() -> PathBuf {
@@ -54,4 +61,107 @@ pub fn summary(m: &Model) -> Value {
             .collect();
     }
     v
+}
+
+/// A model driven only through messages, answering its requests the way the playback driver does.
+pub struct Sim {
+    pub m: Model,
+    pub played: Vec<SequencedEvent>,
+}
+
+impl Sim {
+    pub fn new(look: Look) -> Sim {
+        let mut s = Sim {
+            m: Model::new("unix:/run/user/501/pr-review/reviewer.sock", look, Screen::Inbox, None),
+            played: vec![],
+        };
+        s.apply(Msg::Net(NetEvent::Opened));
+        s
+    }
+
+    pub fn apply(&mut self, msg: Msg) {
+        let fx = update(&mut self.m, msg);
+        for e in fx {
+            if let Effect::Send(req) = e {
+                let dir = protocol_dir().join("fixtures");
+                if let Some(reply) = playback::answer(&dir, &self.played, &req) {
+                    self.apply(Msg::Net(NetEvent::Message(reply)));
+                }
+            }
+        }
+    }
+
+    pub fn server(&mut self, msg: ServerMessage) {
+        if let ServerMessage::Event(Event::Sequenced(e)) = &msg {
+            self.played.push(e.clone());
+        }
+        self.apply(Msg::Net(NetEvent::Message(msg)));
+    }
+
+    pub fn play(mut self, name: &str, lines: usize) -> Sim {
+        for msg in script(name).into_iter().take(lines) {
+            self.server(msg);
+        }
+        self
+    }
+
+    pub fn key(mut self, code: KeyCode) -> Sim {
+        self.apply(Msg::Key(KeyEvent::new(code, KeyModifiers::NONE)));
+        self
+    }
+
+    /// A key whose requests stay unanswered, so the frame shows what the client does while it waits.
+    pub fn key_unanswered(mut self, code: KeyCode) -> Sim {
+        update(&mut self.m, Msg::Key(KeyEvent::new(code, KeyModifiers::NONE)));
+        self
+    }
+
+    pub fn select(mut self, pr: &str) -> Sim {
+        self = self.key(KeyCode::Char('g'));
+        for _ in 0..10 {
+            if self.m.ui.selected_pr == Some(PrId::new(pr)) {
+                return self;
+            }
+            self = self.key(KeyCode::Char('j'));
+        }
+        panic!("{pr} not reachable");
+    }
+}
+
+pub fn render(m: &mut Model, w: u16, h: u16) -> (String, Terminal<TestBackend>) {
+    update(m, Msg::Resize(w, h));
+    let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+    term.draw(|f| view(m, f)).unwrap();
+    let buf = term.backend().buffer().clone();
+    let mut out = String::new();
+    for y in 0..h {
+        let mut line = String::new();
+        let mut skip = 0;
+        for x in 0..w {
+            let sym = buf[(x, y)].symbol();
+            if skip > 0 {
+                skip -= 1;
+                continue;
+            }
+            skip = width(sym).saturating_sub(1);
+            line.push_str(sym);
+        }
+        out.push_str(line.trim_end());
+        out.push('\n');
+    }
+    (out, term)
+}
+
+pub fn mid_review(look: Look) -> Sim {
+    // welcome, snapshot, tool activity, heartbeat, finding f-1: rev-184-a is in VERIFY.
+    Sim::new(look).play("normal", 5)
+}
+
+pub fn states(look: Look) -> Vec<(&'static str, Sim)> {
+    vec![
+        ("inbox", mid_review(look)),
+        ("review", mid_review(look).select("acme/shop#184").key(KeyCode::Enter)),
+        ("diff", mid_review(look).select("acme/shop#184").key(KeyCode::Enter).key(KeyCode::Char('d'))),
+        ("timeline", mid_review(look).select("acme/shop#184").key(KeyCode::Enter).key(KeyCode::Char('4'))),
+    ]
 }

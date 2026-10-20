@@ -1,0 +1,101 @@
+---
+source: tests/light.rs
+expression: frame
+---
+  pr-review · • reviewing #184 verify found: Finding f-1                                                        ● live
+
+
+  PULL REQUESTS                3    acme/shop  #184
+                                    Booking API
+  · #186 Bump deps                  by octocat · bbbbbbb → 4444444 · claude-opus-5-5 · run rev-184-
+    shop 6666666     not reviewed
+                                     ● Collect ● Triage ● Analyze • Verify ○ Prepare ○ Publish          since 13:00:00
+  ○ #185 Fix cache eviction
+    shop 5555555            ○1 →0   1 finding   ▲ 1 high                                          · none on GitHub yet
+                                    ──────────────────────────────────────────────────────────────────────────────────
+▌ • #184 Booking API
+▌   shop      ●─●─●─•─○─○ ▁ 0.2/s   • Reviewing now                                  ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▄  0.2 calls/s
+
+                                    #184   ━━━━━━━━ ━━━━━━━━ ━━━━━━━━ ━━━━━━━━ ──────── ────────  verify     2 calls
+
+                                        13:00:11  read_file   src/booking.ts:1-120
+                                      • 13:00:12  finding     ▲ HIGH Finding f-1
+
+                                    ┃ ▲ HIGH   correctness                                    detected · 82% confident
+                                    ┃ Finding f-1
+                                    ┃ src/booking.ts:42
+                                    ┃
+                                    ┃ Two concurrent bookings can both observe slot.free before either sets held.
+                                    ┃
+                                    ┃   src/booking.ts  lines 40-43 @ 4444444
+                                    ┃    40 │ if (slot.free && !slot.held) {
+                                    ┃
+                                    ┃ Enter all 5 evidence, the fix and the diff    d diff at this line
+
+
+
+
+
+
+
+
+   j/k finding  Enter read  w watch live  d diff  J/K scroll  h pull requests    1 inbox  2 review  3 diff  4 timeline
+
+aabbbbbbbbbacadabbbbbbbbbabbbbaddddddaccccccacccccccacccaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaeaeeeeaa
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+ffffffffffffffffffffffffffffffffffaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+ffggggfggggggggffffffffffffffffgffaacccccccccaaddddaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+ffffffffffffffffffffffffffffffffffaabbbbbbbabbbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+ffgfhhhhfiiiifiiiiffffffffffffffffaaccacccccccacacccccccacacccccccacacccccccccccccccacacccaccccccccaaaaaaaaaaaaaaaaaaaaa
+ffffggggfgggggggfffffgggfggggggggfaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+ffffffffffffffffffffffffffffffffffaaaeabbbbbbbaeabbbbbbaeabbbbbbbadaddddddacacccccccacacccccccaaaaaaaaaacccccaccccccccaa
+ffjfhhhhfiiifiiiiifiiiiiiiifffffffaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+ffffggggfgggggggffffffffffffjjfggfaababbbbbbbaaakakakkkkaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaacaccccaccaccccccacccaa
+ffffffffffffffffffffffffffffffffffaaccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccaa
+lmlmllllmnnnnnnnmnnnmmmmmmmmmmmmmmaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+lmmmoooommmmmmpppppploooomlmooooomaadabbbbbbbbbabbbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaddddddddddddddddddddaacccacccccccaa
+ffffffffffffffffffffffffffffffffffaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+ffffffffffffffffffffffffffffffffffaabbbbaaaeeeeeeeeaeeeeeeeeaeeeeeeeeabdddddddaccccccccaccccccccaaddddddaaaaadadddddaaaa
+ffffffffffffffffffffffffffffffffffaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+ffffffffffffffffffffffffffffffffffaaaaaaccccccccaadddddddddaaabbbbbbbbbbbbbbbbbbbbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+ffffffffffffffffffffffffffffffffffaaaadaccccccccaadddddddaaaaababbbbabbbbbbbabbbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+ffffffffffffffffffffffffffffffffffaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+ffffffffffffffffffffffffffffffffffaakakakkkkaaacccccccccccaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaqqqqqqqqacacccacccccccccaa
+ffffffffffffffffffffffffffffffffffaakabbbbbbbabbbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+ffffffffffffffffffffffffffffffffffaakadddddddddddddddddaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+ffffffffffffffffffffffffffffffffffaakaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+ffffffffffffffffffffffffffffffffffaakabbbabbbbbbbbbbabbbbbbbbabbbabbbbabbbbbbbarrrrrrrrrabbbbbbabbbbbbabbbbarrrrbaaaaaaa
+ffffffffffffffffffffffffffffffffffaakaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+ffffffffffffffffffffffffffffffffffaakaffggggggggggggggffgggggfgggggfgfgggggggfffffffffffffffffffffffffffffffffffffffffaa
+ffffffffffffffffffffffffffffffffffaakafffggfgfssfiiiiiiiiiifiifiiiiiiiiiiififfffffffffffffffffffffffffffffffffffffffffaa
+ffffffffffffffffffffffffffffffffffaakaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+ffffffffffffffffffffffffffffffffffaakadddddacccacacccccccccacccacccacccacccaccccaaaadaccccaccaccccaccccaaaaaaaaaaaaaaaaa
+ffffffffffffffffffffffffffffffffffaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+ffffffffffffffffffffffffffffffffffaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+ffffffffffffffffffffffffffffffffffaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+ffffffffffffffffffffffffffffffffffaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+ffffffffffffffffffffffffffffffffffaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+ffffffffffffffffffffffffffffffffffaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+ffffffffffffffffffffffffffffffffffaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+ffffffffffffffffffffffffffffffffffaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+aaacccacccccccaacccccaccccaacacccccaccccaacaccccaacccaccccccaacaccccaccccccccaaaacacccccaacaddddddaacaccccaacaccccccccaa
+
+a - on base
+b text on base
+c muted on base
+d accent on base
+e ok on base
+f - on surface
+g muted on surface
+h accent on surface
+i text on surface
+j low on surface
+k high on base
+l accent on select
+m - on select
+n text on select
+o muted on select
+p ok on select
+q warn on base
+r type on surface
+s keyword on surface
