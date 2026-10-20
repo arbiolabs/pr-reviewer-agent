@@ -188,9 +188,12 @@ fn hunks(c: &Ctx, f: &mut Frame, area: Rect, d: &DiffView, anchored: &[&Finding]
         return;
     }
     let rows = file_rows(file);
+    let h = (area.height as usize).saturating_sub(usize::from(file.truncated));
+    // Every row draws at least one line, so the rows within `h` of the cursor hold every line the window can show.
+    let near = d.cursor.saturating_sub(h)..(d.cursor + h + 1).min(rows.len());
     let mut lines: Vec<Line> = Vec::new();
     let mut at = 0;
-    for (i, row) in rows.iter().enumerate() {
+    for (i, row) in rows.iter().enumerate().take(near.end).skip(near.start) {
         let cursor = i == d.cursor;
         if cursor {
             at = lines.len();
@@ -202,7 +205,6 @@ fn hunks(c: &Ctx, f: &mut Frame, area: Rect, d: &DiffView, anchored: &[&Finding]
         lines.extend(row_lines(c, row, stack.first().copied(), w, cursor && c.focused(Pane::Main)));
         lines.extend(annotations(c, &stack, w, cursor.then_some(d.stack)));
     }
-    let h = (area.height as usize).saturating_sub(usize::from(file.truncated));
     let range = window(lines.len(), Some(at), h);
     let mut lines: Vec<Line> = lines.drain(range).collect();
     if file.truncated {
@@ -285,7 +287,7 @@ fn row_lines(c: &Ctx, row: &DiffRow, hit: Option<&Finding>, w: usize, cursor: bo
             };
             let room = w.saturating_sub(GUTTER);
             // Wrapped rows hang under the line's own indent, two deeper.
-            let text = super::code::expand(l.text.as_str());
+            let text = super::code::expand(l.text.as_str(), room * WRAP_ROWS);
             let indent = (text.len() - text.trim_start().len() + 2).min(room / 3);
             let code = highlight(c, l.text.as_str(), room * WRAP_ROWS, bg);
             let wrap = c.t.g().ellipsis;

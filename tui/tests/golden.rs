@@ -421,3 +421,26 @@ fn j_reads_the_explanation_before_the_document_moves() {
     assert!(after.contains("2 more above, K scrolls back"), "{after}");
     assert!(after.contains("refund another customer's order"), "the explanation's last line shows:\n{after}");
 }
+
+/// One 160x45 diff frame over 2000 lines of 50k chars each. The view windows the rows before it builds any, and
+/// cuts each line to its row budget before it expands or colors it, so the frame costs what the screen shows.
+#[test]
+fn a_huge_diff_renders_a_frame_in_bounded_time() {
+    let mut s = mid_review(Look::default()).select("acme/shop#184").key_unanswered(KeyCode::Char('3'));
+    let id = s.m.diff.as_ref().and_then(|d| d.pending.clone()).unwrap();
+    let mut page: serde_json::Value =
+        serde_json::from_str(&read("fixtures/server.diff.page.json").replace("req-diff", id.as_str())).unwrap();
+    let text = "\tconst x = \"a\" // b ".repeat(2_500);
+    assert_eq!(text.chars().count(), 50_000);
+    let lines: Vec<_> = (1..=2000).map(|n| serde_json::json!({"kind": "add", "new": n, "text": text})).collect();
+    page["files"][0]["hunks"][0]["lines"] = serde_json::Value::Array(lines);
+    s.server(serde_json::from_value(page).unwrap());
+    let mut term = Terminal::new(TestBackend::new(160, 45)).unwrap();
+    update(&mut s.m, Msg::Resize(160, 45));
+    term.draw(|f| view(&s.m, f)).unwrap();
+    let start = std::time::Instant::now();
+    term.draw(|f| view(&s.m, f)).unwrap();
+    let took = start.elapsed();
+    // About 2 ms in the test profile (opt-level 1) and 1 ms in release; it took 600 ms before the rows were windowed.
+    assert!(took < std::time::Duration::from_millis(30), "frame took {took:?}");
+}

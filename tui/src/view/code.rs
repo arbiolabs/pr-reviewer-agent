@@ -4,7 +4,7 @@ use ratatui::style::Modifier;
 use ratatui::text::Span;
 
 use super::Ctx;
-use crate::text::{fit, width};
+use crate::text::{fit, row_prefix, width};
 use crate::theme::{Bg, Role};
 
 const KEYWORDS: &[&str] = &[
@@ -57,14 +57,14 @@ const KEYWORDS: &[&str] = &[
     "nil",
 ];
 
-/// Tabs become four spaces; the result is safe to measure.
-pub fn expand(s: &str) -> String {
-    s.replace('\t', "    ").chars().filter(|c| !c.is_control()).collect()
+/// The part of `s` a `cols`-wide row can show, tabs as four spaces; the result is safe to measure.
+pub fn expand(s: &str, cols: usize) -> String {
+    row_prefix(s, cols).replace('\t', "    ").chars().filter(|c| !c.is_control()).collect()
 }
 
 /// Colored spans for one code line, cut to `w` columns, every span on `bg`.
 pub fn highlight(c: &Ctx, line: &str, w: usize, bg: Bg) -> Vec<Span<'static>> {
-    let line = fit(&expand(line), w, c.t.g().ellipsis);
+    let line = fit(&expand(line, w), w, c.t.g().ellipsis);
     let on = |role: Role| c.s(role).patch(c.t.bg(bg));
     let chars: Vec<char> = line.chars().collect();
     let mut out = Vec::new();
@@ -77,9 +77,9 @@ pub fn highlight(c: &Ctx, line: &str, w: usize, bg: Bg) -> Vec<Span<'static>> {
     };
     while i < chars.len() {
         let ch = chars[i];
-        let rest: String = chars[i..].iter().collect();
-        if rest.starts_with("//") {
+        if ch == '/' && chars.get(i + 1) == Some(&'/') {
             flush(&mut plain, &mut out);
+            let rest: String = chars[i..].iter().collect();
             out.push(Span::styled(rest, on(Role::Muted).add_modifier(Modifier::ITALIC)));
             break;
         }
