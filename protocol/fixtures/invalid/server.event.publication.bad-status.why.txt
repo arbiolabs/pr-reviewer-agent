@@ -1,0 +1,1 @@
+Publication statuses are a closed list: awaiting_approval, publishing, published, uncertain, failed.

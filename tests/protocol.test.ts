@@ -72,6 +72,7 @@ function replay(ndjson: string): Expect {
   let runs = new Map<string, Run>();
   let findings = new Map<string, Finding>();
   let accounts: Account[] | undefined;
+  const publications = new Map<string, string>();
   const needResync = () => {
     inSync = false;
     resyncRequested = true;
@@ -121,6 +122,9 @@ function replay(ndjson: string): Expect {
           case "accounts.updated":
             accounts = e.data.accounts;
             break;
+          case "review.publication_changed":
+            publications.set(e.data.runId, e.data.status);
+            break;
         }
       }
     }
@@ -135,6 +139,7 @@ function replay(ndjson: string): Expect {
     runs: sorted(runs).map((r) => ({ id: r.id, phase: r.phase, status: r.status })),
     findings: sorted(findings).map((f) => ({ id: f.id, title: sanitize(f.title), status: f.status, stale: f.stale })),
     ...(accounts ? { accounts: [...accounts].sort((a, b) => (a.id < b.id ? -1 : 1)).map(({ id, state, ghActive, selected }) => ({ id, state, ghActive, selected })) } : {}),
+    ...(publications.size > 0 ? { publications: [...publications].sort().map(([runId, status]) => ({ runId, status })) } : {}),
   };
 }
 

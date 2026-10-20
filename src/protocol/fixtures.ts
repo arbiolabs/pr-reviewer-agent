@@ -1,6 +1,6 @@
 // Source of protocol/fixtures and protocol/playback. Edit here, then run `pnpm protocol:emit`.
 import { sha256, stableId } from "../domain/types.ts";
-import type { Account, ClientMessage, DiffFile, Evidence, Finding, FindingDetail, Pr, Run, ServerMessage } from "./v1.ts";
+import { type Account, type ClientMessage, type DiffFile, type Evidence, type Finding, type FindingDetail, type Pr, type PublicationChange, REVIEW_COMMANDS, type Run, type ServerMessage } from "./v1.ts";
 
 const EPOCH = "epoch-1";
 const T0 = Date.parse("2026-10-20T13:00:00Z");
@@ -74,16 +74,24 @@ const findingUpdated = (s: Seq, f: Finding) => ev(s, "finding.updated", f, { prI
 const runEvent = (s: Seq, type: "run.started" | "review.completed" | "run.superseded" | "run.failed", r: Run) =>
   ev(s, type, r, { prId: r.prId, runId: r.id });
 
-const welcome = (latestSequence: number, epoch = EPOCH, capabilities: string[] = []): ServerMessage => ({
+const welcome = (latestSequence: number, epoch = EPOCH, capabilities: string[] = [], mode?: "engine" | "read-only"): ServerMessage => ({
   type: "welcome",
   requestId: "req-hello",
   protocolVersion: 1,
   serverVersion: "0.1.0",
   sessionId: "session-1",
   capabilities,
+  ...(mode ? { mode } : {}),
   streamEpoch: epoch,
   latestSequence,
 });
+const publicationChanged = (s: Seq, r: Run, status: PublicationChange["status"], reviewId?: number) =>
+  ev(
+    s,
+    "review.publication_changed",
+    { runId: r.id, status, ...(reviewId ? { reviewId, url: `https://github.com/${r.prId.split("#")[0]}/pull/${r.prId.split("#")[1]}#pullrequestreview-${reviewId}` } : {}) },
+    { prId: r.prId, runId: r.id },
+  );
 const snapshot = (sequence: number, prs: Pr[], runs: Run[], findings: Finding[], epoch = EPOCH, accounts?: Account[]): ServerMessage => ({
   type: "snapshot",
   requestId: "req-snapshot",
@@ -119,6 +127,25 @@ const personal = account("github.com", "diego-arbio-dev", { ghActive: true });
 const work = account("github.com", "octo-work", { scopes: ["repo"] });
 const expired = account("github.com", "old-bot", { state: "error", scopes: [] });
 const accountsUpdated = (s: Seq, accounts: Account[]) => ev(s, "accounts.updated", { accounts }, {});
+const PREVIEW_ID = sha256("payload of rev-184-a");
+const preview: ServerMessage = {
+  type: "publication.preview",
+  requestId: "req-pub",
+  runId: run1.id,
+  previewId: PREVIEW_ID,
+  headSha: pr1.headSha,
+  body: `## Automated PR review\n\nReviewed commit: \`${pr1.headSha}\`\n\nFound 1 actionable issue.\n\n- High: Finding f-1 (\`src/booking.ts:42\`)\n\nReview performed with isolated read-only tools. Human review is still required.\n<!-- durable-review:${run1.id}:${PREVIEW_ID} -->\n`,
+  comments: [{ path: "src/booking.ts", line: 42, side: "RIGHT", body: "**High: Finding f-1**\n\nTwo concurrent bookings can both observe `slot.free` before either sets `held`." }],
+  event: "COMMENT",
+  status: "awaiting_approval",
+};
+const publishCommand = {
+  type: "command" as const,
+  requestId: "req-cmd",
+  command: "review.publish" as const,
+  params: { runId: run1.id, previewId: PREVIEW_ID, expectedHeadSha: pr1.headSha },
+  idempotencyKey: `review.publish:${run1.id}:${PREVIEW_ID}`,
+};
 const selectCommand = (a: Account) => ({
   type: "command" as const,
   requestId: "req-cmd",
@@ -776,18 +803,16 @@ export const fixtures: Record<string, ClientMessage | ServerMessage | Record<str
     params: { prId: pr1.id, expectedHeadSha: pr1.headSha },
     idempotencyKey: `review.start:${pr1.id}:${pr1.headSha}`,
   },
-  "client.command.review.cancel": { type: "command", requestId: "req-cmd", command: "review.cancel", params: { runId: run1.id }, idempotencyKey: "k1" },
-  "client.command.review.retry": { type: "command", requestId: "req-cmd", command: "review.retry", params: { runId: run1.id }, idempotencyKey: "k2" },
-  "client.command.review.publish": {
-    type: "command",
-    requestId: "req-cmd",
-    command: "review.publish",
-    params: { runId: run1.id, previewId: "preview-1", expectedHeadSha: pr1.headSha },
-    idempotencyKey: "k3",
-  },
+  "client.command.review.cancel": { type: "command", requestId: "req-cmd", command: "review.cancel", params: { runId: run1.id }, idempotencyKey: `review.cancel:${run1.id}` },
+  "client.command.review.retry": { type: "command", requestId: "req-cmd", command: "review.retry", params: { runId: run1.id }, idempotencyKey: `review.retry:${run1.id}` },
+  "client.command.review.publish": publishCommand,
   "client.command.account-select": selectCommand(work),
+  "client.publication.get": { type: "publication.get", requestId: "req-pub", runId: run1.id },
 
   "server.welcome": welcome(108),
+  "server.welcome.engine": welcome(108, EPOCH, ["account.select", ...REVIEW_COMMANDS], "engine"),
+  "server.welcome.read-only": welcome(108, EPOCH, ["account.select"], "read-only"),
+  "server.publication.preview": preview,
   "server.snapshot": snapshot(108, [pr1, pr2, pr3], [run1, run2], [f1, f2]),
   "server.snapshot.accounts": snapshot(108, [pr1], [run1], [f1], EPOCH, [
     account("env", "GITHUB_TOKEN", { scopes: [] }),
@@ -812,7 +837,10 @@ export const fixtures: Record<string, ClientMessage | ServerMessage | Record<str
     failureReason: "aborted by operator",
   }),
   "server.event.accounts-updated": accountsUpdated({ seq: 109 }, [personal, { ...work, selected: true }]),
+  "server.event.review.publication_changed": publicationChanged({ seq: 109 }, run1, "awaiting_approval"),
+  "server.event.review.publication_changed.published": publicationChanged({ seq: 109 }, run1, "published", 3141),
   "server.event.heartbeat": { type: "event", eventType: "heartbeat", streamEpoch: EPOCH, occurredAt: at(110) },
+  // A reserved name (TUI_SPEC §3B's reinvestigation) stands in for whatever a newer server may emit.
   "server.event.unknown-type": {
     type: "event",
     streamEpoch: EPOCH,
@@ -820,7 +848,7 @@ export const fixtures: Record<string, ClientMessage | ServerMessage | Record<str
     prevSequence: 108,
     occurredAt: at(109),
     prId: pr1.id,
-    eventType: "review.publication_changed",
+    eventType: "review.reinvestigation_requested",
     data: { state: "PENDING", whatever: [1, 2] },
   },
   "server.event.extra-fields": {
@@ -927,6 +955,10 @@ export const invalidFixtures: Record<string, [unknown, string]> = {
     { type: "command.result", requestId: "r", status: "accepted" },
     "An accepted command names the operation that later events confirm.",
   ],
+  "server.event.publication.bad-status": [
+    { ...(fixtures["server.event.review.publication_changed"] as object), data: { runId: run1.id, status: "posted" } },
+    "Publication statuses are a closed list: awaiting_approval, publishing, published, uncertain, failed.",
+  ],
   "server.error.unknown-code": [{ type: "error", code: "TEAPOT", message: "m" }, "Error codes are a closed list."],
   "server.finding.line-zero": [
     { ...(fixtures["server.finding.detail"] as Record<string, unknown>), finding: { ...detail, line: 0 } },
@@ -947,6 +979,8 @@ export type Expect = {
   findings: { id: string; title: string; status: string; stale: boolean }[];
   /** Present only when the script's snapshot carries accounts. */
   accounts?: { id: string; state: string; ghActive: boolean; selected: boolean }[];
+  /** The latest `review.publication_changed` per run, sorted by `runId`; present only when the script carries one. */
+  publications?: { runId: string; status: string }[];
 };
 
 const lines = (delayMs: number, messages: ServerMessage[]): PlaybackLine[] => messages.map((message) => ({ delayMs, message }));
@@ -967,7 +1001,7 @@ const normal = lines(40, [
     sequence: 15,
     prevSequence: 14,
     occurredAt: at(15),
-    eventType: "review.publication_changed",
+    eventType: "review.reinvestigation_requested",
     data: { reserved: true },
   } as ServerMessage,
   phase({ seq: 16 }, run1, "PREPARE_PUBLICATION", "PUBLISH", "HEAD_VERIFIED"),
@@ -1043,6 +1077,24 @@ const accounts = lines(40, [
   accountsUpdated({ seq: 11 }, [personal, { ...work, selected: true }]),
 ]);
 
+
+// Approval mode end to end: the run parks, the preview is shown, the approval is accepted, then the publisher's
+// own statuses arrive. The client never shows a publication as done on `accepted`, only on `published`.
+const approval = lines(40, [
+  welcome(10, EPOCH, ["account.select", ...REVIEW_COMMANDS], "engine"),
+  snapshot(10, [pr1, pr2, pr3], [run1, run2], [f1, f2], EPOCH, [personal, work]),
+  phase({ seq: 11 }, run1, "VERIFY", "PREPARE_PUBLICATION", "CANDIDATES_DISPOSED"),
+  publicationChanged({ seq: 12 }, run1, "publishing"),
+  phase({ seq: 13 }, run1, "PREPARE_PUBLICATION", "AWAITING_APPROVAL", "APPROVAL_REQUIRED"),
+  publicationChanged({ seq: 14 }, run1, "awaiting_approval"),
+  preview,
+  { type: "command.result", requestId: "req-cmd", status: "accepted", operationId: `review.publish:${run1.id}` },
+  phase({ seq: 15 }, run1, "AWAITING_APPROVAL", "PUBLISH", "APPROVED"),
+  publicationChanged({ seq: 16 }, run1, "publishing"),
+  publicationChanged({ seq: 17 }, run1, "published", 3141),
+  phase({ seq: 18 }, run1, "PUBLISH", "COMPLETED", "REVIEW_RECONCILED"),
+  runEvent({ seq: 19 }, "review.completed", { ...run1, phase: "COMPLETED", status: "COMPLETED", completedAt: at(19) }),
+]);
 
 // Each step's occurredAt is the script clock, so the timestamps match the cadence the TUI plays at.
 const showcaseScript = (): PlaybackLine[] => {
@@ -1180,6 +1232,22 @@ export const playback: Record<string, { script: PlaybackLine[]; expect: Expect }
         { id: "github.com/dperalta", state: "ok", ghActive: true, selected: false },
       ],
     },
+  },
+  approval: {
+    script: approval,
+    expect: baseExpect({
+      lastSequence: 19,
+      runs: [runRow(run1, "COMPLETED", "COMPLETED"), runRow(run2)],
+      findings: [
+        { id: f1.id, title: f1.title, status: f1.status, stale: false },
+        { id: f2.id, title: f2.title, status: f2.status, stale: false },
+      ],
+      accounts: [
+        { id: personal.id, state: "ok", ghActive: true, selected: false },
+        { id: work.id, state: "ok", ghActive: false, selected: false },
+      ],
+      publications: [{ runId: run1.id, status: "published" }],
+    }),
   },
   burst: { script: burst, expect: baseExpect({ lastSequence: 5010, toolActivityCount: 5000 }) },
 };

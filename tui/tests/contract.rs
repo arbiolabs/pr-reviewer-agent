@@ -20,11 +20,18 @@ fn fixtures(dir: &Path) -> Vec<(String, String)> {
     out
 }
 
+/// M3 messages parse into their own types below; the wiring step adds them to `ServerMessage` and `ClientMessage`,
+/// whose exhaustive matches live outside this contract (update.rs, playback.rs).
+const M3_STANDALONE: [&str; 2] = ["server.publication.preview", "client.publication.get"];
+
 #[test]
 fn every_valid_fixture_parses() {
     let all = fixtures(&protocol_dir().join("fixtures"));
     assert!(all.len() >= 40, "found only {} fixtures", all.len());
     for (name, body) in all {
+        if M3_STANDALONE.contains(&name.as_str()) {
+            continue;
+        }
         if name.starts_with("server.") {
             ServerMessage::parse(&body).unwrap_or_else(|e| panic!("{name}: {e}"));
         } else {
@@ -101,8 +108,57 @@ fn invalid_fixtures_are_rejected_or_handled_as_their_why_says() {
     };
     assert_eq!(protocol_version, 2);
 
-    let covered = rejected_server.len() + rejected_client.len() + 5;
+    // A publication status outside the closed list is Unknown, never a parse failure.
+    let e = sequenced(ServerMessage::parse(&invalid("server.event.publication.bad-status")).unwrap());
+    assert_eq!(e.body, EventBody::Other(Text::new("review.publication_changed")));
+    let raw: serde_json::Value = serde_json::from_str(&invalid("server.event.publication.bad-status")).unwrap();
+    let p: PublicationChanged = serde_json::from_value(raw["data"].clone()).unwrap();
+    assert_eq!(p.status, PublicationStatus::Unknown);
+
+    let covered = rejected_server.len() + rejected_client.len() + 6;
     assert_eq!(covered, fixtures(&protocol_dir().join("fixtures/invalid")).len(), "an invalid fixture is untested");
+}
+
+#[test]
+fn m3_messages_parse_into_their_standalone_types() {
+    let read = |name: &str| fs::read_to_string(protocol_dir().join(format!("fixtures/{name}.json"))).unwrap();
+
+    let p: PublicationPreview = serde_json::from_str(&read("server.publication.preview")).unwrap();
+    assert_eq!((p.run_id.as_str(), p.status, p.event.as_str(), p.comments.len()), ("rev-184-a", PublicationStatus::AwaitingApproval, "COMMENT", 1));
+    assert_eq!(p.preview_id.as_str().len(), 64);
+    assert!(p.body.as_str().ends_with(&format!("<!-- durable-review:rev-184-a:{} -->\n", p.preview_id)));
+    assert_eq!((p.comments[0].path.as_str(), p.comments[0].line.get(), p.comments[0].side.as_str()), ("src/booking.ts", 42, "RIGHT"));
+
+    // The approval names exactly the preview it saw: the fixture command carries the preview's hash in its key.
+    let ClientMessage::Command(c) = serde_json::from_str(&read("client.command.review.publish")).unwrap() else { panic!() };
+    let Command::Publish(params) = &c.command else { panic!() };
+    assert_eq!(params.preview_id, p.preview_id);
+    assert_eq!(c.idempotency_key, c.command.idempotency_key());
+
+    let get: PublicationGet = serde_json::from_str(&read("client.publication.get")).unwrap();
+    let original: serde_json::Value = serde_json::from_str(&read("client.publication.get")).unwrap();
+    assert_eq!(serde_json::to_value(&get).unwrap(), original, "publication.get does not round-trip");
+
+    for (name, status, review) in [
+        ("server.event.review.publication_changed", PublicationStatus::AwaitingApproval, None),
+        ("server.event.review.publication_changed.published", PublicationStatus::Published, Some(3141)),
+    ] {
+        let e = sequenced(ServerMessage::parse(&read(name)).unwrap());
+        assert_eq!(e.body, EventBody::Other(Text::new("review.publication_changed")), "{name}");
+        let raw: serde_json::Value = serde_json::from_str(&read(name)).unwrap();
+        let changed: PublicationChanged = serde_json::from_value(raw["data"].clone()).unwrap();
+        assert_eq!((changed.run_id.as_str(), changed.status, changed.review_id), ("rev-184-a", status, review), "{name}");
+        assert_eq!(changed.url.is_some(), review.is_some());
+    }
+
+    for (name, mode, granted) in [
+        ("server.welcome", None, 0),
+        ("server.welcome.engine", Some(DaemonMode::Engine), 5),
+        ("server.welcome.read-only", Some(DaemonMode::ReadOnly), 1),
+    ] {
+        let ServerMessage::Welcome { mode: m, capabilities, .. } = ServerMessage::parse(&read(name)).unwrap() else { panic!() };
+        assert_eq!((m, capabilities.len()), (mode, granted), "{name}");
+    }
 }
 
 #[test]
@@ -115,7 +171,7 @@ fn unknown_fields_and_event_types_are_ignored() {
     let body = fs::read_to_string(protocol_dir().join("fixtures/server.event.unknown-type.json")).unwrap();
     let e = sequenced(ServerMessage::parse(&body).unwrap());
     assert_eq!((e.sequence.get(), e.prev_sequence), (109, 108));
-    assert_eq!(e.body, EventBody::Other(Text::new("review.publication_changed")));
+    assert_eq!(e.body, EventBody::Other(Text::new("review.reinvestigation_requested")));
 }
 
 #[test]

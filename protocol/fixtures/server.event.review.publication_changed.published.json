@@ -1,0 +1,16 @@
+{
+  "type": "event",
+  "streamEpoch": "epoch-1",
+  "sequence": 109,
+  "prevSequence": 108,
+  "occurredAt": "2026-10-20T13:01:49Z",
+  "prId": "acme/shop#184",
+  "runId": "rev-184-a",
+  "eventType": "review.publication_changed",
+  "data": {
+    "runId": "rev-184-a",
+    "status": "published",
+    "reviewId": 3141,
+    "url": "https://github.com/acme/shop/pull/184#pullrequestreview-3141"
+  }
+}

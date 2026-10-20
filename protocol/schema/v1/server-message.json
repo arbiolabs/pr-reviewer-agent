@@ -40,6 +40,12 @@
             "type": "string"
           }
         },
+        "mode": {
+          "enum": [
+            "engine",
+            "read-only"
+          ]
+        },
         "streamEpoch": {
           "type": "string",
           "minLength": 1
@@ -1237,6 +1243,85 @@
                 "sequence",
                 "prevSequence",
                 "occurredAt",
+                "prId",
+                "runId",
+                "eventType",
+                "data"
+              ],
+              "properties": {
+                "type": {
+                  "type": "string",
+                  "const": "event"
+                },
+                "streamEpoch": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "sequence": {
+                  "type": "integer",
+                  "minimum": 1
+                },
+                "prevSequence": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "sequence of the previous event this server emitted, or the snapshot's sequence"
+                },
+                "occurredAt": {
+                  "type": "string",
+                  "description": "RFC 3339 UTC timestamp"
+                },
+                "prId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "runId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "eventType": {
+                  "type": "string",
+                  "const": "review.publication_changed"
+                },
+                "data": {
+                  "type": "object",
+                  "required": [
+                    "runId",
+                    "status"
+                  ],
+                  "properties": {
+                    "runId": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "status": {
+                      "enum": [
+                        "awaiting_approval",
+                        "publishing",
+                        "published",
+                        "uncertain",
+                        "failed"
+                      ]
+                    },
+                    "reviewId": {
+                      "type": "integer",
+                      "minimum": 1,
+                      "description": "the GitHub review, once one is known"
+                    },
+                    "url": {
+                      "type": "string"
+                    }
+                  }
+                }
+              }
+            },
+            {
+              "type": "object",
+              "required": [
+                "type",
+                "streamEpoch",
+                "sequence",
+                "prevSequence",
+                "occurredAt",
                 "eventType",
                 "data"
               ],
@@ -1411,6 +1496,7 @@
                   "review.completed",
                   "run.superseded",
                   "run.failed",
+                  "review.publication_changed",
                   "accounts.updated",
                   "heartbeat"
                 ]
@@ -1783,6 +1869,86 @@
               }
             }
           }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "requestId",
+        "runId",
+        "previewId",
+        "headSha",
+        "body",
+        "comments",
+        "event",
+        "status"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "publication.preview"
+        },
+        "requestId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "runId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "previewId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "headSha": {
+          "type": "string",
+          "minLength": 1
+        },
+        "body": {
+          "type": "string"
+        },
+        "comments": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "path",
+              "line",
+              "side",
+              "body"
+            ],
+            "properties": {
+              "path": {
+                "type": "string"
+              },
+              "line": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "side": {
+                "type": "string",
+                "const": "RIGHT"
+              },
+              "body": {
+                "type": "string"
+              }
+            }
+          }
+        },
+        "event": {
+          "type": "string",
+          "const": "COMMENT"
+        },
+        "status": {
+          "enum": [
+            "awaiting_approval",
+            "publishing",
+            "published",
+            "uncertain",
+            "failed"
+          ]
         }
       }
     },
@@ -2688,6 +2854,85 @@
                       "sequence",
                       "prevSequence",
                       "occurredAt",
+                      "prId",
+                      "runId",
+                      "eventType",
+                      "data"
+                    ],
+                    "properties": {
+                      "type": {
+                        "type": "string",
+                        "const": "event"
+                      },
+                      "streamEpoch": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "sequence": {
+                        "type": "integer",
+                        "minimum": 1
+                      },
+                      "prevSequence": {
+                        "type": "integer",
+                        "minimum": 0,
+                        "description": "sequence of the previous event this server emitted, or the snapshot's sequence"
+                      },
+                      "occurredAt": {
+                        "type": "string",
+                        "description": "RFC 3339 UTC timestamp"
+                      },
+                      "prId": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "runId": {
+                        "type": "string",
+                        "minLength": 1
+                      },
+                      "eventType": {
+                        "type": "string",
+                        "const": "review.publication_changed"
+                      },
+                      "data": {
+                        "type": "object",
+                        "required": [
+                          "runId",
+                          "status"
+                        ],
+                        "properties": {
+                          "runId": {
+                            "type": "string",
+                            "minLength": 1
+                          },
+                          "status": {
+                            "enum": [
+                              "awaiting_approval",
+                              "publishing",
+                              "published",
+                              "uncertain",
+                              "failed"
+                            ]
+                          },
+                          "reviewId": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "description": "the GitHub review, once one is known"
+                          },
+                          "url": {
+                            "type": "string"
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": "object",
+                    "required": [
+                      "type",
+                      "streamEpoch",
+                      "sequence",
+                      "prevSequence",
+                      "occurredAt",
                       "eventType",
                       "data"
                     ],
@@ -2835,6 +3080,7 @@
                         "review.completed",
                         "run.superseded",
                         "run.failed",
+                        "review.publication_changed",
                         "accounts.updated",
                         "heartbeat"
                       ]

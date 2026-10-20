@@ -5,7 +5,7 @@
   "prevSequence": 108,
   "occurredAt": "2026-10-20T13:01:49Z",
   "prId": "acme/shop#184",
-  "eventType": "review.publication_changed",
+  "eventType": "review.reinvestigation_requested",
   "data": {
     "state": "PENDING",
     "whatever": [
