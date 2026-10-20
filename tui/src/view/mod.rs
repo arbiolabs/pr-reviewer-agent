@@ -83,7 +83,7 @@ pub(crate) fn window(len: usize, selected: Option<usize>, height: usize) -> std:
 
 pub fn view(m: &Model, f: &mut Frame) {
     let area = f.area();
-    let t = Theme { color: m.look.color, ascii: m.look.ascii };
+    let t = Theme { color: m.look.color, ascii: m.look.ascii, terminal_bg: m.look.terminal_bg };
     let c = Ctx { m, t, width: Width::of(area.width) };
     if area.width == 0 || area.height == 0 {
         return;

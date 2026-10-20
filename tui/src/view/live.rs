@@ -109,7 +109,11 @@ mod tests {
     #[test]
     fn the_sparkline_scales_to_the_busiest_second_with_a_floor_of_three() {
         let m = Model::new("x", Look::default(), Screen::Review, None);
-        let c = Ctx { m: &m, t: Theme { color: false, ascii: false }, width: super::super::Width::Wide };
+        let c = Ctx {
+            m: &m,
+            t: Theme { color: false, ascii: false, terminal_bg: false },
+            width: super::super::Width::Wide,
+        };
         assert_eq!(sparkline(&c, &[0, 1, 3, 6]), "▁▃▅█");
         assert_eq!(sparkline(&c, &[0, 1, 2, 3]), "▁▄▆█");
         assert_eq!(rate_cell(&c, 0.0), "▁");

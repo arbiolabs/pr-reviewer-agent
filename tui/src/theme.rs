@@ -165,6 +165,7 @@ const ASCII_BORDER: border::Set = border::Set {
 pub struct Theme {
     pub color: bool,
     pub ascii: bool,
+    pub terminal_bg: bool,
 }
 
 impl Theme {
@@ -198,10 +199,13 @@ impl Theme {
         base.fg(rgb(hex(name)))
     }
 
-    /// A background fill; nothing without color.
+    /// A background fill; nothing without color. With `terminal_bg`, `Base` is the terminal's own background.
     pub fn bg(&self, bg: Bg) -> Style {
         if !self.color {
             return Style::default();
+        }
+        if self.terminal_bg && bg == Bg::Base {
+            return Style::default().bg(Color::Reset);
         }
         let name = match bg {
             Bg::Base => "base",
@@ -302,10 +306,35 @@ mod tests {
         println!("{}\nworst pair {worst:.2}:1 over {} pairs", report.join("\n"), report.len());
     }
 
+    /// `background = "terminal"` swaps `base` for the terminal's own background, which the client cannot see. Every
+    /// foreground must still reach 4.5:1 on the dark backgrounds terminals ship with. A light terminal is reported,
+    /// not asserted: code blocks, the selection and diff lines stay painted dark in both modes, so the text has to be
+    /// light, and light text cannot also reach 4.5:1 on white. The docs say `terminal` assumes a dark terminal.
+    #[test]
+    fn with_the_terminal_background_every_foreground_still_reaches_aa_on_a_dark_terminal() {
+        let ratio = |fg: u32, bg: u32| {
+            let (a, b) = (luminance(fg), luminance(bg));
+            (a.max(b) + 0.05) / (a.min(b) + 0.05)
+        };
+        let fgs: Vec<_> = PALETTE.iter().filter(|p| !p.2).collect();
+        for (name, bg) in [("black", 0x000000), ("dark gray", 0x1e1e1e), ("one dark", 0x282c34)] {
+            let (worst, fname) =
+                fgs.iter().map(|f| (ratio(f.1, bg), f.0)).fold((f64::MAX, ""), |a, b| if b.0 < a.0 { b } else { a });
+            println!("terminal {name:<9} worst {worst:5.2}:1 ({fname})");
+            assert!(worst >= 4.5, "{fname} on a {name} terminal: {worst:.2} < 4.5");
+        }
+        let (worst, fname) =
+            fgs.iter().map(|f| (ratio(f.1, 0xffffff), f.0)).fold((f64::MAX, ""), |a, b| if b.0 < a.0 { b } else { a });
+        println!("terminal white     worst {worst:5.2}:1 ({fname}): unsupported, see the doc comment");
+        let t = Theme { color: true, ascii: false, terminal_bg: true };
+        assert_eq!(t.bg(Bg::Base).bg, Some(Color::Reset));
+        assert_eq!(t.bg(Bg::Surface).bg, Some(rgb(hex("surface"))), "surfaces stay painted");
+    }
+
     #[test]
     fn every_severity_has_its_own_glyph_in_both_glyph_sets() {
         for ascii in [false, true] {
-            let t = Theme { color: false, ascii };
+            let t = Theme { color: false, ascii, terminal_bg: false };
             let glyphs: Vec<&str> =
                 [Severity::Critical, Severity::High, Severity::Medium, Severity::Low].map(|s| t.severity(s).0).to_vec();
             let expected = if ascii { vec!["!", "^", "*", "o"] } else { vec!["◆", "▲", "●", "○"] };

@@ -356,11 +356,13 @@ pub struct Look {
     pub ascii: bool,
     pub color: bool,
     pub show_activity: bool,
+    /// `[ui] background = "terminal"`: the terminal's own background shows where the theme would paint `base`.
+    pub terminal_bg: bool,
 }
 
 impl Default for Look {
     fn default() -> Self {
-        Look { ascii: false, color: true, show_activity: true }
+        Look { ascii: false, color: true, show_activity: true, terminal_bg: false }
     }
 }
 
