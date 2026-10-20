@@ -36,6 +36,15 @@ pub fn sparkline(c: &Ctx, data: &[u64]) -> String {
     data.iter().map(|n| levels[(*n as usize * (levels.len() - 1)).div_ceil(max as usize)]).collect()
 }
 
+/// A rate in at most four columns: `0.2`, `42`, then `99+` for a burst.
+pub fn rate_label(per_sec: f64) -> String {
+    match per_sec {
+        r if r < 9.95 => format!("{r:.1}"),
+        r if r < 99.5 => format!("{r:.0}"),
+        _ => "99+".into(),
+    }
+}
+
 /// One cell for a rate: how busy, at a glance.
 pub fn rate_cell(c: &Ctx, per_sec: f64) -> &'static str {
     let levels: &[&str] = if c.t.ascii { &[".", ":", "|", "#"] } else { &["▁", "▃", "▅", "▇"] };
@@ -118,5 +127,6 @@ mod tests {
         assert_eq!(sparkline(&c, &[0, 1, 2, 3]), "▁▄▆█");
         assert_eq!(rate_cell(&c, 0.0), "▁");
         assert_eq!(rate_cell(&c, 1.2), "▅");
+        assert_eq!([rate_label(0.2), rate_label(42.4), rate_label(400.0)], ["0.2", "42", "99+"]);
     }
 }

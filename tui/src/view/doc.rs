@@ -419,7 +419,7 @@ fn live(c: &Ctx, pr: &Pr, w: usize, log: usize, lines: &mut Vec<Line<'static>>) 
     let left = vec![c.span(format!("{} ", spinner(c)), Role::Accent), c.span("Reviewing now", Role::Title)];
     let right = vec![
         c.span(sparkline(c, &rate(c, Some(&pr.id), spark_w)), Role::Accent),
-        c.span(format!("  {rate_now:.1} calls/s"), Role::Muted),
+        c.span(format!("  {} calls/s", super::live::rate_label(rate_now)), Role::Muted),
     ];
     lines.push(Line::from(split_row(left, right, w)));
     lines.push(Line::raw(""));

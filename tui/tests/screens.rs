@@ -89,3 +89,15 @@ fn the_open_card_counts_its_evidence_in_plain_words() {
         frame.lines().find(|l| l.contains("Enter ") && l.contains("the diff")).unwrap_or_else(|| panic!("{frame}"));
     assert!(hint.contains("Enter  3 evidence items · the fix · the diff"), "{hint}");
 }
+
+#[test]
+fn a_burst_rate_is_clamped_to_fit_its_cell() {
+    let mut s = Sim::new(Look::default()).play("burst", usize::MAX);
+    let (frame, _) = render(&mut s.m, 120, 38);
+    let rail: Vec<&str> =
+        frame.lines().map(|l| l.get(..l.char_indices().nth(34).map_or(l.len(), |(i, _)| i)).unwrap()).collect();
+    assert!(rail.iter().any(|l| l.trim_end().ends_with("99+/s")), "{}", rail.join("\n"));
+    let mut s = s.select("acme/shop#184");
+    let (frame, _) = render(&mut s.m, 120, 38);
+    assert!(frame.contains("99+ calls/s"), "{frame}");
+}

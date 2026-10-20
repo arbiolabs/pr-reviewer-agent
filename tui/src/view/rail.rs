@@ -170,7 +170,7 @@ fn pr_rows(c: &Ctx, pr: &Pr, w: usize, selected: bool, rh: usize) -> Vec<Line<'s
             let mut s: Vec<Span<'static>> = stepper(c, r).into_iter().map(|s| s.patch_style(row_bg)).collect();
             if c.m.look.show_activity {
                 s.push(Span::styled(format!(" {}", rate_cell(c, rate)), on(Role::Accent)));
-                s.push(Span::styled(format!("{rate:>4.1}/s "), on(Role::Muted)));
+                s.push(Span::styled(format!("{:>4}/s ", super::live::rate_label(rate)), on(Role::Muted)));
             } else {
                 s.push(Span::styled(" ", row_bg));
             }
