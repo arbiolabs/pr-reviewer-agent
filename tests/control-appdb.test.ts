@@ -113,7 +113,7 @@ it("streams a real review to a client attached from the start, with no gaps", as
     finding: {
       id: finding!.id,
       reasoningSummary: "Compared the new route registration with its guarded sibling.",
-      evidence: [{ kind: "code_ref", path: "src/routes/orders.ts", start: 4, end: 5, refSha: fixture.headSha, text: "src/routes/orders.ts:4-5" }],
+      evidence: [{ kind: "code_ref", path: "src/routes/orders.ts", start: 4, end: 5, refSha: fixture.headSha, text: '  app.get("/orders", requireAdmin, listOrders);\n  app.delete("/orders/:id", deleteOrder);' }],
       history: [{ runId: revision.id, disposition: "DETECTED" }],
     },
   });

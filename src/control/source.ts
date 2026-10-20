@@ -29,7 +29,7 @@ export interface ControlSource {
   snapshot(): Snapshot;
   eventsAfter(sequence: number, limit: number): SequencedEvent[];
   diff(request: DiffRequest): Promise<DiffPage>;
-  finding(findingId: string): FindingDetail;
+  finding(findingId: string): Promise<FindingDetail>;
   timeline(request: TimelineRequest): TimelinePage;
   /** Present on sources that can select a GitHub account; the server offers the account.select capability only then. */
   refreshAccounts?(maxAgeMs: number): Promise<void>;
@@ -133,7 +133,7 @@ export class FixtureSource implements ControlSource {
     return nextCursor === undefined ? { files: wanted, truncated } : { files: wanted, nextCursor, truncated };
   }
 
-  finding(findingId: string): FindingDetail {
+  async finding(findingId: string): Promise<FindingDetail> {
     const { snapshot, journal } = this.state();
     const updates = journal.flatMap((e) => (e.eventType === "finding.updated" ? [e.data as Finding] : []));
     const finding = [...snapshot.findings, ...updates].findLast((f) => f.id === findingId);

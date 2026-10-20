@@ -11,8 +11,11 @@ const GIT_ENV = { ...process.env, GIT_TERMINAL_PROMPT: "0", GIT_LITERAL_PATHSPEC
 
 export const DEFAULT_OUTPUT_CAP = 64 * 1024;
 
-async function git(dir: string, args: string[], maxBuffer = 64 * 1024 * 1024): Promise<string> {
-  const { stdout } = await run("git", ["-C", dir, "-c", "core.quotePath=false", ...args], { env: GIT_ENV, maxBuffer, encoding: "utf8" });
+// A blob-less clone fetches a missing blob from origin on demand; readers that must stay off the network turn that off.
+const OFFLINE_ENV = { ...GIT_ENV, GIT_NO_LAZY_FETCH: "1" };
+
+async function git(dir: string, args: string[], maxBuffer = 64 * 1024 * 1024, env = GIT_ENV): Promise<string> {
+  const { stdout } = await run("git", ["-C", dir, "-c", "core.quotePath=false", ...args], { env, maxBuffer, encoding: "utf8" });
   return stdout;
 }
 
@@ -90,11 +93,14 @@ export class PinnedRepo {
     return files;
   }
 
-  /** `undefined` when the path or object does not exist at `sha`; any other git failure throws so the caller retries. */
-  async show(sha: string, path: string): Promise<string | undefined> {
+  /**
+   * `undefined` when the path or object does not exist at `sha`; any other git failure throws so the caller retries.
+   * `offline` never fetches a blob the clone lacks: git fails with "bad object" instead.
+   */
+  async show(sha: string, path: string, options: { offline?: boolean } = {}): Promise<string | undefined> {
     const safe = assertSafePath(path);
     try {
-      return await git(this.dir, ["show", `${sha}:${safe}`]);
+      return await git(this.dir, ["show", `${sha}:${safe}`], undefined, options.offline ? OFFLINE_ENV : GIT_ENV);
     } catch (error) {
       const { code, stderr } = error as { code?: unknown; stderr?: unknown };
       if (code === 128 && /does not exist|exists on disk, but not in|invalid object name/.test(String(stderr))) return undefined;
