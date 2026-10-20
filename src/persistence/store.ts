@@ -103,6 +103,9 @@ export type DeadWebhookRow = { delivery_id: string; event_type: string; attempts
 
 export type AuditEvent = { seq: number; from_state: string; event: string; to_state: string; detail: string | null; at: string };
 
+/** The revision is not where the caller believed: another actor moved it, or a publication guard refused the step. */
+export class StateConflict extends Error {}
+
 const now = () => new Date().toISOString();
 
 /** Outbox events whose detail is why publication is not done; `last_error` keeps the latest one. */
@@ -212,9 +215,9 @@ export class AppStore {
     return this.tx(() => {
       const current = this.revision(revisionId)?.state;
       if (current === result.state) return current;
-      if (current !== from) throw new Error(`revision ${revisionId} is ${current}, expected ${from} for ${event}`);
+      if (current !== from) throw new StateConflict(`revision ${revisionId} is ${current}, expected ${from} for ${event}`);
       writes?.();
-      if (!this.recordTransition(revisionId, from, event, result.state, detail)) throw new Error(`${event} refused in ${from}: a review write may have reached GitHub`);
+      if (!this.recordTransition(revisionId, from, event, result.state, detail)) throw new StateConflict(`${event} refused in ${from}: a review write may have reached GitHub`);
       return result.state;
     });
   }

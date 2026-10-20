@@ -177,7 +177,9 @@ export async function startControlServer(options: ServerOptions): Promise<Contro
           send(c, { type: "command.result", requestId, status: "accepted", operationId });
         } catch (error) {
           if (error instanceof ControlError) return reject(error.code, error.message);
-          throw error;
+          // A command's failure is always its own result, so the client never waits on a bare error for a requestId.
+          report(error);
+          return reject("INTERNAL_ERROR", error instanceof Error ? error.message : String(error));
         }
         return pump(c);
       }

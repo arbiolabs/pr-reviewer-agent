@@ -4,6 +4,7 @@ import type { GitHubClient } from "../github/client.ts";
 import type { PullSource } from "../github/pulls.ts";
 import type { ReviewCommand } from "../protocol/v1.ts";
 import { type App, finishReview, recover, type StartedReview } from "../runtime/app.ts";
+import { StateConflict } from "../persistence/store.ts";
 import { approve, cancel, Refused, retry, startFromHead } from "../runtime/commands.ts";
 import { AppDbSource } from "./appdb.ts";
 import { ControlError } from "./source.ts";
@@ -118,6 +119,8 @@ export class EngineSource extends AppDbSource {
       }
     } catch (error) {
       if (error instanceof Refused) throw new ControlError(error.code, error.message);
+      // The state the command checked moved during its await (a cancel from another connection, say).
+      if (error instanceof StateConflict) throw new ControlError("CONFLICT", error.message);
       throw error;
     }
   }

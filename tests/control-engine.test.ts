@@ -338,6 +338,58 @@ it("binds each key to one attempt: cancel, retry and approve act again on a late
   expect(await cancel()).toEqual(rejected("CONFLICT", "cannot cancel in PUBLISH: a GitHub write may be in flight"));
 }, 90_000);
 
+it("answers an approval that lost a race to a cancel with command.result CONFLICT naming the current state", async () => {
+  const client = newClient();
+  const request = client.request.bind(client);
+  let armed = false;
+  let release: () => void = () => {};
+  const blocked = new Promise<void>((resolve) => {
+    client.request = (async (method: string, path: string, options?: Parameters<typeof request>[2]) => {
+      if (armed && method === "GET" && path.includes("/pulls/")) {
+        armed = false;
+        resolve();
+        await new Promise<void>((r) => (release = r));
+      }
+      return request(method, path, options);
+    }) as typeof client.request;
+  });
+  const h = await host({ client });
+  const { c } = await serve(h.source);
+  const prId = h.app.store.upsertPull(fixture.pull);
+  c.send({ type: "snapshot.get", requestId: "s" });
+  await c.waitFor((m) => m.type === "snapshot");
+  const started = (await command(c, { command: "review.start", params: { prId, expectedHeadSha: fixture.headSha } })) as { operationId: string };
+  const runId = started.operationId.slice("review.start:".length);
+  await c.waitFor((m) => m.type === "event" && m.eventType === "review.phase_changed" && (m.data as { to: string }).to === "AWAITING_APPROVAL");
+  const previewId = h.app.store.outboxForRevision(runId)!.payload_hash;
+
+  armed = true;
+  const publish = { type: "command", requestId: "race", command: "review.publish", params: { runId, previewId, expectedHeadSha: fixture.headSha } } as Command;
+  publish.idempotencyKey = idempotencyKey(publish);
+  c.send(publish);
+  await blocked;
+  const second = await serve(h.source);
+  second.c.send({ type: "snapshot.get", requestId: "s" });
+  await second.c.waitFor((m) => m.type === "snapshot");
+  expect(await command(second.c, { command: "review.cancel", params: { runId } })).toMatchObject({ status: "accepted" });
+  await second.c.waitFor((m) => m.type === "event" && m.eventType === "run.failed");
+  release();
+  expect(await c.waitFor((m) => "requestId" in m && m.requestId === "race")).toEqual({
+    type: "command.result",
+    requestId: "race",
+    status: "rejected",
+    code: "CONFLICT",
+    message: `revision ${runId} is FAILED, expected AWAITING_APPROVAL for APPROVED`,
+  });
+  expect([fake.postAttempts, h.app.store.revision(runId)!.state]).toEqual([0, "FAILED"]);
+  // The connection is still in the protocol: the next command is answered, and so is one the engine crashes on.
+  expect(await command(c, { command: "review.retry", params: { runId } })).toMatchObject({ status: "accepted", operationId: `review.retry:${runId}` });
+  h.source.command = async () => {
+    throw new Error("durable storage is closed");
+  };
+  expect(await command(c, { command: "review.cancel", params: { runId } })).toEqual(rejected("INTERNAL_ERROR", "durable storage is closed"));
+}, 60_000);
+
 it("recovers an approval the daemon was stopped in the middle of, with one POST", async () => {
   const client = newClient();
   const request = client.request.bind(client);
