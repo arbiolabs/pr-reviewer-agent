@@ -2,7 +2,6 @@
 //! colors and keeps modifiers (reverse video marks the selection, bold marks focus).
 
 use ratatui::style::{Color, Modifier, Style};
-use ratatui::symbols::border;
 
 use crate::protocol::{FindingStatus, Phase, RunStatus, Severity};
 
@@ -150,17 +149,6 @@ const ASCII: Glyphs = Glyphs {
     sev_low: "o",
 };
 
-const ASCII_BORDER: border::Set = border::Set {
-    top_left: "+",
-    top_right: "+",
-    bottom_left: "+",
-    bottom_right: "+",
-    vertical_left: "|",
-    vertical_right: "|",
-    horizontal_top: "-",
-    horizontal_bottom: "-",
-};
-
 #[derive(Clone, Copy, Debug)]
 pub struct Theme {
     pub color: bool,
@@ -220,10 +208,6 @@ impl Theme {
 
     pub fn g(&self) -> &'static Glyphs {
         if self.ascii { &ASCII } else { &UNICODE }
-    }
-
-    pub fn border(&self) -> border::Set<'static> {
-        if self.ascii { ASCII_BORDER } else { border::PLAIN }
     }
 
     pub fn severity(&self, s: Severity) -> (&'static str, &'static str, Role) {

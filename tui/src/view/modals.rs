@@ -1,179 +1,163 @@
-//! Help, finding detail and event detail modals, and the Settings / diagnostics screen.
+//! The help page, the confirmation panel, and the Settings page. Like the finding reader they are pages in the reading
+//! column, not boxes: section headings, muted keys, and a surface panel only where the user must answer.
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Clear, Paragraph, Wrap};
+use ratatui::widgets::{Clear, Paragraph};
 
 use super::Ctx;
-use crate::keymap::help_rows;
+use super::code::rich;
+use super::doc::{column, filled};
+use crate::keymap::{Context, help_rows};
 use crate::model::{ConfirmState, Link, Modal};
-use crate::protocol::{Account, AccountState, EvidenceKind, FindingId};
-use crate::theme::{Role, finding_status};
-
-fn centered(area: Rect, w: u16, h: u16) -> Rect {
-    let w = w.min(area.width);
-    let h = h.min(area.height);
-    Rect { x: area.x + (area.width - w) / 2, y: area.y + (area.height - h) / 2, width: w, height: h }
-}
+use crate::protocol::{Account, AccountState};
+use crate::theme::{Bg, Role};
 
 pub fn modal(c: &Ctx, f: &mut Frame, body: Rect, modal: &Modal) {
     match modal {
         Modal::Input { .. } => {}
-        Modal::Confirm { title, prompt, command, state } => {
-            let (status, role) = match state {
-                ConfirmState::Asking => ("y confirm   n / Esc cancel".to_string(), Role::Title),
-                ConfirmState::Requested(_) => ("requested... waiting for the server".to_string(), Role::Pending),
-                ConfirmState::Accepted(op) => {
-                    (format!("accepted ({op}); waiting for events to confirm it"), Role::Active)
-                }
-                ConfirmState::Failed(e) => (format!("rejected: {e}"), Role::Fail),
-                ConfirmState::TimedOut => ("request timed out; y sends it again, r refreshes".to_string(), Role::Fail),
-            };
-            let rows = |s: &str| crate::text::width(s).div_ceil(62).max(1) as u16;
-            let h = 4 + rows(prompt) + rows(&status);
-            let lines = vec![
-                Line::from(c.span(prompt.clone(), Role::Normal)),
-                Line::from(c.span(format!("command {}", command.name()), Role::Muted)),
-                Line::raw(""),
-                Line::from(c.span(status, role)),
-            ];
-            draw(c, f, centered(body, 64, h), &title.to_uppercase(), lines, 0);
-        }
-        Modal::Help => {
-            let rows = help_rows();
-            let two = body.width >= 80;
-            let per_col = if two { rows.len().div_ceil(2) } else { rows.len() };
-            let col = |i: usize| -> Vec<Span<'static>> {
-                rows.get(i).map_or(vec![], |(keys, what)| {
-                    vec![c.span(format!(" {}", c.pad(keys, 10)), Role::Title), c.span(c.pad(what, 28), Role::Normal)]
-                })
-            };
-            let mut lines: Vec<Line> = (0..per_col)
-                .map(|i| {
-                    let mut spans = col(i);
-                    if two {
-                        spans.extend(col(i + per_col));
-                    }
-                    Line::from(spans)
-                })
-                .collect();
-            let g = c.t.g();
-            let legend = format!(
-                " Severity: {} critical  {} high  {} medium  {} low",
-                g.sev_crit, g.sev_high, g.sev_med, g.sev_low
-            );
-            lines.push(Line::from(c.span(legend, Role::Muted)));
-            lines.push(Line::from(c.span(" Write keys need a capability the server grants.", Role::Muted)));
-            let area = centered(body, if two { 80 } else { 44 }, lines.len() as u16 + 2);
-            draw(c, f, area, "HELP", lines, 0);
-        }
+        Modal::Confirm { title, prompt, command, state } => confirm(c, f, body, title, prompt, command.name(), state),
+        Modal::Help => help(c, f, body),
         Modal::Finding { id, scroll } => super::doc::finding_page(c, f, body, id, *scroll),
     }
 }
 
-fn draw(c: &Ctx, f: &mut Frame, area: Rect, title: &str, lines: Vec<Line<'static>>, scroll: u16) {
-    let block = c.pane(title, true);
+/// A page over the body: cleared to the base background, content in the reading column.
+fn page(c: &Ctx, f: &mut Frame, area: Rect, lines: Vec<Line<'static>>) {
     f.render_widget(Clear, area);
-    f.render_widget(Paragraph::new("").style(c.t.bg(crate::theme::Bg::Base)), area);
-    f.render_widget(Paragraph::new(lines).block(block).wrap(Wrap { trim: false }).scroll((scroll, 0)), area);
+    f.render_widget(Paragraph::new("").style(c.t.bg(Bg::Base)), area);
+    f.render_widget(Paragraph::new(lines), column(area));
 }
 
-#[allow(dead_code)]
-fn finding_lines(c: &Ctx, id: &FindingId) -> Vec<Line<'static>> {
+fn heading(c: &Ctx, text: &str) -> Line<'static> {
+    Line::from(c.span(text.to_string(), Role::Focus))
+}
+
+/// The only place `y` acts: a surface panel with the accent bar, the question, the command it sends and its state.
+fn confirm(c: &Ctx, f: &mut Frame, body: Rect, title: &str, prompt: &str, command: &str, state: &ConfirmState) {
+    let (status, role) = match state {
+        ConfirmState::Asking => ("y confirm   n / Esc cancel".to_string(), Role::Title),
+        ConfirmState::Requested(_) => ("requested… waiting for the server".to_string(), Role::Pending),
+        ConfirmState::Accepted(op) => (format!("accepted ({op}); waiting for events to confirm it"), Role::Active),
+        ConfirmState::Failed(e) => (format!("rejected: {e}"), Role::Fail),
+        ConfirmState::TimedOut => ("request timed out; y sends it again, r refreshes".to_string(), Role::Fail),
+    };
+    let w = 64.min(body.width) as usize;
+    let surface = c.t.bg(Bg::Surface);
+    let inner = w.saturating_sub(4);
+    let bar = Span::styled(if c.t.ascii { "|" } else { "▌" }, c.s(Role::Accent).patch(surface));
+    let row = |spans: Vec<Span<'static>>| {
+        let mut s = vec![bar.clone(), Span::styled("  ", surface)];
+        s.extend(spans.into_iter().map(|x| x.patch_style(surface)));
+        Line::from(filled(s, w, surface))
+    };
+    let mut lines = vec![row(vec![]), row(vec![c.span(title.to_uppercase(), Role::Muted)])];
+    lines.extend(rich(c, prompt, inner, Role::Title).into_iter().map(row));
+    lines.push(row(vec![c.span(format!("sends {command}"), Role::Muted)]));
+    lines.push(row(vec![]));
+    lines.push(row(vec![c.span(c.fit(&status, inner), role)]));
+    lines.push(row(vec![]));
+    let h = (lines.len() as u16).min(body.height);
+    let area = Rect {
+        x: body.x + (body.width - w as u16) / 2,
+        y: body.y + body.height.saturating_sub(h) / 2,
+        width: w as u16,
+        height: h,
+    };
+    f.render_widget(Clear, area);
+    f.render_widget(Paragraph::new(lines), area);
+}
+
+/// Every key by where it works, then what the glyphs mean.
+fn help(c: &Ctx, f: &mut Frame, body: Rect) {
     let g = c.t.g();
-    let sep = format!(" {} ", g.sep);
-    let Some(f) = c.m.domain.findings.get(id) else {
-        return vec![Line::from(c.span(format!("{id} is no longer in the snapshot."), Role::Muted))];
+    let col = column(body);
+    let rows = help_rows();
+    let section = |ctx: Context, name: &str, w: usize| -> Vec<Line<'static>> {
+        let mut out = vec![heading(c, name)];
+        for (_, keys, what) in rows.iter().filter(|r| r.0 == ctx) {
+            out.push(Line::from(vec![
+                c.span(format!("  {}", c.pad(keys, 11)), Role::Accent),
+                c.span(c.fit(what, w.saturating_sub(14)), Role::Normal),
+            ]));
+        }
+        out.push(Line::raw(""));
+        out
     };
-    let (glyph, sev, sev_role) = c.t.severity(f.severity);
-    let (status, status_role) = finding_status(f.status);
-    let run = c.m.domain.runs.get(&f.run_id);
-    let head = run.map_or("?".to_string(), |r| r.head_sha.short().to_string());
-    let anchor = match f.line {
-        Some(l) => format!("{}:{l}", f.file),
-        None => format!("{} (whole file)", f.file),
-    };
+    let two = col.width >= 76;
+    let half = if two { col.width as usize / 2 } else { col.width as usize };
+    let left = section(Context::Global, "Everywhere", half);
+    let mut right = Vec::new();
+    for (ctx, name) in [(Context::Review, "Review"), (Context::Diff, "Diff"), (Context::Timeline, "Timeline")] {
+        right.extend(section(ctx, name, half));
+    }
     let mut lines = vec![
-        Line::from(vec![c.span(format!("{glyph} {sev} "), sev_role), c.span(f.title.to_string(), Role::Title)]),
-        Line::from(vec![
-            c.span(format!("{:?}", f.category).to_lowercase(), Role::Muted),
-            c.span(sep.clone(), Role::Muted),
-            c.span(status, status_role),
-            c.span(
-                format!("{sep}confidence {:.0}%{sep}{} evidence", f.confidence * 100.0, f.evidence_count),
-                Role::Muted,
-            ),
-        ]),
-        Line::from(c.span(
-            format!("anchor {anchor} at head {head} (run {}){sep}fingerprint {}", f.run_id, f.fingerprint),
-            Role::Muted,
-        )),
+        Line::raw(""),
+        Line::from(c.span("Keys", Role::Title)),
+        Line::from(
+            c.span("Read from the keymap itself, so this page cannot drift from what the keys do.", Role::Muted),
+        ),
+        Line::raw(""),
     ];
-    if f.stale {
-        lines.push(Line::from(
-            c.span("STALE: the PR head moved past this anchor; it is shown as found, not remapped.", Role::Pending),
-        ));
-    }
-    lines.push(Line::raw(""));
-    let Some(d) = c.m.details.get(id) else {
-        let text = match c.m.detail_errors.get(id) {
-            Some(e) => (format!("detail unavailable: {e}"), Role::Fail),
-            None if c.m.link.connected() => ("loading detail...".to_string(), Role::Pending),
-            None => ("detail not loaded; reconnect to fetch it".to_string(), Role::Muted),
-        };
-        lines.push(Line::from(c.span(text.0, text.1)));
-        return lines;
-    };
-    let section = |lines: &mut Vec<Line<'static>>, title: &str, body: &str| {
-        lines.push(Line::from(c.span(title.to_string(), Role::Title)));
-        lines.extend(body.split('\n').map(|l| Line::from(c.span(format!("  {l}"), Role::Normal))));
-        lines.push(Line::raw(""));
-    };
-    section(&mut lines, "Explanation", d.explanation.as_str());
-    section(&mut lines, "Reasoning summary (model-written, not a confirmation)", d.reasoning_summary.as_str());
-    if let Some(fix) = &d.suggested_fix {
-        section(&mut lines, "Suggested fix", fix.as_str());
-    }
-    lines.push(Line::from(c.span(format!("Evidence ({})", d.evidence.len()), Role::Title)));
-    for e in &d.evidence {
-        let kind = match e.kind {
-            EvidenceKind::CodeRef => "code",
-            EvidenceKind::ToolSummary => "tool",
-            EvidenceKind::TestResult => "test",
-            EvidenceKind::Scenario => "scenario",
-            EvidenceKind::Link => "link",
-            EvidenceKind::Unknown => "other",
-        };
-        let mut at = e.path.as_ref().map_or(String::new(), |p| format!(" {p}"));
-        match (e.start, e.end) {
-            (Some(s), Some(end)) if end != s => at.push_str(&format!(":{s}-{end}")),
-            (Some(s), _) => at.push_str(&format!(":{s}")),
-            _ => {}
+    if two {
+        for i in 0..left.len().max(right.len()) {
+            let mut spans: Vec<Span<'static>> = left.get(i).map_or(vec![], |l| l.spans.clone());
+            spans = filled(spans, half, ratatui::style::Style::default());
+            spans.extend(right.get(i).map_or(vec![], |l| l.spans.clone()));
+            lines.push(Line::from(spans));
         }
-        if let Some(sha) = &e.ref_sha {
-            at.push_str(&format!(" @{}", sha.short()));
-        }
-        lines.push(Line::from(vec![c.span(format!("  [{kind}]"), Role::Active), c.span(at, Role::Muted)]));
-        lines.extend(e.text.as_str().split('\n').map(|l| Line::from(c.span(format!("    {l}"), Role::Normal))));
+    } else {
+        lines.extend(left);
+        lines.extend(right);
     }
-    if d.evidence.is_empty() {
-        lines.push(Line::from(c.span("  none attached", Role::Muted)));
+    lines.push(heading(c, "Glyphs"));
+    let mut sev = vec![Span::raw("  ")];
+    for s in [
+        crate::protocol::Severity::Critical,
+        crate::protocol::Severity::High,
+        crate::protocol::Severity::Medium,
+        crate::protocol::Severity::Low,
+    ] {
+        let (gl, _, role) = c.t.severity(s);
+        sev.push(c.span(format!("{gl} "), role));
+        sev.push(c.span(format!("{}   ", super::doc::sev_word(s).to_lowercase()), Role::Normal));
     }
+    lines.push(Line::from(sev));
+    lines.push(Line::from(vec![
+        c.span(format!("  {} ", super::doc::spinner(c)), Role::Accent),
+        c.span("reviewing   ", Role::Normal),
+        c.span(format!("{} ", g.ok), Role::Ok),
+        c.span("clean   ", Role::Normal),
+        c.span(format!("{} ", g.fail), Role::Fail),
+        c.span("failed   ", Role::Normal),
+        c.span(format!("{}2 ", g.arrow), Role::Ok),
+        c.span("findings on GitHub", Role::Normal),
+    ]));
     lines.push(Line::raw(""));
-    lines.push(Line::from(c.span("History", Role::Title)));
-    for h in &d.history {
-        let (word, role) = finding_status(h.disposition);
-        lines.push(Line::from(vec![c.span(format!("  {} {} ", h.at, h.run_id), Role::Muted), c.span(word, role)]));
-    }
-    if d.history.is_empty() {
-        lines.push(Line::from(c.span("  first seen in this run", Role::Muted)));
-    }
+    lines.push(heading(c, "Mouse"));
     lines
+        .push(Line::from(c.span("  Click a pull request or a finding to select it; the wheel scrolls.", Role::Normal)));
+    lines.push(Line::from(c.span("  Write keys need a capability the server grants.", Role::Muted)));
+    page(c, f, body, lines);
+}
+
+/// The GitHub identity the daemon uses.
+fn identity(c: &Ctx) -> (String, Role) {
+    use crate::model::Identity;
+    match c.m.identity() {
+        None => ("not reported by this daemon".into(), Role::Muted),
+        Some(Identity::Env) => ("the daemon's GITHUB_TOKEN".into(), Role::Pending),
+        Some(Identity::Selected(a)) if a.state != AccountState::Ok => (format!("{} (error)", a.login), Role::Fail),
+        Some(Identity::Selected(a) | Identity::GhActive(a)) => (format!("{} on {}", a.login, a.host), Role::Normal),
+        Some(Identity::Nobody) => ("nobody: run gh auth login".into(), Role::Pending),
+    }
 }
 
 fn account_row(c: &Ctx, a: &Account, w: usize, cursor: bool) -> Line<'static> {
     let g = c.t.g();
+    let st = c.t.bg(if cursor { Bg::Select } else { Bg::Base });
+    let on = |r: Role| c.s(r).patch(st);
     let (state, state_role) = match a.state {
         AccountState::Ok => (format!("{} ok", g.ok), Role::Ok),
         AccountState::Error => (format!("{} error", g.fail), Role::Fail),
@@ -186,30 +170,35 @@ fn account_row(c: &Ctx, a: &Account, w: usize, cursor: bool) -> Line<'static> {
         (false, false) => "",
     };
     let block = c.m.account_block(a);
+    let bar = if cursor { if c.t.ascii { ">" } else { "▌" } } else { " " };
     let mut spans = vec![
-        Span::raw(format!("  {} ", if cursor { g.cursor } else { " " })),
-        c.span(c.pad(a.login.as_str(), 16), if block.is_none() { Role::Title } else { Role::Normal }),
-        c.span(c.pad(&format!(" {}", a.host), 12), Role::Muted),
-        c.span(c.pad(&format!(" {state}"), 8), state_role),
-        c.span(c.pad(&format!(" {marks}"), 20), Role::Active),
+        Span::styled(format!("{bar} "), on(Role::Accent)),
+        Span::styled(c.pad(a.login.as_str(), 16), on(if block.is_none() { Role::Title } else { Role::Normal })),
+        Span::styled(c.pad(&format!(" {}", a.host), 12), on(Role::Muted)),
+        Span::styled(c.pad(&format!(" {state}"), 10), on(state_role)),
+        Span::styled(c.pad(&format!(" {marks}"), 20), on(Role::Active)),
     ];
-    let used = 4 + 16 + 12 + 8 + 20;
+    let used = 2 + 16 + 12 + 10 + 20;
     let (why, role) = match block {
-        None => ("Enter selects".to_string(), Role::Muted),
+        None => ("Enter selects".to_string(), Role::Accent),
         Some(why) => (why.to_string(), Role::Pending),
     };
-    spans.push(c.span(c.fit(&format!(" {why}"), w.saturating_sub(used)), role));
-    let line = Line::from(spans);
-    if cursor { line.style(c.s(Role::Selected)) } else { line }
+    spans.push(Span::styled(c.fit(&format!(" {why}"), w.saturating_sub(used)), on(role)));
+    Line::from(filled(spans, w, st))
 }
 
 pub fn settings(c: &Ctx, f: &mut Frame, area: Rect) {
     let m = c.m;
+    let col = column(area);
+    let w = col.width as usize;
+    let tight = area.height < 30;
     let row = |k: &str, v: String, role: Role| {
-        Line::from(vec![
-            c.span(format!("  {k:<22}"), Role::Muted),
-            c.span(c.fit(&v, (area.width as usize).saturating_sub(26)), role),
-        ])
+        Line::from(vec![c.span(format!("  {k:<22}"), Role::Muted), c.span(c.fit(&v, w.saturating_sub(24)), role)])
+    };
+    let gap = |lines: &mut Vec<Line<'static>>| {
+        if !tight {
+            lines.push(Line::raw(""));
+        }
     };
     let age = |at: Option<u64>| {
         at.map_or("never".into(), |t| format!("{:.1}s ago", m.now_ms.saturating_sub(t) as f64 / 1000.0))
@@ -223,24 +212,27 @@ pub fn settings(c: &Ctx, f: &mut Frame, area: Rect) {
             s.capabilities.iter().map(|c| c.to_string()).collect::<Vec<_>>().join(", ")
         }
     });
-    let mut lines = vec![Line::from(c.span(" GITHUB ACCOUNTS", Role::Title))];
+    let mut lines = vec![Line::raw("")];
+    lines.push(Line::from(c.span("Settings", Role::Title)));
+    lines.push(Line::from(c.span(c.fit(&format!("connected through {}", m.diag.endpoint), w), Role::Muted)));
+    gap(&mut lines);
+    lines.push(heading(c, "GitHub accounts"));
+    let (who, who_role) = identity(c);
+    lines.push(row("publishes as", who, who_role));
     let cursor = m.cursor_account().map(|a| &a.id);
     match &m.domain.accounts {
         None if m.diag.last_snapshot_ms.is_none() => {
-            lines.push(Line::from(c.span("  waiting for a snapshot", Role::Muted)))
+            lines.push(row("accounts", "waiting for a snapshot".into(), Role::Muted))
         }
-        None => lines.push(Line::from(c.span("  not reported by this daemon version", Role::Muted))),
-        Some(accounts) if accounts.is_empty() => lines.push(Line::from(c.span(
-            c.fit("  none: run gh auth login, or set GITHUB_TOKEN for the daemon", area.width as usize),
-            Role::Pending,
-        ))),
-        Some(accounts) => {
-            lines.extend(accounts.iter().map(|a| account_row(c, a, area.width as usize, Some(&a.id) == cursor)))
+        None => lines.push(row("accounts", "not reported by this daemon version".into(), Role::Muted)),
+        Some(accounts) if accounts.is_empty() => {
+            lines.push(row("accounts", "none: run gh auth login, or set GITHUB_TOKEN".into(), Role::Pending))
         }
+        Some(accounts) => lines.extend(accounts.iter().map(|a| account_row(c, a, w, Some(&a.id) == cursor))),
     }
+    gap(&mut lines);
+    lines.push(heading(c, "Connection"));
     lines.extend([
-        Line::from(c.span(" CONNECTION", Role::Title)),
-        row("endpoint", m.diag.endpoint.clone(), Role::Normal),
         row("state", status, role),
         row(
             "protocol",
@@ -250,11 +242,20 @@ pub fn settings(c: &Ctx, f: &mut Frame, area: Rect) {
         row("server version", server.map_or("-".into(), |s| s.server_version.to_string()), Role::Normal),
         row("session", server.map_or("-".into(), |s| s.session_id.to_string()), Role::Normal),
         row("capabilities", caps, Role::Normal),
-        Line::from(c.span(" DIAGNOSTICS", Role::Title)),
-        row("stream epoch", m.stream.epoch.as_ref().map_or("-".into(), |e| e.to_string()), Role::Normal),
-        row("last applied sequence", m.stream.last_applied.to_string(), Role::Normal),
-        row("last snapshot", age(m.diag.last_snapshot_ms), Role::Normal),
-        row("last heartbeat", age(m.diag.last_heartbeat_ms), Role::Normal),
+    ]);
+    gap(&mut lines);
+    lines.push(heading(c, "Stream"));
+    lines.extend([
+        row(
+            "epoch, last sequence",
+            format!("{}, {}", m.stream.epoch.as_ref().map_or("-".into(), |e| e.to_string()), m.stream.last_applied),
+            Role::Normal,
+        ),
+        row(
+            "snapshot, heartbeat",
+            format!("{}, {}", age(m.diag.last_snapshot_ms), age(m.diag.last_heartbeat_ms)),
+            Role::Normal,
+        ),
         row("resyncs / reconnects", format!("{} / {}", m.diag.resyncs, m.diag.reconnects), Role::Normal),
         row(
             "activity",
@@ -265,18 +266,26 @@ pub fn settings(c: &Ctx, f: &mut Frame, area: Rect) {
             ),
             Role::Normal,
         ),
-        Line::from(c.span(" DISPLAY", Role::Title)),
-        row(
-            "glyphs / color",
-            format!(
-                "{} / {}",
-                if m.look.ascii { "ascii" } else { "unicode" },
-                if m.look.color { "color" } else { "monochrome" }
-            ),
-            Role::Normal,
-        ),
-        Line::from(c.span(" RECENT ERRORS", Role::Title)),
     ]);
+    gap(&mut lines);
+    lines.push(heading(c, "Display"));
+    let look = m.look;
+    lines.push(row(
+        "glyphs, color",
+        format!(
+            "{}, {}",
+            if look.ascii { "ascii" } else { "unicode" },
+            if look.color { "color" } else { "monochrome (NO_COLOR or theme = \"mono\")" }
+        ),
+        Role::Normal,
+    ));
+    lines.push(row(
+        "background",
+        if look.terminal_bg { "terminal: assumes a dark terminal".into() } else { "theme: painted ink".into() },
+        Role::Normal,
+    ));
+    gap(&mut lines);
+    lines.push(heading(c, "Recent errors"));
     if let Link::Incompatible { message, .. } = &m.link {
         lines.push(row("incompatible", message.to_string(), Role::Fail));
     }
@@ -288,5 +297,5 @@ pub fn settings(c: &Ctx, f: &mut Frame, area: Rect) {
     for (at, e) in errors {
         lines.push(row(&age(Some(*at)), e.clone(), Role::Fail));
     }
-    f.render_widget(Paragraph::new(lines), area);
+    f.render_widget(Paragraph::new(lines), col);
 }

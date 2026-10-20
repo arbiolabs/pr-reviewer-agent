@@ -12,10 +12,9 @@ mod timeline;
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::widgets::Paragraph;
 
-use crate::model::{Identity, InputPurpose, Link, Modal, Model, Pane, Screen};
-use crate::protocol::AccountState;
+use crate::model::{InputPurpose, Link, Modal, Model, Pane, Screen};
 use crate::text::{fit, pad};
 use crate::theme::{Role, Theme};
 
@@ -57,15 +56,6 @@ impl Ctx<'_> {
     }
     pub fn pad(&self, text: &str, cols: usize) -> String {
         pad(text, cols, self.t.g().ellipsis)
-    }
-    /// A bordered pane; the focused one gets a bold border and a marker in its title.
-    pub fn pane<'b>(&self, title: &str, focused: bool) -> Block<'b> {
-        let marker = if focused { format!("{} ", self.t.g().cursor) } else { String::new() };
-        Block::default()
-            .borders(Borders::ALL)
-            .border_set(self.t.border())
-            .border_style(self.s(if focused { Role::Focus } else { Role::Border }))
-            .title(Span::styled(format!(" {marker}{title} "), self.s(Role::Title)))
     }
     pub fn focused(&self, pane: Pane) -> bool {
         self.m.ui.focus == pane && self.m.top_modal().is_none()
@@ -136,39 +126,6 @@ fn link_status(c: &Ctx) -> (String, Role) {
     }
 }
 
-/// The GitHub identity the daemon uses, as the header shows it.
-fn identity_badge(c: &Ctx) -> Option<(String, Role)> {
-    Some(match c.m.identity()? {
-        Identity::Env => ("env token".into(), Role::Pending),
-        Identity::Selected(a) if a.state != AccountState::Ok => (format!("gh: {} (error)", a.login), Role::Fail),
-        Identity::Selected(a) | Identity::GhActive(a) => (format!("gh: {}", a.login), Role::Normal),
-        Identity::Nobody => ("no GitHub account".into(), Role::Pending),
-    })
-}
-
-#[allow(dead_code)]
-fn title_line(c: &Ctx, width: u16) -> Line<'static> {
-    let (status, role) = link_status(c);
-    let left = " PR REVIEWER ";
-    let right = " ? help ";
-    let (badge, badge_role) = identity_badge(c).unwrap_or((String::new(), Role::Muted));
-    let badge = if badge.is_empty() { badge } else { format!(" {}", c.fit(&badge, 28)) };
-    let endpoint = format!(" {} {} ", c.t.g().sep, c.m.diag.endpoint);
-    let fixed =
-        crate::text::width(left) + crate::text::width(&status) + crate::text::width(&badge) + crate::text::width(right);
-    let room = (width as usize).saturating_sub(fixed);
-    let endpoint = c.fit(&endpoint, room);
-    let gap = room.saturating_sub(crate::text::width(&endpoint));
-    Line::from(vec![
-        c.span(left, Role::Title),
-        c.span(status, role),
-        c.span(endpoint, Role::Muted),
-        Span::raw(" ".repeat(gap)),
-        c.span(badge, badge_role),
-        c.span(right, Role::Muted),
-    ])
-}
-
 /// The quiet live line at the top: what the reviewer is doing right now, across every PR.
 fn status_line(c: &Ctx, width: u16) -> Line<'static> {
     let w = width as usize;
@@ -237,18 +194,6 @@ fn views_line(c: &Ctx) -> Line<'static> {
 
 fn views_w(c: &Ctx) -> usize {
     if c.m.size.0 < 100 { 0 } else { views_line(c).spans.iter().map(|s| crate::text::width(&s.content)).sum() }
-}
-
-#[allow(dead_code)]
-fn tab_line(c: &Ctx) -> Line<'static> {
-    let mut spans = vec![Span::raw(" ")];
-    for (i, s) in Screen::ALL.iter().enumerate() {
-        let label = format!("{} {}", i + 1, s.label());
-        let role = if *s == c.m.ui.screen { Role::Selected } else { Role::Muted };
-        spans.push(c.span(format!(" {label} "), role));
-        spans.push(Span::raw(" "));
-    }
-    Line::from(spans)
 }
 
 fn banner(c: &Ctx, width: u16) -> Option<Line<'static>> {
