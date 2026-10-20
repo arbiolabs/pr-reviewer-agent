@@ -4,20 +4,20 @@ expression: text
 ---
   pr-review · ⠋ reviewing #184 verify found: Finding f-1                                                                                                ● live
 
-                                    src/booking.ts   +2 -1
-  FILES  4                          acme/shop #184 · bbbbbbb → 4444444   TRUNCATED   finding 1 of 1
+                                        src/booking.ts   +2 -1
+  FILES  4                              acme/shop #184 · bbbbbbb → 4444444   TRUNCATED   finding 1 of 1
 
-▌ ▲ booking.ts                                   @@ -40,3 +40,4 @@  export function book()
-▌   src                     +2 -1       40   40     const slot = await lock(id);
-                                        41      -   if (slot.free) {
-    logo.png                                 41 +   if (slot.free && !slot.held) {
-    assets                 binary   ▲        42 +     slot.held = true;
-                                                 ┃ ▲ HIGH     Finding f-1
-    slots.ts                                     ┃ Enter reads the finding   n next finding
-    renamed  src            +0 -0       42   43     }
+▌ ▲ booking.ts                                       @@ -40,3 +40,4 @@  export function book()
+▌   src                         +2 -1       40   40     const slot = await lock(id);
+                                            41      -   if (slot.free) {
+    logo.png                                     41 +   if (slot.free && !slot.held) {
+    assets                     binary   ▲        42 +     slot.held = true;
+                                                     ┃ ▲ HIGH     Finding f-1
+    slots.ts                                         ┃ Enter reads the finding   n next finding
+    renamed  src                +0 -0       42   43     }
 
     schema.ts
-    new  src/generated   +4000 -0
+    new  src/generated       +4000 -0
 
   more files below
 

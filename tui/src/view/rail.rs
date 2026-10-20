@@ -16,7 +16,11 @@ use crate::protocol::{Finding, FindingStatus, Pr, RunStatus, Severity};
 use crate::text::width;
 use crate::theme::{Bg, Role};
 
-pub const RAIL_W: u16 = 34;
+/// The rail's width on a `width`-column terminal: 34 below 140 columns, then a column more for every four or so, up
+/// to 48 at 200.
+pub fn rail_w(width: u16) -> u16 {
+    (34 + width.saturating_sub(140) * 14 / 60).min(48)
+}
 /// Rows above the first PR: blank, heading, filter or blank.
 pub const RAIL_HEAD: u16 = 3;
 
@@ -80,7 +84,7 @@ pub fn rail(c: &Ctx, f: &mut Frame, area: Rect, focused: bool) {
     }));
     if prs.is_empty() {
         let mut empty = empty_rail(c, total);
-        if area.width <= RAIL_W && empty[0].1 == Role::Fail {
+        if area.width < c.m.size.0 && empty[0].1 == Role::Fail {
             // Beside the reading column, which carries the reason in full.
             empty = vec![("  unavailable".into(), Role::Fail)];
         }

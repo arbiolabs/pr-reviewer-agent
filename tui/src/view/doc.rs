@@ -14,7 +14,8 @@ use crate::protocol::{Evidence, EvidenceKind, Finding, FindingDetail, FindingId,
 use crate::text::width;
 use crate::theme::{Bg, Role, finding_status, phase_name};
 
-pub const COLUMN: u16 = 100;
+/// The reading column's widest: room for code and about 15 words of prose a line.
+pub const COLUMN: u16 = 112;
 
 /// A braille spinner: no frame reads as the `·` separator or the `●` of a finished phase.
 pub fn spinner(c: &Ctx) -> &'static str {
@@ -136,7 +137,7 @@ fn sticky(c: &Ctx, pr: &Pr, w: usize) -> Line<'static> {
 
 /// The rail and the document areas. Below 100 columns only one shows: the rail while it has focus.
 pub fn split(area: Rect, rail_focus: bool) -> (Option<Rect>, Option<Rect>) {
-    let rw = super::rail::RAIL_W;
+    let rw = super::rail::rail_w(area.width);
     match area.width {
         100.. => (Some(Rect { width: rw, ..area }), Some(Rect { x: area.x + rw, width: area.width - rw, ..area })),
         _ if rail_focus => (Some(area), None),

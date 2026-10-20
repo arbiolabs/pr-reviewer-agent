@@ -6,33 +6,33 @@ expression: settings
 
  ✗ disconnected · retry in 2s
 
-          Settings
-          connected through unix:/private/tmp/claude-501/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…
+    Settings
+    connected through unix:/private/tmp/claude-501/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…
 
-          GitHub accounts
-            publishes as          not reported by this daemon
-            accounts              waiting for a snapshot
+    GitHub accounts
+      publishes as          not reported by this daemon
+      accounts              waiting for a snapshot
 
-          Connection
-            state                 ✗ disconnected: socket directory does not exist: /private/tmp/claude-501/xx…
-            protocol              client 1, server -
-            server version        -
-            session               -
-            capabilities          -
+    Connection
+      state                 ✗ disconnected: socket directory does not exist: /private/tmp/claude-501/xxxxxxxxxxxxxx…
+      protocol              client 1, server -
+      server version        -
+      session               -
+      capabilities          -
 
-          Stream
-            epoch, last sequence  -, 0
-            snapshot, heartbeat   never, never
-            resyncs / reconnects  0 / 0
-            activity              0 feed entries kept (cap 2000); 0 tool events applied
+    Stream
+      epoch, last sequence  -, 0
+      snapshot, heartbeat   never, never
+      resyncs / reconnects  0 / 0
+      activity              0 feed entries kept (cap 2000); 0 tool events applied
 
-          Display
-            glyphs                unicode
-            color                 on
-            background            painted (theme)
+    Display
+      glyphs                unicode
+      color                 on
+      background            painted (theme)
 
-          Recent errors
-            0.0s ago              disconnected: socket directory does not exist: /private/tmp/claude-501/xxxx…
+    Recent errors
+      0.0s ago              disconnected: socket directory does not exist: /private/tmp/claude-501/xxxxxxxxxxxxxxxx…
 
 
 

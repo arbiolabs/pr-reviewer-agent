@@ -5,36 +5,36 @@ expression: text
   pr-review · 1 PR tracked · nothing running                                                                    ● live
 
 
-          Settings
-          connected through unix:/run/user/501/pr-review/reviewer.sock
+    Settings
+    connected through unix:/run/user/501/pr-review/reviewer.sock
 
-          GitHub accounts
-            publishes as          the daemon's GITHUB_TOKEN
-          ▌ GITHUB_TOKEN     env         ✓ ok                          set by the daemon env
-            diego-arbio-dev  github.com  ✓ ok      gh active           env token wins
-            octo-work        github.com  ✓ ok      selected            env token wins
-            old-bot          github.com  ✗ error                       run gh auth login
+    GitHub accounts
+      publishes as          the daemon's GITHUB_TOKEN
+    ▌ GITHUB_TOKEN     env         ✓ ok                          set by the daemon env
+      diego-arbio-dev  github.com  ✓ ok      gh active           env token wins
+      octo-work        github.com  ✓ ok      selected            env token wins
+      old-bot          github.com  ✗ error                       run gh auth login
 
-          Connection
-            state                 ● live
-            protocol              client 1, server 1
-            server version        0.1.0
-            session               session-1
-            capabilities          account.select
+    Connection
+      state                 ● live
+      protocol              client 1, server 1
+      server version        0.1.0
+      session               session-1
+      capabilities          account.select
 
-          Stream
-            epoch, last sequence  epoch-1, 108
-            snapshot, heartbeat   0.0s ago, never
-            resyncs / reconnects  0 / 0
-            activity              0 feed entries kept (cap 2000); 0 tool events applied
+    Stream
+      epoch, last sequence  epoch-1, 108
+      snapshot, heartbeat   0.0s ago, never
+      resyncs / reconnects  0 / 0
+      activity              0 feed entries kept (cap 2000); 0 tool events applied
 
-          Display
-            glyphs                unicode
-            color                 on
-            background            painted (theme)
+    Display
+      glyphs                unicode
+      color                 on
+      background            painted (theme)
 
-          Recent errors
-            none
+    Recent errors
+      none
 
 
 

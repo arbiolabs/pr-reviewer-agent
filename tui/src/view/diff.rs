@@ -34,7 +34,7 @@ pub fn diff(c: &Ctx, f: &mut Frame, area: Rect) {
             (None, Some(Rect { x: area.x + 1, width: area.width.saturating_sub(2), ..area }))
         }
         Width::Wide => {
-            let rw = 34;
+            let rw = super::rail::rail_w(area.width);
             (Some(Rect { width: rw, ..area }), Some(Rect { x: area.x + rw + 2, width: area.width - rw - 3, ..area }))
         }
     };

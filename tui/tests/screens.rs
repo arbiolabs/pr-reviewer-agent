@@ -292,3 +292,15 @@ fn a_long_hunk_header_wraps_like_the_code_under_it() {
     assert!(joined.contains("@@ -84,8 +85,26 @@"), "{frame}");
     assert!(joined.contains("export function ordersRouter(db: Db, payments: Payments) {"), "{frame}");
 }
+
+#[test]
+fn at_200_columns_the_rail_and_the_column_use_the_width() {
+    let mut s = showcase(2);
+    let (frame, _) = render(&mut s.m, 200, 50);
+    assert!(frame.contains("#345 Partition ledger_entries by month"), "the wider rail shows whole titles:\n{frame}");
+    let right = frame.lines().skip(3).map(|l| l.chars().count()).max().unwrap();
+    assert!(right >= 200 - 24, "content ends at column {right}, a dead band on the right:\n{frame}");
+    // Below 140 columns the rail keeps its 34.
+    let (frame, _) = render(&mut s.m, 120, 38);
+    assert!(frame.contains("#345 Partition ledger_entrie…"), "{frame}");
+}
