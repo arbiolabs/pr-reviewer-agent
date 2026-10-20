@@ -9,7 +9,7 @@ use super::lists::time_of;
 use super::{Ctx, Width, window};
 use crate::model::{EventCategory, Pane, TimelineScope};
 use crate::protocol::{EventBody, Phase, RunChange, SequencedEvent};
-use crate::text::{pad_left, width};
+use crate::text::{fit_len, pad_left, width};
 use crate::theme::{Role, finding_status, phase_name};
 use crate::update::timeline_rows;
 
@@ -73,13 +73,7 @@ pub fn detail_lines(c: &Ctx, e: &SequencedEvent, phase: Option<Phase>, w: usize)
     ];
     let mut rest = text.as_str();
     while !rest.is_empty() && w > 0 {
-        let mut cut = 0;
-        for (i, ch) in rest.char_indices() {
-            if width(&rest[..i + ch.len_utf8()]) > w {
-                break;
-            }
-            cut = i + ch.len_utf8();
-        }
+        let cut = fit_len(rest, w);
         if cut == 0 {
             break;
         }

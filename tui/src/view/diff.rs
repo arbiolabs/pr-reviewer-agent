@@ -183,7 +183,7 @@ fn hunks(c: &Ctx, f: &mut Frame, area: Rect, d: &DiffView, anchored: &[&Finding]
 
 fn row_line(c: &Ctx, file: &DiffFile, row: &DiffRow, anchored: &[&Finding], w: usize, cursor: bool) -> Line<'static> {
     let line = match row {
-        DiffRow::Header(h) => Line::from(c.span(c.pad(&code(h.header.as_str()), w), Role::Hunk)),
+        DiffRow::Header(h) => Line::from(c.span(c.pad(&code(h.header.as_str(), w), w), Role::Hunk)),
         DiffRow::Line(l) => {
             let hit =
                 anchored.iter().find(|x| x.file == file.path && x.line.map(|n| n.get()) == l.new && l.new.is_some());
@@ -207,7 +207,7 @@ fn row_line(c: &Ctx, file: &DiffFile, row: &DiffRow, anchored: &[&Finding], w: u
                 marker,
                 c.span(gutter, Role::Muted),
                 c.span(sign, role),
-                c.span(c.pad(&code(l.text.as_str()), text_w), role),
+                c.span(c.pad(&code(l.text.as_str(), text_w), text_w), role),
             ])
         }
     };

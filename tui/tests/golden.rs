@@ -342,6 +342,22 @@ fn special_states() {
 }
 
 #[test]
+fn a_diff_line_with_a_long_zero_width_run_renders() {
+    let mut s = mid_review(Look::default()).select("acme/shop#184").key_unanswered(KeyCode::Char('3'));
+    let id = s.m.diff.as_ref().and_then(|d| d.pending.clone()).unwrap();
+    let hostile = format!("    abcdefghij{}{}", "\u{200b}".repeat(100_000), "xyz".repeat(40));
+    let page = read("fixtures/server.diff.page.json")
+        .replace("req-diff", id.as_str())
+        .replace("    slot.held = true;", &hostile);
+    s.server(ServerMessage::parse(&page).unwrap());
+    let start = std::time::Instant::now();
+    let (text, _) = render(&mut s.m, 120, 38);
+    let took = start.elapsed();
+    assert!(took < std::time::Duration::from_millis(500), "frame took {took:?}");
+    insta::assert_snapshot!("state_zero_width_diff", text.replace('\u{200b}', ""));
+}
+
+#[test]
 fn a_connection_error_on_a_long_path_keeps_its_reason_in_view() {
     let long = format!("/private/tmp/claude-501/{}/pr-review/reviewer.sock", "x".repeat(70));
     let reason = pr_review_tui::net::check_socket_dir(std::path::Path::new(&long)).unwrap_err();

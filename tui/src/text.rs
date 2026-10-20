@@ -1,10 +1,34 @@
-//! Width-aware text fitting. Widths come from `unicode-width`, the same table ratatui lays out with, so CJK and emoji
-//! never spill past a cell.
+//! Width-aware text fitting. Widths come from `unicode-width` per grapheme, the way ratatui lays text out, so CJK and
+//! emoji never spill past a cell.
+//!
+//! A row never looks at more than `CHARS_PER_COL` chars per column, so a hostile run of zero-width chars costs the same
+//! as a short line.
 
+use unicode_segmentation::UnicodeSegmentation;
 use unicode_width::UnicodeWidthStr;
+
+const CHARS_PER_COL: usize = 4;
 
 pub fn width(s: &str) -> usize {
     UnicodeWidthStr::width(s)
+}
+
+/// At most the first `chars` chars of `s`.
+pub fn chars_prefix(s: &str, chars: usize) -> &str {
+    s.char_indices().nth(chars).map_or(s, |(i, _)| &s[..i])
+}
+
+/// The byte length of the longest prefix of `s` at most `cols` wide, within the per-row char cap.
+pub fn fit_len(s: &str, cols: usize) -> usize {
+    let head = chars_prefix(s, cols.saturating_mul(CHARS_PER_COL));
+    let mut used = 0;
+    for (i, g) in head.grapheme_indices(true) {
+        used += width(g);
+        if used > cols {
+            return i;
+        }
+    }
+    head.len()
 }
 
 /// One display line: newlines and tabs become spaces.
@@ -14,21 +38,11 @@ pub fn one_line(s: &str) -> String {
 
 /// At most `max` columns, ending in `ellipsis` when cut.
 pub fn fit(s: &str, max: usize, ellipsis: &str) -> String {
-    let s = one_line(s);
-    if width(&s) <= max {
-        return s;
+    let line = one_line(chars_prefix(s, max.saturating_mul(CHARS_PER_COL)));
+    if line.len() == s.len() && fit_len(&line, max) == line.len() {
+        return line;
     }
-    let budget = max.saturating_sub(width(ellipsis));
-    // Measured as a whole string, like ratatui does, so emoji ZWJ sequences count as one glyph. The loop stops at the
-    // budget, so this stays O(columns^2) however long the input is.
-    let mut out = String::new();
-    for c in s.chars() {
-        out.push(c);
-        if width(&out) > budget {
-            out.pop();
-            break;
-        }
-    }
+    let mut out = line[..fit_len(&line, max.saturating_sub(width(ellipsis)))].to_string();
     if width(ellipsis) <= max {
         out.push_str(ellipsis);
     }
@@ -50,9 +64,10 @@ pub fn pad_left(s: &str, cols: usize) -> String {
     format!("{}{out}", " ".repeat(cols.saturating_sub(w)))
 }
 
-/// Code text: tabs expand to four spaces so columns stay aligned.
-pub fn code(s: &str) -> String {
-    one_line(&s.replace('\t', "    "))
+/// Code text for a `cols`-wide row: tabs expand to four spaces so columns stay aligned. One char past the row cap is
+/// kept, so `fit` still sees the cut.
+pub fn code(s: &str, cols: usize) -> String {
+    one_line(&chars_prefix(s, cols.saturating_mul(CHARS_PER_COL) + 1).replace('\t', "    "))
 }
 
 #[cfg(test)]
@@ -69,5 +84,17 @@ mod tests {
         assert_eq!(fit("abc", 0, "…"), "");
         assert_eq!(pad_left("42", 5), "   42");
         assert_eq!(fit("a\nb\tc", 10, "…"), "a b c");
+    }
+
+    #[test]
+    fn a_long_zero_width_run_fits_without_rescanning() {
+        let line = format!("abcdefghij{}xyz", "\u{200b}".repeat(100_000));
+        assert!(line.len() > 300_000);
+        let start = std::time::Instant::now();
+        let out = fit(&line, 12, "…");
+        let took = start.elapsed();
+        assert!(took < std::time::Duration::from_millis(50), "fit took {took:?}");
+        assert_eq!(out.replace('\u{200b}', ""), "abcdefghij…");
+        assert_eq!(fit(&line, 80, "…").replace('\u{200b}', ""), "abcdefghij…");
     }
 }

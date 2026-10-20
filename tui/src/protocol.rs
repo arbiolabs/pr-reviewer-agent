@@ -61,20 +61,16 @@ macro_rules! id {
 
 id!(PrId, RunId, FindingId, Epoch, Sha, RequestId, AccountId);
 
-fn prefix(s: &str, chars: usize) -> &str {
-    s.char_indices().nth(chars).map_or(s, |(i, _)| &s[..i])
-}
-
 impl Sha {
     pub fn short(&self) -> &str {
-        prefix(self.as_str(), 7)
+        crate::text::chars_prefix(self.as_str(), 7)
     }
 }
 
 impl RunId {
     /// Revision ids are long hashes; eight characters tell runs of one PR apart.
     pub fn short(&self) -> &str {
-        prefix(self.as_str(), 8)
+        crate::text::chars_prefix(self.as_str(), 8)
     }
 }
 

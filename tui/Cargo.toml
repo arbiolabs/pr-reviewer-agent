@@ -18,6 +18,7 @@ tokio = { version = "=1.54.0", features = ["rt-multi-thread", "net", "io-util", 
 toml = "=1.1.8"
 tracing = "=0.1.44"
 tracing-subscriber = { version = "=0.3.23", default-features = false, features = ["fmt", "std"] }
+unicode-segmentation = "=1.13.3"
 unicode-width = "=0.2.2"
 
 [dev-dependencies]
