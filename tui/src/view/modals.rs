@@ -8,7 +8,7 @@ use ratatui::widgets::{Clear, Paragraph, Wrap};
 use super::Ctx;
 use crate::keymap::help_rows;
 use crate::model::{ConfirmState, Link, Modal};
-use crate::protocol::{EvidenceKind, FindingId};
+use crate::protocol::{Account, AccountState, EvidenceKind, FindingId};
 use crate::theme::{Role, finding_status};
 use crate::update::event_phases;
 
@@ -31,13 +31,15 @@ pub fn modal(c: &Ctx, f: &mut Frame, body: Rect, modal: &Modal) {
                 }
                 ConfirmState::Failed(e) => (format!("rejected: {e}"), Role::Fail),
             };
+            let rows = |s: &str| crate::text::width(s).div_ceil(62).max(1) as u16;
+            let h = 4 + rows(prompt) + rows(&status);
             let lines = vec![
                 Line::from(c.span(prompt.clone(), Role::Normal)),
                 Line::from(c.span(format!("command {}", command.name()), Role::Muted)),
                 Line::raw(""),
                 Line::from(c.span(status, role)),
             ];
-            draw(c, f, centered(body, 64, 6), &title.to_uppercase(), lines, 0);
+            draw(c, f, centered(body, 64, h), &title.to_uppercase(), lines, 0);
         }
         Modal::Help => {
             let rows = help_rows();
@@ -172,6 +174,37 @@ fn finding_lines(c: &Ctx, id: &FindingId) -> Vec<Line<'static>> {
     lines
 }
 
+fn account_row(c: &Ctx, a: &Account, w: usize, cursor: bool) -> Line<'static> {
+    let g = c.t.g();
+    let (state, state_role) = match a.state {
+        AccountState::Ok => (format!("{} ok", g.ok), Role::Ok),
+        AccountState::Error => (format!("{} error", g.fail), Role::Fail),
+        AccountState::Unknown => ("? unknown".to_string(), Role::Muted),
+    };
+    let marks = match (a.selected, a.gh_active) {
+        (true, true) => "selected, gh active",
+        (true, false) => "selected",
+        (false, true) => "gh active",
+        (false, false) => "",
+    };
+    let block = c.m.account_block(a);
+    let mut spans = vec![
+        Span::raw(format!("  {} ", if cursor { g.cursor } else { " " })),
+        c.span(c.pad(a.login.as_str(), 16), if block.is_none() { Role::Title } else { Role::Normal }),
+        c.span(c.pad(&format!(" {}", a.host), 12), Role::Muted),
+        c.span(c.pad(&format!(" {state}"), 8), state_role),
+        c.span(c.pad(&format!(" {marks}"), 20), Role::Active),
+    ];
+    let used = 4 + 16 + 12 + 8 + 20;
+    let (why, role) = match block {
+        None => ("Enter selects".to_string(), Role::Muted),
+        Some(why) => (why.to_string(), Role::Pending),
+    };
+    spans.push(c.span(c.fit(&format!(" {why}"), w.saturating_sub(used)), role));
+    let line = Line::from(spans);
+    if cursor { line.style(c.s(Role::Selected)) } else { line }
+}
+
 pub fn settings(c: &Ctx, f: &mut Frame, area: Rect) {
     let m = c.m;
     let row = |k: &str, v: String, role: Role| {
@@ -192,7 +225,22 @@ pub fn settings(c: &Ctx, f: &mut Frame, area: Rect) {
             s.capabilities.iter().map(|c| c.to_string()).collect::<Vec<_>>().join(", ")
         }
     });
-    let mut lines = vec![
+    let mut lines = vec![Line::from(c.span(" GITHUB ACCOUNTS", Role::Title))];
+    let cursor = m.cursor_account().map(|a| &a.id);
+    match &m.domain.accounts {
+        None if m.diag.last_snapshot_ms.is_none() => {
+            lines.push(Line::from(c.span("  waiting for a snapshot", Role::Muted)))
+        }
+        None => lines.push(Line::from(c.span("  not reported by this daemon version", Role::Muted))),
+        Some(accounts) if accounts.is_empty() => lines.push(Line::from(c.span(
+            c.fit("  none: run gh auth login, or set GITHUB_TOKEN for the daemon", area.width as usize),
+            Role::Pending,
+        ))),
+        Some(accounts) => {
+            lines.extend(accounts.iter().map(|a| account_row(c, a, area.width as usize, Some(&a.id) == cursor)))
+        }
+    }
+    lines.extend([
         Line::from(c.span(" CONNECTION", Role::Title)),
         row("endpoint", m.diag.endpoint.clone(), Role::Normal),
         row("state", status, role),
@@ -204,7 +252,6 @@ pub fn settings(c: &Ctx, f: &mut Frame, area: Rect) {
         row("server version", server.map_or("-".into(), |s| s.server_version.to_string()), Role::Normal),
         row("session", server.map_or("-".into(), |s| s.session_id.to_string()), Role::Normal),
         row("capabilities", caps, Role::Normal),
-        Line::raw(""),
         Line::from(c.span(" DIAGNOSTICS", Role::Title)),
         row("stream epoch", m.stream.epoch.as_ref().map_or("-".into(), |e| e.to_string()), Role::Normal),
         row("last applied sequence", m.stream.last_applied.to_string(), Role::Normal),
@@ -220,7 +267,6 @@ pub fn settings(c: &Ctx, f: &mut Frame, area: Rect) {
             ),
             Role::Normal,
         ),
-        Line::raw(""),
         Line::from(c.span(" DISPLAY", Role::Title)),
         row(
             "glyphs / color",
@@ -231,9 +277,8 @@ pub fn settings(c: &Ctx, f: &mut Frame, area: Rect) {
             ),
             Role::Normal,
         ),
-        Line::raw(""),
         Line::from(c.span(" RECENT ERRORS", Role::Title)),
-    ];
+    ]);
     if let Link::Incompatible { message, .. } = &m.link {
         lines.push(row("incompatible", message.to_string(), Role::Fail));
     }

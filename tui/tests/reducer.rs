@@ -2,7 +2,7 @@ mod common;
 
 use common::*;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use pr_review_tui::model::{Link, Modal, Model, Pane, Screen};
+use pr_review_tui::model::{ConfirmState, Identity, Link, Modal, Model, Pane, Screen};
 use pr_review_tui::protocol::{ClientMessage, Phase, PrId, RunStatus, ServerMessage};
 use pr_review_tui::update::{Effect, Msg, NetEvent, update};
 
@@ -229,7 +229,7 @@ fn y_confirms_only_inside_the_confirmation_modal_and_sends_the_command_once() {
     assert_eq!(
         state,
         &pr_review_tui::model::ConfirmState::Failed(pr_review_tui::protocol::Text::new(
-            "CapabilityDenied: review.start is not available in this version"
+            "CAPABILITY_DENIED: review.start is not available in this version"
         ))
     );
     press(&mut m, KeyCode::Esc);
@@ -304,4 +304,111 @@ fn a_diff_request_lost_with_the_connection_is_retried_when_reopened() {
     press(&mut m, KeyCode::Char('1'));
     let fx = press(&mut m, KeyCode::Char('3'));
     assert!(matches!(&fx[..], [Effect::Send(ClientMessage::DiffGet { .. })]), "{fx:?}");
+}
+
+/// accounts.ndjson up to its snapshot: diego-arbio-dev (gh active) and octo-work, account.select offered.
+fn accounts_live() -> Model {
+    let mut m = model();
+    update(&mut m, Msg::Net(NetEvent::Opened));
+    for msg in script("accounts").into_iter().take(2) {
+        update(&mut m, Msg::Net(NetEvent::Message(msg)));
+    }
+    m
+}
+
+fn identity(m: &Model) -> String {
+    match m.identity() {
+        Some(Identity::Env) => "env".into(),
+        Some(Identity::Selected(a)) => format!("selected {}", a.id),
+        Some(Identity::GhActive(a)) => format!("active {}", a.id),
+        Some(Identity::Nobody) => "nobody".into(),
+        None => "unknown".into(),
+    }
+}
+
+#[test]
+fn account_select_waits_for_accounts_updated_before_showing_the_selection() {
+    let mut m = accounts_live();
+    assert_eq!(identity(&m), "active github.com/diego-arbio-dev");
+    press(&mut m, KeyCode::Char('A'));
+    assert_eq!(m.ui.screen, Screen::Settings);
+    assert_eq!(press(&mut m, KeyCode::Char('y')), [], "y outside the modal does nothing");
+    press(&mut m, KeyCode::Char('j'));
+    assert_eq!(press(&mut m, KeyCode::Enter), []);
+    let Some(Modal::Confirm { prompt, .. }) = m.top_modal() else { panic!("{:?}", m.top_modal()) };
+    assert_eq!(prompt, "Use octo-work on github.com for GitHub reads and publishing?");
+
+    let fx = press(&mut m, KeyCode::Char('y'));
+    let [Effect::Send(ClientMessage::Command(c))] = &fx[..] else { panic!("{fx:?}") };
+    let wire = serde_json::to_value(ClientMessage::Command(c.clone())).unwrap();
+    let mut want: serde_json::Value =
+        serde_json::from_str(&read("fixtures/client.command.account-select.json")).unwrap();
+    want["requestId"] = c.request_id.as_str().into();
+    assert_eq!(wire, want);
+
+    let accepted =
+        r#"{"type":"command.result","requestId":"RID","status":"accepted","operationId":"account.select:11"}"#;
+    send(&mut m, &accepted.replace("RID", c.request_id.as_str()));
+    assert!(matches!(m.top_modal(), Some(Modal::Confirm { state: ConfirmState::Accepted(_), .. })));
+    assert_eq!(identity(&m), "active github.com/diego-arbio-dev", "accepted alone changes nothing");
+
+    let event = script("accounts").pop().unwrap();
+    update(&mut m, Msg::Net(NetEvent::Message(event)));
+    assert_eq!(m.top_modal(), None);
+    assert_eq!(identity(&m), "selected github.com/octo-work");
+    assert_eq!(
+        m.notice.as_ref().map(|n| n.text.as_str()),
+        Some("GitHub reads and publishing now use octo-work on github.com")
+    );
+}
+
+#[test]
+fn a_rejected_account_select_shows_the_code_and_message_in_the_modal() {
+    let mut m = accounts_live();
+    press(&mut m, KeyCode::Char('A'));
+    press(&mut m, KeyCode::Enter);
+    let fx = press(&mut m, KeyCode::Char('y'));
+    let [Effect::Send(ClientMessage::Command(c))] = &fx[..] else { panic!("{fx:?}") };
+    assert_eq!(c.idempotency_key, "account.select:github.com/diego-arbio-dev");
+    let rejected = r#"{"type":"command.result","requestId":"RID","status":"rejected","code":"NOT_FOUND","message":"gh lists no account github.com/diego-arbio-dev"}"#;
+    send(&mut m, &rejected.replace("RID", c.request_id.as_str()));
+    let Some(Modal::Confirm { state: ConfirmState::Failed(e), .. }) = m.top_modal() else { panic!() };
+    assert_eq!(e.as_str(), "NOT_FOUND: gh lists no account github.com/diego-arbio-dev");
+}
+
+#[test]
+fn accounts_that_cannot_be_selected_say_why_and_open_no_modal() {
+    let mut m = model();
+    update(&mut m, Msg::Net(NetEvent::Opened));
+    let caps = "\"capabilities\": [\"account.select\"]";
+    send(&mut m, &read("fixtures/server.welcome.json").replace("\"capabilities\": []", caps));
+    send(&mut m, &read("fixtures/server.snapshot.accounts.json"));
+    assert_eq!(identity(&m), "env");
+    let reasons: Vec<_> =
+        m.domain.accounts.as_ref().unwrap().iter().map(|a| (a.id.to_string(), m.account_block(a))).collect();
+    assert_eq!(
+        reasons,
+        [
+            ("env/GITHUB_TOKEN".to_string(), Some("set by the daemon env")),
+            ("github.com/diego-arbio-dev".to_string(), Some("GITHUB_TOKEN wins")),
+            ("github.com/octo-work".to_string(), Some("GITHUB_TOKEN wins")),
+            ("github.com/old-bot".to_string(), Some("run gh auth login")),
+        ]
+    );
+    press(&mut m, KeyCode::Char('A'));
+    assert_eq!(press(&mut m, KeyCode::Enter), []);
+    assert_eq!(m.top_modal(), None);
+    assert_eq!(
+        m.notice.as_ref().map(|n| n.text.as_str()),
+        Some("env/GITHUB_TOKEN cannot be selected: set by the daemon env")
+    );
+
+    // Without the capability, or off a live stream, a selectable account says so.
+    let mut m = accounts_live();
+    let a = m.domain.accounts.as_ref().unwrap()[1].clone();
+    assert_eq!(m.account_block(&a), None);
+    m.server.as_mut().unwrap().capabilities.clear();
+    assert_eq!(m.account_block(&a), Some("daemon has no select"));
+    update(&mut m, Msg::Net(NetEvent::Lost { reason: "x".into(), retry_in_ms: None }));
+    assert_eq!(m.account_block(&a), Some("not live"));
 }

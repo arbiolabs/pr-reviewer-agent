@@ -11,7 +11,8 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::{Block, Borders, Paragraph};
 
-use crate::model::{InputPurpose, Link, Modal, Model, Pane, Screen};
+use crate::model::{Identity, InputPurpose, Link, Modal, Model, Pane, Screen};
+use crate::protocol::AccountState;
 use crate::text::{fit, pad};
 use crate::theme::{Role, Theme};
 
@@ -128,12 +129,25 @@ fn link_status(c: &Ctx) -> (String, Role) {
     }
 }
 
+/// The GitHub identity the daemon uses, as the header shows it.
+fn identity_badge(c: &Ctx) -> Option<(String, Role)> {
+    Some(match c.m.identity()? {
+        Identity::Env => ("env token".into(), Role::Pending),
+        Identity::Selected(a) if a.state != AccountState::Ok => (format!("gh: {} (error)", a.login), Role::Fail),
+        Identity::Selected(a) | Identity::GhActive(a) => (format!("gh: {}", a.login), Role::Normal),
+        Identity::Nobody => ("no GitHub account".into(), Role::Pending),
+    })
+}
+
 fn title_line(c: &Ctx, width: u16) -> Line<'static> {
     let (status, role) = link_status(c);
     let left = " PR REVIEWER ";
     let right = " ? help ";
+    let (badge, badge_role) = identity_badge(c).unwrap_or((String::new(), Role::Muted));
+    let badge = if badge.is_empty() { badge } else { format!(" {}", c.fit(&badge, 28)) };
     let endpoint = format!(" {} {} ", c.t.g().sep, c.m.diag.endpoint);
-    let fixed = crate::text::width(left) + crate::text::width(&status) + crate::text::width(right);
+    let fixed =
+        crate::text::width(left) + crate::text::width(&status) + crate::text::width(&badge) + crate::text::width(right);
     let room = (width as usize).saturating_sub(fixed);
     let endpoint = c.fit(&endpoint, room);
     let gap = room.saturating_sub(crate::text::width(&endpoint));
@@ -142,6 +156,7 @@ fn title_line(c: &Ctx, width: u16) -> Line<'static> {
         c.span(status, role),
         c.span(endpoint, Role::Muted),
         Span::raw(" ".repeat(gap)),
+        c.span(badge, badge_role),
         c.span(right, Role::Muted),
     ])
 }
@@ -205,7 +220,7 @@ fn footer_line(c: &Ctx, width: u16) -> Line<'static> {
         (_, Screen::Review) => "j/k move  Tab pane  Enter inspect  d diff  t timeline  n/N finding  ? help  q quit",
         (_, Screen::Diff) => "j/k line  h/l pane  n/N finding  : jump  Enter finding  Esc back  ? help  q quit",
         (_, Screen::Timeline) => "j/k move  Enter detail  f scope  v category  P phase  Esc back  ? help  q quit",
-        (_, Screen::Settings) => "r refresh  1-4 views  ? help  q quit",
+        (_, Screen::Settings) => "j/k account  Enter select account  r refresh  1-4 views  ? help  q quit",
     };
     Line::from(c.span(c.fit(&format!(" {hints}"), w), Role::Muted))
 }

@@ -258,7 +258,7 @@ fn server_message(m: &mut Model, msg: ServerMessage, fx: &mut Vec<Effect>) {
                 *state = match r.outcome {
                     CommandOutcome::Accepted { operation_id } => ConfirmState::Accepted(operation_id),
                     CommandOutcome::Rejected { code, message } => {
-                        ConfirmState::Failed(Text::new(&format!("{code:?}: {message}")))
+                        ConfirmState::Failed(Text::new(&format!("{code}: {message}")))
                     }
                 };
                 return;
@@ -267,7 +267,7 @@ fn server_message(m: &mut Model, msg: ServerMessage, fx: &mut Vec<Effect>) {
                 CommandOutcome::Accepted { operation_id } => {
                     format!("request accepted ({operation_id}); waiting for events")
                 }
-                CommandOutcome::Rejected { code, message } => format!("rejected {code:?}: {message}"),
+                CommandOutcome::Rejected { code, message } => format!("rejected {code}: {message}"),
             };
             notice(m, text);
         }
@@ -279,9 +279,9 @@ fn server_message(m: &mut Model, msg: ServerMessage, fx: &mut Vec<Effect>) {
                 }
                 return;
             }
-            m.diag.error(m.now_ms, format!("{code:?}: {message}"));
+            m.diag.error(m.now_ms, format!("{code}: {message}"));
             let Some(id) = request_id else {
-                notice(m, format!("server error {code:?}: {message}"));
+                notice(m, format!("server error {code}: {message}"));
                 return;
             };
             if let Some(f) = m.detail_requests.remove(&id) {
@@ -293,7 +293,7 @@ fn server_message(m: &mut Model, msg: ServerMessage, fx: &mut Vec<Effect>) {
                 t.pending = None;
                 t.error = Some(message);
             } else {
-                notice(m, format!("server error {code:?}: {message}"));
+                notice(m, format!("server error {code}: {message}"));
             }
         }
     }
@@ -413,7 +413,8 @@ fn apply_body(m: &mut Model, e: &SequencedEvent, fx: &mut Vec<Effect>) {
         }
         EventBody::AccountsUpdated(accounts) => {
             d.accounts = Some(accounts.clone());
-            None
+            settle_account_select(m, accounts);
+            return;
         }
         EventBody::Other(_) => None,
     };
@@ -435,6 +436,22 @@ fn apply_body(m: &mut Model, e: &SequencedEvent, fx: &mut Vec<Effect>) {
         fetch_detail(m, &f.id.clone(), fx);
     }
     reselect(m);
+}
+
+/// The selection shows only once the event reports it: that is what closes a pending account.select modal.
+fn settle_account_select(m: &mut Model, accounts: &[Account]) {
+    let done = |modal: &Modal| match modal {
+        Modal::Confirm { command: Command::SelectAccount(p), state, .. } => {
+            matches!(state, ConfirmState::Requested(_) | ConfirmState::Accepted(_))
+                && accounts.iter().any(|a| a.selected && a.id == p.account_id)
+        }
+        _ => false,
+    };
+    let Some(i) = m.ui.modals.iter().position(done) else { return };
+    m.ui.modals.remove(i);
+    if let Some(a) = accounts.iter().find(|a| a.selected) {
+        notice(m, format!("GitHub reads and publishing now use {} on {}", a.login, a.host));
+    }
 }
 
 /// Re-resolves selections by ID after the lists changed; an ID that vanished falls back to the first entry.
@@ -785,6 +802,12 @@ fn act(m: &mut Model, a: Action, fx: &mut Vec<Effect>) {
         Action::NextFinding => next_finding(m, 1, fx),
         Action::PrevFinding => next_finding(m, -1, fx),
         Action::Mutation(mu) => mutation(m, mu),
+        Action::Accounts => {
+            goto(m, Screen::Settings, fx);
+            if m.domain.accounts.is_none() {
+                notice(m, "this daemon reports no GitHub accounts");
+            }
+        }
         Action::CycleScope => {
             if let Some(t) = &m.timeline {
                 let scope = cycle(&[TimelineScope::Pr, TimelineScope::Run, TimelineScope::Finding], t.scope);
@@ -995,7 +1018,11 @@ fn move_by(m: &mut Model, delta: isize, fx: &mut Vec<Effect>) {
                 }
             }
         }
-        (Screen::Settings, _) => {}
+        (Screen::Settings, _) => {
+            let ids: Vec<AccountId> = m.domain.accounts.iter().flatten().map(|a| a.id.clone()).collect();
+            let current = m.cursor_account().map(|a| a.id.clone());
+            m.ui.selected_account = step(&ids, current.as_ref(), delta);
+        }
     }
 }
 
@@ -1043,8 +1070,21 @@ fn open(m: &mut Model, fx: &mut Vec<Effect>) {
                 None => m.ui.modals.push(Modal::Event { sequence: seq }),
             }
         }
-        (Screen::Settings, _) => {}
+        (Screen::Settings, _) => select_account(m),
     }
+}
+
+fn select_account(m: &mut Model) {
+    let Some(a) = m.cursor_account().cloned() else {
+        notice(m, "no GitHub accounts to select");
+        return;
+    };
+    if let Some(why) = m.account_block(&a) {
+        notice(m, format!("{} cannot be selected: {why}", a.id));
+        return;
+    }
+    let prompt = format!("Use {} on {} for GitHub reads and publishing?", a.login, a.host);
+    confirm(m, "account.select", prompt, Command::SelectAccount(AccountParams { account_id: a.id }));
 }
 
 fn open_finding(m: &mut Model, id: FindingId, fx: &mut Vec<Effect>) {

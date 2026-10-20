@@ -62,6 +62,12 @@ impl Sim {
         self
     }
 
+    /// A key whose requests stay unanswered, so the frame shows what the client does while it waits.
+    fn key_unanswered(mut self, code: KeyCode) -> Sim {
+        update(&mut self.m, Msg::Key(KeyEvent::new(code, KeyModifiers::NONE)));
+        self
+    }
+
     fn select(mut self, pr: &str) -> Sim {
         self = self.key(KeyCode::Char('g'));
         for _ in 0..10 {
@@ -139,6 +145,41 @@ fn views_at_every_breakpoint() {
             assert_eq!(mono_text, text, "{name} {w}x{h}: NO_COLOR changed the text");
             assert!(colorless(&term), "{name} {w}x{h}: NO_COLOR frame has colors");
         }
+    }
+}
+
+/// accounts.ndjson up to its snapshot: two selectable github.com accounts, the daemon offers account.select.
+fn accounts_live(look: Look) -> Sim {
+    Sim::new(look).play("accounts", 2)
+}
+
+/// The fixture daemon state with every reason an account cannot be selected: env token, gh error.
+fn accounts_blocked() -> Sim {
+    let mut s = Sim::new(Look::default());
+    let welcome =
+        read("fixtures/server.welcome.json").replace("\"capabilities\": []", "\"capabilities\": [\"account.select\"]");
+    s.server(ServerMessage::parse(&welcome).unwrap());
+    s.server(ServerMessage::parse(&read("fixtures/server.snapshot.accounts.json")).unwrap());
+    s.key(KeyCode::Char('A'))
+}
+
+#[test]
+fn accounts_view() {
+    let ascii = Look { ascii: true, ..Look::default() };
+    let mono = Look { color: false, ..Look::default() };
+    let mut s = accounts_live(Look::default()).key(KeyCode::Char('A')).key(KeyCode::Char('j'));
+    let mut a = accounts_live(ascii).key(KeyCode::Char('A')).key(KeyCode::Char('j'));
+    let mut n = accounts_live(mono).key(KeyCode::Char('A')).key(KeyCode::Char('j'));
+    for (w, h) in [(80, 24), (120, 38)] {
+        let (text, _) = render(&mut s.m, w, h);
+        insta::assert_snapshot!(format!("accounts_{w}x{h}"), text);
+        let (ascii_text, _) = render(&mut a.m, w, h);
+        insta::assert_snapshot!(format!("accounts_{w}x{h}_ascii"), ascii_text);
+        assert!(ascii_text.is_ascii(), "accounts {w}x{h} --ascii frame has non-ASCII glyphs");
+        let (mono_text, term) = render(&mut n.m, w, h);
+        // Settings names the display mode; nothing else may change.
+        assert_eq!(mono_text.replace("monochrome", "color"), text, "accounts {w}x{h}: NO_COLOR changed the text");
+        assert!(colorless(&term));
     }
 }
 
@@ -241,6 +282,32 @@ fn special_states() {
             },
             (80, 24),
         ),
+        ("accounts_blocked", accounts_blocked(), (120, 38)),
+        (
+            "accounts_requested",
+            accounts_live(Look::default())
+                .key(KeyCode::Char('A'))
+                .key(KeyCode::Char('j'))
+                .key(KeyCode::Enter)
+                .key_unanswered(KeyCode::Char('y')),
+            (80, 24),
+        ),
+        (
+            "accounts_rejected",
+            {
+                let mut s = accounts_live(Look::default())
+                    .key(KeyCode::Char('A'))
+                    .key(KeyCode::Char('j'))
+                    .key(KeyCode::Enter)
+                    .key_unanswered(KeyCode::Char('y'));
+                let rid = s.m.next_request - 1;
+                s.server(ServerMessage::parse(&format!(
+                    r#"{{"type":"command.result","requestId":"req-{rid}","status":"rejected","code":"CONFLICT","message":"GITHUB_TOKEN is set in the daemon environment; it overrides any selection"}}"#
+                )).unwrap());
+                s
+            },
+            (80, 24),
+        ),
     ];
     for (name, s, (w, h)) in cases.iter_mut() {
         let (text, _) = render(&mut s.m, *w, *h);
@@ -252,6 +319,7 @@ fn special_states() {
 fn every_view_survives_every_size() {
     let mut sims: Vec<Sim> = states(Look::default()).into_iter().map(|(_, s)| s).collect();
     sims.push(mid_review(Look::default()).key(KeyCode::Char('5')));
+    sims.push(accounts_blocked());
     sims.push(mid_review(Look::default()).select("acme/shop#184").key(KeyCode::Enter).key(KeyCode::Enter));
     sims.push(Sim::new(Look::default()).play("hostile", 5).select("acme/shop#2").key(KeyCode::Enter));
     let mut term = Terminal::new(TestBackend::new(0, 0)).unwrap();

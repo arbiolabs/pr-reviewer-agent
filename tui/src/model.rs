@@ -366,6 +366,17 @@ pub struct Ui {
     pub pr_filter: String,
     /// From `--pr`: selected once it shows up in a snapshot.
     pub wanted_pr: Option<PrId>,
+    /// The Accounts cursor in Settings; an ID that vanished falls back to the first account.
+    pub selected_account: Option<AccountId>,
+}
+
+/// Whose token the daemon uses for GitHub, in its precedence order (protocol/README.md "Accounts").
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Identity<'a> {
+    Env,
+    Selected(&'a Account),
+    GhActive(&'a Account),
+    Nobody,
 }
 
 #[derive(Clone, Debug)]
@@ -410,6 +421,7 @@ impl Model {
                 feed_scroll: 0,
                 pr_filter: String::new(),
                 wanted_pr,
+                selected_account: None,
             },
             look,
             diag: Diagnostics { endpoint: endpoint.into(), ..Diagnostics::default() },
@@ -446,10 +458,54 @@ impl Model {
         self.ui.selected_finding.as_ref().and_then(|id| self.domain.findings.get(id))
     }
 
-    /// Writes need a live stream and a capability the server granted. No capability is granted this round.
+    /// Writes need a live stream and a capability the server granted.
     pub fn may_write(&self, capability: &str) -> bool {
         self.link.accepts_events()
             && self.server.as_ref().is_some_and(|s| s.capabilities.iter().any(|c| c.as_str() == capability))
+    }
+
+    /// `None` while the daemon has not reported accounts.
+    pub fn identity(&self) -> Option<Identity<'_>> {
+        let accounts = self.domain.accounts.as_ref()?;
+        let github = |a: &&Account| a.host.as_str() == "github.com";
+        Some(if accounts.iter().any(|a| a.id.is_env()) {
+            Identity::Env
+        } else if let Some(a) = accounts.iter().find(|a| a.selected) {
+            Identity::Selected(a)
+        } else if let Some(a) = accounts.iter().filter(github).find(|a| a.gh_active) {
+            Identity::GhActive(a)
+        } else {
+            Identity::Nobody
+        })
+    }
+
+    pub fn cursor_account(&self) -> Option<&Account> {
+        let accounts = self.domain.accounts.as_ref()?;
+        let wanted = self.ui.selected_account.as_ref();
+        accounts.iter().find(|a| Some(&a.id) == wanted).or(accounts.first())
+    }
+
+    /// Why `account.select` would not be sent for `a` right now, short enough for an 80-column row; `None` means it
+    /// would be.
+    pub fn account_block(&self, a: &Account) -> Option<&'static str> {
+        let env = || self.domain.accounts.iter().flatten().any(|x| x.id.is_env());
+        Some(if a.id.is_env() {
+            "set by the daemon env"
+        } else if a.host.as_str() != "github.com" {
+            "github.com only"
+        } else if a.state != AccountState::Ok {
+            "run gh auth login"
+        } else if env() {
+            "GITHUB_TOKEN wins"
+        } else if a.selected {
+            "already selected"
+        } else if !self.link.accepts_events() {
+            "not live"
+        } else if !self.may_write("account.select") {
+            "daemon has no select"
+        } else {
+            return None;
+        })
     }
 
     pub fn top_modal(&self) -> Option<&Modal> {

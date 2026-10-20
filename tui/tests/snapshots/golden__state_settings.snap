@@ -1,9 +1,12 @@
 ---
 source: tests/golden.rs
+assertion_line: 314
 expression: text
 ---
  PR REVIEWER ● live · unix:/run/user/501/pr-review/reviewer.sock         ? help
   1 Inbox   2 Review   3 Diff   4 Timeline   5 Settings
+ GITHUB ACCOUNTS
+  not reported by this daemon version
  CONNECTION
   endpoint              unix:/run/user/501/pr-review/reviewer.sock
   state                 ● live
@@ -11,7 +14,6 @@ expression: text
   server version        0.1.0
   session               session-1
   capabilities          none (read-only)
-
  DIAGNOSTICS
   stream epoch          epoch-1
   last applied sequence 12
@@ -19,10 +21,9 @@ expression: text
   last heartbeat        0.0s ago
   resyncs / reconnects  0 / 0
   activity              2 feed entries kept (cap 2000); 1 tool events applied
-
  DISPLAY
   glyphs / color        unicode / color
-
  RECENT ERRORS
   none
- r refresh  1-4 views  ? help  q quit
+
+ j/k account  Enter select account  r refresh  1-4 views  ? help  q quit

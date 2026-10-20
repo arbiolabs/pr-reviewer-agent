@@ -1,5 +1,5 @@
 //! `(Context, KeyEvent) -> Action` as one table. A focused text input captures every key, so no shortcut fires while
-//! the user types. `y` is bound nowhere: there is no confirmation modal this round, so it never acts.
+//! the user types. `y` is bound only in the confirmation modal.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
@@ -62,6 +62,7 @@ pub enum Action {
     PrevFinding,
     Refresh,
     Help,
+    Accounts,
     Mutation(Mutation),
     CycleScope,
     CycleCategory,
@@ -118,6 +119,8 @@ const TABLE: &[(Context, KeyCode, KeyModifiers, Action)] = &[
     (C::Global, K::Char('d'), NONE, A::OpenDiff),
     (C::Global, K::Char('t'), NONE, A::OpenTimeline),
     (C::Global, K::Char('r'), NONE, A::Refresh),
+    (C::Global, K::Char('A'), SHIFT, A::Accounts),
+    (C::Global, K::Char('A'), NONE, A::Accounts),
     (C::Global, K::Char('s'), NONE, A::Mutation(Mutation::Start)),
     (C::Global, K::Char('R'), SHIFT, A::Mutation(Mutation::Retry)),
     (C::Global, K::Char('R'), NONE, A::Mutation(Mutation::Retry)),
@@ -196,6 +199,7 @@ pub fn help_rows() -> Vec<(String, &'static str)> {
             A::OpenDiff => "diff at the finding",
             A::OpenTimeline => "timeline for selection",
             A::Refresh => "refresh snapshot",
+            A::Accounts => "GitHub accounts (Settings)",
             A::Mutation(_) => "start/retry/cancel/publish",
             A::NextFinding | A::PrevFinding => "next / previous finding",
             A::JumpTo => "jump to path:line (Diff)",
