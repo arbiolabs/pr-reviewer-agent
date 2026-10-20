@@ -1,8 +1,9 @@
+import { readFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
 import type { AuthInteraction, CredentialStore, Models } from "@earendil-works/pi-ai";
 import { createTypeSafeClient, createZenClient } from "jev-systemone";
-import { loadConfig, saveDefaultModel } from "../config/config.ts";
+import { type Config, loadConfig, saveDefaultModel } from "../config/config.ts";
 import { clientFor, type GitHubClient } from "../github/client.ts";
 import { GitHubPullSource, parsePullRef, parsePullUrl, type PullSource, resolveGitHubToken } from "../github/pulls.ts";
 import { type DecisionEngine, JevDecisionEngine, type JevRoute, jevSkipReason } from "../jev/decision.ts";
@@ -10,7 +11,9 @@ import { PiAuthFileStore } from "../models/credential-store.ts";
 import { buildModels, detectModels } from "../models/detect.ts";
 import { chooseModel, listAvailableModels, splitRef } from "../models/select.ts";
 import { AppStore } from "../persistence/store.ts";
-import { finishReview, openApp, startReview } from "../runtime/app.ts";
+import { reconcileOutbox } from "../publish/publisher.ts";
+import { finishReview, lockDataDir, openApp, startReview } from "../runtime/app.ts";
+import { startService } from "../server/service.ts";
 import { loadReport, renderJson, renderMarkdown } from "./report.ts";
 
 export const REVIEWER_CODE_VERSION = "m1";
@@ -54,6 +57,10 @@ export async function main(argv: string[], deps: CliDeps = {}): Promise<number> 
     switch (command) {
       case "review":
         return await review(rest, deps, dataDir, out, err);
+      case "reconcile":
+        return await reconcile(rest, deps, dataDir, out);
+      case "serve":
+        return await serve(deps, dataDir, err);
       case "inspect":
         return inspect(rest, dataDir, out);
       case "models":
@@ -89,14 +96,7 @@ async function review(args: string[], deps: CliDeps, dataDir: string, out: Out, 
   const pulls = deps.pulls ?? new GitHubPullSource(() => github);
   const pull = await pulls.getPull(ref);
 
-  const models = deps.models ?? buildModels(deps.credentials ?? new PiAuthFileStore());
-  const available = await listAvailableModels(models, config.models.preferred);
-  const isTTY = deps.isTTY ?? Boolean(process.stdin.isTTY && process.stdout.isTTY);
-  let choice = chooseModel({ flag: values.model, env: process.env.PR_REVIEW_MODEL, config: config.models.default }, available, isTTY);
-  if (choice.kind === "error") throw new Error(choice.message);
-  if (choice.kind === "pick") choice = { kind: "chosen", ref: await pickModel(available.map((m) => `${m.ref}  (${m.authSource})`), available.map((m) => m.ref)), source: "--model" };
-  if (choice.kind !== "chosen") throw new Error("no model chosen");
-  err(`model: ${choice.ref} (${choice.source})\n`);
+  const { models, ref: modelRef } = await resolveModel(config, deps, values.model, deps.isTTY ?? Boolean(process.stdin.isTTY && process.stdout.isTTY), err);
 
   const keyed = Boolean(process.env.TYPESAFE_API_KEY);
   const skipped = jevSkipReason({ noJev: values["no-jev"] ?? false, keyed, privateRepo: pull.private, allowKeylessForPrivate: config.jev.allow_keyless_for_private });
@@ -111,8 +111,8 @@ async function review(args: string[], deps: CliDeps, dataDir: string, out: Out, 
     github: () => github,
     engine,
     models,
-    model: splitRef(choice.ref),
-    reviewerVersion: `${REVIEWER_CODE_VERSION}+${choice.ref}`,
+    model: splitRef(modelRef),
+    reviewerVersion: `${REVIEWER_CODE_VERSION}+${modelRef}`,
     onReport: (error) => err(`note: ${error instanceof Error ? error.message : String(error)}\n`),
   });
   try {
@@ -133,6 +133,120 @@ async function review(args: string[], deps: CliDeps, dataDir: string, out: Out, 
   } finally {
     await app.close();
   }
+}
+
+async function resolveModel(config: Config, deps: CliDeps, flag: string | undefined, isTTY: boolean, err: (t: string) => void): Promise<{ models: Models; ref: string }> {
+  const models = deps.models ?? buildModels(deps.credentials ?? new PiAuthFileStore());
+  const available = await listAvailableModels(models, config.models.preferred);
+  let choice = chooseModel({ flag, env: process.env.PR_REVIEW_MODEL, config: config.models.default }, available, isTTY);
+  if (choice.kind === "error") throw new Error(choice.message);
+  if (choice.kind === "pick") choice = { kind: "chosen", ref: await pickModel(available.map((m) => `${m.ref}  (${m.authSource})`), available.map((m) => m.ref)), source: "--model" };
+  if (choice.kind !== "chosen") throw new Error("no model chosen");
+  err(`model: ${choice.ref} (${choice.source})\n`);
+  return { models, ref: choice.ref };
+}
+
+/**
+ * GitHub clients per installation from the environment: a GitHub App (`GITHUB_APP_ID` plus `GITHUB_APP_PRIVATE_KEY`
+ * or `GITHUB_APP_PRIVATE_KEY_FILE`), else one token client (`GITHUB_TOKEN` or `gh auth token`).
+ */
+async function githubFromEnv(config: Config): Promise<{ clientFor: (installationId: number) => GitHubClient; kind: "app" | "token" }> {
+  const appId = process.env.GITHUB_APP_ID;
+  if (!appId) {
+    const client = clientFor(config.github, { kind: "token", token: await resolveGitHubToken() });
+    return { clientFor: () => client, kind: "token" };
+  }
+  const pem = process.env.GITHUB_APP_PRIVATE_KEY?.replaceAll("\\n", "\n") ?? (process.env.GITHUB_APP_PRIVATE_KEY_FILE ? readFileSync(process.env.GITHUB_APP_PRIVATE_KEY_FILE, "utf8") : undefined);
+  if (!pem) throw new Error("GITHUB_APP_ID is set but neither GITHUB_APP_PRIVATE_KEY nor GITHUB_APP_PRIVATE_KEY_FILE is");
+  const clients = new Map<number, GitHubClient>();
+  return {
+    kind: "app",
+    clientFor: (installationId) => {
+      if (installationId === 0) throw new Error("this PR was recorded without a GitHub App installation; use token auth for it");
+      if (!clients.has(installationId)) clients.set(installationId, clientFor(config.github, { kind: "app", appId, privateKeyPem: pem, installationId }));
+      return clients.get(installationId)!;
+    },
+  };
+}
+
+/** `reconcile --revision <id>`: decide an uncertain publication by listing the PR's reviews. Never posts. */
+async function reconcile(args: string[], deps: CliDeps, dataDir: string, out: Out): Promise<number> {
+  const { values } = parseArgs({ args, options: { revision: { type: "string" } } });
+  if (!values.revision) throw new Error("reconcile needs --revision <revision-id>");
+  const config = loadConfig();
+  const release = await lockDataDir(dataDir);
+  const store = AppStore.open(`${dataDir}/app.sqlite`);
+  try {
+    const revision = store.revision(values.revision);
+    if (!revision) throw new Error(`no revision ${values.revision}`);
+    const outbox = store.outboxForRevision(revision.id);
+    if (!outbox) throw new Error(`revision ${revision.id} has no publication`);
+    if (outbox.status !== "sending" && outbox.status !== "needs_reconciliation") {
+      out(`publication ${outbox.status}${outbox.github_review_id ? `: review ${outbox.github_review_id}` : ""}; nothing to reconcile\n`);
+      return 0;
+    }
+    const pr = store.pullById(revision.pr_id)!;
+    const client = deps.github ?? (await githubFromEnv(config)).clientFor(pr.installation_id);
+    const verdict = await reconcileOutbox(store, client, { fullName: pr.repo_full_name, number: pr.number }, outbox);
+    const state = store.revision(revision.id)!.state;
+    if (verdict.kind === "found") out(`found review ${verdict.reviewId}; publication published, revision ${state}\n`);
+    else if (verdict.kind === "absent") out(`no review with the marker on GitHub; publication pending, revision ${state}${state === "FAILED" ? "; rerun review --publish --retry to post it" : ""}\n`);
+    else out(`cannot safely decide: ${verdict.reason}; publication stays needs_reconciliation\n`);
+    return verdict.kind === "undecided" ? 1 : 0;
+  } finally {
+    store.close();
+    await release();
+  }
+}
+
+/** `serve`: webhook receiver, worker and reviews in one process, configured from the environment. */
+async function serve(deps: CliDeps, dataDir: string, err: (t: string) => void): Promise<number> {
+  const config = loadConfig();
+  const webhookSecret = process.env.GITHUB_WEBHOOK_SECRET;
+  if (!webhookSecret) throw new Error("serve needs GITHUB_WEBHOOK_SECRET");
+  const github = await githubFromEnv(config);
+  const pulls = new GitHubPullSource(github.clientFor);
+  const { models, ref } = await resolveModel(config, deps, undefined, false, err);
+  // One engine serves every repository, so the keyless Jev tier is used only when private diffs may go there.
+  const keyed = Boolean(process.env.TYPESAFE_API_KEY);
+  const engine: JevRoute = keyed
+    ? new JevDecisionEngine(createTypeSafeClient())
+    : config.jev.allow_keyless_for_private
+      ? new JevDecisionEngine(createZenClient())
+      : { skipped: "jev_skipped_private_repo" };
+  const report = (error: unknown) => err(`note: ${error instanceof Error ? error.message : String(error)}\n`);
+  const app = await openApp({
+    dataDir,
+    config,
+    pulls,
+    gitToken: (installationId) => github.clientFor(installationId).token(),
+    github: github.clientFor,
+    engine,
+    models,
+    model: splitRef(ref),
+    reviewerVersion: `${REVIEWER_CODE_VERSION}+${ref}`,
+    onReport: report,
+  });
+  const service = await startService({
+    app,
+    config,
+    dataDir,
+    pulls,
+    github: github.clientFor,
+    webhookSecret,
+    adminToken: process.env.PR_REVIEW_ADMIN_TOKEN || undefined,
+    port: Number(process.env.PORT ?? 8080),
+    publish: config.review.publish_mode !== "dry_run",
+    report,
+  });
+  err(`serving on ${service.url} (${github.kind} auth, publish_mode ${config.review.publish_mode})\n`);
+  await new Promise<void>((resolve) => {
+    process.once("SIGTERM", resolve);
+    process.once("SIGINT", resolve);
+  });
+  await service.close();
+  await app.close();
+  return 0;
 }
 
 async function pickModel(labels: string[], refs: string[]): Promise<string> {

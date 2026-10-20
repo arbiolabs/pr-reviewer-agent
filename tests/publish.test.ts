@@ -3,6 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { FauxResponseStep } from "@earendil-works/pi-ai";
 import { afterEach, beforeEach, expect, it } from "vitest";
+import { main } from "../src/cli/main.ts";
 import { DEFAULT_CONFIG } from "../src/config/config.ts";
 import { GitHubClient } from "../src/github/client.ts";
 import { GitHubPullSource } from "../src/github/pulls.ts";
@@ -27,8 +28,8 @@ afterEach(async () => {
   await fake.close();
 });
 
-async function openPublishing(responses: FauxResponseStep[] = [readDiff(), submitDefect(fixture)]) {
-  const client = new GitHubClient({
+function testClient() {
+  return new GitHubClient({
     auth: { kind: "token", token: "ghp_test" },
     baseUrl: fake.url,
     maxRetries: 2,
@@ -37,15 +38,19 @@ async function openPublishing(responses: FauxResponseStep[] = [readDiff(), submi
     timeoutMs: 5000,
     sleep: async (ms) => void sleeps.push(ms),
   });
+}
+
+async function openPublishing(responses: FauxResponseStep[] = [readDiff(), submitDefect(fixture)], dataDir = mkdtempSync(join(tmpdir(), "publish-"))) {
+  const client = testClient();
   const app = await openApp({
-    dataDir: mkdtempSync(join(tmpdir(), "publish-")),
+    dataDir,
     config: DEFAULT_CONFIG,
     pulls: new GitHubPullSource(() => client),
     github: () => client,
     engine: { skipped: "Jev disabled by --no-jev" },
     models: fauxModels(responses),
     model: { provider: "faux", modelId: "reviewer" },
-    reviewerVersion: "m2+faux/reviewer",
+    reviewerVersion: "m1+faux/reviewer",
   });
   apps.push(app);
   return app;
@@ -144,3 +149,29 @@ it("fails the revision when GitHub rejects the review outright", async () => {
   expect([revision.state, outbox.status, fake.postAttempts]).toEqual(["FAILED", "failed", 1]);
   expect(app.store.auditEvents(revision.id).at(-1)!.detail).toBe("GitHub rejected the review: POST /repos/acme/shop/pulls/1/reviews: HTTP 422");
 }, 30_000);
+
+it("recovers a needs_reconciliation revision by hand: reconcile proves absence, then review --publish --retry posts once", async () => {
+  fake.postBehaviors = ["bad-gateway"];
+  fake.listStatus = 500;
+  const dataDir = mkdtempSync(join(tmpdir(), "publish-manual-"));
+  const app = await openPublishing(undefined, dataDir);
+  const { revision } = await publish(app);
+  await apps.pop()!.close();
+  expect(revision.state).toBe("FAILED");
+
+  const output: string[] = [];
+  const deps = { github: testClient(), models: fauxModels([]), isTTY: false, out: (t: string) => output.push(t), err: (t: string) => output.push(t) };
+  process.env.PR_REVIEW_DATA_DIR = dataDir;
+  try {
+    expect(await main(["reconcile", "--revision", revision.id], deps)).toBe(1);
+    fake.listStatus = 200;
+    expect(await main(["reconcile", "--revision", revision.id], deps)).toBe(0);
+    expect(output.slice(-1)).toEqual(["no review with the marker on GitHub; publication pending, revision FAILED; rerun review --publish --retry to post it\n"]);
+    expect(await main(["review", "https://github.com/acme/shop/pull/1", "--publish", "--retry", "--no-jev", "--model", "faux/reviewer"], deps)).toBe(0);
+    expect(await main(["reconcile", "--revision", revision.id], deps)).toBe(0);
+    expect(output.at(-1)).toBe(`publication published: review 1000; nothing to reconcile\n`);
+  } finally {
+    delete process.env.PR_REVIEW_DATA_DIR;
+  }
+  expect([fake.postAttempts, fake.reviews.length]).toEqual([2, 1]);
+}, 60_000);

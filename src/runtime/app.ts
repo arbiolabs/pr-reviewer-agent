@@ -55,7 +55,7 @@ export async function openApp(options: AppOptions): Promise<App> {
  * `stale`, so a rerun after kill -9 takes over the dead process's lock. proper-lockfile removes the lock on exit and
  * on signals.
  */
-async function lockDataDir(dir: string): Promise<() => Promise<void>> {
+export async function lockDataDir(dir: string): Promise<() => Promise<void>> {
   try {
     return await lockfile.lock(dir, { stale: 5000, update: 1000, retries: { retries: 12, minTimeout: 500, maxTimeout: 500 } });
   } catch (error) {
