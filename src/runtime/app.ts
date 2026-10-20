@@ -102,6 +102,11 @@ async function openLocked(options: AppOptions, release: () => Promise<void>): Pr
   };
 }
 
+const PUBLISH_POLICY = "+publish";
+
+/** Whether a revision was started to publish; recovery recreates its task the same way. */
+export const publishes = (revision: RevisionRow) => revision.policy_version.endsWith(PUBLISH_POLICY);
+
 export type StartedReview = { revision: RevisionRow; taskId: TaskId<ReviewResult> | undefined };
 
 /**
@@ -118,7 +123,7 @@ export async function startReview(
 ): Promise<StartedReview> {
   const prId = app.store.upsertPull(pull);
   // Publishing is part of the policy: a dry run of a head never blocks publishing that head later (§2 invariant 3).
-  const policyVersion = options.publish ? `${basePolicyVersion}+publish` : basePolicyVersion;
+  const policyVersion = options.publish ? `${basePolicyVersion}${PUBLISH_POLICY}` : basePolicyVersion;
   let revision = app.store.ensureRevision({ prId, baseSha: pull.baseSha, headSha: pull.headSha, policyVersion, reviewerVersion: app.reviewerVersion });
   if (options.retry && TERMINAL_REVIEW_STATES.includes(revision.state)) {
     const n = app.store.retryCount(revision.id) + 1;
