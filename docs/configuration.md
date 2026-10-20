@@ -82,7 +82,7 @@ When Jev fails, times out, or is skipped, the review runs at standard depth. Jev
 
 ### Control commands
 
-`control.allow_commands` lets `pr-review daemon` accept the review commands (start, retry, cancel, publish) from the terminal client. The default is `false`, which grants only the account selector. `pr-review daemon --allow-commands` enables them for one daemon. The daemon grants `review.publish` only under `publish_mode: "approval"`. See [Take actions](tui.md#take-actions).
+`control.allow_commands` lets `pr-review daemon` accept the review commands (start, retry, cancel, publish) from the terminal client. The default is `false`: the daemon stays read-only, takes no lock on the data directory, runs no review, and grants only the account selector. `pr-review daemon --allow-commands` enables them for one daemon, which then hosts the review engine. The daemon grants `review.publish` only under `publish_mode: "approval"`. See [Take actions](tui.md#take-actions).
 
 ## State
 
@@ -94,4 +94,4 @@ All state lives in `.data/`, or in the directory that `PR_REVIEW_DATA_DIR` names
 | `durable.sqlite` | Pi Durable checkpoints and the model conversations |
 | `repos/` | Bare git clones, one per repository |
 
-Only one `pr-review` process can use a data directory at a time. A second one exits with `another pr-review is running on <dir>`. After a `kill -9`, the next run takes over the lock within about 5 seconds. The control daemon takes the lock when it can, and otherwise runs in read-only mode beside the process that holds it.
+Only one `pr-review` process can use a data directory at a time. A second one exits with `another pr-review is running on <dir>`. After a `kill -9`, the next run takes over the lock within about 5 seconds. The control daemon takes the lock only with commands enabled, and only when it can; otherwise it runs in read-only mode beside the process that holds it.

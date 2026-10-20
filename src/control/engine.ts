@@ -13,8 +13,6 @@ export type EngineOptions = {
   config: Config;
   pulls: PullSource;
   github: (installationId: number) => GitHubClient;
-  /** `control.allow_commands` or `--allow-commands`: without it the engine runs reviews but grants no command. */
-  allowCommands: boolean;
   env?: Env;
   report?: (error: unknown) => void;
 };
@@ -22,10 +20,10 @@ export type EngineOptions = {
 const CANCEL_REASON = "cancelled from the TUI";
 
 /**
- * The daemon in engine mode (TUI_SPEC §2): the app DB read side of `AppDbSource`, plus the App it hosts. Commands run
- * in process through the same code the CLI uses; each accepted one is recorded under its idempotency key, so a replay
- * answers the same operation and has no second effect. Reviews it starts or resumes are followed to their end, and
- * closing the source suspends them for the next start.
+ * The daemon in engine mode (TUI_SPEC §2), which the daemon enters only with commands enabled: the app DB read side of
+ * `AppDbSource`, plus the App it hosts. Commands run in process through the same code the CLI uses; each accepted one
+ * is recorded under its idempotency key and attempt, so a replay answers the same operation and has no second effect.
+ * Reviews it starts or resumes are followed to their end, and closing the source suspends them for the next start.
  */
 export class EngineSource extends AppDbSource {
   override readonly mode = "engine" as const;
@@ -66,13 +64,11 @@ export class EngineSource extends AppDbSource {
   }
 
   capabilities(): string[] {
-    if (!this.options.allowCommands) return [];
     const publish = this.options.config.review.publish_mode === "approval";
     return ["review.start", "review.retry", "review.cancel", ...(publish ? ["review.publish"] : [])];
   }
 
   override unavailable(command: string): string {
-    if (!this.options.allowCommands) return `${command} is not enabled: start the daemon with --allow-commands or set control.allow_commands`;
     return `${command} needs review.publish_mode "approval" (it is "${this.options.config.review.publish_mode}")`;
   }
 

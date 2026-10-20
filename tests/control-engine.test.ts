@@ -5,7 +5,7 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import { type FauxResponseStep, fauxAssistantMessage } from "@earendil-works/pi-ai";
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { type Config, DEFAULT_CONFIG } from "../src/config/config.ts";
-import { openSource } from "../src/control/daemon.ts";
+import { COMMANDS_OFF, openSource } from "../src/control/daemon.ts";
 import { EngineSource } from "../src/control/engine.ts";
 import { startControlServer } from "../src/control/server.ts";
 import type { ControlSource } from "../src/control/source.ts";
@@ -40,7 +40,7 @@ const newClient = () => new GitHubClient({ auth: { kind: "token", token: "ghp_te
 type Hosted = { app: App; source: EngineSource; dataDir: string; client: GitHubClient };
 
 /** An App on the fake GitHub, hosted by an EngineSource (not yet served). */
-async function host(options: { config?: Config; responses?: FauxResponseStep[]; allowCommands?: boolean; dataDir?: string; client?: GitHubClient; github?: (installationId: number) => GitHubClient } = {}): Promise<Hosted> {
+async function host(options: { config?: Config; responses?: FauxResponseStep[]; dataDir?: string; client?: GitHubClient; github?: (installationId: number) => GitHubClient } = {}): Promise<Hosted> {
   const config = options.config ?? approvalConfig;
   const client = options.client ?? newClient();
   const pulls = new GitHubPullSource(() => client);
@@ -57,7 +57,7 @@ async function host(options: { config?: Config; responses?: FauxResponseStep[]; 
     lockWaitMs: 0,
   });
   // No gh on PATH: journal sequences are pinned, and a detected account would add a row.
-  const source = await EngineSource.host(dataDir, app, { config, pulls, github: options.github ?? (() => client), allowCommands: options.allowCommands ?? true, env: { PATH: "" } });
+  const source = await EngineSource.host(dataDir, app, { config, pulls, github: options.github ?? (() => client), env: { PATH: "" } });
   cleanup.push(() => source.close());
   return { app, source, dataDir, client };
 }
@@ -131,12 +131,12 @@ const UP_TO_APPROVAL = [
 ];
 
 it("is read-only while another pr-review holds the data dir, and grants only account.select there", async () => {
-  const holder = await host({ allowCommands: true });
+  const holder = await host();
   const notes: string[] = [];
   const source = await openSource(
     holder.dataDir,
     true,
-    { openEngine: async (dataDir) => (await host({ dataDir, allowCommands: true })).source },
+    { openEngine: async (dataDir) => (await host({ dataDir })).source },
     (t) => notes.push(t),
   );
   cleanup.push(() => source.close());
@@ -196,18 +196,36 @@ it("falls back to read-only with the reason when recovery fails, holding no lock
   expect(await taskStatuses(cli)).toEqual([]);
 }, 30_000);
 
-it("grants no command by default, the three review commands when enabled, and review.publish only in approval mode", async () => {
-  const off = await host({ allowCommands: false });
-  const { c, welcome } = await serve(off.source);
-  expect(welcome).toMatchObject({ mode: "engine", capabilities: ["account.select"] });
+it("is read-only by default: no lock, no engine, account.select only; the review commands need --allow-commands, and review.publish approval mode", async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "engine-"));
+  seedUncertainOutbox(dataDir);
+  let engines = 0;
+  const notes: string[] = [];
+  const off = await openSource(dataDir, false, { openEngine: async (dir) => (engines++, (await host({ dataDir: dir })).source) }, (t) => notes.push(t));
+  cleanup.push(() => off.close());
+  const { c, welcome } = await serve(off);
+  expect([engines, notes, welcome]).toEqual([0, [], expect.objectContaining({ mode: "read-only", readOnlyReason: COMMANDS_OFF, capabilities: ["account.select"] })]);
   c.send({ type: "snapshot.get", requestId: "s" });
   await c.waitFor((m) => m.type === "snapshot");
-  expect(await command(c, { command: "review.cancel", params: { runId: "r" } })).toEqual(
-    rejected("CAPABILITY_DENIED", "review.cancel is not enabled: start the daemon with --allow-commands or set control.allow_commands"),
-  );
-  const comment = await host({ config: { ...approvalConfig, review: { ...approvalConfig.review, publish_mode: "comment" } }, allowCommands: true });
+  expect(await command(c, { command: "review.cancel", params: { runId: "r" } })).toEqual(rejected("CAPABILITY_DENIED", `review.cancel is not available: ${COMMANDS_OFF}`));
+  // Nothing holds the data dir, and the uncertain outbox was not reconciled: a CLI review opens it at once and finds it untouched.
+  const cli = await openApp({
+    dataDir,
+    config: approvalConfig,
+    pulls: new GitHubPullSource(newClient),
+    engine: { skipped: "test" },
+    models: fauxModels([]),
+    model: { provider: "faux", modelId: "reviewer" },
+    reviewerVersion: "m1+faux/reviewer",
+    lockWaitMs: 0,
+  });
+  cleanup.push(() => cli.close());
+  expect([await taskStatuses(cli), cli.store.uncertainOutboxes().length, fake.listCalls]).toEqual([[], 1, 0]);
+
+  const comment = await host({ config: { ...approvalConfig, review: { ...approvalConfig.review, publish_mode: "comment" } } });
   const served = await serve(comment.source);
   expect(served.welcome).toMatchObject({ mode: "engine", capabilities: ["account.select", "review.start", "review.retry", "review.cancel"] });
+  expect(served.welcome).not.toHaveProperty("readOnlyReason");
   served.c.send({ type: "snapshot.get", requestId: "s" });
   await served.c.waitFor((m) => m.type === "snapshot");
   expect(await command(served.c, { command: "review.publish", params: { runId: "r", previewId: "p", expectedHeadSha: "h" } })).toEqual(

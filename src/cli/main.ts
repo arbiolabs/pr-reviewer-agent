@@ -81,7 +81,7 @@ export async function main(argv: string[], deps: CliDeps = {}): Promise<number> 
       case "login":
         return await login(rest, deps, out);
       case "daemon":
-        return await runDaemon(rest, dataDir, err, { openEngine: (dir, allowCommands) => openEngine(dir, allowCommands, deps, err) });
+        return await runDaemon(rest, dataDir, err, { openEngine: (dir) => openEngine(dir, deps, err), commandsConfigured: () => loadConfig().control.allow_commands });
       case "tui":
         return runTui(rest);
       default:
@@ -283,7 +283,7 @@ function jevFromEnv(config: Config, deps: CliDeps): JevRoute {
  * The daemon's engine, configured like `serve` from the environment: the GitHub auth `resolveGithubAuth` picks, the
  * model resolved without a prompt, and the data-dir lock. Throws while another pr-review holds that lock.
  */
-async function openEngine(dataDir: string, allowCommands: boolean, deps: CliDeps, err: (t: string) => void): Promise<EngineSource> {
+async function openEngine(dataDir: string, deps: CliDeps, err: (t: string) => void): Promise<EngineSource> {
   const config = loadConfig();
   const github = await withStore(dataDir, (store) => githubFromEnv(config, store));
   const pulls = deps.pulls ?? new GitHubPullSource(github.clientFor);
@@ -301,7 +301,7 @@ async function openEngine(dataDir: string, allowCommands: boolean, deps: CliDeps
     reviewerVersion: `${REVIEWER_CODE_VERSION}+${ref}`,
     onReport: report,
   });
-  return EngineSource.host(dataDir, app, { config, pulls, github: github.clientFor, allowCommands: allowCommands || config.control.allow_commands, report });
+  return EngineSource.host(dataDir, app, { config, pulls, github: github.clientFor, report });
 }
 
 /** `serve`: webhook receiver, worker and reviews in one process, configured from the environment. */

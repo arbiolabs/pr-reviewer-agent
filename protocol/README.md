@@ -57,9 +57,10 @@ the recorded `operationId` and does nothing again. A key in any other form is `I
 | `review.publish` | `runId`, `previewId`, `expectedHeadSha` | `review.publish:<runId>:<previewId>` | `review.publish:<runId>` |
 | `account.select` | `accountId` | `account.select:<accountId>` | `account.select:<journal seq>` |
 
-`welcome.capabilities` lists what this daemon grants. A daemon in `read-only` mode (another pr-review holds the data
-dir) grants `account.select` only. A daemon in `engine` mode grants the review commands when started with
-`--allow-commands` or `control.allow_commands`, and `review.publish` only under `review.publish_mode: "approval"`.
+`welcome.capabilities` lists what this daemon grants. A daemon in `read-only` mode (the default, or another pr-review
+holds the data dir, or the engine failed to open; `welcome.readOnlyReason` says which) grants `account.select` only.
+A daemon started with `--allow-commands` or `control.allow_commands` runs in `engine` mode and grants the review
+commands, and `review.publish` only under `review.publish_mode: "approval"`.
 Every command is checked by the server whatever the client showed:
 
 - `review.start`: the PR must be tracked (`NOT_FOUND`), `expectedHeadSha` must be GitHub's head now (`REVISION_STALE`,
