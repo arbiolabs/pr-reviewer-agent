@@ -11,6 +11,7 @@ use crate::protocol::*;
 
 pub const NOTICE_MS: u64 = 4_000;
 pub const TIMED_OUT: &str = "request timed out; r to retry";
+pub const OFFLINE: &str = "not connected; r retries";
 
 #[derive(Debug)]
 pub enum Msg {
@@ -146,6 +147,17 @@ fn request(m: &mut Model) -> RequestId {
     id
 }
 
+/// Sends every request but `hello`. The server answers anything before its welcome with an error, so until then
+/// this sends nothing and returns `None`; the caller leaves a mark the next snapshot retries.
+fn send(m: &mut Model, fx: &mut Vec<Effect>, msg: impl FnOnce(RequestId) -> ClientMessage) -> Option<RequestId> {
+    if !m.link.welcomed() {
+        return None;
+    }
+    let request_id = request(m);
+    fx.push(Effect::Send(msg(request_id.clone())));
+    Some(request_id)
+}
+
 /// Ends every request older than the timeout that is still waited on, as if the server had answered with an error.
 fn expire_requests(m: &mut Model) {
     let (now, timeout) = (m.now_ms, m.request_timeout_ms);
@@ -261,9 +273,7 @@ fn snapshot_get(m: &mut Model, fx: &mut Vec<Effect>) {
     if let Some(old) = m.snapshot_request.take() {
         m.stale_snapshots.insert(old);
     }
-    let request_id = request(m);
-    m.snapshot_request = Some(request_id.clone());
-    fx.push(Effect::Send(ClientMessage::SnapshotGet { request_id }));
+    m.snapshot_request = send(m, fx, |request_id| ClientMessage::SnapshotGet { request_id });
 }
 
 fn server_message(m: &mut Model, msg: ServerMessage, fx: &mut Vec<Effect>) {
@@ -281,13 +291,11 @@ fn server_message(m: &mut Model, msg: ServerMessage, fx: &mut Vec<Effect>) {
             if !transition(m, LinkInput::Welcomed { resuming }) {
                 return;
             }
-            let request_id = request(m);
-            fx.push(Effect::Send(match (resuming, m.stream.epoch.clone()) {
-                (true, Some(stream_epoch)) => {
-                    ClientMessage::Resume { request_id, stream_epoch, after_sequence: m.stream.last_applied }
-                }
+            let (epoch, after_sequence) = (m.stream.epoch.clone(), m.stream.last_applied);
+            send(m, fx, |request_id| match (resuming, epoch) {
+                (true, Some(stream_epoch)) => ClientMessage::Resume { request_id, stream_epoch, after_sequence },
                 _ => ClientMessage::SnapshotGet { request_id },
-            }));
+            });
         }
         ServerMessage::Snapshot(s) => apply_snapshot(m, s, fx),
         ServerMessage::Event(Event::Heartbeat { .. }) => m.diag.last_heartbeat_ms = Some(m.now_ms),
@@ -579,13 +587,15 @@ fn timeline_matches(q: &TimelineQuery, e: &SequencedEvent) -> bool {
 }
 
 fn fetch_detail(m: &mut Model, id: &FindingId, fx: &mut Vec<Effect>) {
-    if m.detail_requests.values().any(|f| f == id) || !m.link.welcomed() {
+    if m.detail_requests.values().any(|f| f == id) {
         return;
     }
-    let request_id = request(m);
+    let Some(request_id) = send(m, fx, |request_id| ClientMessage::FindingGet { request_id, finding_id: id.clone() })
+    else {
+        return;
+    };
     m.detail_errors.remove(id);
-    m.detail_requests.insert(request_id.clone(), id.clone());
-    fx.push(Effect::Send(ClientMessage::FindingGet { request_id, finding_id: id.clone() }));
+    m.detail_requests.insert(request_id, id.clone());
 }
 
 // ---- diff ----
@@ -646,19 +656,18 @@ fn load_more_diff(m: &mut Model, fx: &mut Vec<Effect>) {
 /// Requests one page of the open diff: the first with no `cursor`.
 fn diff_get(m: &mut Model, cursor: Option<Text>, fx: &mut Vec<Effect>) {
     let Some(key) = m.diff.as_ref().map(|d| d.key.clone()) else { return };
-    let request_id = request(m);
-    fx.push(Effect::Send(ClientMessage::DiffGet {
-        request_id: request_id.clone(),
+    let pending = send(m, fx, |request_id| ClientMessage::DiffGet {
+        request_id,
         pr_id: key.pr,
         base_sha: key.base,
         head_sha: key.head,
         file: None,
         cursor,
         limit: Some(Limit::DEFAULT),
-    }));
+    });
     if let Some(d) = &mut m.diff {
-        d.pending = Some(request_id);
-        d.error = None;
+        d.error = if pending.is_none() { Some(Text::new(OFFLINE)) } else { None };
+        d.pending = pending;
     }
 }
 
@@ -762,22 +771,21 @@ fn finding_stops(m: &Model, d: &DiffView) -> Vec<(usize, usize, usize)> {
 
 fn load_timeline(m: &mut Model, scope: TimelineScope, query: TimelineQuery, fx: &mut Vec<Effect>) {
     let (category, phase) = m.timeline.as_ref().map_or((None, None), |t| (t.category, t.phase));
-    let request_id = request(m);
-    fx.push(Effect::Send(ClientMessage::TimelineGet {
-        request_id: request_id.clone(),
+    let pending = send(m, fx, |request_id| ClientMessage::TimelineGet {
+        request_id,
         pr_id: query.pr.clone(),
         run_id: query.run.clone(),
         finding_id: query.finding.clone(),
         before_sequence: None,
         limit: Limit::DEFAULT,
-    }));
+    });
     m.timeline = Some(TimelineView {
         scope,
         query,
         events: Vec::new(),
         next_before: None,
-        pending: Some(request_id),
-        error: None,
+        error: pending.is_none().then(|| Text::new(OFFLINE)),
+        pending,
         selected: None,
         open: None,
         category,
@@ -1074,13 +1082,12 @@ fn send_confirmed(m: &mut Model, fx: &mut Vec<Effect>) {
     else {
         return;
     };
-    let request_id = request(m);
     let idempotency_key = command.idempotency_key();
-    fx.push(Effect::Send(ClientMessage::Command(CommandRequest {
-        request_id: request_id.clone(),
-        idempotency_key,
-        command,
-    })));
+    let Some(request_id) =
+        send(m, fx, |request_id| ClientMessage::Command(CommandRequest { request_id, idempotency_key, command }))
+    else {
+        return;
+    };
     if let Some(Modal::Confirm { state, .. }) = m.ui.modals.last_mut() {
         *state = ConfirmState::Requested(request_id);
     }
@@ -1180,17 +1187,18 @@ fn move_by(m: &mut Model, delta: isize, fx: &mut Vec<Effect>) {
                 t.selected = next;
             }
             if let Some(before) = more {
-                let request_id = request(m);
-                fx.push(Effect::Send(ClientMessage::TimelineGet {
-                    request_id: request_id.clone(),
+                let pending = send(m, fx, |request_id| ClientMessage::TimelineGet {
+                    request_id,
                     pr_id: query.pr,
                     run_id: query.run,
                     finding_id: query.finding,
                     before_sequence: Some(before),
                     limit: Limit::DEFAULT,
-                }));
-                if let Some(t) = &mut m.timeline {
-                    t.pending = Some(request_id);
+                });
+                if let Some(t) = &mut m.timeline
+                    && pending.is_some()
+                {
+                    t.pending = pending;
                     t.scope = scope;
                 }
             }

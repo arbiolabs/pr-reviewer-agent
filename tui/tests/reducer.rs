@@ -737,3 +737,23 @@ fn l_on_the_document_stays_put_and_tab_cycles_between_the_rail_and_the_document(
     assert_eq!(m.ui.focus, Pane::Sidebar);
     assert_eq!(m.ui.selected_pr, before.0);
 }
+
+#[test]
+fn nothing_but_hello_goes_out_before_the_welcome_and_a_snapshot_reissues_what_waited() {
+    let mut m = review_184();
+    update(&mut m, Msg::Net(NetEvent::Lost { reason: "eof".into(), retry_in_ms: Some(250) }));
+    update(&mut m, Msg::Net(NetEvent::Opened));
+    assert_eq!(m.link, Link::Negotiating);
+    let mut fx = press(&mut m, KeyCode::Enter);
+    press(&mut m, KeyCode::Esc);
+    fx.extend(press(&mut m, KeyCode::Char('3')));
+    fx.extend(press(&mut m, KeyCode::Char('4')));
+    fx.extend(press(&mut m, KeyCode::Char('k')));
+    assert_eq!(sent(&fx), Vec::<&str>::new(), "the server answers anything before welcome with an error");
+    assert_eq!(m.diff.as_ref().and_then(|d| d.error.as_ref()).map(|e| e.as_str()), Some("not connected; r retries"));
+
+    let welcome = read("fixtures/server.welcome.json").replace("epoch-1", "epoch-2");
+    assert_eq!(sent(&send(&mut m, &welcome)), ["snapshot.get", "finding.get"]);
+    let fx = send(&mut m, &read("fixtures/server.snapshot.json"));
+    assert_eq!(sent(&fx), ["diff.get", "timeline.get", "finding.get"]);
+}
