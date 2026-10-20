@@ -4,7 +4,8 @@ import type { ReviewMode, Severity } from "../domain/types.ts";
 /** Spec §16, the parts M1 reads, plus the verification thresholds §7 asks to make configurable. */
 export type Config = {
   review: {
-    publish_mode: "comment" | "dry_run" | "silent_no_findings";
+    /** `approval` stores the payload and parks the revision in AWAITING_APPROVAL until `pr-review approve` or the TUI approves it. */
+    publish_mode: "comment" | "dry_run" | "silent_no_findings" | "approval";
     on_jev_failure: ReviewMode;
     max_retries_per_phase: number;
     max_changed_files: number;
@@ -49,6 +50,10 @@ export type Config = {
     /** Ordered preference for picking among available models; `provider/*` matches a whole provider. */
     preferred: string[];
   };
+  control: {
+    /** Let the daemon accept review.start, review.retry, review.cancel and review.publish from the TUI (TUI_SPEC §15.2). */
+    allow_commands: boolean;
+  };
 };
 
 export const DEFAULT_CONFIG: Config = {
@@ -77,6 +82,7 @@ export const DEFAULT_CONFIG: Config = {
     default: "",
     preferred: ["anthropic/claude-opus-5-5", "anthropic/claude-fable-5-1", "anthropic/claude-sonnet-5-5", "openai/*"],
   },
+  control: { allow_commands: false },
 };
 
 /** Overlay `pr-review.config.json` (or `PR_REVIEW_CONFIG`) onto the defaults; every key must exist in the defaults with the same JSON type. */

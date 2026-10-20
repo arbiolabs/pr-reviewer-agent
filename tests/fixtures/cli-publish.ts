@@ -1,4 +1,5 @@
-// Runs `pr-review review --publish` in its own process against a fake GitHub; KILL makes it SIGKILL itself at a POST.
+// Runs a CLI command (default `review --publish`) in its own process against a fake GitHub; KILL makes it SIGKILL
+// itself at a review POST. CLI_ARGS (a JSON array) replaces the default arguments, for `approve`.
 import { main } from "../../src/cli/main.ts";
 import { GitHubClient } from "../../src/github/client.ts";
 import type { Fixture } from "../fixture.ts";
@@ -14,7 +15,8 @@ client.request = (async (method: string, path: string, options?: Parameters<type
   if (post && process.env.KILL === "after-response") process.kill(process.pid, "SIGKILL");
   return result;
 }) as typeof client.request;
-process.exitCode = await main(["review", "https://github.com/acme/shop/pull/1", "--publish", "--no-jev", "--model", "faux/reviewer"], {
+const args = process.env.CLI_ARGS ? (JSON.parse(process.env.CLI_ARGS) as string[]) : ["review", "https://github.com/acme/shop/pull/1", "--publish", "--no-jev", "--model", "faux/reviewer"];
+process.exitCode = await main(args, {
   github: client,
   models: fauxModels([readDiff(), submitDefect(fixture)]),
   isTTY: false,
