@@ -233,3 +233,52 @@ fn an_empty_timeline_says_whether_filters_hide_events() {
     let (frame, _) = render(&mut filtered.m, 120, 38);
     assert!(frame.contains("no events match the filters (f v P)"), "{frame}");
 }
+
+#[test]
+fn an_open_finding_event_shows_the_finding_not_the_row_again() {
+    use crossterm::event::KeyCode;
+    use pr_review_tui::protocol::EventBody;
+    let mut s = showcase(2).key(KeyCode::Char('t'));
+    let t = s.m.timeline.as_mut().unwrap();
+    let (seq, f) = t
+        .events
+        .iter()
+        .find_map(|e| match &e.body {
+            EventBody::FindingUpdated(f) if f.severity == pr_review_tui::protocol::Severity::Critical => {
+                Some((e.sequence.get(), f.clone()))
+            }
+            _ => None,
+        })
+        .unwrap();
+    t.selected = Some(seq);
+    let mut s = s.key(KeyCode::Enter);
+    let (frame, _) = render(&mut s.m, 120, 38);
+    let detail = s.m.details.get(&f.id).expect("opening a finding event fetches its detail");
+    let first_words: String = detail.explanation.as_str().split(' ').take(6).collect::<Vec<_>>().join(" ");
+    assert!(frame.contains(&format!("{}:{}", f.file, f.line.unwrap())), "file:line:\n{frame}");
+    assert!(frame.contains(&first_words), "the explanation:\n{frame}");
+    assert!(frame.contains("% confident"), "{frame}");
+}
+
+#[test]
+fn an_open_tool_event_shows_its_whole_summary() {
+    use crossterm::event::KeyCode;
+    use pr_review_tui::protocol::EventBody;
+    let mut s = showcase(2).key(KeyCode::Char('t'));
+    let t = s.m.timeline.as_mut().unwrap();
+    let (seq, summary) = t
+        .events
+        .iter()
+        .find_map(|e| match &e.body {
+            EventBody::ToolActivity(a) => Some((e.sequence.get(), a.summary.to_string())),
+            _ => None,
+        })
+        .unwrap();
+    t.selected = Some(seq);
+    let mut s = s.key(KeyCode::Enter);
+    let (frame, _) = render(&mut s.m, 80, 24);
+    let shown: String = frame.split_whitespace().collect::<Vec<_>>().join(" ");
+    let tail: String =
+        summary.split(' ').rev().take(3).collect::<Vec<_>>().into_iter().rev().collect::<Vec<_>>().join(" ");
+    assert!(shown.contains(&tail), "the summary's end {tail:?} shows at 80 columns:\n{frame}");
+}

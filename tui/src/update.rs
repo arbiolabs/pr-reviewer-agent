@@ -1261,9 +1261,13 @@ fn open(m: &mut Model, fx: &mut Vec<Effect>) {
             // Enter shows the detail under the row; on an open finding event it reads the finding, else it folds.
             match (t.open == Some(seq), finding) {
                 (true, Some(id)) => open_finding(m, id, fx),
-                (open, _) => {
+                (open, finding) => {
                     if let Some(t) = &mut m.timeline {
                         t.open = (!open).then_some(seq);
+                    }
+                    // The open detail quotes the finding's explanation.
+                    if let Some(id) = finding.filter(|id| !open && !m.details.contains_key(id)) {
+                        fetch_detail(m, &id, fx);
                     }
                 }
             }

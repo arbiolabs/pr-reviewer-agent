@@ -54,53 +54,74 @@ pub fn summary(c: &Ctx, e: &SequencedEvent) -> (String, Role) {
     }
 }
 
-/// The detail under an open row: where the event sits in the stream, then its whole text, as an inset block.
+/// The detail under an open row, as an inset block: what the event carries in full (the whole tool summary; for a
+/// finding its title, severity, place and the start of its explanation), then where it sits in the stream.
 fn detail_block(c: &Ctx, e: &SequencedEvent, phase: Option<Phase>, w: usize) -> Vec<Line<'static>> {
     let g = c.t.g();
     let surface = c.t.bg(Bg::Surface);
     let sep = format!("  {}  ", g.sep);
     let row = |spans: Vec<Span<'static>>| Line::from(filled(spans, w, surface));
-    let field = |k: &str, v: String| {
-        vec![
-            Span::styled(format!("{k} "), c.s(Role::Muted).patch(surface)),
-            Span::styled(v, c.s(Role::Normal).patch(surface)),
-        ]
-    };
-    let join = |parts: Vec<Vec<Span<'static>>>| {
-        let mut out = vec![Span::styled("  ", surface)];
-        for (i, p) in parts.into_iter().enumerate() {
-            if i > 0 {
-                out.push(Span::styled(sep.clone(), c.s(Role::Muted).patch(surface)));
-            }
-            out.extend(p);
-        }
-        out
+    let text = |t: &str, role: Role| -> Vec<Line<'static>> {
+        super::code::rich(c, t, w.saturating_sub(4), role)
+            .into_iter()
+            .map(|l| {
+                let mut s = vec![Span::styled("  ", surface)];
+                s.extend(l.into_iter().map(|x| x.patch_style(surface)));
+                row(s)
+            })
+            .collect()
     };
     let mut lines = vec![row(vec![])];
-    lines.push(row(join(vec![
-        field("sequence", e.sequence.get().to_string()),
-        field("after", e.prev_sequence.to_string()),
-        field("epoch", e.stream_epoch.to_string()),
-    ])));
-    let mut second = vec![field("at", e.occurred_at.to_string()), field("by", actor(e).into())];
+    match &e.body {
+        EventBody::FindingUpdated(f) => {
+            let (glyph, sev, role) = c.t.severity(f.severity);
+            let (status, _) = finding_status(f.status);
+            let cat = format!("{:?}", f.category).to_lowercase();
+            lines.extend(text(f.title.as_str(), Role::Title));
+            let head = format!("{glyph} {sev}  {cat}  {status} {} {:.0}% confident", g.sep, f.confidence * 100.0);
+            lines.extend(text(&head, role));
+            let place = match f.line {
+                Some(l) => format!("{}:{l}", f.file),
+                None => format!("{} (whole file)", f.file),
+            };
+            lines.extend(text(&place, Role::Accent));
+            lines.push(row(vec![]));
+            match c.m.details.get(&f.id) {
+                Some(d) => {
+                    let prose = text(d.explanation.as_str(), Role::Normal);
+                    let more = prose.len() > 4;
+                    lines.extend(prose.into_iter().take(4));
+                    if more {
+                        lines.push(row(vec![Span::styled(
+                            format!("  {}", g.ellipsis),
+                            c.s(Role::Muted).patch(surface),
+                        )]));
+                    }
+                }
+                None => lines.extend(text(&format!("loading the explanation{}", g.ellipsis), Role::Muted)),
+            }
+            lines.push(row(vec![]));
+            lines.push(row(vec![Span::styled("  Enter reads the finding", c.s(Role::Accent).patch(surface))]));
+        }
+        EventBody::ToolActivity(a) => {
+            lines.extend(text(a.tool.as_str(), Role::Accent));
+            lines.extend(text(a.summary.as_str(), Role::Normal));
+        }
+        _ => {
+            let (t, role) = summary(c, e);
+            lines.extend(text(&t, role));
+        }
+    }
+    lines.push(row(vec![]));
+    let mut place = vec![format!("at {}", e.occurred_at), format!("by {}", actor(e))];
     if let Some(p) = phase {
-        second.push(field("phase", phase_name(p).into()));
+        place.push(format!("phase {}", phase_name(p)));
     }
     if let Some(r) = &e.run_id {
-        second.push(field("run", r.short().to_string()));
+        place.push(format!("run {}", r.short()));
     }
-    lines.push(row(join(second)));
-    lines.push(row(vec![]));
-    let (text, role) = summary(c, e);
-    for l in super::code::rich(c, &text, w.saturating_sub(4), role) {
-        let mut s = vec![Span::styled("  ", surface)];
-        s.extend(l.into_iter().map(|x| x.patch_style(surface)));
-        lines.push(row(s));
-    }
-    if let EventBody::FindingUpdated(_) = e.body {
-        lines.push(row(vec![]));
-        lines.push(row(vec![Span::styled("  Enter reads the finding", c.s(Role::Accent).patch(surface))]));
-    }
+    place.push(format!("sequence {} after {} in {}", e.sequence.get(), e.prev_sequence, e.stream_epoch));
+    lines.extend(text(&place.join(&sep), Role::Muted));
     lines.push(row(vec![]));
     lines
 }
