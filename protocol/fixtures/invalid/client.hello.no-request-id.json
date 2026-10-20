@@ -1,0 +1,6 @@
+{
+  "type": "hello",
+  "protocolVersion": 1,
+  "client": "ratatui",
+  "capabilities": []
+}

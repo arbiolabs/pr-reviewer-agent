@@ -1,0 +1,10 @@
+{
+  "type": "hello",
+  "requestId": "req-hello",
+  "protocolVersion": 1,
+  "client": "ratatui",
+  "capabilities": [
+    "snapshots",
+    "events"
+  ]
+}

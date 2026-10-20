@@ -1,0 +1,57 @@
+{
+  "streamEpoch": "epoch-1",
+  "lastSequence": 11,
+  "resyncRequested": false,
+  "toolActivityCount": 0,
+  "prs": [
+    {
+      "id": "acme/shop#184",
+      "headSha": "4444444444444444444444444444444444444444",
+      "title": "Booking API"
+    },
+    {
+      "id": "acme/shop#185",
+      "headSha": "5555555555555555555555555555555555555555",
+      "title": "Fix cache eviction"
+    },
+    {
+      "id": "acme/shop#186",
+      "headSha": "6666666666666666666666666666666666666666",
+      "title": "Bump deps"
+    }
+  ],
+  "runs": [
+    {
+      "id": "rev-184-a",
+      "phase": "VERIFY",
+      "status": "RUNNING"
+    },
+    {
+      "id": "rev-185-a",
+      "phase": "COMPLETED",
+      "status": "COMPLETED"
+    }
+  ],
+  "findings": [
+    {
+      "id": "f-2",
+      "title": "Finding f-2",
+      "status": "DETECTED",
+      "stale": false
+    }
+  ],
+  "accounts": [
+    {
+      "id": "github.com/diego-arbio-dev",
+      "state": "ok",
+      "ghActive": true,
+      "selected": false
+    },
+    {
+      "id": "github.com/octo-work",
+      "state": "ok",
+      "ghActive": false,
+      "selected": true
+    }
+  ]
+}

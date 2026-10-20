@@ -6,12 +6,14 @@ import {
   OUTBOX_MACHINE,
   type OutboxEvent,
   type OutboxStatus,
+  REVIEW_EVENTS,
   REVIEW_MACHINE,
   type ReviewEvent,
   type ReviewState,
   TERMINAL_REVIEW_STATES,
 } from "../domain/machines.ts";
 import { type CandidateFinding, type ChangedFile, type Disposition, type PullInfo, stableId } from "../domain/types.ts";
+import { sanitize } from "../protocol/sanitize.ts";
 
 const MIGRATIONS_DIR = new URL("../../migrations/", import.meta.url);
 
@@ -95,6 +97,8 @@ const now = () => new Date().toISOString();
 
 /** Outbox events whose detail is why publication is not done; `last_error` keeps the latest one. */
 const OUTBOX_ERRORS: readonly OutboxEvent[] = ["NOT_SENT", "UNCERTAIN", "REJECTED", "ABANDON", "UNDECIDED"];
+// The journal also holds stream-only rows (tool activity, migration 050's triggers); a revision's audit trail is its transitions.
+const TRANSITIONS = `event IN (${REVIEW_EVENTS.map((e) => `'${e}'`).join(", ")})`;
 
 export class AppStore {
   readonly db: DatabaseSync;
@@ -309,8 +313,29 @@ export class AppStore {
 
   auditEvents(revisionId: string): AuditEvent[] {
     return this.db
-      .prepare("SELECT seq, from_state, event, to_state, detail, at FROM audit_events WHERE revision_id = ? ORDER BY seq")
+      .prepare(`SELECT seq, from_state, event, to_state, detail, at FROM audit_events WHERE revision_id = ? AND ${TRANSITIONS} ORDER BY seq`)
       .all(revisionId) as AuditEvent[];
+  }
+
+  getMeta(key: string): string | undefined {
+    return (this.db.prepare("SELECT value FROM meta WHERE key = ?").get(key) as { value: string } | undefined)?.value;
+  }
+
+  /** Set `meta` entries and journal one revision-less row (from_state = to_state = '-') in one transaction; returns its seq. */
+  journalMeta(event: "ACCOUNT_SELECTED" | "ACCOUNTS_DETECTED", detail: string, meta: Record<string, string>): number {
+    return this.tx(() => {
+      for (const [key, value] of Object.entries(meta)) this.db.prepare("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").run(key, value);
+      const row = this.db.prepare("INSERT INTO audit_events (revision_id, from_state, event, to_state, detail, at) VALUES (NULL, '-', ?, '-', ?, ?) RETURNING seq").get(event, detail, now()) as { seq: number };
+      return row.seq;
+    });
+  }
+
+  /** Journal one tool call for the control stream: tool name plus its path or query, never file contents. */
+  appendActivity(revisionId: string, tool: string, summary: string): void {
+    const detail = Array.from(sanitize(`${tool} ${summary}`).replace(/\s+/g, " ")).slice(0, 200).join("");
+    this.db
+      .prepare("INSERT INTO audit_events (revision_id, from_state, event, to_state, detail, at) SELECT id, state, 'TOOL_ACTIVITY', state, ?, ? FROM review_revisions WHERE id = ?")
+      .run(detail, now(), revisionId);
   }
 
   saveSnapshot(snapshot: Omit<Snapshot, "id">): string {

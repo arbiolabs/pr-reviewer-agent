@@ -1,0 +1,6 @@
+{
+  "type": "error",
+  "requestId": "req-finding",
+  "code": "NOT_FOUND",
+  "message": "no finding f-9"
+}

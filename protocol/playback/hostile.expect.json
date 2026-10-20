@@ -1,0 +1,38 @@
+{
+  "streamEpoch": "epoch-1",
+  "lastSequence": 4,
+  "resyncRequested": false,
+  "toolActivityCount": 1,
+  "prs": [
+    {
+      "id": "acme/shop#1",
+      "headSha": "1111111111111111111111111111111111111111",
+      "title": "red click done"
+    },
+    {
+      "id": "acme/shop#2",
+      "headSha": "2222222222222222222222222222222222222222",
+      "title": "Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor booking Refactor bo"
+    },
+    {
+      "id": "acme/shop#3",
+      "headSha": "3333333333333333333333333333333333333333",
+      "title": "修复竞态条件 🔥 👩‍💻 ｗｉｄｅ!"
+    }
+  ],
+  "runs": [
+    {
+      "id": "rev-1",
+      "phase": "VERIFY",
+      "status": "RUNNING"
+    }
+  ],
+  "findings": [
+    {
+      "id": "f-h",
+      "title": "safeEVIL  tail",
+      "status": "DETECTED",
+      "stale": false
+    }
+  ]
+}

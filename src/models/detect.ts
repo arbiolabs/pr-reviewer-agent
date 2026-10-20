@@ -3,6 +3,7 @@ import { homedir } from "node:os";
 import { delimiter, join } from "node:path";
 import type { AuthContext, CredentialStore, MutableModels } from "@earendil-works/pi-ai";
 import { builtinModels } from "@earendil-works/pi-ai/providers/all";
+import { detectGh } from "../github/accounts.ts";
 import { PiAuthFileStore, ReadOnlyCredentialStore } from "./credential-store.ts";
 import { type AvailableModel, listAvailableModels } from "./select.ts";
 
@@ -21,7 +22,7 @@ const KNOWN_HARNESSES: readonly { name: string; bin: string; sharesCredentials: 
   { name: "cursor-agent", bin: "cursor-agent", sharesCredentials: false },
 ];
 
-function which(bin: string, pathVar: string): string | undefined {
+export function which(bin: string, pathVar: string): string | undefined {
   for (const dir of pathVar.split(delimiter).filter(Boolean)) {
     const candidate = join(dir, bin);
     try {
@@ -64,5 +65,20 @@ export async function detectModels(options: DetectOptions): Promise<{ harnesses:
       : { name, installed: true, path, usable: false, note: "no credential in pi's auth file; run `pr-review login <provider>`" };
   });
   const models = await listAvailableModels(buildModels(store, options.env), options.preferred);
-  return { harnesses, models };
+  return { harnesses: [...harnesses, await ghHarness({ ...(options.env ?? process.env), PATH: options.pathVar ?? process.env.PATH })], models };
+}
+
+/** The gh row: not a model harness, but where GitHub tokens come from (see `pr-review accounts`). */
+async function ghHarness(env: Record<string, string | undefined>): Promise<HarnessInfo> {
+  const gh = await detectGh(env);
+  if (!gh.installed) return { name: "gh", installed: false, usable: false, note: "not on PATH; GitHub reads use GITHUB_TOKEN or no token" };
+  const active = gh.accounts.filter((a) => a.ghActive).map((a) => a.login);
+  const n = gh.accounts.length;
+  return {
+    name: "gh",
+    installed: true,
+    path: gh.path,
+    usable: gh.accounts.some((a) => a.state === "ok"),
+    note: `${n} account${n === 1 ? "" : "s"}${active.length ? ` (active: ${active.join(", ")})` : ""}`,
+  };
 }

@@ -58,6 +58,7 @@ export function createReviewTools(deps: ToolDeps): Extension {
         execute: async (_args, api, context) => {
           const ws = await workspace(api, context);
           const lines = ws.snapshot.changedFiles.map((f) => `${f.status} ${f.path}`);
+          deps.store.appendActivity(ws.revision.id, "get_changed_files", `${lines.length} files`);
           return text([...lines, ...ws.snapshot.limitations.map((l) => `note: ${l}`)].join("\n"));
         },
       }),
@@ -71,6 +72,7 @@ export function createReviewTools(deps: ToolDeps): Extension {
           const file = ws.files.get(assertSafePath(args.file));
           if (file === undefined) throw new Error(`${args.file} is not a changed file with a head side`);
           deps.store.markCodeRead(ws.revision.id);
+          deps.store.appendActivity(ws.revision.id, "read_diff", file.path);
           return text(capBytes(file.text));
         },
       }),
@@ -85,6 +87,7 @@ export function createReviewTools(deps: ToolDeps): Extension {
           const source = await ws.repo.show(sha, args.path);
           if (source === undefined) throw new Error(`${args.path} does not exist at ${args.ref} (${sha})`);
           deps.store.markCodeRead(ws.revision.id);
+          deps.store.appendActivity(ws.revision.id, "read_file", `${args.path} @${args.ref}`);
           return text(capBytes(`${args.path} @ ${sha}\n${numbered(source)}`));
         },
       }),
@@ -97,6 +100,7 @@ export function createReviewTools(deps: ToolDeps): Extension {
           const ws = await workspace(api, context);
           const found = await ws.repo.grep(args.query, args.scope);
           deps.store.markCodeRead(ws.revision.id);
+          deps.store.appendActivity(ws.revision.id, "search_code", args.scope ? `${args.query} in ${args.scope}` : args.query);
           return text(found);
         },
       }),
@@ -107,7 +111,9 @@ export function createReviewTools(deps: ToolDeps): Extension {
         replay: "safe",
         execute: async (args, api, context) => {
           const ws = await workspace(api, context);
-          return text(capBytes(await ws.repo.log(args.path, args.limit ?? 10)));
+          const log = await ws.repo.log(args.path, args.limit ?? 10);
+          deps.store.appendActivity(ws.revision.id, "git_history", `${args.path} limit ${args.limit ?? 10}`);
+          return text(capBytes(log));
         },
       }),
       defineTool({
@@ -118,6 +124,7 @@ export function createReviewTools(deps: ToolDeps): Extension {
         execute: async (_args, api, context) => {
           const ws = await workspace(api, context);
           const findings = deps.store.previousFindings(ws.revision.pr_id, ws.revision.id);
+          deps.store.appendActivity(ws.revision.id, "previous_findings", `${findings.length} found`);
           return text(findings.length === 0 ? "No earlier findings." : JSON.stringify(findings, null, 2));
         },
       }),

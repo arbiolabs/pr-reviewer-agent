@@ -1,0 +1,1 @@
+Command params are closed: an unknown param is rejected rather than ignored.

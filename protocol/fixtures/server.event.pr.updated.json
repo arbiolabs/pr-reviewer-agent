@@ -1,0 +1,19 @@
+{
+  "type": "event",
+  "streamEpoch": "epoch-1",
+  "sequence": 109,
+  "prevSequence": 108,
+  "occurredAt": "2026-10-20T13:01:49Z",
+  "prId": "acme/shop#184",
+  "eventType": "pr.updated",
+  "data": {
+    "id": "acme/shop#184",
+    "repository": "acme/shop",
+    "number": 184,
+    "title": "Booking API",
+    "headSha": "4444444444444444444444444444444444444444",
+    "baseSha": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+    "lifecycle": "ACTIVE",
+    "author": "octocat"
+  }
+}

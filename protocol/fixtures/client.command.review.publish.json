@@ -1,0 +1,11 @@
+{
+  "type": "command",
+  "requestId": "req-cmd",
+  "command": "review.publish",
+  "params": {
+    "runId": "rev-184-a",
+    "previewId": "preview-1",
+    "expectedHeadSha": "4444444444444444444444444444444444444444"
+  },
+  "idempotencyKey": "k3"
+}

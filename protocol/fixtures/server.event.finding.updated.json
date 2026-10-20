@@ -1,0 +1,25 @@
+{
+  "type": "event",
+  "streamEpoch": "epoch-1",
+  "sequence": 109,
+  "prevSequence": 108,
+  "occurredAt": "2026-10-20T13:01:49Z",
+  "prId": "acme/shop#184",
+  "runId": "rev-184-a",
+  "eventType": "finding.updated",
+  "data": {
+    "id": "f-1",
+    "prId": "acme/shop#184",
+    "runId": "rev-184-a",
+    "fingerprint": "fp-f-1",
+    "title": "Finding f-1",
+    "category": "correctness",
+    "severity": "high",
+    "status": "DETECTED",
+    "confidence": 0.82,
+    "file": "src/booking.ts",
+    "line": 42,
+    "evidenceCount": 1,
+    "stale": false
+  }
+}
