@@ -1,0 +1,361 @@
+import { mkdtempSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
+import { type FauxResponseStep, fauxAssistantMessage } from "@earendil-works/pi-ai";
+import { afterEach, beforeEach, expect, it } from "vitest";
+import { type Config, DEFAULT_CONFIG } from "../src/config/config.ts";
+import { openSource } from "../src/control/daemon.ts";
+import { EngineSource } from "../src/control/engine.ts";
+import { startControlServer } from "../src/control/server.ts";
+import type { ControlSource } from "../src/control/source.ts";
+import { GitHubClient } from "../src/github/client.ts";
+import { GitHubPullSource } from "../src/github/pulls.ts";
+import { AppStore } from "../src/persistence/store.ts";
+import { type Command, idempotencyKey, type ServerMessage } from "../src/protocol/v1.ts";
+import { type App, openApp } from "../src/runtime/app.ts";
+import { REVIEW_TASK_NAME } from "../src/runtime/task.ts";
+import { produced, TestClient } from "./control-client.ts";
+import { FakeGitHub } from "./fake-github.ts";
+import { createFixture, type Fixture } from "./fixture.ts";
+import { fauxModels, readDiff, submitDefect } from "./helpers.ts";
+
+let fake: FakeGitHub;
+let fixture: Fixture;
+const cleanup: (() => Promise<void> | void)[] = [];
+
+beforeEach(async () => {
+  fake = await FakeGitHub.start();
+  fixture = createFixture();
+  fake.setPull(fixture.pull);
+});
+afterEach(async () => {
+  for (const fn of cleanup.splice(0).reverse()) await fn();
+  await fake.close();
+});
+
+const approvalConfig: Config = { ...DEFAULT_CONFIG, review: { ...DEFAULT_CONFIG.review, publish_mode: "approval", retry_backoff_ms: 10 }, github: { ...DEFAULT_CONFIG.github, timeout_ms: 300 } };
+const newClient = () => new GitHubClient({ auth: { kind: "token", token: "ghp_test" }, baseUrl: fake.url, maxRetries: 2, backoffMs: 1, concurrency: 2, timeoutMs: 5000 });
+
+type Hosted = { app: App; source: EngineSource; dataDir: string; client: GitHubClient };
+
+/** An App on the fake GitHub, hosted by an EngineSource (not yet served). */
+async function host(options: { config?: Config; responses?: FauxResponseStep[]; allowCommands?: boolean; dataDir?: string; client?: GitHubClient } = {}): Promise<Hosted> {
+  const config = options.config ?? approvalConfig;
+  const client = options.client ?? newClient();
+  const pulls = new GitHubPullSource(() => client);
+  const dataDir = options.dataDir ?? mkdtempSync(join(tmpdir(), "engine-"));
+  const app = await openApp({
+    dataDir,
+    config,
+    pulls,
+    github: () => client,
+    engine: { skipped: "test" },
+    models: fauxModels(options.responses ?? [readDiff(), submitDefect(fixture)]),
+    model: { provider: "faux", modelId: "reviewer" },
+    reviewerVersion: "m1+faux/reviewer",
+    lockWaitMs: 0,
+  });
+  // No gh on PATH: journal sequences are pinned, and a detected account would add a row.
+  const source = await EngineSource.host(dataDir, app, { config, pulls, github: () => client, allowCommands: options.allowCommands ?? true, env: { PATH: "" } });
+  cleanup.push(() => source.close());
+  return { app, source, dataDir, client };
+}
+
+async function serve(source: ControlSource) {
+  const server = await startControlServer({ socketPath: join(mkdtempSync(join(tmpdir(), "ctl-")), "run", "s.sock"), source, pollMs: 20 });
+  cleanup.push(() => server.close());
+  const c = await TestClient.connect(server.path);
+  cleanup.push(() => c.close());
+  const welcome = await c.hello();
+  return { c, welcome };
+}
+
+type Ev = ReturnType<TestClient["events"]>[number];
+const describeEvent = (e: Ev) => {
+  const d = e.data as Record<string, unknown>;
+  switch (e.eventType) {
+    case "review.phase_changed":
+      return `phase ${d.from} -> ${d.to}`;
+    case "review.publication_changed":
+      return `publication ${d.status}${d.reviewId ? ` review ${d.reviewId}` : ""}`;
+    case "tool.activity":
+      return `tool ${d.tool}`;
+    case "finding.updated":
+      return `finding ${d.title}`;
+    case "pr.updated":
+      return `pr ${d.repository}#${d.number}`;
+    default:
+      return `${e.eventType} ${d.phase}${d.failureReason ? ` (${d.failureReason})` : ""}`;
+  }
+};
+const chained = (events: Ev[], from: number) => events.map((e) => e.prevSequence).every((p, i) => p === (i === 0 ? from : events[i - 1]!.sequence));
+
+let requests = 0;
+type Result = Extract<ServerMessage, { type: "command.result" }>;
+/** Send a command with the key the protocol fixes for it, and wait for its result. */
+async function command(c: TestClient, cmd: Omit<Command, "type" | "requestId" | "idempotencyKey">, key?: string): Promise<Result> {
+  const requestId = `cmd-${++requests}`;
+  const message = { type: "command", requestId, idempotencyKey: "", ...cmd } as Command;
+  message.idempotencyKey = key ?? idempotencyKey(message);
+  c.send(message);
+  return c.waitFor<Result>((m) => m.type === "command.result" && m.requestId === requestId);
+}
+/** A replay carries a fresh requestId; the operation is what must match. */
+const operation = ({ requestId: _, ...rest }: Result) => rest;
+const rejected = (code: string, message: string | RegExp) => expect.objectContaining({ status: "rejected", code, message: typeof message === "string" ? message : expect.stringMatching(message) });
+const taskStatuses = (app: App) => app.harness.commit(async (tx) => (await tx.scanTasks({ kind: REVIEW_TASK_NAME }, 100)).items.map((t) => t.state.status), BACKGROUND_CONTEXT);
+
+const UP_TO_APPROVAL = [
+  "pr acme/shop#1",
+  "run.started COLLECT_CONTEXT",
+  "phase COLLECT_CONTEXT -> TRIAGE",
+  "phase TRIAGE -> ANALYZE",
+  "tool read_diff",
+  "phase ANALYZE -> VERIFY",
+  "finding Order deletion endpoint skips the admin check",
+  "phase VERIFY -> PREPARE_PUBLICATION",
+  "publication publishing",
+  "phase PREPARE_PUBLICATION -> AWAITING_APPROVAL",
+  "publication awaiting_approval",
+];
+
+it("is read-only while another pr-review holds the data dir, and grants only account.select there", async () => {
+  const holder = await host({ allowCommands: true });
+  const notes: string[] = [];
+  const source = await openSource(
+    holder.dataDir,
+    true,
+    { openEngine: async (dataDir) => (await host({ dataDir, allowCommands: true })).source },
+    (t) => notes.push(t),
+  );
+  cleanup.push(() => source.close());
+  expect(source.mode).toBe("read-only");
+  expect(notes).toEqual([`pr-review daemon: read-only mode (another pr-review is running on ${holder.dataDir})\n`]);
+  const { c, welcome } = await serve(source);
+  expect(welcome).toMatchObject({ mode: "read-only", capabilities: ["account.select"] });
+  c.send({ type: "snapshot.get", requestId: "s" });
+  await c.waitFor((m) => m.type === "snapshot");
+  expect(await command(c, { command: "review.start", params: { prId: "p", expectedHeadSha: fixture.headSha } })).toEqual(
+    rejected("CAPABILITY_DENIED", `review.start is not available: another pr-review is running on ${holder.dataDir}`),
+  );
+  // The holder is still the engine: its own welcome grants the commands.
+  expect((await serve(holder.source)).welcome).toMatchObject({ mode: "engine", capabilities: ["account.select", "review.start", "review.retry", "review.cancel", "review.publish"] });
+}, 30_000);
+
+it("grants no command by default, the three review commands when enabled, and review.publish only in approval mode", async () => {
+  const off = await host({ allowCommands: false });
+  const { c, welcome } = await serve(off.source);
+  expect(welcome).toMatchObject({ mode: "engine", capabilities: ["account.select"] });
+  c.send({ type: "snapshot.get", requestId: "s" });
+  await c.waitFor((m) => m.type === "snapshot");
+  expect(await command(c, { command: "review.cancel", params: { runId: "r" } })).toEqual(
+    rejected("CAPABILITY_DENIED", "review.cancel is not enabled: start the daemon with --allow-commands or set control.allow_commands"),
+  );
+  const comment = await host({ config: { ...approvalConfig, review: { ...approvalConfig.review, publish_mode: "comment" } }, allowCommands: true });
+  const served = await serve(comment.source);
+  expect(served.welcome).toMatchObject({ mode: "engine", capabilities: ["account.select", "review.start", "review.retry", "review.cancel"] });
+  served.c.send({ type: "snapshot.get", requestId: "s" });
+  await served.c.waitFor((m) => m.type === "snapshot");
+  expect(await command(served.c, { command: "review.publish", params: { runId: "r", previewId: "p", expectedHeadSha: "h" } })).toEqual(
+    rejected("CAPABILITY_DENIED", 'review.publish needs review.publish_mode "approval" (it is "comment")'),
+  );
+}, 30_000);
+
+it("approves a review end to end over the socket: parked, previewed, published once, replay-safe, streamed without gaps", async () => {
+  const h = await host();
+  const { c } = await serve(h.source);
+  const prId = h.app.store.upsertPull(fixture.pull);
+  c.send({ type: "snapshot.get", requestId: "s" });
+  const snap = await c.waitFor<Extract<ServerMessage, { type: "snapshot" }>>((m) => m.type === "snapshot");
+
+  // Guards before anything runs.
+  expect(await command(c, { command: "review.start", params: { prId: "nope", expectedHeadSha: fixture.headSha } })).toEqual(rejected("NOT_FOUND", "no PR nope"));
+  expect(await command(c, { command: "review.start", params: { prId, expectedHeadSha: "0".repeat(40) } })).toEqual(rejected("REVISION_STALE", `the head of acme/shop#1 is now ${fixture.headSha}`));
+  expect(await command(c, { command: "review.start", params: { prId, expectedHeadSha: fixture.headSha } }, "k")).toEqual(rejected("INVALID_REQUEST", `idempotencyKey must be review.start:${prId}:${fixture.headSha}`));
+  expect(await command(c, { command: "review.retry", params: { runId: "nope" } })).toEqual(rejected("NOT_FOUND", "no run nope"));
+  expect(await command(c, { command: "review.publish", params: { runId: "nope", previewId: "p", expectedHeadSha: fixture.headSha } })).toEqual(rejected("NOT_FOUND", "no run nope"));
+  expect(await taskStatuses(h.app)).toEqual([]);
+
+  const started = await command(c, { command: "review.start", params: { prId, expectedHeadSha: fixture.headSha } });
+  expect(started).toMatchObject({ status: "accepted", operationId: expect.stringMatching(/^review\.start:[0-9a-f]{32}$/) });
+  const runId = (started as { operationId: string }).operationId.slice("review.start:".length);
+  await c.waitFor((m) => m.type === "event" && m.eventType === "review.publication_changed" && (m.data as { status: string }).status === "awaiting_approval");
+  expect(c.events().map(describeEvent)).toEqual(UP_TO_APPROVAL);
+  expect(chained(c.events(), snap.sequence)).toBe(true);
+  expect([h.app.store.revision(runId)!.state, fake.postAttempts]).toEqual(["AWAITING_APPROVAL", 0]);
+
+  // A replayed start answers the same operation; a running or parked head cannot be started, retried or cancelled wrongly.
+  expect(operation(await command(c, { command: "review.start", params: { prId, expectedHeadSha: fixture.headSha } }))).toEqual(operation(started));
+  expect(await taskStatuses(h.app)).toEqual(["terminal"]);
+  expect(await command(c, { command: "review.retry", params: { runId } })).toEqual(rejected("INVALID_TRANSITION", "MANUAL_RETRY is not legal in AWAITING_APPROVAL"));
+
+  c.send({ type: "publication.get", requestId: "pub", runId });
+  const preview = await c.waitFor<Extract<ServerMessage, { type: "publication.preview" }>>((m) => m.type === "publication.preview");
+  const outbox = h.app.store.outboxForRevision(runId)!;
+  const payload = JSON.parse(outbox.payload_json) as { body: string; comments: unknown[] };
+  expect(preview).toEqual({
+    type: "publication.preview",
+    requestId: "pub",
+    runId,
+    previewId: outbox.payload_hash,
+    headSha: fixture.headSha,
+    body: payload.body,
+    comments: payload.comments,
+    event: "COMMENT",
+    status: "awaiting_approval",
+  });
+  expect(preview.comments).toEqual([{ path: "src/routes/orders.ts", line: 5, side: "RIGHT", body: expect.stringContaining("**High: Order deletion endpoint skips the admin check**") }]);
+  c.send({ type: "publication.get", requestId: "pub404", runId: "nope" });
+  expect(await c.waitFor((m) => m.type === "error" && m.requestId === "pub404")).toMatchObject({ code: "NOT_FOUND", message: "no stored publication for run nope" });
+
+  expect(await command(c, { command: "review.publish", params: { runId, previewId: "stale-preview", expectedHeadSha: fixture.headSha } })).toEqual(
+    rejected("CONFLICT", `preview stale-preview is not the stored payload ${outbox.payload_hash}`),
+  );
+  expect(await command(c, { command: "review.publish", params: { runId, previewId: outbox.payload_hash, expectedHeadSha: "1".repeat(40) } })).toEqual(
+    rejected("REVISION_STALE", `revision ${runId} reviewed ${fixture.headSha}, not ${"1".repeat(40)}`),
+  );
+  expect(fake.postAttempts).toBe(0);
+
+  const approved = await command(c, { command: "review.publish", params: { runId, previewId: outbox.payload_hash, expectedHeadSha: fixture.headSha } });
+  expect(approved).toMatchObject({ status: "accepted", operationId: `review.publish:${runId}` });
+  await c.waitFor((m) => m.type === "event" && m.eventType === "review.completed");
+  expect(c.events().map(describeEvent).slice(UP_TO_APPROVAL.length)).toEqual([
+    "phase AWAITING_APPROVAL -> PUBLISH",
+    "publication publishing",
+    "publication published review 1000",
+    "finding Order deletion endpoint skips the admin check",
+    "review.completed COMPLETED",
+  ]);
+  expect(chained(c.events(), snap.sequence)).toBe(true);
+  const published = c.events().find((e) => e.eventType === "review.publication_changed" && (e.data as { status: string }).status === "published")!;
+  expect(published.data).toEqual({ runId, status: "published", reviewId: 1000, url: "https://github.com/acme/shop/pull/1#pullrequestreview-1000" });
+  expect([fake.postAttempts, fake.reviews.length, h.app.store.revision(runId)!.state]).toEqual([1, 1, "COMPLETED"]);
+
+  // The replayed approval is the recorded one: same answer, no second attempt, no second POST.
+  expect(operation(await command(c, { command: "review.publish", params: { runId, previewId: outbox.payload_hash, expectedHeadSha: fixture.headSha } }))).toEqual(operation(approved));
+  expect([fake.postAttempts, await taskStatuses(h.app)]).toEqual([1, ["terminal", "terminal"]]);
+  expect(h.app.store.db.prepare("SELECT idempotency_key, command FROM control_commands ORDER BY created_at").all()).toEqual([
+    { idempotency_key: `review.start:${prId}:${fixture.headSha}`, command: "review.start" },
+    { idempotency_key: `review.publish:${runId}:${outbox.payload_hash}`, command: "review.publish" },
+  ]);
+  expect(operation(await command(c, { command: "review.start", params: { prId, expectedHeadSha: fixture.headSha } }))).toEqual(operation(started));
+  c.send({ type: "publication.get", requestId: "pub2", runId });
+  expect(await c.waitFor((m) => m.type === "publication.preview" && m.requestId === "pub2")).toMatchObject({ status: "published" });
+}, 60_000);
+
+it("supersedes a parked review when the head moves before approval, with nothing posted", async () => {
+  const h = await host();
+  const { c } = await serve(h.source);
+  const prId = h.app.store.upsertPull(fixture.pull);
+  c.send({ type: "snapshot.get", requestId: "s" });
+  await c.waitFor((m) => m.type === "snapshot");
+  const started = (await command(c, { command: "review.start", params: { prId, expectedHeadSha: fixture.headSha } })) as { operationId: string };
+  const runId = started.operationId.slice("review.start:".length);
+  await c.waitFor((m) => m.type === "event" && m.eventType === "review.phase_changed" && (m.data as { to: string }).to === "AWAITING_APPROVAL");
+  const previewId = h.app.store.outboxForRevision(runId)!.payload_hash;
+
+  fake.setPull({ ...fixture.pull, headSha: "f".repeat(40) });
+  expect(await command(c, { command: "review.publish", params: { runId, previewId, expectedHeadSha: fixture.headSha } })).toEqual(
+    rejected("REVISION_STALE", `the head of acme/shop#1 is now ${"f".repeat(40)}; revision ${runId} is superseded`),
+  );
+  await c.waitFor((m) => m.type === "event" && m.eventType === "run.superseded");
+  expect(c.events().map(describeEvent).slice(-2)).toEqual(["publication failed", "run.superseded SUPERSEDED"]);
+  expect(await command(c, { command: "review.publish", params: { runId, previewId, expectedHeadSha: fixture.headSha } })).toEqual(rejected("INVALID_TRANSITION", "APPROVED is not legal in SUPERSEDED"));
+  expect([fake.postAttempts, h.app.store.outboxForRevision(runId)!.status]).toEqual([0, "failed"]);
+  // The old head's start is a recorded key, so it replays; the new head starts a new run.
+  expect(operation(await command(c, { command: "review.start", params: { prId, expectedHeadSha: fixture.headSha } }))).toEqual(operation(started as Result));
+  const next = await command(c, { command: "review.start", params: { prId, expectedHeadSha: "f".repeat(40) } });
+  expect(next).toMatchObject({ status: "accepted", operationId: expect.stringMatching(/^review\.start:[0-9a-f]{32}$/) });
+  expect((next as { operationId: string }).operationId).not.toBe(started.operationId);
+}, 60_000);
+
+it("cancels a running review from the TUI with that reason, refuses while publishing, and retries a failed one", async () => {
+  let inFlight!: () => void;
+  const reachedAnalyze = new Promise<void>((resolve) => (inFlight = resolve));
+  const blocked: FauxResponseStep = (_context, options) =>
+    new Promise((resolve) => {
+      inFlight();
+      options?.signal?.addEventListener("abort", () => resolve(fauxAssistantMessage("", { stopReason: "aborted" })), { once: true });
+    });
+  const h = await host({ responses: [readDiff(), blocked, readDiff(), submitDefect(fixture)] });
+  const { c } = await serve(h.source);
+  const prId = h.app.store.upsertPull(fixture.pull);
+  c.send({ type: "snapshot.get", requestId: "s" });
+  await c.waitFor((m) => m.type === "snapshot");
+  const started = (await command(c, { command: "review.start", params: { prId, expectedHeadSha: fixture.headSha } })) as { operationId: string };
+  const runId = started.operationId.slice("review.start:".length);
+  await reachedAnalyze;
+  expect(await command(c, { command: "review.cancel", params: { runId } })).toEqual({ type: "command.result", requestId: expect.any(String), status: "accepted", operationId: `review.cancel:${runId}` });
+  const failed = await c.waitFor<Ev>((m) => m.type === "event" && m.eventType === "run.failed");
+  expect(failed.data).toMatchObject({ id: runId, status: "FAILED", failureReason: "cancelled from the TUI" });
+  expect(await taskStatuses(h.app)).toEqual(["terminal"]);
+  expect(await command(c, { command: "review.cancel", params: { runId } })).toMatchObject({ status: "accepted", operationId: `review.cancel:${runId}` });
+  expect(await command(c, { command: "review.cancel", params: { runId: "nope" } })).toEqual(rejected("NOT_FOUND", "no run nope"));
+
+  const retried = await command(c, { command: "review.retry", params: { runId } });
+  expect(retried).toMatchObject({ status: "accepted", operationId: `review.retry:${runId}` });
+  await c.waitFor((m) => m.type === "event" && m.eventType === "review.phase_changed" && (m.data as { to: string }).to === "AWAITING_APPROVAL");
+  expect(h.app.store.auditEvents(runId).find((e) => e.event === "MANUAL_RETRY")!.detail).toBe("manual override: tui via daemon (retry 1)");
+  expect(operation(await command(c, { command: "review.retry", params: { runId } }))).toEqual(operation(retried));
+  expect(await taskStatuses(h.app)).toEqual(["terminal", "terminal"]);
+
+  h.app.store.db.prepare("UPDATE review_revisions SET state = 'PUBLISH' WHERE id = ?").run(runId);
+  expect(await command(c, { command: "review.cancel", params: { runId } }, `review.cancel:${runId}`)).toMatchObject({ status: "accepted" });
+  h.app.store.db.prepare("DELETE FROM control_commands WHERE idempotency_key = ?").run(`review.cancel:${runId}`);
+  expect(await command(c, { command: "review.cancel", params: { runId } })).toEqual(rejected("CONFLICT", "cannot cancel in PUBLISH: a GitHub write may be in flight"));
+  h.app.store.db.prepare("UPDATE review_revisions SET state = 'AWAITING_APPROVAL' WHERE id = ?").run(runId);
+}, 60_000);
+
+it("recovers an approval the daemon was stopped in the middle of, with one POST", async () => {
+  const client = newClient();
+  const request = client.request.bind(client);
+  let armed = false;
+  let release: () => void = () => {};
+  const blocked = new Promise<void>((resolve) => {
+    client.request = (async (method: string, path: string, options?: Parameters<typeof request>[2]) => {
+      if (armed && method === "GET" && path.includes("/reviews")) {
+        armed = false;
+        resolve();
+        await new Promise<void>((_, reject) => (release = () => reject(new Error("daemon stopping"))));
+      }
+      return request(method, path, options);
+    }) as typeof client.request;
+  });
+  const slow: Config = { ...approvalConfig, review: { ...approvalConfig.review, retry_backoff_ms: 3000 } };
+  const first = await host({ config: slow, client });
+  const { c } = await serve(first.source);
+  const prId = first.app.store.upsertPull(fixture.pull);
+  c.send({ type: "snapshot.get", requestId: "s" });
+  await c.waitFor((m) => m.type === "snapshot");
+  const started = (await command(c, { command: "review.start", params: { prId, expectedHeadSha: fixture.headSha } })) as { operationId: string };
+  const runId = started.operationId.slice("review.start:".length);
+  await c.waitFor((m) => m.type === "event" && m.eventType === "review.phase_changed" && (m.data as { to: string }).to === "AWAITING_APPROVAL");
+  const previewId = first.app.store.outboxForRevision(runId)!.payload_hash;
+
+  armed = true;
+  expect(await command(c, { command: "review.publish", params: { runId, previewId, expectedHeadSha: fixture.headSha } })).toMatchObject({ status: "accepted" });
+  await blocked;
+  // The daemon stops while the publisher waits on GitHub: APPROVED is recorded, nothing was posted.
+  release();
+  for (const fn of cleanup.splice(0).reverse()) await fn();
+  const stopped = AppStore.open(join(first.dataDir, "app.sqlite"));
+  expect([stopped.revision(runId)!.state, stopped.outboxForRevision(runId)!.status, fake.postAttempts]).toEqual(["PUBLISH", "pending", 0]);
+  stopped.close();
+
+  const second = await host({ config: slow, dataDir: first.dataDir, responses: [] });
+  const again = await serve(second.source);
+  again.c.send({ type: "snapshot.get", requestId: "s" });
+  const snap = await again.c.waitFor<Extract<ServerMessage, { type: "snapshot" }>>((m) => m.type === "snapshot");
+  expect(snap.runs.map((r) => [r.id, r.phase])).toEqual([[runId, "PUBLISH"]]);
+  await again.c.waitFor((m) => m.type === "event" && m.eventType === "review.completed", 0, 20_000);
+  expect(again.c.events().map(describeEvent)).toEqual(["publication published review 1000", "finding Order deletion endpoint skips the admin check", "review.completed COMPLETED"]);
+  expect([fake.postAttempts, fake.reviews.length, second.app.store.outboxForRevision(runId)!.status]).toEqual([1, 1, "published"]);
+  // The replayed approval still answers the recorded operation.
+  expect(await command(again.c, { command: "review.publish", params: { runId, previewId, expectedHeadSha: fixture.headSha } })).toMatchObject({ status: "accepted", operationId: `review.publish:${runId}` });
+  expect(fake.postAttempts).toBe(1);
+}, 60_000);
+
+it("produced the M3 server messages, each passing the v1 schema", () => {
+  for (const type of ["publication.preview", "event:review.publication_changed", "event:run.failed", "event:run.superseded", "command.result"]) expect(produced.has(type), type).toBe(true);
+});

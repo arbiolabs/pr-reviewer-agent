@@ -4,7 +4,7 @@ import { connect, createServer, type Socket } from "node:net";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { Compile } from "typebox/compile";
-import { ClientMessage, type ErrorCode, MAX_LINE_BYTES, PROTOCOL_VERSION, type ServerMessage } from "../protocol/v1.ts";
+import { ClientMessage, type ErrorCode, idempotencyKey, MAX_LINE_BYTES, PROTOCOL_VERSION, type ServerMessage } from "../protocol/v1.ts";
 import { ControlError, type ControlSource } from "./source.ts";
 
 const SERVER_VERSION = (JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as { version: string }).version;
@@ -156,18 +156,25 @@ export async function startControlServer(options: ServerOptions): Promise<Contro
       case "finding.get":
         send(c, { type: "finding.detail", requestId, finding: await source.finding(message.findingId) });
         return;
+      case "publication.get": {
+        if (!source.publication) throw new ControlError("NOT_FOUND", `no stored publication for run ${message.runId}`);
+        send(c, { type: "publication.preview", requestId, ...(await source.publication(message.runId)) });
+        return;
+      }
       case "timeline.get":
         send(c, { type: "timeline.page", requestId, ...source.timeline(message) });
         return;
       case "command": {
         const reject = (code: ErrorCode, text: string) => send(c, { type: "command.result", requestId, status: "rejected", code, message: text });
-        // The server is the gate, whatever the UI shows: account.select is the only write, and only on a source that has it.
-        if (message.command !== "account.select" || !source.selectAccount) return reject("CAPABILITY_DENIED", `${message.command} is not available in this version`);
-        if (c.phase !== "streaming") return reject("CONFLICT", "send snapshot.get or resume before account.select");
-        const { accountId } = message.params;
-        if (message.idempotencyKey !== `account.select:${accountId}`) return reject("INVALID_REQUEST", `idempotencyKey must be account.select:${accountId}`);
+        // The server is the gate, whatever the UI shows: only a capability the welcome granted runs, and only while streaming.
+        const granted = message.command === "account.select" ? Boolean(source.selectAccount) : Boolean(source.command) && (source.capabilities?.() ?? []).includes(message.command);
+        if (!granted) return reject("CAPABILITY_DENIED", source.unavailable?.(message.command) ?? `${message.command} is not available in this version`);
+        if (c.phase !== "streaming") return reject("CONFLICT", `send snapshot.get or resume before ${message.command}`);
+        const expectedKey = idempotencyKey(message);
+        if (message.idempotencyKey !== expectedKey) return reject("INVALID_REQUEST", `idempotencyKey must be ${expectedKey}`);
         try {
-          send(c, { type: "command.result", requestId, status: "accepted", operationId: await source.selectAccount(accountId) });
+          const operationId = message.command === "account.select" ? await source.selectAccount!(message.params.accountId) : await source.command!(message);
+          send(c, { type: "command.result", requestId, status: "accepted", operationId });
         } catch (error) {
           if (error instanceof ControlError) return reject(error.code, error.message);
           throw error;
@@ -210,7 +217,8 @@ export async function startControlServer(options: ServerOptions): Promise<Contro
         protocolVersion: PROTOCOL_VERSION,
         serverVersion: SERVER_VERSION,
         sessionId: randomUUID(),
-        capabilities: source.selectAccount ? ["account.select"] : [],
+        capabilities: [...(source.selectAccount ? ["account.select"] : []), ...(source.capabilities?.() ?? [])],
+        ...(source.mode ? { mode: source.mode } : {}),
         streamEpoch: source.epoch(),
         latestSequence: source.latestSequence(),
       });

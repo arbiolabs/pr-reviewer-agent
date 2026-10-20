@@ -3,21 +3,50 @@ import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { AppDbSource } from "./appdb.ts";
+import type { EngineSource } from "./engine.ts";
 import { defaultSocketPath, startControlServer } from "./server.ts";
-import { FixtureSource } from "./source.ts";
+import { type ControlSource, FixtureSource } from "./source.ts";
+
+export type DaemonDeps = {
+  /** Open the engine for `dataDir`; throws `another pr-review is running on ...` while another process holds the lock. */
+  openEngine?: (dataDir: string, allowCommands: boolean) => Promise<EngineSource>;
+};
 
 /**
- * `pr-review daemon`: serve the control socket in the foreground until SIGINT or SIGTERM. It takes no data-dir lock, so
- * it runs beside `pr-review review`; its only app DB writes are account rows, and no client action reaches a durable task.
+ * Engine mode when this process can take the data-dir lock, read-only mode otherwise (TUI_SPEC §2). An engine that
+ * fails to open for another reason (no model, say) also leaves the daemon read-only, and says why on every command.
  */
-export async function runDaemon(args: string[], dataDir: string, err: (text: string) => void): Promise<number> {
-  const { values } = parseArgs({ args, options: { socket: { type: "string" }, fixture: { type: "string" }, data: { type: "string" }, heartbeat: { type: "string" } } });
+export async function openSource(dataDir: string, allowCommands: boolean, deps: DaemonDeps, err: (text: string) => void): Promise<ControlSource> {
+  if (deps.openEngine) {
+    try {
+      return await deps.openEngine(dataDir, allowCommands);
+    } catch (error) {
+      const why = error instanceof Error ? error.message : String(error);
+      err(`pr-review daemon: read-only mode (${why})\n`);
+      return AppDbSource.open(dataDir, process.env, why);
+    }
+  }
+  return AppDbSource.open(dataDir);
+}
+
+/**
+ * `pr-review daemon`: serve the control socket in the foreground until SIGINT or SIGTERM. In engine mode it hosts the
+ * review engine and runs the granted commands in process; stopping it suspends the reviews in flight, which resume on
+ * the next engine start. Quitting a client never touches it.
+ */
+export async function runDaemon(args: string[], dataDir: string, err: (text: string) => void, deps: DaemonDeps = {}): Promise<number> {
+  const { values } = parseArgs({
+    args,
+    options: { socket: { type: "string" }, fixture: { type: "string" }, data: { type: "string" }, heartbeat: { type: "string" }, "allow-commands": { type: "boolean" } },
+  });
   const heartbeat = Number(values.heartbeat ?? 15);
   if (!(heartbeat > 0)) throw new Error("--heartbeat takes a positive number of seconds");
-  const source = values.fixture ? FixtureSource.load(values.fixture) : AppDbSource.open(values.data ?? dataDir);
+  const dir = values.data ?? dataDir;
+  const source: ControlSource = values.fixture ? FixtureSource.load(values.fixture) : await openSource(dir, values["allow-commands"] ?? false, deps, err);
   try {
     const server = await startControlServer({ socketPath: values.socket ?? defaultSocketPath(), source, heartbeatMs: heartbeat * 1000 });
-    err(`pr-review daemon: listening on ${server.path} (${values.fixture ? `fixture ${values.fixture}` : `data dir ${values.data ?? dataDir}`})\n`);
+    const where = values.fixture ? `fixture ${values.fixture}` : `data dir ${dir}, ${source.mode ?? "read-only"} mode`;
+    err(`pr-review daemon: listening on ${server.path} (${where}${source.capabilities?.().length ? ", commands enabled" : ""})\n`);
     await new Promise((resolve) => {
       process.once("SIGINT", resolve);
       process.once("SIGTERM", resolve);
@@ -25,7 +54,7 @@ export async function runDaemon(args: string[], dataDir: string, err: (text: str
     await server.close();
     return 0;
   } finally {
-    source.close();
+    await source.close();
   }
 }
 

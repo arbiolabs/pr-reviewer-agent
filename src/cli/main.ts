@@ -5,6 +5,7 @@ import type { AuthInteraction, CredentialStore, Models } from "@earendil-works/p
 import { createTypeSafeClient, createZenClient } from "jev-systemone";
 import { type Config, loadConfig, saveDefaultModel } from "../config/config.ts";
 import { runDaemon, runTui } from "../control/daemon.ts";
+import { EngineSource } from "../control/engine.ts";
 import { type Account, ACCOUNT_KEY, chooseAccount, detectGh, listAccounts, planGithubAuth, resolveGithubAuth } from "../github/accounts.ts";
 import { clientFor, type GitHubClient } from "../github/client.ts";
 import { GitHubPullSource, parsePullRef, parsePullUrl, type PullSource } from "../github/pulls.ts";
@@ -80,7 +81,7 @@ export async function main(argv: string[], deps: CliDeps = {}): Promise<number> 
       case "login":
         return await login(rest, deps, out);
       case "daemon":
-        return await runDaemon(rest, dataDir, err);
+        return await runDaemon(rest, dataDir, err, { openEngine: (dir, allowCommands) => openEngine(dir, allowCommands, deps, err) });
       case "tui":
         return runTui(rest);
       default:
@@ -272,6 +273,37 @@ async function reconcile(args: string[], deps: CliDeps, dataDir: string, out: Ou
   }
 }
 
+/** One Jev engine serves every repository, so the keyless tier is used only when private diffs may go there. */
+function jevFromEnv(config: Config, deps: CliDeps): JevRoute {
+  if (process.env.TYPESAFE_API_KEY) return deps.engine ?? new JevDecisionEngine(createTypeSafeClient());
+  return config.jev.allow_keyless_for_private ? (deps.engine ?? new JevDecisionEngine(createZenClient())) : { skipped: "jev_skipped_private_repo" };
+}
+
+/**
+ * The daemon's engine, configured like `serve` from the environment: the GitHub auth `resolveGithubAuth` picks, the
+ * model resolved without a prompt, and the data-dir lock. Throws while another pr-review holds that lock.
+ */
+async function openEngine(dataDir: string, allowCommands: boolean, deps: CliDeps, err: (t: string) => void): Promise<EngineSource> {
+  const config = loadConfig();
+  const github = await withStore(dataDir, (store) => githubFromEnv(config, store));
+  const pulls = deps.pulls ?? new GitHubPullSource(github.clientFor);
+  const { models, ref } = await resolveModel(config, deps, undefined, false, err);
+  const report = (error: unknown) => err(`note: ${error instanceof Error ? error.message : String(error)}\n`);
+  const app = await openApp({
+    dataDir,
+    config,
+    pulls,
+    gitToken: (installationId) => github.clientFor(installationId).token(),
+    github: github.clientFor,
+    engine: jevFromEnv(config, deps),
+    models,
+    model: splitRef(ref),
+    reviewerVersion: `${REVIEWER_CODE_VERSION}+${ref}`,
+    onReport: report,
+  });
+  return EngineSource.host(dataDir, app, { config, pulls, github: github.clientFor, allowCommands: allowCommands || config.control.allow_commands, report });
+}
+
 /** `serve`: webhook receiver, worker and reviews in one process, configured from the environment. */
 async function serve(deps: CliDeps, dataDir: string, err: (t: string) => void): Promise<number> {
   const config = loadConfig();
@@ -280,13 +312,6 @@ async function serve(deps: CliDeps, dataDir: string, err: (t: string) => void): 
   const github = await withStore(dataDir, (store) => githubFromEnv(config, store));
   const pulls = new GitHubPullSource(github.clientFor);
   const { models, ref } = await resolveModel(config, deps, undefined, false, err);
-  // One engine serves every repository, so the keyless Jev tier is used only when private diffs may go there.
-  const keyed = Boolean(process.env.TYPESAFE_API_KEY);
-  const engine: JevRoute = keyed
-    ? new JevDecisionEngine(createTypeSafeClient())
-    : config.jev.allow_keyless_for_private
-      ? new JevDecisionEngine(createZenClient())
-      : { skipped: "jev_skipped_private_repo" };
   const report = (error: unknown) => err(`note: ${error instanceof Error ? error.message : String(error)}\n`);
   const app = await openApp({
     dataDir,
@@ -294,7 +319,7 @@ async function serve(deps: CliDeps, dataDir: string, err: (t: string) => void): 
     pulls,
     gitToken: (installationId) => github.clientFor(installationId).token(),
     github: github.clientFor,
-    engine,
+    engine: jevFromEnv(config, deps),
     models,
     model: splitRef(ref),
     reviewerVersion: `${REVIEWER_CODE_VERSION}+${ref}`,

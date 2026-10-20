@@ -1,12 +1,13 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { COORDINATOR_STATES, FINDING_STATES, REVIEW_STATES, type ReviewState } from "../domain/machines.ts";
+import { COORDINATOR_STATES, FINDING_STATES, PUBLICATION_STATUSES, publicationStatus, REVIEW_STATES, type ReviewState } from "../domain/machines.ts";
 import type { CandidateFinding } from "../domain/types.ts";
 import { ACCOUNT_KEY, chooseAccount, detectGh, type Env, type GhDetection, listAccounts } from "../github/accounts.ts";
-import { AppStore, type PullRow, type RevisionRow } from "../persistence/store.ts";
+import { AppStore, type OutboxRow, type PullRow, type RevisionRow } from "../persistence/store.ts";
+import type { ReviewPayload } from "../publish/publisher.ts";
 import { sanitize } from "../protocol/sanitize.ts";
-import type { Account, Finding, FindingDetail, Pr, Run, SequencedEvent } from "../protocol/v1.ts";
+import type { Account, Finding, FindingDetail, Pr, PublicationChange, PublicationPreview, Run, SequencedEvent } from "../protocol/v1.ts";
 import { isMissingObject, offlineReadsSupported, PinnedRepo } from "../source/git.ts";
 import { type DiffPage, pageDiff, parseDiffFiles } from "./diff.ts";
 import { ControlError, type ControlSource, type DiffRequest, type Snapshot, type TimelinePage, type TimelineRequest } from "./source.ts";
@@ -78,8 +79,8 @@ export function excerpt(content: string, start: number, end: number): string | u
  * writes are account rows, through `writer`: the selection and a journal row whenever gh's accounts change.
  */
 export class AppDbSource implements ControlSource {
-  private readonly db: DatabaseSync;
-  private readonly writer: AppStore;
+  protected readonly db: DatabaseSync;
+  protected readonly writer: AppStore;
   private readonly dataDir: string;
   private readonly env: Env;
   private readonly streamEpoch: string;
@@ -87,20 +88,31 @@ export class AppDbSource implements ControlSource {
   /** File contents by repo, sha and path, least recently used first. Misses are not cached: a later sync may add the blob. */
   private readonly blobs = new Map<string, string>();
   private gh: { at: number; detection: GhDetection } | undefined;
+  readonly mode: "engine" | "read-only" = "read-only";
+  /** Why this daemon is read-only, for the CAPABILITY_DENIED message. */
+  private readonly readOnlyReason: string;
 
-  private constructor(dataDir: string, writer: AppStore, env: Env) {
+  protected constructor(dataDir: string, writer: AppStore, env: Env, readOnlyReason = "the daemon is read-only") {
     this.dataDir = dataDir;
     this.writer = writer;
     this.env = env;
+    this.readOnlyReason = readOnlyReason;
     this.db = new DatabaseSync(join(dataDir, "app.sqlite"), { readOnly: true });
     this.db.exec("PRAGMA busy_timeout = 5000");
     this.streamEpoch = (this.db.prepare("SELECT value FROM meta WHERE key = 'stream_epoch'").get() as { value: string }).value;
   }
 
-  /** Creates or migrates the app DB first, so the epoch exists before any review ran. `env` is where gh and GITHUB_TOKEN are looked up. */
-  static open(dataDir: string, env: Env = process.env): AppDbSource {
+  /**
+   * Creates or migrates the app DB first, so the epoch exists before any review ran. `env` is where gh and GITHUB_TOKEN
+   * are looked up; `readOnlyReason` is why this daemon could not host the engine.
+   */
+  static open(dataDir: string, env: Env = process.env, readOnlyReason?: string): AppDbSource {
     mkdirSync(dataDir, { recursive: true });
-    return new AppDbSource(dataDir, AppStore.open(join(dataDir, "app.sqlite")), env);
+    return new AppDbSource(dataDir, AppStore.open(join(dataDir, "app.sqlite")), env, readOnlyReason);
+  }
+
+  unavailable(command: string): string {
+    return `${command} is not available: ${this.readOnlyReason}`;
   }
 
   /** Re-run gh detection when the cached one is older than `maxAgeMs`; a change from what this data dir last saw is journaled. */
@@ -252,13 +264,45 @@ export class AppDbSource implements ControlSource {
     return clean(pageDiff(this.diffCache.files, request));
   }
 
-  close(): void {
+  /** TUI_SPEC §5.5: exactly what the outbox will post, so the approval names what the user saw. */
+  async publication(runId: string): Promise<PublicationPreview> {
+    return this.read(() => {
+      const revision = this.db.prepare("SELECT * FROM review_revisions WHERE id = ?").get(runId) as RevisionRow | undefined;
+      const outbox = revision && this.outboxOf(runId);
+      if (!revision || !outbox) throw new ControlError("NOT_FOUND", `no stored publication for run ${runId}`);
+      const payload = JSON.parse(outbox.payload_json) as ReviewPayload;
+      return {
+        runId,
+        previewId: outbox.payload_hash,
+        headSha: payload.commit_id,
+        body: payload.body,
+        comments: payload.comments,
+        event: payload.event,
+        status: publicationStatus(revision.state, outbox.status),
+      };
+    });
+  }
+
+  close(): void | Promise<void> {
     this.db.close();
     this.writer.close();
   }
 
   private revision(id: string): RevisionRow {
     return this.db.prepare("SELECT * FROM review_revisions WHERE id = ?").get(id) as RevisionRow;
+  }
+
+  private outboxOf(revisionId: string): OutboxRow | undefined {
+    return this.db.prepare("SELECT * FROM publication_outbox WHERE revision_id = ? ORDER BY updated_at DESC LIMIT 1").get(revisionId) as OutboxRow | undefined;
+  }
+
+  /** `review.publication_changed` data: the journaled status, plus the review GitHub gave us once it is known. */
+  private publicationChange(rev: RevisionRow, status: string): PublicationChange {
+    const known = (PUBLICATION_STATUSES as readonly string[]).includes(status) ? (status as PublicationChange["status"]) : "failed";
+    const reviewId = this.outboxOf(rev.id)?.github_review_id;
+    if (!reviewId) return { runId: rev.id, status: known };
+    const pr = this.db.prepare("SELECT repo_full_name, number FROM pull_requests WHERE id = ?").get(rev.pr_id) as { repo_full_name: string; number: number };
+    return { runId: rev.id, status: known, reviewId, url: `https://github.com/${pr.repo_full_name}/pull/${pr.number}#pullrequestreview-${reviewId}` };
   }
 
   private pr(pull: PullRow, at?: RevisionRow): Pr {
@@ -323,6 +367,8 @@ export class AppDbSource implements ControlSource {
         return { ...ids, eventType: "finding.updated", data: findingAt(rev.id) };
       case "FINDING_UPDATED":
         return { ...ids, eventType: "finding.updated", data: findingAt(null) };
+      case "PUBLICATION_CHANGED":
+        return { ...ids, eventType: "review.publication_changed", data: this.publicationChange(rev, row.detail ?? "") };
     }
     const { from_state: from, to_state: to, event } = row;
     if (!isPhase(from) || !isPhase(to)) return { ...ids, eventType: `journal.${event}`, data: { from, to, event, detail: row.detail } };
