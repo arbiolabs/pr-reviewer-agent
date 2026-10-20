@@ -35,6 +35,8 @@ export type ReviewTaskDeps = {
   engine: DecisionEngine | undefined;
   config: Config;
   cacheDir: string;
+  /** Sent to git only as a per-command header on clone and fetch, for private repositories. */
+  githubToken?: string | undefined;
   model: ModelRef;
   tools: Extension;
   workspace(revisionId: string): Promise<Workspace>;
@@ -103,7 +105,7 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
       return finished(revision.id, "SUPERSEDED");
     }
     const pr = store.pullById(revision.pr_id)!;
-    const repo = new PinnedRepo(await syncRepo(deps.cacheDir, pr.repo_full_name, pull.cloneUrl, pr.number), revision.base_sha, revision.head_sha);
+    const repo = new PinnedRepo(await syncRepo(deps.cacheDir, pr.repo_full_name, pull.cloneUrl, pr.number, deps.githubToken), revision.base_sha, revision.head_sha);
     await repo.assertCommitsPresent();
     const [diff, changedFiles] = [await repo.diff(), await repo.changedFiles()];
     const limitations: string[] = [];

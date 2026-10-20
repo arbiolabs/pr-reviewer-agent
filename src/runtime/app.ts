@@ -19,6 +19,7 @@ export type AppOptions = {
   dataDir: string;
   config: Config;
   pulls: PullSource;
+  githubToken?: string | undefined;
   engine: DecisionEngine | undefined;
   models: Models;
   model: ModelRef;

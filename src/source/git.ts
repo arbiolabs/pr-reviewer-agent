@@ -37,13 +37,24 @@ export function capBytes(text: string, cap = DEFAULT_OUTPUT_CAP): string {
  * ponytail: blob:none fetches blobs lazily one round trip at a time, so search_code over a large tree is slow;
  * prefetch the head tree's blobs if that becomes the bottleneck.
  */
-export async function syncRepo(cacheDir: string, fullName: string, cloneUrl: string, prNumber: number): Promise<string> {
+export async function syncRepo(cacheDir: string, fullName: string, cloneUrl: string, prNumber: number, token?: string): Promise<string> {
   const dir = join(cacheDir, `${fullName}.git`);
-  if (!existsSync(join(dir, "HEAD"))) {
-    mkdirSync(dirname(dir), { recursive: true });
-    await run("git", ["clone", "--bare", "--filter=blob:none", "--quiet", cloneUrl, dir], { env: GIT_ENV });
+  // GitHub's git endpoint rejects `Bearer` for user tokens and takes Basic x-access-token. `-c` before the subcommand
+  // lives only for this command: not in the environment, not in the bare repo's config.
+  const basic = token === undefined ? undefined : Buffer.from(`x-access-token:${token}`).toString("base64");
+  const auth = basic === undefined ? [] : ["-c", `http.extraHeader=Authorization: Basic ${basic}`];
+  try {
+    if (!existsSync(join(dir, "HEAD"))) {
+      mkdirSync(dirname(dir), { recursive: true });
+      await run("git", [...auth, "clone", "--bare", "--filter=blob:none", "--quiet", cloneUrl, dir], { env: GIT_ENV });
+    }
+    await git(dir, [...auth, "fetch", "--quiet", "--filter=blob:none", "origin", "+refs/heads/*:refs/heads/*", `+refs/pull/${prNumber}/head:refs/pull/${prNumber}/head`]);
+  } catch (error) {
+    // execFile's message echoes the command line; rethrow a plain Error so no field still carries the header.
+    let message = error instanceof Error ? error.message : String(error);
+    for (const secret of [token, basic]) if (secret) message = message.replaceAll(secret, "***");
+    throw new Error(message);
   }
-  await git(dir, ["fetch", "--quiet", "--filter=blob:none", "origin", "+refs/heads/*:refs/heads/*", `+refs/pull/${prNumber}/head:refs/pull/${prNumber}/head`]);
   return dir;
 }
 

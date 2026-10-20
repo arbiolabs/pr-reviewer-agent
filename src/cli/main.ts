@@ -72,7 +72,9 @@ async function review(args: string[], deps: CliDeps, dataDir: string, out: (t: s
   }
   const config = loadConfig();
   const ref = parsePullUrl(positionals[0]!);
-  const pulls = deps.pulls ?? new GitHubPullSource(await resolveGitHubToken());
+  // A test's fake pull source serves local repositories; only the real GitHub source needs the token.
+  const githubToken = deps.pulls ? undefined : await resolveGitHubToken();
+  const pulls = deps.pulls ?? new GitHubPullSource(githubToken);
   const pull = await pulls.getPull(ref);
 
   const models = deps.models ?? buildModels(deps.credentials ?? new PiAuthFileStore());
@@ -91,6 +93,7 @@ async function review(args: string[], deps: CliDeps, dataDir: string, out: (t: s
     dataDir,
     config,
     pulls,
+    githubToken,
     engine,
     models,
     model: splitRef(choice.ref),
