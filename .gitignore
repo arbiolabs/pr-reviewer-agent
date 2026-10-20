@@ -3,3 +3,4 @@ dist/
 *.sqlite*
 .data/
 todo.md
+tui/target/
