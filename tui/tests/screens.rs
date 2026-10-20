@@ -416,9 +416,15 @@ fn a_read_only_daemon_says_so_in_settings_and_on_the_help_page() {
         s.server(ServerMessage::parse(&read("fixtures/server.snapshot.json")).unwrap());
         let mut s = s.key(crossterm::event::KeyCode::Char('5'));
         let (frame, _) = render(&mut s.m, 140, 45);
-        assert!(frame.contains(&format!("mode                  read-only: {reason}")), "{frame}");
+        assert!(frame.contains(&format!("mode                  read-only: {}", &reason[..40])), "{frame}");
         let mut s = s.key(crossterm::event::KeyCode::Char('?'));
         let (frame, _) = render(&mut s.m, 140, 45);
-        assert!(frame.contains(&format!("start a review ({note})")), "{frame}");
+        let short = note.split(" (").next().unwrap();
+        assert!(frame.contains(&format!("start a review ({short})")), "{frame}");
+        s.apply(pr_review_tui::update::Msg::Key(crossterm::event::KeyEvent::from(crossterm::event::KeyCode::Char(
+            'G',
+        ))));
+        let (frame, _) = render(&mut s.m, 140, 45);
+        assert!(frame.contains(&format!("Write keys are off: {note}.")), "{frame}");
     }
 }

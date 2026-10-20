@@ -113,7 +113,9 @@ pub fn help_lines(c: &Ctx, body: Rect) -> Vec<Line<'static>> {
             let (what, key_role, role) = match offered {
                 true => (what.to_string(), Role::Accent, Role::Normal),
                 false => {
+                    // The short form fits a help column; the last lines carry the whole reason.
                     let why = c.m.server.as_ref().and_then(|s| s.commands_off()).unwrap_or("not offered");
+                    let why = why.split(" (").next().unwrap_or(why);
                     (format!("{what} ({why})"), Role::Muted, Role::Muted)
                 }
             };
@@ -192,7 +194,14 @@ pub fn help_lines(c: &Ctx, body: Rect) -> Vec<Line<'static>> {
     lines.push(Line::from(c.span("  Click a PR, finding, file, line or event to select it.", Role::Normal)));
     lines.push(Line::from(c.span("  Click it again to open it. Click a view in the footer.", Role::Normal)));
     lines.push(Line::from(c.span("  The wheel scrolls the page under it.", Role::Normal)));
-    lines.push(Line::from(c.span("  Keys marked (not offered) are off on this daemon.", Role::Muted)));
+    let off = c.m.server.as_ref().and_then(|s| s.commands_off());
+    lines.push(Line::from(c.span(
+        match off {
+            Some(why) => format!("  Write keys are off: {why}."),
+            None => "  Keys marked (not offered) are off on this daemon.".into(),
+        },
+        Role::Muted,
+    )));
     lines
 }
 
