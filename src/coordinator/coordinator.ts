@@ -1,5 +1,5 @@
 import { transition } from "../domain/machine.ts";
-import { COORDINATOR_MACHINE, type CoordinatorEvent, type CoordinatorState, type ReviewState } from "../domain/machines.ts";
+import { COORDINATOR_MACHINE, type CoordinatorEvent, type CoordinatorState, type ReviewState, TERMINAL_REVIEW_STATES } from "../domain/machines.ts";
 import type { PullInfo } from "../domain/types.ts";
 import { GitHubError } from "../github/client.ts";
 import type { PullRef, PullSource } from "../github/pulls.ts";
@@ -54,6 +54,7 @@ export function routeEvent(eventType: string, payload: Payload, botLogin: string
 }
 
 const LIFECYCLE: readonly CoordinatorEvent[] = ["PR_OPENED", "PR_REOPENED", "PR_CLOSED", "PR_MERGED"];
+const ASKS: readonly CoordinatorEvent[] = ["REVIEW_REQUESTED", "COMMENT_CREATED"];
 
 /** The lifecycle event GitHub's current state implies, whatever the delivery said (§9.2 step 5). */
 function lifecycleEvent(status: CoordinatorState, live: PullInfo): CoordinatorEvent | undefined {
@@ -131,7 +132,9 @@ export class Coordinator {
       store.setPullSchedule(prId, status, open ? this.deps.now() + this.deps.debounceMs : null);
       // A closed or merged PR supersedes every in-flight revision, whatever its head.
       this.supersedeOlder(prId, open ? live.headSha : undefined);
-      store.markWebhookProcessed(deliveryId, `${trigger.event} -> ${status}`);
+      // A request to review a head that already has a final review starts nothing; say so. Only an admin retry reopens it.
+      const reviewed = ASKS.includes(trigger.event) ? store.revisionsForPr(prId).filter((r) => r.head_sha === live.headSha && TERMINAL_REVIEW_STATES.includes(r.state)).at(-1) : undefined;
+      store.markWebhookProcessed(deliveryId, reviewed ? `already_reviewed:${reviewed.state}` : `${trigger.event} -> ${status}`);
     });
     if (!done) throw new Error(`PR ${prId} is leased by another worker; delivery ${deliveryId} waits`);
   }

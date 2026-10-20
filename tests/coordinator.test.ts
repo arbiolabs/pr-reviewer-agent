@@ -293,3 +293,16 @@ it("keeps ticking while an abort hangs: another PR's delivery is processed on th
   await Promise.race([h.coordinator.tick(), new Promise((resolve) => setTimeout(resolve, 500))]);
   expect([settled, h.aborted, outcomes(h.store).at(-1)]).toEqual(["returned", ["task-a"], { delivery_id: "d3", attempts: 0, outcome: "PR_OPENED -> ACTIVE" }]);
 });
+
+it("records a review request or mention for an already reviewed head as already_reviewed, not a silent ACTIVE", async () => {
+  const h = harness();
+  h.pr("opened");
+  await h.coordinator.tick();
+  h.advance(30_000);
+  await h.coordinator.tick();
+  h.store.db.prepare("UPDATE review_revisions SET state = 'FAILED'").run();
+  h.pr("review_requested");
+  h.deliver("issue_comment", { action: "created", issue: { number: 1, pull_request: {} }, comment: { body: "@durable-review review", user: { login: "alice" } } });
+  await h.coordinator.tick();
+  expect(outcomes(h.store).slice(1).map((o) => (o as { outcome: string }).outcome)).toEqual(["already_reviewed:FAILED", "already_reviewed:FAILED"]);
+});
