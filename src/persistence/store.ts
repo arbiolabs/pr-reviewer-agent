@@ -38,7 +38,8 @@ export type RevisionRow = {
 export const REOPENINGS = ["MANUAL_RETRY", "APPROVED"] as const;
 export type Reopening = (typeof REOPENINGS)[number];
 
-export type CommandRecord = { command: string; operationId: string };
+/** `attempt` is the run attempt the key is bound to (migration 053); null when the key names a head, not an attempt. */
+export type CommandRecord = { command: string; operationId: string; attempt: number | null };
 
 export type PullRow = {
   id: string;
@@ -357,15 +358,20 @@ export class AppStore {
 
   /** The accepted result recorded under a control command's idempotency key, if any. */
   commandResult(idempotencyKey: string): CommandRecord | undefined {
-    const row = this.db.prepare("SELECT command, result_json FROM control_commands WHERE idempotency_key = ?").get(idempotencyKey) as { command: string; result_json: string } | undefined;
-    return row ? { command: row.command, operationId: (JSON.parse(row.result_json) as { operationId: string }).operationId } : undefined;
+    const row = this.db.prepare("SELECT command, result_json, attempt FROM control_commands WHERE idempotency_key = ?").get(idempotencyKey) as
+      | { command: string; result_json: string; attempt: number | null }
+      | undefined;
+    return row ? { command: row.command, operationId: (JSON.parse(row.result_json) as { operationId: string }).operationId, attempt: row.attempt } : undefined;
   }
 
-  /** Record an accepted control command; a later replay of the key answers this result and does nothing else. */
+  /** Record an accepted control command for its attempt; a replay of the key on that attempt answers this result and does nothing else. */
   recordCommand(idempotencyKey: string, record: CommandRecord): void {
     this.db
-      .prepare("INSERT INTO control_commands (idempotency_key, command, result_json, created_at) VALUES (?, ?, ?, ?) ON CONFLICT (idempotency_key) DO NOTHING")
-      .run(idempotencyKey, record.command, JSON.stringify({ operationId: record.operationId }), now());
+      .prepare(
+        `INSERT INTO control_commands (idempotency_key, command, result_json, attempt, created_at) VALUES (?, ?, ?, ?, ?)
+         ON CONFLICT (idempotency_key) DO UPDATE SET result_json = excluded.result_json, attempt = excluded.attempt, created_at = excluded.created_at`,
+      )
+      .run(idempotencyKey, record.command, JSON.stringify({ operationId: record.operationId }), record.attempt, now());
   }
 
   auditEvents(revisionId: string): AuditEvent[] {

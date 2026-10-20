@@ -268,42 +268,75 @@ it("supersedes a parked review when the head moves before approval, with nothing
   expect((next as { operationId: string }).operationId).not.toBe(started.operationId);
 }, 60_000);
 
-it("cancels a running review from the TUI with that reason, refuses while publishing, and retries a failed one", async () => {
-  let inFlight!: () => void;
-  const reachedAnalyze = new Promise<void>((resolve) => (inFlight = resolve));
+it("binds each key to one attempt: cancel, retry and approve act again on a later attempt and replay within one", async () => {
+  const reached: (() => void)[] = [];
   const blocked: FauxResponseStep = (_context, options) =>
     new Promise((resolve) => {
-      inFlight();
+      reached.shift()!();
       options?.signal?.addEventListener("abort", () => resolve(fauxAssistantMessage("", { stopReason: "aborted" })), { once: true });
     });
-  const h = await host({ responses: [readDiff(), blocked, readDiff(), submitDefect(fixture)] });
+  const analyzing = () => new Promise<void>((resolve) => reached.push(resolve));
+  // Attempts 0 and 1 are cancelled mid-ANALYZE; attempt 2 submits; the retries after that reuse its candidates.
+  const h = await host({ responses: [readDiff(), blocked, readDiff(), blocked, readDiff(), submitDefect(fixture)] });
   const { c } = await serve(h.source);
   const prId = h.app.store.upsertPull(fixture.pull);
   c.send({ type: "snapshot.get", requestId: "s" });
   await c.waitFor((m) => m.type === "snapshot");
+  const failures = () => c.events().filter((e) => e.eventType === "run.failed").map((e) => (e.data as { failureReason: string }).failureReason);
+  const failed = (n: number) => c.waitFor(() => failures().length >= n, 0, 5000);
+  const parked = (from: number) => c.waitFor((m) => m.type === "event" && m.eventType === "review.phase_changed" && (m.data as { to: string }).to === "AWAITING_APPROVAL", from);
+  const cancel = () => command(c, { command: "review.cancel", params: { runId } });
+  const retry = () => command(c, { command: "review.retry", params: { runId } });
+  const publish = () => command(c, { command: "review.publish", params: { runId, previewId, expectedHeadSha: fixture.headSha } });
+
+  let inAnalyze = analyzing();
   const started = (await command(c, { command: "review.start", params: { prId, expectedHeadSha: fixture.headSha } })) as { operationId: string };
   const runId = started.operationId.slice("review.start:".length);
-  await reachedAnalyze;
-  expect(await command(c, { command: "review.cancel", params: { runId } })).toEqual({ type: "command.result", requestId: expect.any(String), status: "accepted", operationId: `review.cancel:${runId}` });
-  const failed = await c.waitFor<Ev>((m) => m.type === "event" && m.eventType === "run.failed");
-  expect(failed.data).toMatchObject({ id: runId, status: "FAILED", failureReason: "cancelled from the TUI" });
-  expect(await taskStatuses(h.app)).toEqual(["terminal"]);
-  expect(await command(c, { command: "review.cancel", params: { runId } })).toMatchObject({ status: "accepted", operationId: `review.cancel:${runId}` });
+  let previewId = "";
+  await inAnalyze;
+  const cancelled = await cancel();
+  expect(cancelled).toEqual({ type: "command.result", requestId: expect.any(String), status: "accepted", operationId: `review.cancel:${runId}` });
+  await failed(1);
+  expect([failures(), await taskStatuses(h.app)]).toEqual([["cancelled from the TUI"], ["terminal"]]);
+  expect(operation(await cancel())).toEqual(operation(cancelled));
   expect(await command(c, { command: "review.cancel", params: { runId: "nope" } })).toEqual(rejected("NOT_FOUND", "no run nope"));
 
-  const retried = await command(c, { command: "review.retry", params: { runId } });
+  inAnalyze = analyzing();
+  const retried = await retry();
   expect(retried).toMatchObject({ status: "accepted", operationId: `review.retry:${runId}` });
-  await c.waitFor((m) => m.type === "event" && m.eventType === "review.phase_changed" && (m.data as { to: string }).to === "AWAITING_APPROVAL");
+  await inAnalyze;
   expect(h.app.store.auditEvents(runId).find((e) => e.event === "MANUAL_RETRY")!.detail).toBe("manual override: tui via daemon (retry 1)");
-  expect(operation(await command(c, { command: "review.retry", params: { runId } }))).toEqual(operation(retried));
-  expect(await taskStatuses(h.app)).toEqual(["terminal", "terminal"]);
+  expect(operation(await retry())).toEqual(operation(retried));
+  // The same cancel key now names the retried attempt: it cancels again instead of replaying.
+  expect(await cancel()).toMatchObject({ status: "accepted", operationId: `review.cancel:${runId}` });
+  await failed(2);
+  expect(failures()).toEqual(["cancelled from the TUI", "cancelled from the TUI"]);
+  // And the same retry key reopens the twice-failed revision once more.
+  let mark = c.messages.length;
+  expect(await retry()).toMatchObject({ status: "accepted", operationId: `review.retry:${runId}` });
+  await parked(mark);
+  expect([h.app.store.reopenings(runId), await taskStatuses(h.app)]).toEqual([["MANUAL_RETRY", "MANUAL_RETRY"], ["terminal", "terminal", "terminal"]]);
+
+  // GitHub rejects the approved POST; the retried attempt parks again on the same payload, and the same approval key posts it.
+  previewId = h.app.store.outboxForRevision(runId)!.payload_hash;
+  fake.postBehaviors.push("unprocessable");
+  const approved = await publish();
+  expect(approved).toMatchObject({ status: "accepted", operationId: `review.publish:${runId}` });
+  await failed(3);
+  expect([fake.postAttempts, fake.reviews.length, h.app.store.outboxForRevision(runId)!.status, failures().at(-1)]).toEqual([1, 0, "failed", expect.stringMatching(/^GitHub rejected the review: /)]);
+  expect(operation(await publish())).toEqual(operation(approved));
+  mark = c.messages.length;
+  expect(await retry()).toMatchObject({ status: "accepted", operationId: `review.retry:${runId}` });
+  await parked(mark);
+  expect(h.app.store.outboxForRevision(runId)!.payload_hash).toBe(previewId);
+  expect(await publish()).toMatchObject({ status: "accepted", operationId: `review.publish:${runId}` });
+  await c.waitFor((m) => m.type === "event" && m.eventType === "review.completed");
+  expect([fake.postAttempts, fake.reviews.length, h.app.store.revision(runId)!.state]).toEqual([2, 1, "COMPLETED"]);
+  expect(h.app.store.reopenings(runId)).toEqual(["MANUAL_RETRY", "MANUAL_RETRY", "APPROVED", "MANUAL_RETRY", "APPROVED"]);
 
   h.app.store.db.prepare("UPDATE review_revisions SET state = 'PUBLISH' WHERE id = ?").run(runId);
-  expect(await command(c, { command: "review.cancel", params: { runId } }, `review.cancel:${runId}`)).toMatchObject({ status: "accepted" });
-  h.app.store.db.prepare("DELETE FROM control_commands WHERE idempotency_key = ?").run(`review.cancel:${runId}`);
-  expect(await command(c, { command: "review.cancel", params: { runId } })).toEqual(rejected("CONFLICT", "cannot cancel in PUBLISH: a GitHub write may be in flight"));
-  h.app.store.db.prepare("UPDATE review_revisions SET state = 'AWAITING_APPROVAL' WHERE id = ?").run(runId);
-}, 60_000);
+  expect(await cancel()).toEqual(rejected("CONFLICT", "cannot cancel in PUBLISH: a GitHub write may be in flight"));
+}, 90_000);
 
 it("recovers an approval the daemon was stopped in the middle of, with one POST", async () => {
   const client = newClient();

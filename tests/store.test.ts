@@ -33,7 +33,7 @@ it("derives the same revision id on reopen and applies migrations once", () => {
   store.close();
   const reopened = AppStore.open(path);
   expect(reopened.ensureRevision(key).id).toBe(first.id);
-  expect(reopened.db.prepare("SELECT name FROM schema_migrations").all()).toEqual([{ name: "001_init.sql" }, { name: "002_code_read.sql" }, { name: "003_publication.sql" }, { name: "004_coordinator.sql" }, { name: "005_webhook_retry.sql" }, { name: "006_meta.sql" }, { name: "050_stream_meta.sql" }, { name: "051_journal_without_revision.sql" }, { name: "052_control_commands.sql" }]);
+  expect(reopened.db.prepare("SELECT name FROM schema_migrations").all()).toEqual([{ name: "001_init.sql" }, { name: "002_code_read.sql" }, { name: "003_publication.sql" }, { name: "004_coordinator.sql" }, { name: "005_webhook_retry.sql" }, { name: "006_meta.sql" }, { name: "050_stream_meta.sql" }, { name: "051_journal_without_revision.sql" }, { name: "052_control_commands.sql" }, { name: "053_control_command_attempt.sql" }]);
   expect(reopened.revisionsForPr(prId).length).toBe(1);
 });
 
@@ -145,12 +145,14 @@ it("abandons the unsent outbox when an awaiting revision is superseded or cancel
   expect([store.outbox(outbox.id)!.status, store.reopenings(revision.id)]).toEqual(["pending", ["MANUAL_RETRY"]]);
 });
 
-it("records an accepted command once per idempotency key and keeps a cancel reason", () => {
+it("records an accepted command per idempotency key and attempt, and keeps a cancel reason", () => {
   const { store } = openFresh();
-  expect(store.commandResult("review.start:p:h")).toBe(undefined);
-  store.recordCommand("review.start:p:h", { command: "review.start", operationId: "review.start:rev-1" });
-  store.recordCommand("review.start:p:h", { command: "review.start", operationId: "review.start:rev-2" });
-  expect(store.commandResult("review.start:p:h")).toEqual({ command: "review.start", operationId: "review.start:rev-1" });
+  expect(store.commandResult("review.retry:r")).toBe(undefined);
+  store.recordCommand("review.retry:r", { command: "review.retry", operationId: "review.retry:r", attempt: 1 });
+  expect(store.commandResult("review.retry:r")).toEqual({ command: "review.retry", operationId: "review.retry:r", attempt: 1 });
+  // The same key accepted for a later attempt replaces the record.
+  store.recordCommand("review.retry:r", { command: "review.retry", operationId: "review.retry:r", attempt: 2 });
+  expect(store.commandResult("review.retry:r")).toEqual({ command: "review.retry", operationId: "review.retry:r", attempt: 2 });
   const prId = store.upsertPull(pull);
   const rev = store.ensureRevision({ prId, baseSha: pull.baseSha, headSha: pull.headSha, policyVersion: "1", reviewerVersion: "m1" });
   expect(store.revision(rev.id)!.cancel_reason).toBe(null);

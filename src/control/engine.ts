@@ -65,12 +65,29 @@ export class EngineSource extends AppDbSource {
     return `${command} needs review.publish_mode "approval" (it is "${this.options.config.review.publish_mode}")`;
   }
 
+  /**
+   * The run attempt a command's key is bound to, counted in reopenings: a cancel ends the current attempt, a retry or
+   * an approval opens the next one, and a start names a head rather than an attempt. A key recorded under another
+   * attempt is a new request, so the same retry acts again once the attempt it opened has failed, and the same cancel
+   * or approval acts on an attempt opened since.
+   */
+  private attemptOf(request: ReviewCommand): number | null {
+    if (!("runId" in request.params)) return null;
+    const revision = this.app.store.revision(request.params.runId);
+    if (!revision) return null;
+    const n = this.app.store.reopenings(revision.id).length;
+    if (request.command === "review.retry") return revision.state === "FAILED" ? n + 1 : n;
+    if (request.command === "review.publish") return revision.state === "AWAITING_APPROVAL" ? n + 1 : n;
+    return n;
+  }
+
   async command(request: ReviewCommand): Promise<string> {
     const { app, options } = this;
     const key = request.idempotencyKey;
+    const attempt = this.attemptOf(request);
     const replay = app.store.commandResult(key);
-    if (replay) return replay.operationId;
-    const record = (operationId: string) => () => app.store.recordCommand(key, { command: request.command, operationId });
+    if (replay && replay.attempt === attempt) return replay.operationId;
+    const record = (operationId: string) => () => app.store.recordCommand(key, { command: request.command, operationId, attempt });
     try {
       switch (request.command) {
         case "review.start": {
