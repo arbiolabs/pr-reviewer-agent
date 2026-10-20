@@ -186,7 +186,7 @@ fn help_marks_write_keys_the_daemon_does_not_grant() {
     // The showcase daemon grants account.select only.
     let mut s = showcase(2).key(crossterm::event::KeyCode::Char('?'));
     let (frame, _) = render(&mut s.m, 120, 38);
-    for what in ["start a review", "retry the run", "cancel the run", "publish the findings"] {
+    for what in ["start a review", "retry the run", "cancel the run", "preview and publish"] {
         assert!(frame.contains(&format!("{what} (not offered)")), "{what}:\n{frame}");
     }
     let mut granted = Sim::new(Look::default());
@@ -399,4 +399,26 @@ fn clicks_select_diff_files_and_lines_timeline_events_and_footer_views() {
     let (x, y) = cell_of(&frame, "5 settings");
     click(&mut s, x + 3, y);
     assert_eq!(s.m.ui.screen, pr_review_tui::model::Screen::Settings);
+}
+
+#[test]
+fn a_read_only_daemon_says_so_in_settings_and_on_the_help_page() {
+    use pr_review_tui::protocol::ServerMessage;
+    let off = "review commands are off; start the daemon with --allow-commands or set control.allow_commands";
+    for (reason, note) in [
+        ("another pr-review is running on /srv/pr-review/.data", "daemon is read-only"),
+        (off, "commands are off (start the daemon with --allow-commands)"),
+    ] {
+        let mut s = Sim::new(Look::default());
+        let welcome = read("fixtures/server.welcome.read-only.json")
+            .replace("another pr-review is running on /srv/pr-review/.data", reason);
+        s.server(ServerMessage::parse(&welcome).unwrap());
+        s.server(ServerMessage::parse(&read("fixtures/server.snapshot.json")).unwrap());
+        let mut s = s.key(crossterm::event::KeyCode::Char('5'));
+        let (frame, _) = render(&mut s.m, 140, 45);
+        assert!(frame.contains(&format!("mode                  read-only: {reason}")), "{frame}");
+        let mut s = s.key(crossterm::event::KeyCode::Char('?'));
+        let (frame, _) = render(&mut s.m, 140, 45);
+        assert!(frame.contains(&format!("start a review ({note})")), "{frame}");
+    }
 }

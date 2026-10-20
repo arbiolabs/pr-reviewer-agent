@@ -16,6 +16,7 @@ expression: text
     server version        0.1.0
     session               session-1
     capabilities          none (read-only)
+    mode                  not reported by this daemon version
   Stream
     epoch, last sequence  epoch-1, 12
     snapshot, heartbeat   0.0s ago, 0.0s ago
@@ -24,5 +25,4 @@ expression: text
   Display
     glyphs                unicode
     color                 on
-    background            painted (theme)
    j/k account  Enter select account  w watch live  1-5 views  ? help  q quit

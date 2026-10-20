@@ -112,7 +112,10 @@ pub fn help_lines(c: &Ctx, body: Rect) -> Vec<Line<'static>> {
                 .is_none_or(|cap| c.m.server.as_ref().is_none_or(|s| s.capabilities.iter().any(|x| x.as_str() == cap)));
             let (what, key_role, role) = match offered {
                 true => (what.to_string(), Role::Accent, Role::Normal),
-                false => (format!("{what} (not offered)"), Role::Muted, Role::Muted),
+                false => {
+                    let why = c.m.server.as_ref().and_then(|s| s.commands_off()).unwrap_or("not offered");
+                    (format!("{what} ({why})"), Role::Muted, Role::Muted)
+                }
             };
             out.push(Line::from(vec![
                 c.span(format!("  {}", c.pad(keys, kw)), key_role),
@@ -298,6 +301,17 @@ pub fn settings(c: &Ctx, f: &mut Frame, area: Rect) {
         row("session", server.map_or("-".into(), |s| s.session_id.to_string()), Role::Normal),
         row("capabilities", caps, Role::Normal),
     ]);
+    if let Some(s) = server {
+        use crate::protocol::DaemonMode;
+        let (mode, role) = match (s.mode, &s.read_only_reason) {
+            (Some(DaemonMode::Engine), _) => ("engine: runs reviews and takes commands".to_string(), Role::Ok),
+            (Some(DaemonMode::ReadOnly), Some(why)) => (format!("read-only: {why}"), Role::Pending),
+            (Some(DaemonMode::ReadOnly), None) => ("read-only".to_string(), Role::Pending),
+            (Some(DaemonMode::Unknown), _) => ("unknown to this client".to_string(), Role::Muted),
+            (None, _) => ("not reported by this daemon version".to_string(), Role::Muted),
+        };
+        lines.push(row("mode", mode, role));
+    }
     gap(&mut lines);
     lines.push(heading(c, "Stream"));
     lines.extend([

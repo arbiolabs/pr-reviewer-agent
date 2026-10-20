@@ -17,6 +17,7 @@ expression: ascii_text
     server version        0.1.0
     session               session-1
     capabilities          account.select
+    mode                  not reported by this daemon version
   Stream
     epoch, last sequence  epoch-1, 10
     snapshot, heartbeat   0.0s ago, never
@@ -24,5 +25,4 @@ expression: ascii_text
     activity              0 feed entries kept (cap 2000); 0 tool events appli~
   Display
     glyphs                ascii
-    color                 on
    j/k account  Enter select account  w watch live  1-5 views  ? help  q quit

@@ -17,12 +17,12 @@ expression: text
     serv▌  sends account.select
     sess▌
     capa▌  rejected: CONFLICT: GITHUB_TOKEN is set in the daemon envir…
-  Stream▌
+    mode▌
+  Stream
     epoch, last sequence  epoch-1, 10
     snapshot, heartbeat   0.0s ago, never
     resyncs / reconnects  0 / 0
     activity              0 feed entries kept (cap 2000); 0 tool events appli…
   Display
     glyphs                unicode
-    color                 on
    y confirm  n/Esc cancel

@@ -21,6 +21,7 @@ expression: text
       server version        0.1.0
       session               session-1
       capabilities          account.select
+      mode                  not reported by this daemon version
 
     Stream
       epoch, last sequence  epoch-1, 108
@@ -35,7 +36,6 @@ expression: text
 
     Recent errors
       none
-
 
 
 
