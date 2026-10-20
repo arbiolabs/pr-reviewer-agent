@@ -29,7 +29,7 @@ const USAGE = `usage:
   pr-review review <pr-url> --dry-run [--json] [--no-jev] [--model provider/id] [--retry]
   pr-review inspect --pr owner/repo#123 [--json]
   pr-review models [--json]
-  pr-review login [provider]`;
+  pr-review login [provider] [--api-key]`;
 
 /** Text output; `json` writes the value unchanged, so a JSON consumer gets the raw strings (JSON escapes C0 itself). */
 type Out = ((text: string) => void) & { json(value: unknown): void };
@@ -190,7 +190,8 @@ async function models(args: string[], out: Out): Promise<number> {
 }
 
 async function login(args: string[], deps: CliDeps, out: (t: string) => void): Promise<number> {
-  const provider = args[0] ?? "anthropic";
+  const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { "api-key": { type: "boolean" } } });
+  const provider = positionals[0] ?? "anthropic";
   const models = deps.models ?? buildModels(deps.credentials ?? new PiAuthFileStore());
   const auth = models.getProvider(provider)?.auth;
   if (!auth) throw new Error(`unknown provider ${provider}`);
@@ -210,7 +211,7 @@ async function login(args: string[], deps: CliDeps, out: (t: string) => void): P
     },
   };
   try {
-    const type = auth.oauth ? "oauth" : "api_key";
+    const type = auth.oauth && !values["api-key"] ? "oauth" : "api_key";
     await models.login(provider, type, interaction);
     out(`Logged in to ${provider} (${type}); credential stored in pi's auth file.\n`);
     return 0;

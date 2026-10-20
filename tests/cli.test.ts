@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createModels, fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
+import { createModels, fauxAssistantMessage, fauxProvider, fauxToolCall, type Models } from "@earendil-works/pi-ai";
 import { expect, it } from "vitest";
 import { main } from "../src/cli/main.ts";
 import { MockDecisionEngine } from "../src/jev/decision.ts";
@@ -125,3 +125,18 @@ it("never sends a private repository to the keyless Jev endpoint, and records th
   ]);
   store.close();
 }, 60_000);
+
+it("logs in with an API key when asked, and with OAuth by default where the provider offers it", async () => {
+  const logins: string[] = [];
+  const models = {
+    getProvider: () => ({ auth: { oauth: {}, apiKey: { name: "key", login: async () => ({}) } } }),
+    login: async (provider: string, type: string) => {
+      logins.push(`${provider} ${type}`);
+      return {};
+    },
+  } as unknown as Models;
+  const deps = { models, out: () => {}, err: () => {} };
+  expect(await main(["login", "anthropic", "--api-key"], deps)).toBe(0);
+  expect(await main(["login", "anthropic"], deps)).toBe(0);
+  expect(logins).toEqual(["anthropic api_key", "anthropic oauth"]);
+});

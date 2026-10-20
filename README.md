@@ -11,7 +11,7 @@ pnpm install
 node bin/pr-review.mjs models                          # agent CLIs found on PATH, and the models you can use
 node bin/pr-review.mjs review https://github.com/owner/repo/pull/123 --dry-run [--json] [--no-jev] [--model anthropic/claude-opus-5-5]
 node bin/pr-review.mjs inspect --pr owner/repo#123      # every phase transition, the routing decision, findings and discards
-node bin/pr-review.mjs login anthropic                  # store a credential in pi's auth file
+node bin/pr-review.mjs login anthropic [--api-key]      # store a credential in pi's auth file (OAuth where offered)
 pnpm typecheck && pnpm test
 ```
 
