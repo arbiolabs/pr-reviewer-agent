@@ -4,7 +4,7 @@ expression: text
 ---
   pr-review · not connected                                     ✗ disconnected
 
- ✗ disconnected: connection refused · retrying in 2.0s · showing last known sta…
+ ✗ disconnected · retry in 2s
 
   PULL REQUESTS                                                              0
 

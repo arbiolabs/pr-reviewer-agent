@@ -236,7 +236,11 @@ pub fn settings(c: &Ctx, f: &mut Frame, area: Rect) {
     let age = |at: Option<u64>| {
         at.map_or("never".into(), |t| format!("{:.1}s ago", m.now_ms.saturating_sub(t) as f64 / 1000.0))
     };
-    let (status, role) = super::link_status(c);
+    let (mut status, role) = super::link_status(c);
+    // The banner stays short, so the reason a connection failed lives here.
+    if let Link::Disconnected { reason, .. } = &m.link {
+        status = format!("{status}: {reason}");
+    }
     let server = m.server.as_ref();
     let caps = server.map_or("-".into(), |s| {
         if s.capabilities.is_empty() {

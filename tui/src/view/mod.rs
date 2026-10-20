@@ -264,13 +264,14 @@ fn views_w(c: &Ctx) -> usize {
 fn banner(c: &Ctx, width: u16) -> Option<Line<'static>> {
     let g = c.t.g();
     let text = match &c.m.link {
-        Link::Disconnected { reason, retry_in_ms } => {
-            let retry =
-                retry_in_ms.map_or(String::new(), |ms| format!(" {} retrying in {:.1}s", g.sep, ms as f64 / 1000.0));
-            format!(
-                " {} disconnected: {reason}{retry} {} showing last known state {} writes disabled",
-                g.fail, g.sep, g.sep
-            )
+        // The reason is in the column and in Settings; the banner says only what the reader must know.
+        Link::Disconnected { retry_in_ms, .. } => {
+            let mut parts = vec![format!(" {} disconnected", g.fail)];
+            parts.extend(retry_in_ms.map(|ms| format!("retry in {}s", ms.div_ceil(1000))));
+            if c.m.diag.last_snapshot_ms.is_some() {
+                parts.push("last known state".into());
+            }
+            parts.join(&format!(" {} ", g.sep))
         }
         Link::Incompatible { supported, message } => format!(
             " {} protocol mismatch: {message}; server supports {supported:?}, this client speaks [1]. Upgrade the client or daemon.",

@@ -4,7 +4,7 @@ expression: text
 ---
   pr-review · last known state, 0s old                                                                  ✗ disconnected
 
- ✗ disconnected: no message for 30s (heartbeat timeout) · retrying in 1.0s · showing last known state · writes disabled
+ ✗ disconnected · retry in 1s · last known state
 
   PULL REQUESTS                3    acme/shop  #184
                                     Booking API

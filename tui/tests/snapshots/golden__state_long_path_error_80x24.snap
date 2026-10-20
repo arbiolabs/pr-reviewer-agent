@@ -4,7 +4,7 @@ expression: inbox
 ---
   pr-review · not connected                                     ✗ disconnected
 
- ✗ disconnected: socket directory does not exist: /private/tmp/claude-501/xxxxx…
+ ✗ disconnected · retry in 2s
 
   PULL REQUESTS                                                              0
 

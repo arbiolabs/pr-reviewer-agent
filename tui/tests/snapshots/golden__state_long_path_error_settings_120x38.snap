@@ -4,7 +4,7 @@ expression: settings
 ---
   pr-review · not connected                                                                             ✗ disconnected
 
- ✗ disconnected: socket directory does not exist: /private/tmp/claude-501/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…
+ ✗ disconnected · retry in 2s
 
           Settings
           connected through unix:/private/tmp/claude-501/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…
@@ -14,7 +14,7 @@ expression: settings
             accounts              waiting for a snapshot
 
           Connection
-            state                 ✗ disconnected
+            state                 ✗ disconnected: socket directory does not exist: /private/tmp/claude-501/xx…
             protocol              client 1, server -
             server version        -
             session               -

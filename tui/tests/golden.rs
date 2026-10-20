@@ -275,9 +275,10 @@ fn a_connection_error_on_a_long_path_keeps_its_reason_in_view() {
         let (settings, _) = render(&mut s.m, w, h);
         insta::assert_snapshot!(format!("state_long_path_error_settings_{w}x{h}"), settings);
         let shows = |frame: &str, prefix: &str| frame.lines().any(|l| l.contains(prefix));
-        assert!(shows(&inbox, "disconnected: socket directory does not exist: /pri"), "banner, {w} cols:\n{inbox}");
+        // The banner stays short; the column carries the reason and the path.
+        assert!(shows(&inbox, "✗ disconnected · retry in 2s"), "banner, {w} cols:\n{inbox}");
         assert!(shows(&inbox, "unavailable: socket directory does not exist:"), "inbox, {w} cols:\n{inbox}");
-        assert!(inbox.matches("/private/tmp/claude-501/").count() >= 2, "inbox names the path, {w} cols:\n{inbox}");
+        assert!(inbox.contains("/private/tmp/claude-501/"), "inbox names the path, {w} cols:\n{inbox}");
         assert!(
             shows(&settings, "disconnected: socket directory does not exist: /"),
             "settings, {w} cols:\n{settings}"

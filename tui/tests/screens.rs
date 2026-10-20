@@ -66,3 +66,17 @@ fn disconnected_the_status_line_says_so_instead_of_counting_prs() {
 fn s_tick(s: &mut Sim, now: u64) {
     s.apply(pr_review_tui::update::Msg::Tick(now));
 }
+
+#[test]
+fn the_disconnect_banner_fits_at_120_columns() {
+    let mut seen = showcase(2);
+    lose(&mut seen, Some(7_000));
+    let (frame, _) = render(&mut seen.m, 120, 38);
+    let banner = frame.lines().nth(2).unwrap().trim();
+    assert_eq!(banner, "✗ disconnected · retry in 7s · last known state");
+
+    let mut never = Sim::new(Look::default());
+    lose(&mut never, Some(2_500));
+    let (frame, _) = render(&mut never.m, 80, 24);
+    assert_eq!(frame.lines().nth(2).unwrap().trim(), "✗ disconnected · retry in 3s");
+}
