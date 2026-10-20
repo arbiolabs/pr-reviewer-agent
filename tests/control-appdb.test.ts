@@ -350,6 +350,31 @@ it("sends the cited lines as evidence text, capped, sanitized, and never fetched
   expect(() => execFileSync("git", ["-C", lazy, "cat-file", "-e", blob], { env: { ...process.env, GIT_NO_LAZY_FETCH: "1" }, stdio: "ignore" })).toThrow();
 }, 30_000);
 
+it("answers a diff whose blobs the clone lacks with TEMPORARILY_UNAVAILABLE instead of fetching them", async () => {
+  const fixture = createFixture();
+  const git = (dir: string, ...args: string[]) => execFileSync("git", ["-C", dir, "-c", "user.name=F", "-c", "user.email=f@x", ...args], { encoding: "utf8" }).trim();
+  const baseSha = git(fixture.repoDir, "rev-parse", "HEAD");
+  writeFileSync(join(fixture.repoDir, "app.ts"), "export const changed = true;\n");
+  git(fixture.repoDir, "add", ".");
+  git(fixture.repoDir, "commit", "-q", "-m", "change");
+  const headSha = git(fixture.repoDir, "rev-parse", "HEAD");
+  git(fixture.repoDir, "config", "uploadpack.allowFilter", "true");
+
+  const dataDir = mkdtempSync(join(tmpdir(), "ctl-lazydiff-"));
+  const server = await daemon(dataDir);
+  const store = AppStore.open(join(dataDir, "app.sqlite"));
+  cleanup.push(() => store.close());
+  const lazy = await syncRepo(join(dataDir, "repos"), "acme/lazy", `file://${fixture.repoDir}`, 1);
+  const prId = store.upsertPull({ ...fixture.pull, repositoryId: 2, fullName: "acme/lazy", baseSha, headSha });
+  store.ensureRevision({ prId, baseSha, headSha, policyVersion: "1", reviewerVersion: "m1+faux/reviewer" });
+
+  const c = await attach(server.path);
+  c.send({ type: "diff.get", requestId: "lazy", prId, baseSha, headSha });
+  expect(await c.waitFor((m) => m.type === "error" && m.requestId === "lazy")).toMatchObject({ code: "TEMPORARILY_UNAVAILABLE" });
+  const blob = git(fixture.repoDir, "rev-parse", `${headSha}:app.ts`);
+  expect(() => execFileSync("git", ["-C", lazy, "cat-file", "-e", blob], { env: { ...process.env, GIT_NO_LAZY_FETCH: "1" }, stdio: "ignore" })).toThrow();
+}, 30_000);
+
 describe("account.select", () => {
   async function accountsDaemon(env: Record<string, string>) {
     const dataDir = mkdtempSync(join(tmpdir(), "ctl-accounts-"));

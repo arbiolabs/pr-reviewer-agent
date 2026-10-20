@@ -224,7 +224,10 @@ export class AppDbSource implements ControlSource {
     const key = `${request.prId}\0${request.baseSha}\0${request.headSha}`;
     if (this.diffCache?.key !== key) {
       const repo = new PinnedRepo(join(this.dataDir, "repos", `${found.repo_full_name}.git`), request.baseSha, request.headSha);
-      this.diffCache = { key, files: parseDiffFiles(await repo.diff()) };
+      const text = await repo.diff(undefined, { offline: true }).catch(() => {
+        throw new ControlError("TEMPORARILY_UNAVAILABLE", `the diff of ${request.baseSha.slice(0, 7)}...${request.headSha.slice(0, 7)} is not in the local clone; the daemon never fetches`);
+      });
+      this.diffCache = { key, files: parseDiffFiles(text) };
     }
     return clean(pageDiff(this.diffCache.files, request));
   }

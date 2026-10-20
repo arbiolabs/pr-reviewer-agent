@@ -77,9 +77,10 @@ export class PinnedRepo {
     for (const sha of [this.baseSha, this.headSha]) await git(this.dir, ["cat-file", "-e", `${sha}^{commit}`]);
   }
 
-  diff(path?: string): Promise<string> {
+  /** `offline` never fetches a blob the clone lacks: git fails instead. */
+  diff(path?: string, options: { offline?: boolean } = {}): Promise<string> {
     const args = ["diff", "--no-color", "--no-ext-diff", "-M", `${this.baseSha}...${this.headSha}`];
-    return git(this.dir, path === undefined ? args : [...args, "--", assertSafePath(path)]);
+    return git(this.dir, path === undefined ? args : [...args, "--", assertSafePath(path)], undefined, options.offline ? OFFLINE_ENV : GIT_ENV);
   }
 
   async changedFiles(): Promise<ChangedFile[]> {
