@@ -7,7 +7,9 @@ expression: inbox
 
  ✗ disconnected: socket directory does not exist: /private/tmp/claude-501/xxxxx…
 
-  PULL REQUESTS
+  PULL REQUESTS                                                              0
+
+  nothing tracked yet
 
 
 
@@ -24,6 +26,4 @@ expression: inbox
 
 
 
-
-
-  j/k pull request  Enter read  / search  ? help  q quit
+   j/k pull request  Enter read  / search  ? help  q quit

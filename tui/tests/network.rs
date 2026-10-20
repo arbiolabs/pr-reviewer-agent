@@ -114,21 +114,19 @@ async fn play(name: &str) -> (Client, Seen) {
 }
 
 #[tokio::test]
-#[ignore = "design prototype C: evidence prefetch, landing selection and start view change reducer output"]
 async fn normal_over_a_socket() {
     let (c, seen) = play("normal").await;
-    wait_for(&seen, 2).await;
-    assert_eq!(types(&seen), ["hello", "snapshot.get"]);
+    wait_for(&seen, 3).await;
+    assert_eq!(types(&seen), ["hello", "snapshot.get", "finding.get"], "the landing PR prefetches its finding");
     assert_eq!(seen.lock().unwrap()[0]["protocolVersion"], 1);
     assert_eq!(c.model.link, Link::Live);
 }
 
 #[tokio::test]
-#[ignore = "design prototype C: evidence prefetch, landing selection and start view change reducer output"]
 async fn gap_over_a_socket_asks_for_a_new_snapshot() {
     let (c, seen) = play("gap").await;
-    wait_for(&seen, 3).await;
-    assert_eq!(types(&seen), ["hello", "snapshot.get", "snapshot.get"]);
+    wait_for(&seen, 4).await;
+    assert_eq!(types(&seen), ["hello", "snapshot.get", "finding.get", "snapshot.get"]);
     assert_eq!(c.model.link, Link::Resyncing);
 }
 
@@ -142,7 +140,6 @@ async fn burst_over_a_socket_stays_bounded() {
 }
 
 #[tokio::test]
-#[ignore = "design prototype C: evidence prefetch, landing selection and start view change reducer output"]
 async fn a_dropped_connection_resumes_after_the_last_applied_sequence() {
     let dir = socket_dir("resume");
     let sock = dir.join("reviewer.sock");
@@ -174,8 +171,9 @@ async fn a_dropped_connection_resumes_after_the_last_applied_sequence() {
 
     let want = expect("normal");
     c.until("normal expected state after resume", |m| summary(m) == want).await;
+    wait_for(&second, 3).await;
     let resume = second.lock().unwrap()[1].clone();
-    assert_eq!(types(&second), ["hello", "resume"]);
+    assert_eq!(types(&second), ["hello", "resume", "finding.get"], "no request goes out before welcome");
     assert_eq!((resume["streamEpoch"].as_str(), resume["afterSequence"].as_u64()), (Some("epoch-1"), Some(11)));
     assert_eq!(c.model.diag.reconnects, 1);
     assert_eq!(c.model.diag.resyncs, 0);

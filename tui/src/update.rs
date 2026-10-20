@@ -578,7 +578,7 @@ fn timeline_matches(q: &TimelineQuery, e: &SequencedEvent) -> bool {
 }
 
 fn fetch_detail(m: &mut Model, id: &FindingId, fx: &mut Vec<Effect>) {
-    if m.detail_requests.values().any(|f| f == id) || !m.link.connected() {
+    if m.detail_requests.values().any(|f| f == id) || !m.link.welcomed() {
         return;
     }
     let request_id = request(m);

@@ -70,8 +70,9 @@ impl Link {
         matches!(self, Link::Live)
     }
 
-    pub fn connected(&self) -> bool {
-        matches!(self, Link::Negotiating | Link::Syncing | Link::Live | Link::Resyncing)
+    /// The server has answered `hello` with `welcome`, so requests other than `hello` may go out.
+    pub fn welcomed(&self) -> bool {
+        matches!(self, Link::Syncing | Link::Live | Link::Resyncing)
     }
 }
 
