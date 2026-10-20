@@ -31,9 +31,18 @@ const USAGE = `usage:
   pr-review models [--json]
   pr-review login [provider]`;
 
+/** Text output; `json` writes the value unchanged, so a JSON consumer gets the raw strings (JSON escapes C0 itself). */
+type Out = ((text: string) => void) & { json(value: unknown): void };
+
+/** C0 and C1 controls except newline and tab: model and repository text must not drive the terminal. */
+export const stripControl = (text: string) => text.replace(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/g, "");
+
 export async function main(argv: string[], deps: CliDeps = {}): Promise<number> {
-  const out = deps.out ?? ((t) => process.stdout.write(t));
-  const err = deps.err ?? ((t) => process.stderr.write(t));
+  const stdout = deps.out ?? ((t) => process.stdout.write(t));
+  const stderr = deps.err ?? ((t) => process.stderr.write(t));
+  // The single output boundary: every text line the CLI prints passes through stripControl here.
+  const out: Out = Object.assign((t: string) => stdout(stripControl(t)), { json: (value: unknown) => stdout(`${JSON.stringify(value, null, 2)}\n`) });
+  const err = (t: string) => stderr(stripControl(t));
   const [command, ...rest] = argv;
   const dataDir = process.env.PR_REVIEW_DATA_DIR || ".data";
   try {
@@ -56,7 +65,7 @@ export async function main(argv: string[], deps: CliDeps = {}): Promise<number> 
   }
 }
 
-async function review(args: string[], deps: CliDeps, dataDir: string, out: (t: string) => void, err: (t: string) => void): Promise<number> {
+async function review(args: string[], deps: CliDeps, dataDir: string, out: Out, err: (t: string) => void): Promise<number> {
   const { values, positionals } = parseArgs({
     args,
     allowPositionals: true,
@@ -111,7 +120,8 @@ async function review(args: string[], deps: CliDeps, dataDir: string, out: (t: s
     const revision = await finishReview(app, started);
     const report = loadReport(app.store, revision.id);
     if (revision.state === "FAILED") err(`revision ${revision.id} FAILED: ${report.audit.at(-1)?.detail ?? "no reason recorded"}; rerun with --retry to try again\n`);
-    out(values.json ? `${JSON.stringify(renderJson(report), null, 2)}\n` : renderMarkdown(report));
+    if (values.json) out.json(renderJson(report));
+    else out(renderMarkdown(report));
     return revision.state === "COMPLETED" ? 0 : 1;
   } finally {
     await app.close();
@@ -135,7 +145,7 @@ async function pickModel(labels: string[], refs: string[]): Promise<string> {
   }
 }
 
-function inspect(args: string[], dataDir: string, out: (t: string) => void): number {
+function inspect(args: string[], dataDir: string, out: Out): number {
   const { values } = parseArgs({ args, options: { pr: { type: "string" }, json: { type: "boolean" } } });
   if (!values.pr) throw new Error("inspect needs --pr owner/repo#123");
   const ref = parsePullRef(values.pr);
@@ -145,7 +155,7 @@ function inspect(args: string[], dataDir: string, out: (t: string) => void): num
     if (!pr) throw new Error(`no reviews recorded for ${values.pr}`);
     const reports = store.revisionsForPr(pr.id).map((r) => loadReport(store, r.id));
     if (values.json) {
-      out(`${JSON.stringify(reports.map((r) => ({ ...renderJson(r), durableTaskId: r.revision.durable_task_id, reviewer: r.revision.reviewer_version, transitions: r.audit })), null, 2)}\n`);
+      out.json(reports.map((r) => ({ ...renderJson(r), durableTaskId: r.revision.durable_task_id, reviewer: r.revision.reviewer_version, transitions: r.audit })));
       return 0;
     }
     for (const r of reports) {
@@ -163,11 +173,11 @@ function inspect(args: string[], dataDir: string, out: (t: string) => void): num
   }
 }
 
-async function models(args: string[], out: (t: string) => void): Promise<number> {
+async function models(args: string[], out: Out): Promise<number> {
   const { values } = parseArgs({ args, options: { json: { type: "boolean" } } });
   const detected = await detectModels({ preferred: loadConfig().models.preferred });
   if (values.json) {
-    out(`${JSON.stringify(detected, null, 2)}\n`);
+    out.json(detected);
     return 0;
   }
   out("Harnesses:\n");

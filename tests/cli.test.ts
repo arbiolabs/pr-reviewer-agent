@@ -7,6 +7,7 @@ import { expect, it } from "vitest";
 import { main } from "../src/cli/main.ts";
 import { AppStore } from "../src/persistence/store.ts";
 import { createFixture } from "./fixture.ts";
+import { fauxModels, readDiff, submitDefect } from "./helpers.ts";
 
 const SCRIPT = new URL("./fixtures/cli-faux.ts", import.meta.url).pathname;
 
@@ -72,3 +73,27 @@ it("refuses --publish in M1", async () => {
   expect(await main(["review", "https://github.com/acme/shop/pull/1", "--publish"], { err: (t) => errors.push(t) })).toBe(2);
   expect(errors).toEqual(["pr-review: publishing lands in M2; run with --dry-run\n"]);
 });
+
+it("strips control characters from model text in Markdown and inspect output, and keeps JSON raw", async () => {
+  const fixture = createFixture();
+  const title = "Order deletion\u001b[2J\u009b31m skips the admin check\r\u0007";
+  const message = submitDefect(fixture);
+  const call = message.content.find((c) => c.type === "toolCall")!;
+  (call.arguments as { candidates: { title: string }[] }).candidates[0]!.title = title;
+  process.env.PR_REVIEW_DATA_DIR = mkdtempSync(join(tmpdir(), "control-"));
+  const outputs: string[] = [];
+  const deps = { pulls: fixture.pulls, models: fauxModels([readDiff(), message]), isTTY: false, out: (t: string) => outputs.push(t), err: (t: string) => outputs.push(t) };
+  const review = ["review", "https://github.com/acme/shop/pull/1", "--no-jev", "--model", "faux/reviewer"];
+  try {
+    expect(await main(review, deps)).toBe(0);
+    expect(await main(["inspect", "--pr", "acme/shop#1"], deps)).toBe(0);
+    const text = outputs.join("");
+    expect(text).toContain("- High: Order deletion[2J31m skips the admin check (`src/routes/orders.ts:5`)");
+    expect(text).not.toMatch(/[\u0000-\u0008\u000b-\u001f\u007f-\u009f]/);
+    outputs.length = 0;
+    expect(await main([...review, "--json"], { ...deps, err: () => {} })).toBe(0);
+    expect(JSON.parse(outputs.join("")).findings[0].title).toBe(title);
+  } finally {
+    delete process.env.PR_REVIEW_DATA_DIR;
+  }
+}, 60_000);
