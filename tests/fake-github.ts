@@ -18,6 +18,8 @@ export class FakeGitHub {
   listCalls = 0;
   pageSize = 100;
   viewer = "reviewer-bot";
+  /** 403 is what GitHub answers an installation token on `/user`. */
+  userStatus = 200;
   /** How long a `slow-insert` POST holds the request before it stores the review. */
   slowInsertMs = 0;
   appSlug = "durable-review";
@@ -67,7 +69,7 @@ export class FakeGitHub {
       res.end(JSON.stringify(body));
     };
     let m: RegExpExecArray | null;
-    if (req.method === "GET" && url.pathname === "/user") return json(200, { login: this.viewer });
+    if (req.method === "GET" && url.pathname === "/user") return this.userStatus === 200 ? json(200, { login: this.viewer }) : json(this.userStatus, { message: "Resource not accessible by integration" });
     if (req.method === "GET" && url.pathname === "/app") return json(200, { slug: this.appSlug });
     if (req.method === "POST" && /^\/app\/installations\/\d+\/access_tokens$/.test(url.pathname)) {
       this.tokensMinted++;

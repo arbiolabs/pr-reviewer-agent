@@ -44,6 +44,8 @@ A revision that FAILED stays failed. A rerun prints the failure reason and tells
    - A timed-out write can still land, so RECONCILE first waits `github.timeout_ms`. It claims the review absent only after two complete listings at least that far apart. Then PUBLISH tries again, up to `max_retries_per_phase` more times.
    - If the listing fails, the outbox stays `needs_reconciliation` and the revision FAILS with `cannot_safely_decide`. Then run `reconcile --revision <id>` when GitHub is reachable. If that proves the review absent, `review <url> --publish --retry` posts it.
 
+Reconciliation matches our reviews by author. A token's author comes from `GET /user`, which an installation token (`ghs_...`) cannot read. With such a token, set `github.bot_login` in the config or `PR_REVIEW_BOT_LOGIN` to the app's bot login, such as `my-app[bot]`. Without it, reconciliation cannot decide and leaves the outbox `needs_reconciliation`.
+
 Publishing is part of the policy version (`1+publish`), so an earlier dry run of a head does not block publishing it. A 429 or a rate-limit 403 is retried after `Retry-After` or the reset time. GitHub answers these before it processes the request, so a retry cannot post a second review. Retries and the per-installation concurrency cap are in the `github` config section.
 
 ## Service

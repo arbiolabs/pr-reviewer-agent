@@ -70,6 +70,8 @@ export type ClientOptions = {
   /** Requests in flight at once for this client, which is per installation. */
   concurrency: number;
   timeoutMs: number;
+  /** The author of our reviews when token auth cannot read `/user` (an installation token answers 403 there). */
+  botLogin?: string;
   sleep?: (ms: number) => Promise<void>;
   now?: () => number;
 };
@@ -134,12 +136,19 @@ export class GitHubClient {
   /** The login a review we post is authored by: the app's bot user, or the token's user. */
   async viewerLogin(options: { maxSleepMs?: number } = {}): Promise<string> {
     if (this.login === undefined) {
-      this.login =
-        this.auth.kind === "app"
-          ? `${(await this.request<{ slug: string }>("GET", "/app", { jwt: true, ...options })).data.slug}[bot]`
-          : (await this.request<{ login: string }>("GET", "/user", options)).data.login;
+      this.login = this.auth.kind === "app" ? `${(await this.request<{ slug: string }>("GET", "/app", { jwt: true, ...options })).data.slug}[bot]` : await this.tokenLogin(options);
     }
     return this.login;
+  }
+
+  private async tokenLogin(options: { maxSleepMs?: number }): Promise<string> {
+    try {
+      return (await this.request<{ login: string }>("GET", "/user", options)).data.login;
+    } catch (error) {
+      // Without a configured login the author stays unknown, and reconciliation stays undecided.
+      if (error instanceof GitHubError && error.status === 403 && error.class === "fatal" && this.options.botLogin) return this.options.botLogin;
+      throw error;
+    }
   }
 
   /** The installation token, minted on first use and again within 60 s of expiry. */
@@ -193,11 +202,16 @@ export class GitHubClient {
   }
 }
 
-/** A client with the configured retry budget, against `GITHUB_API_URL` when set (tests point it at a fake). */
-export function clientFor(config: { max_retries: number; backoff_ms: number; concurrency_per_installation: number; timeout_ms: number }, auth: GitHubAuth): GitHubClient {
+/** A client with the configured retry budget and bot login, against `GITHUB_API_URL` when set (tests point it at a fake). */
+export function clientFor(
+  config: { max_retries: number; backoff_ms: number; concurrency_per_installation: number; timeout_ms: number; bot_login: string },
+  auth: GitHubAuth,
+): GitHubClient {
+  const botLogin = config.bot_login || process.env.PR_REVIEW_BOT_LOGIN;
   return new GitHubClient({
     auth,
     ...(process.env.GITHUB_API_URL ? { baseUrl: process.env.GITHUB_API_URL } : {}),
+    ...(botLogin ? { botLogin } : {}),
     maxRetries: config.max_retries,
     backoffMs: config.backoff_ms,
     concurrency: config.concurrency_per_installation,

@@ -7,7 +7,8 @@ import { main } from "../src/cli/main.ts";
 import { DEFAULT_CONFIG } from "../src/config/config.ts";
 import { GitHubClient } from "../src/github/client.ts";
 import { GitHubPullSource } from "../src/github/pulls.ts";
-import { postReview } from "../src/publish/publisher.ts";
+import { findReview, marker, postReview } from "../src/publish/publisher.ts";
+import type { OutboxRow } from "../src/persistence/store.ts";
 import { type App, finishReview, openApp, startReview } from "../src/runtime/app.ts";
 import { FakeGitHub } from "./fake-github.ts";
 import { createFixture, type Fixture } from "./fixture.ts";
@@ -261,3 +262,15 @@ it("puts the outbox back to pending when every try of a POST was rate-limited, t
   expect([revision.state, outbox.status, fake.postAttempts, fake.reviews.length]).toEqual(["COMPLETED", "published", 4, 1]);
   expect(outboxEvents).toEqual(["pending SEND sending", "sending NOT_SENT pending", "pending SEND sending", "sending SENT published"]);
 }, 30_000);
+
+it("reconciles with an installation token through the configured bot login, and stays undecided without one", async () => {
+  fake.userStatus = 403;
+  const installationToken = (botLogin?: string) =>
+    new GitHubClient({ auth: { kind: "token", token: "ghs_install_from_env" }, baseUrl: fake.url, maxRetries: 0, backoffMs: 1, concurrency: 1, timeoutMs: 5000, ...(botLogin ? { botLogin } : {}) });
+  const posted = await postReview(installationToken(), { fullName: "acme/shop", number: 1 }, { commit_id: fixture.headSha, body: `${marker("r".repeat(32), "h")}\n`, event: "COMMENT", comments: [] });
+  const outbox = { revision_id: "r".repeat(32), payload_json: JSON.stringify({ commit_id: fixture.headSha }) } as OutboxRow;
+  expect(posted).toEqual({ kind: "posted", reviewId: 1000 });
+  expect(await findReview(installationToken("durable-review[bot]"), { fullName: "acme/shop", number: 1 }, outbox)).toEqual({ kind: "found", reviewId: 1000 });
+  expect(await findReview(installationToken("someone-else"), { fullName: "acme/shop", number: 1 }, outbox)).toEqual({ kind: "absent" });
+  expect(await findReview(installationToken(), { fullName: "acme/shop", number: 1 }, outbox)).toEqual({ kind: "undecided", reason: "GET /user: HTTP 403" });
+});

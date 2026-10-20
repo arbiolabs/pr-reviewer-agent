@@ -26,6 +26,8 @@ export type Config = {
     timeout_ms: number;
     /** The longest rate-limit wait the worker loop sits through; a longer one fails the delivery, which backs off. */
     max_rate_limit_sleep_ms: number;
+    /** Our reviews' author for token auth that cannot read `/user`, such as an installation token; else `PR_REVIEW_BOT_LOGIN`. */
+    bot_login: string;
   };
   routing: {
     mandatory_deep_paths: string[];
@@ -63,7 +65,7 @@ export const DEFAULT_CONFIG: Config = {
     webhook_max_attempts: 6,
     webhook_backoff_ms: 5000,
   },
-  github: { max_retries: 3, backoff_ms: 500, concurrency_per_installation: 2, timeout_ms: 15_000, max_rate_limit_sleep_ms: 30_000 },
+  github: { max_retries: 3, backoff_ms: 500, concurrency_per_installation: 2, timeout_ms: 15_000, max_rate_limit_sleep_ms: 30_000, bot_login: "" },
   routing: {
     mandatory_deep_paths: ["**/auth/**", "**/payments/**", "**/booking/**", "**/migrations/**"],
     jev_deep_threshold: 0.7,
