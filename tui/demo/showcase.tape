@@ -1,7 +1,8 @@
 # Records tui/demo/showcase.gif from the showcase playback. From the repository root:
 #   cargo build --release --manifest-path tui/Cargo.toml && vhs tui/demo/showcase.tape
 # The playback clock starts when the client launches, so the sleeps below line up with its events:
-# #1291's review finds two issues at about 14 s and 15 s, and completes at about 18 s.
+# #1291's review finds two issues at about 14 s and 15 s, and parks for approval at about 18 s. Its publication
+# plays once the client sends review.publish.
 
 Output tui/demo/showcase.gif
 
@@ -37,10 +38,20 @@ Sleep 3.5s
 Escape
 Sleep 1.5s
 
-# w watches the running review on #1291 until it completes with two findings.
+# w watches the running review on #1291 until it parks, waiting for approval.
 Type "w"
 Sleep 10s
 
 # t opens #1291's timeline, oldest first under phase headings.
 Type "t"
 Sleep 6s
+
+# Esc goes back to #1291's review; p opens the exact review the approval would post.
+Escape
+Sleep 1.5s
+Type "p"
+Sleep 4s
+
+# y approves this preview: publishing, then published with the review on GitHub.
+Type "y"
+Sleep 5s

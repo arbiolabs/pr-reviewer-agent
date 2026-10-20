@@ -74,7 +74,7 @@ In Diff, a long line or hunk header wraps onto up to four rows. Each finding is 
 
 In Timeline, `Enter` opens the selected event's detail under its row, and `Esc` closes it. The detail shows what the event carries: a tool call's whole summary, or a finding's title, severity, `file:line`, and the start of its explanation.
 
-The help page marks a write key `(not offered)` when the connected daemon does not grant its capability.
+The help page marks a write key `(not offered)` when the connected daemon does not grant its capability. Against a read-only daemon the note says `(daemon is read-only)` or `(commands are off)`, and the page's last line gives the whole reason.
 
 ## Keys
 
@@ -87,7 +87,7 @@ The help page marks a write key `(not offered)` when the connected daemon does n
 | `g` and `G` | Go to the top or the bottom |
 | `Ctrl-d` and `Ctrl-u` | Page down or up |
 | `/` | Search what the screen shows. On Inbox and Review, filter the PR list by a fuzzy match. On Timeline, filter the events by text. On Diff, search the lines; `n` and `N` then step through the matches, and `Esc` clears the search. |
-| `w` | Watch the running review. Press `w` again for the next running PR. |
+| `w` | Watch the running review. Press `w` again for the next running PR, then the PRs waiting for approval. |
 | `J` and `K` | Scroll the open finding's explanation down or up, in Review |
 | `d` | Open the diff at the selected finding's line |
 | `t` | Open the selected PR's timeline |
@@ -95,6 +95,12 @@ The help page marks a write key `(not offered)` when the connected daemon does n
 | `:` | Jump to `path:line`, in Diff |
 | `f`, `v`, and `P` | Change the timeline's scope, category, or phase filter |
 | `A` | Open the GitHub accounts in Settings |
+| `s` | Start a review of the selected PR at its head |
+| `R` | Retry the selected PR's failed run |
+| `c` | Cancel the selected PR's running or parked review |
+| `p` | Preview the review that a parked run would publish |
+| `y` | Confirm, only in a confirmation panel or the publication preview |
+| `o` | Open the published review in the browser, from the publication preview |
 | `r` | Refresh from the daemon, or retry a timed-out request |
 | `?` | Show help. The help page is built from the keymap. When it is taller than the window, `j`, `k`, the wheel, PgUp, and PgDn scroll it, and its last row shows how many lines remain below. |
 | `q` | Quit the client |
@@ -161,9 +167,31 @@ The daemon can start, retry, cancel, and publish reviews on the client's behalf.
 
 	Or set `"control": { "allow_commands": true }` in `pr-review.config.json`.
 
-2. With commands enabled, the daemon runs in **engine mode**: it takes the data directory lock at startup and runs reviews itself. Without them it is **read-only**: it takes no lock, runs nothing, and grants only the account selector. A daemon with commands enabled is also read-only while `pr-review serve` or `pr-review review` holds the lock. The daemon's start line reports the mode, and the `welcome` message carries it as `mode`, with `readOnlyReason` saying why a read-only daemon is read-only. The client's Settings view will show both once its action screens land.
+2. With commands enabled, the daemon runs in **engine mode**: it takes the data directory lock at startup and runs reviews itself. Without them it is **read-only**: it takes no lock, runs nothing, and grants only the account selector. A daemon with commands enabled is also read-only while `pr-review serve` or `pr-review review` holds the lock. The daemon's start line reports the mode, and the `welcome` message carries it as `mode`, with `readOnlyReason` saying why a read-only daemon is read-only. The client's Settings view shows both on its **mode** row.
 
 3. To approve publications from the client, set `"review": { "publish_mode": "approval" }`. [Publishing](publishing.md#approval-mode) describes the approval flow.
+
+### Start, retry, or cancel a review
+
+1. Select the PR.
+2. Press `s` to start, `R` to retry its failed run, or `c` to cancel its running or parked review. A panel names the exact target, for example `Start a review of #1291 at f86859b?`.
+3. Press `y` to send the command, or `n` or `Esc` to close the panel without sending anything.
+
+The panel shows `requested…` and then `accepted…` until the event that proves the effect arrives: the new run starting, the retried run moving, or the cancelled run ending. Then the panel closes and the footer says what happened. A rejected command stays in the panel with its code and message, for example `REVISION_STALE: the head of acme/shop#1291 is now 1a2b3c4`.
+
+### Approve a publication
+
+In approval mode a finished review parks in `AWAITING_APPROVAL`. The client marks it in amber as waiting for you, never as running, failed, or done: `◔ awaiting you` on its PR row, `◔ Publish` in the phase stepper, `◔ #1291 waiting for you` in the status line, and a `Ready to publish · p previews` line above its findings.
+
+1. Select the parked PR, or press `w` until it is selected.
+2. Press `p`. The publication preview shows the target (the repository, the PR, the head commit, and the event `COMMENT`), the summary exactly as it will be posted, and each inline comment with its `path:line` and the diff around it. GitHub does not render the hidden marker at the end of the summary, so the preview names it and shows it dimmed. The **Positioning** section says whether each comment sits on a line of the diff.
+3. Press `y` to publish exactly that preview, or `Esc` to close it without publishing.
+
+The page then follows the publisher: `requested…`, `approval recorded; publishing…`, `publishing…`, and finally `published on GitHub` with the review's URL, or `uncertain` or `failed` with the reason. Press `o` to open a published review in the browser. The key works only for an `https://github.com/` URL.
+
+`y` is off, with the reason, when the preview is stale: the run has left `AWAITING_APPROVAL`, or the PR has a newer head than the preview was written for. Close the page and press `p` again for the current preview.
+
+The timeline lists each publication status as a `publication` row under `AWAITING APPROVAL` or `PUBLISH`.
 
 The daemon checks every command itself, whatever the client showed:
 
