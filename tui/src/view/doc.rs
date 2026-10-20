@@ -497,7 +497,7 @@ fn code_block(c: &Ctx, ev: &Evidence, f: &Finding, w: usize, max: usize) -> Vec<
     let mut out = Vec::new();
     let path = ev.path.as_ref().map_or(String::new(), |p| p.to_string());
     let range = match ev.end {
-        Some(e) if e != start => format!("lines {start}–{e}"),
+        Some(e) if e != start => format!("lines {start}-{e}"),
         _ => format!("line {start}"),
     };
     let at = ev.ref_sha.as_ref().map_or(String::new(), |s| format!(" @ {}", s.short()));

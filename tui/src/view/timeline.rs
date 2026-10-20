@@ -42,7 +42,7 @@ pub fn summary(c: &Ctx, e: &SequencedEvent) -> (String, Role) {
         }
         EventBody::FindingUpdated(f) => {
             let (glyph, sev, role) = c.t.severity(f.severity);
-            (format!("{} {glyph} {sev} {}: {}", f.id, f.title, finding_status(f.status).0), role)
+            (format!("{glyph} {sev} {}: {}", f.title, finding_status(f.status).0), role)
         }
         EventBody::ToolActivity(a) => (format!("{} {}", a.tool, a.summary), Role::Normal),
         EventBody::AccountsUpdated(accounts) => {

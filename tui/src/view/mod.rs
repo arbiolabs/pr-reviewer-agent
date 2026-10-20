@@ -112,7 +112,7 @@ pub fn view(m: &Model, f: &mut Frame) {
         Screen::Timeline => timeline::timeline(&c, f, body),
         Screen::Settings => modals::settings(&c, f, body),
     }
-    f.render_widget(Paragraph::new(footer_line(&c, footer.width.saturating_sub(views_w(&c) as u16))), footer);
+    f.render_widget(Paragraph::new(footer_line(&c, footer.width.saturating_sub(views_w(&c) as u16 + 2))), footer);
     let vw = views_w(&c) as u16;
     let vr = Rect { x: footer.x + footer.width.saturating_sub(vw), width: vw.min(footer.width), ..footer };
     f.render_widget(Paragraph::new(views_line(&c)), vr);
@@ -281,8 +281,8 @@ fn footer_line(c: &Ctx, width: u16) -> Line<'static> {
         (Some(Modal::Confirm { .. }), _) => "y confirm  n/Esc cancel",
         (_, Screen::Inbox) => "j/k pull request  Enter read  / search  ? help  q quit",
         (_, Screen::Review) => "j/k finding  Enter read  d diff  t timeline  h pull requests  ? help  q quit",
-        (_, Screen::Diff) => "j/k line  h/l pane  n/N finding  : jump  Enter finding  Esc back  ? help  q quit",
-        (_, Screen::Timeline) => "j/k move  Enter detail  f scope  v category  P phase  Esc back  ? help  q quit",
+        (_, Screen::Diff) => "j/k line  n/N finding  Enter read  h files  : jump  Esc back  ? help",
+        (_, Screen::Timeline) => "j/k move  Enter detail  f scope  v kind  P phase  Esc back  ? help",
         (_, Screen::Settings) => "j/k account  Enter select account  r refresh  1-4 views  ? help  q quit",
     };
     Line::from(c.span(c.fit(&format!("  {hints}"), w), Role::Muted))
