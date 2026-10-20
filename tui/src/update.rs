@@ -627,6 +627,7 @@ fn load_diff(m: &mut Model, key: DiffKey, anchor: Option<(Text, Option<u32>)>, f
         error: None,
         selected_file: None,
         cursor: 0,
+        stack: 0,
         anchor,
     });
     diff_get(m, None, fx);
@@ -693,6 +694,7 @@ fn resolve_anchor(m: &mut Model, fx: &mut Vec<Effect>) {
     match found {
         Some(i) => {
             d.cursor = line.map_or(0, |l| row_for_line(&d.files[i], l));
+            d.stack = 0;
             d.selected_file = Some(d.files[i].path.clone());
             d.anchor = None;
             m.ui.focus = Pane::Main;
@@ -724,8 +726,18 @@ pub fn diff_findings<'a>(m: &'a Model, d: &DiffView) -> Vec<&'a Finding> {
         .collect()
 }
 
-/// (file index, row) of each anchored finding in diff order.
-fn finding_stops(m: &Model, d: &DiffView) -> Vec<(usize, usize)> {
+/// The findings anchored to `row` of `file`, most severe first: they stack under that line in the diff.
+pub fn row_findings<'a>(anchored: &[&'a Finding], file: &DiffFile, row: &DiffRow) -> Vec<&'a Finding> {
+    let DiffRow::Line(l) = row else { return vec![] };
+    anchored
+        .iter()
+        .filter(|f| f.file == file.path && l.new.is_some() && f.line.map(|n| n.get()) == l.new)
+        .copied()
+        .collect()
+}
+
+/// (file index, row, place in its line's stack) of each anchored finding, in diff order.
+fn finding_stops(m: &Model, d: &DiffView) -> Vec<(usize, usize, usize)> {
     let mut stops: Vec<_> = diff_findings(m, d)
         .into_iter()
         .filter_map(|f| {
@@ -734,8 +746,12 @@ fn finding_stops(m: &Model, d: &DiffView) -> Vec<(usize, usize)> {
         })
         .collect();
     stops.sort();
-    stops.dedup();
-    stops
+    let mut out: Vec<(usize, usize, usize)> = Vec::new();
+    for (fi, row) in stops {
+        let k = out.iter().filter(|s| (s.0, s.1) == (fi, row)).count();
+        out.push((fi, row, k));
+    }
+    out
 }
 
 // ---- timeline ----
@@ -1105,6 +1121,7 @@ fn move_by(m: &mut Model, delta: isize, fx: &mut Vec<Effect>) {
                     load_more_diff(m, fx);
                 }
             } else if let Some(rows) = d.file().map(|f| file_rows(f).len()) {
+                d.stack = 0;
                 d.cursor = (d.cursor as isize + delta).clamp(0, rows.saturating_sub(1) as isize) as usize;
                 let at_end = d.cursor + 1 >= rows && d.files.last().map(|f| &f.path) == d.selected_file.as_ref();
                 if at_end {
@@ -1166,14 +1183,15 @@ fn open(m: &mut Model, fx: &mut Vec<Effect>) {
             let Some(d) = &m.diff else { return };
             let Some(file) = d.file() else { return };
             let rows = file_rows(file);
-            let new = match rows.get(d.cursor) {
-                Some(DiffRow::Line(l)) => l.new,
-                _ => None,
+            let hit = match rows.get(d.cursor) {
+                Some(row @ DiffRow::Line(_)) => {
+                    row_findings(&diff_findings(m, d), file, row).get(d.stack).map(|f| f.id.clone())
+                }
+                _ => diff_findings(m, d)
+                    .into_iter()
+                    .find(|f| f.file == file.path && f.line.is_none())
+                    .map(|f| f.id.clone()),
             };
-            let hit = diff_findings(m, d)
-                .into_iter()
-                .find(|f| f.file == file.path && (f.line.map(|l| l.get()) == new || f.line.is_none() && d.cursor == 0))
-                .map(|f| f.id.clone());
             if let Some(id) = hit {
                 open_finding(m, id, fx);
             }
@@ -1289,16 +1307,18 @@ fn next_finding(m: &mut Model, dir: isize, fx: &mut Vec<Effect>) {
             let here = (
                 d.selected_file.as_ref().and_then(|p| d.files.iter().position(|f| &f.path == p)).unwrap_or(0),
                 d.cursor,
+                d.stack,
             );
             let target = if dir > 0 {
                 stops.iter().find(|s| **s > here).or(stops.first())
             } else {
                 stops.iter().rev().find(|s| **s < here).or(stops.last())
             };
-            let &(fi, row) = target.unwrap_or(&stops[0]);
+            let &(fi, row, k) = target.unwrap_or(&stops[0]);
             if let Some(d) = &mut m.diff {
                 d.selected_file = Some(d.files[fi].path.clone());
                 d.cursor = row;
+                d.stack = k;
             }
             m.ui.focus = Pane::Main;
         }

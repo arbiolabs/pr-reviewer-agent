@@ -621,3 +621,23 @@ fn opening_a_finding_loads_its_revisions_diff_without_leaving_the_screen() {
     assert_eq!(m.ui.screen, Screen::Review);
     assert!(fx.iter().any(|e| matches!(e, Effect::Send(ClientMessage::DiffGet { .. }))), "{fx:?}");
 }
+
+#[test]
+fn n_walks_the_findings_stacked_on_one_diff_line_before_moving_on() {
+    let mut m = diff_loaded();
+    let second = read("fixtures/server.event.finding.updated.json")
+        .replace("\"f-1\"", "\"f-9\"")
+        .replace("fp-f-1", "fp-f-9")
+        .replace("\"high\"", "\"low\"");
+    send(&mut m, &second);
+    let at = |m: &Model| m.diff.as_ref().map(|d| (d.cursor, d.stack)).unwrap();
+    assert_eq!(at(&m), (4, 0));
+    press(&mut m, KeyCode::Char('n'));
+    assert_eq!(at(&m), (4, 1), "the second finding on line 42");
+    press(&mut m, KeyCode::Enter);
+    let Some(Modal::Finding { id, .. }) = m.top_modal() else { panic!("{:?}", m.top_modal()) };
+    assert_eq!(id.as_str(), "f-9");
+    press(&mut m, KeyCode::Esc);
+    press(&mut m, KeyCode::Char('j'));
+    assert_eq!(at(&m), (5, 0), "moving the cursor leaves the stack");
+}

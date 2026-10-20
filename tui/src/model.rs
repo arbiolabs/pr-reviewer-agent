@@ -228,6 +228,8 @@ pub struct DiffView {
     pub selected_file: Option<Text>,
     /// Row index within the selected file's rows (hunk headers and lines).
     pub cursor: usize,
+    /// Which of the findings stacked on the cursor's line `Enter` opens; `n` walks the stack before the next line.
+    pub stack: usize,
     pub anchor: Option<(Text, Option<u32>)>,
 }
 

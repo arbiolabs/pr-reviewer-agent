@@ -174,3 +174,63 @@ pub fn rich(c: &Ctx, text: &str, w: usize, role: Role) -> Vec<Vec<Span<'static>>
     }
     lines
 }
+
+/// Splits one row of spans into rows at most `w` columns wide, keeping each piece's style. A row breaks after the
+/// last space or comma that leaves it at least half full, else mid-token.
+pub fn wrap_spans(spans: Vec<Span<'static>>, w: usize) -> Vec<Vec<Span<'static>>> {
+    use unicode_segmentation::UnicodeSegmentation;
+    let text: String = spans.iter().map(|s| s.content.as_ref()).collect();
+    let mut cuts = Vec::new();
+    let (mut used, mut soft) = (0, None);
+    for (i, g) in text.grapheme_indices(true) {
+        let gw = width(g);
+        if used + gw > w && used > 0 {
+            let cut = soft.filter(|&(_, u)| u * 2 >= w).map_or(i, |(at, _)| at);
+            cuts.push(cut);
+            used = width(&text[cut..i]);
+            soft = None;
+        }
+        used += gw;
+        if g == " " || g == "," {
+            soft = Some((i + g.len(), used));
+        }
+    }
+    let mut rows = vec![Vec::new()];
+    let mut at = 0;
+    let mut next = cuts.into_iter().peekable();
+    for span in spans {
+        let mut rest: &str = &span.content;
+        while let Some(&cut) = next.peek() {
+            if cut >= at + rest.len() {
+                break;
+            }
+            let (head, tail) = rest.split_at(cut - at);
+            if !head.is_empty() {
+                rows.last_mut().unwrap().push(Span::styled(head.to_string(), span.style));
+            }
+            rows.push(Vec::new());
+            at = cut;
+            rest = tail;
+            next.next();
+        }
+        if !rest.is_empty() {
+            rows.last_mut().unwrap().push(Span::styled(rest.to_string(), span.style));
+        }
+        at += rest.len();
+    }
+    rows
+}
+
+#[cfg(test)]
+mod tests {
+    use ratatui::text::Span;
+
+    #[test]
+    fn wrapped_rows_keep_every_char_and_never_pass_the_width() {
+        let rows = super::wrap_spans(vec![Span::raw("const refund"), Span::raw(" = await pay(x);")], 10);
+        let text: Vec<String> = rows.iter().map(|r| r.iter().map(|s| s.content.as_ref()).collect()).collect();
+        assert_eq!(text, ["const ", "refund = ", "await ", "pay(x);"]);
+        let rows = super::wrap_spans(vec![Span::raw("abcdefghijkl")], 5);
+        assert_eq!(rows.len(), 3);
+    }
+}

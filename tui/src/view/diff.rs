@@ -1,18 +1,20 @@
-//! Diff, editorial: a file rail on the left, the patch as a syntax-colored listing, and each finding written inline
-//! under its anchor line like a review comment. Explicit truncation and staleness stay.
+//! Diff, editorial: a file list on the left, the patch as a syntax-colored listing, and each finding written inline
+//! under its anchor line like a review comment. Long lines soft-wrap (up to `WRAP_ROWS` rows) instead of scrolling
+//! sideways, so no key hides code. Explicit truncation and staleness stay.
 
 use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
-use super::code::highlight;
+use super::code::{highlight, wrap_spans};
+use super::doc::{filled, spans_w, split_row};
 use super::{Ctx, Width, window};
 use crate::model::{DiffRow, DiffView, Pane, file_rows};
-use crate::protocol::{DiffFile, FileStatus, Finding, LineKind};
+use crate::protocol::{FileStatus, Finding, LineKind};
 use crate::text::{pad_left, width};
 use crate::theme::{Bg, Role};
-use crate::update::diff_findings;
+use crate::update::{diff_findings, row_findings};
 
 pub fn diff(c: &Ctx, f: &mut Frame, area: Rect) {
     let Some(d) = &c.m.diff else {
@@ -86,81 +88,81 @@ fn on_cursor(d: &DiffView, f: &Finding) -> bool {
     }
 }
 
-fn status_letter(s: FileStatus) -> &'static str {
+/// What the file list says about a file's status; a plain modification says nothing.
+fn status_word(s: FileStatus) -> &'static str {
     match s {
-        FileStatus::Added => "A",
-        FileStatus::Modified => "M",
-        FileStatus::Deleted => "D",
-        FileStatus::Renamed => "R",
-        FileStatus::Binary => "B",
-        FileStatus::Unknown => "?",
+        FileStatus::Added => "new  ",
+        FileStatus::Deleted => "deleted  ",
+        FileStatus::Renamed => "renamed  ",
+        FileStatus::Modified | FileStatus::Binary | FileStatus::Unknown => "",
     }
 }
 
+/// The file list: no panel, two rows a file like the PR rail, the selection a band with the accent bar.
 fn tree(c: &Ctx, f: &mut Frame, area: Rect, d: &DiffView, anchored: &[&Finding], focused: bool) {
-    let bg = c.t.bg(Bg::Surface);
+    let base = c.t.bg(Bg::Base);
     let w = area.width as usize;
-    let fill = |spans: Vec<Span<'static>>, st| {
-        let used: usize = spans.iter().map(|s| width(&s.content)).sum();
-        let mut spans = spans;
-        spans.push(Span::styled(" ".repeat(w.saturating_sub(used)), st));
-        Line::from(spans)
-    };
     let mut lines = vec![
-        fill(vec![], bg),
-        fill(
-            vec![Span::styled(
-                format!("  FILES  {}", d.files.len()),
-                c.s(if focused { Role::Accent } else { Role::Muted }).patch(bg),
-            )],
-            bg,
-        ),
-        fill(vec![], bg),
+        Line::raw(""),
+        Line::from(vec![
+            c.span("  FILES", if focused { Role::Accent } else { Role::Muted }),
+            c.span(format!("  {}", d.files.len()), Role::Muted),
+        ]),
+        Line::raw(""),
     ];
     let sel = d.selected_file.as_ref().and_then(|p| d.files.iter().position(|x| &x.path == p));
+    let rh = if d.files.len() * 3 + 4 <= area.height as usize { 3 } else { 2 };
     let h = (area.height as usize).saturating_sub(4);
-    for i in window(d.files.len(), sel, h / 2) {
+    for i in window(d.files.len(), sel, h / rh) {
         let file = &d.files[i];
         let selected = Some(i) == sel;
-        let st = if selected { c.t.bg(Bg::Select) } else { bg };
+        let st = if selected { c.t.bg(Bg::Select) } else { base };
         let on = |r: Role| c.s(r).patch(st);
         let marker = anchored.iter().filter(|x| x.file == file.path).map(|x| x.severity).min().map(|s| c.t.severity(s));
         let (name, dir) = match file.path.as_str().rsplit_once('/') {
-            Some((dir, name)) => (name.to_string(), format!("{dir}/")),
+            Some((dir, name)) => (name.to_string(), dir.to_string()),
             None => (file.path.to_string(), String::new()),
         };
         let bar = if selected { if c.t.ascii { ">" } else { "▌" } } else { " " };
         let (glyph, grole) = marker.map_or((" ", Role::Muted), |(g, _, r)| (g, r));
-        lines.push(fill(
+        lines.push(Line::from(filled(
             vec![
                 Span::styled(bar.to_string(), on(Role::Accent)),
                 Span::styled(format!(" {glyph} "), on(grole)),
                 Span::styled(c.fit(&name, w.saturating_sub(5)), on(if selected { Role::Title } else { Role::Normal })),
             ],
+            w,
             st,
-        ));
+        )));
         let counts = match file.status {
-            FileStatus::Binary => "binary".to_string(),
-            _ => format!("+{} -{}", file.additions, file.deletions),
-        };
-        lines.push(fill(
-            vec![
-                Span::styled(bar.to_string(), on(Role::Accent)),
-                Span::styled(format!("   {} ", status_letter(file.status)), on(Role::Muted)),
-                Span::styled(c.fit(&dir, w.saturating_sub(7 + counts.len())), on(Role::Muted)),
-                Span::styled(format!(" {counts}"), on(Role::Muted)),
+            FileStatus::Binary => vec![Span::styled("binary ", on(Role::Muted))],
+            _ => vec![
+                Span::styled(format!("+{}", file.additions), on(Role::Add)),
+                Span::styled(format!(" -{} ", file.deletions), on(Role::Del)),
             ],
-            st,
-        ));
+        };
+        let word = status_word(file.status);
+        let room = w.saturating_sub(5 + width(word) + spans_w(&counts));
+        let left = vec![
+            Span::styled(bar.to_string(), on(Role::Accent)),
+            Span::styled(format!("   {word}"), on(Role::Pending)),
+            Span::styled(c.fit(&dir, room), on(Role::Muted)),
+        ];
+        lines.push(Line::from(filled(split_row(left, counts, w), w, st)).style(st));
+        if rh == 3 {
+            lines.push(Line::raw(""));
+        }
     }
     if d.next_cursor.is_some() || d.truncated {
-        lines.push(fill(vec![Span::styled("  more files below", c.s(Role::Pending).patch(bg))], bg));
-    }
-    while lines.len() < area.height as usize {
-        lines.push(fill(vec![], bg));
+        lines.push(Line::from(c.span("  more files below", Role::Pending)));
     }
     f.render_widget(Paragraph::new(lines), area);
 }
+
+/// A code line soft-wraps onto at most this many rows, then ends in an ellipsis.
+const WRAP_ROWS: usize = 4;
+/// Columns before the code: severity marker, old and new line numbers, the sign.
+const GUTTER: usize = 14;
 
 fn hunks(c: &Ctx, f: &mut Frame, area: Rect, d: &DiffView, anchored: &[&Finding]) {
     let Some(file) = d.file() else { return };
@@ -179,32 +181,23 @@ fn hunks(c: &Ctx, f: &mut Frame, area: Rect, d: &DiffView, anchored: &[&Finding]
         return;
     }
     let rows = file_rows(file);
-    let h = (area.height as usize).saturating_sub(usize::from(file.truncated));
-    let range = window(rows.len(), Some(d.cursor), h.saturating_sub(3));
     let mut lines: Vec<Line> = Vec::new();
-    for i in range {
-        let cursor = i == d.cursor && c.focused(Pane::Main);
-        lines.push(row_line(c, file, &rows[i], anchored, w, cursor));
-        // A finding reads like a review comment under the line it is about.
-        if let DiffRow::Line(l) = &rows[i]
-            && let Some(x) =
-                anchored.iter().find(|x| x.file == file.path && l.new.is_some() && x.line.map(|n| n.get()) == l.new)
-        {
-            let (glyph, _, role) = c.t.severity(x.severity);
-            let bar = if c.t.ascii { "|" } else { "┃" };
-            let pad = " ".repeat(14);
-            lines.push(Line::from(vec![
-                c.span(format!("{pad}{bar} "), role),
-                c.span(format!("{glyph} {} ", super::doc::sev_word(x.severity)), role),
-                c.span(c.fit(x.title.as_str(), w.saturating_sub(30)), Role::Title),
-            ]));
-            lines.push(Line::from(vec![
-                c.span(format!("{pad}{bar} "), role),
-                c.span("Enter reads the finding   n next finding", Role::Muted),
-            ]));
+    let mut at = 0;
+    for (i, row) in rows.iter().enumerate() {
+        let cursor = i == d.cursor;
+        if cursor {
+            at = lines.len();
         }
+        if matches!(row, DiffRow::Header(_)) && i > 0 {
+            lines.push(Line::raw(""));
+        }
+        let stack = row_findings(anchored, file, row);
+        lines.extend(row_lines(c, row, stack.first().copied(), w, cursor && c.focused(Pane::Main)));
+        lines.extend(annotations(c, &stack, w, cursor.then_some(d.stack)));
     }
-    lines.truncate(h);
+    let h = (area.height as usize).saturating_sub(usize::from(file.truncated));
+    let range = window(lines.len(), Some(at), h);
+    let mut lines: Vec<Line> = lines.drain(range).collect();
     if file.truncated {
         let shown: usize = file.hunks.iter().map(|h| h.lines.len()).sum();
         let total = (file.additions + file.deletions) as usize;
@@ -215,22 +208,51 @@ fn hunks(c: &Ctx, f: &mut Frame, area: Rect, d: &DiffView, anchored: &[&Finding]
     f.render_widget(Paragraph::new(lines), area);
 }
 
-fn row_line(c: &Ctx, file: &DiffFile, row: &DiffRow, anchored: &[&Finding], w: usize, cursor: bool) -> Line<'static> {
-    let g = c.t.g();
+/// The findings on one line, written under it like review comments: one row each, most severe first, in its own
+/// severity color. At the cursor the one `Enter` opens is bright and a hint row follows.
+fn annotations(c: &Ctx, stack: &[&Finding], w: usize, focus: Option<usize>) -> Vec<Line<'static>> {
+    let bar = if c.t.ascii { "|" } else { "┃" };
+    let pad = " ".repeat(GUTTER - 1);
+    let mut out = Vec::new();
+    for (k, x) in stack.iter().enumerate() {
+        let (glyph, _, role) = c.t.severity(x.severity);
+        let lit = focus.is_none_or(|f| f == k);
+        let word = format!("{glyph} {:<9}", super::doc::sev_word(x.severity));
+        out.push(Line::from(vec![
+            c.span(format!("{pad}{bar} "), role),
+            c.span(word, role),
+            c.span(c.fit(x.title.as_str(), w.saturating_sub(GUTTER + 12)), if lit { Role::Title } else { Role::Muted }),
+        ]));
+    }
+    if let (Some(k), Some(x)) = (focus, focus.and_then(|k| stack.get(k))) {
+        let role = c.t.severity(x.severity).2;
+        let hint = match stack.len() {
+            1 => "Enter reads the finding   n next finding",
+            _ if k + 1 < stack.len() => "Enter reads the bright one   n the next one here",
+            _ => "Enter reads the bright one   n next finding",
+        };
+        out.push(Line::from(vec![c.span(format!("{pad}{bar} "), role), c.span(hint, Role::Muted)]));
+    }
+    out
+}
+
+fn row_lines(c: &Ctx, row: &DiffRow, hit: Option<&Finding>, w: usize, cursor: bool) -> Vec<Line<'static>> {
     match row {
         DiffRow::Header(h) => {
+            let st = c.t.bg(if cursor { Bg::Select } else { Bg::Surface });
             let text = h.header.as_str();
-            let ctx = text.rsplit_once("@@").map_or("", |x| x.1).trim();
-            let at = text.split("@@").nth(1).unwrap_or("").trim();
-            Line::from(vec![
-                c.span(format!("{:>11} {} ", "", g.ellipsis), Role::Muted),
-                c.span(format!("{at}  "), Role::Muted),
-                c.span(c.fit(ctx, w.saturating_sub(width(at) + 16)), Role::Type),
-            ])
+            let (at, ctx) = match text.strip_prefix("@@").and_then(|t| t.split_once("@@")) {
+                Some((at, ctx)) => (format!("@@ {} @@", at.trim()), ctx.trim().to_string()),
+                None => (text.to_string(), String::new()),
+            };
+            let spans = vec![
+                Span::styled(format!("{:>w$}", "", w = GUTTER - 1), st),
+                Span::styled(format!("{at}  "), c.s(Role::Muted).patch(st)),
+                Span::styled(c.fit(&ctx, w.saturating_sub(GUTTER + width(&at) + 1)), c.s(Role::Hunk).patch(st)),
+            ];
+            vec![Line::from(filled(spans, w, st))]
         }
         DiffRow::Line(l) => {
-            let hit =
-                anchored.iter().find(|x| x.file == file.path && l.new.is_some() && x.line.map(|n| n.get()) == l.new);
             let bg = match (cursor, hit.is_some(), l.kind) {
                 (true, _, _) => Bg::Select,
                 (_, true, _) => Bg::Anchor,
@@ -254,16 +276,29 @@ fn row_line(c: &Ctx, file: &DiffFile, row: &DiffRow, anchored: &[&Finding], w: u
                 LineKind::Context => (" ", Role::Muted),
                 LineKind::Unknown => ("?", Role::Muted),
             };
-            let mut spans = vec![
-                marker,
-                Span::styled(format!(" {} {} ", num(l.old), num(l.new)), on(Role::Muted)),
-                Span::styled(format!("{sign} "), on(role)),
-            ];
-            let used: usize = spans.iter().map(|s| width(&s.content)).sum();
-            spans.extend(highlight(c, l.text.as_str(), w.saturating_sub(used), bg));
-            let used: usize = spans.iter().map(|s| width(&s.content)).sum();
-            spans.push(Span::styled(" ".repeat(w.saturating_sub(used)), st));
-            Line::from(spans)
+            let room = w.saturating_sub(GUTTER);
+            // Wrapped rows hang under the line's own indent, two deeper.
+            let text = super::code::expand(l.text.as_str());
+            let indent = (text.len() - text.trim_start().len() + 2).min(room / 3);
+            let code = highlight(c, l.text.as_str(), room * WRAP_ROWS, bg);
+            let wrap = c.t.g().ellipsis;
+            wrap_spans(code, room.saturating_sub(indent).max(1))
+                .into_iter()
+                .enumerate()
+                .map(|(k, piece)| {
+                    let mut spans = if k == 0 {
+                        vec![
+                            marker.clone(),
+                            Span::styled(format!(" {} {} ", num(l.old), num(l.new)), on(Role::Muted)),
+                            Span::styled(format!("{sign} "), on(role)),
+                        ]
+                    } else {
+                        vec![Span::styled(format!("{:>w$} {:indent$}", wrap, "", w = GUTTER - 1), on(Role::Muted))]
+                    };
+                    spans.extend(piece);
+                    Line::from(filled(spans, w, st))
+                })
+                .collect()
         }
     }
 }
