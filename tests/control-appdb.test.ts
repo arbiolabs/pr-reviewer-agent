@@ -104,6 +104,7 @@ it("streams a real review to a client attached from the start, with no gaps", as
       model: "faux/reviewer",
       startedAt: revision.created_at,
       completedAt: revision.completed_at,
+      attempt: 1,
     },
   ]);
   const [finding] = snapshot.findings;
@@ -210,10 +211,13 @@ it("maps failure, manual retry and supersession, and sanitizes repository text",
     "run.superseded SUPERSEDED SUPERSEDED",
   ]);
   await c.waitFor((m) => m.type === "event" && m.eventType === "heartbeat");
+  // Each run event carries the attempt it happened in; the retry opened the second.
+  expect(c.events().filter((e) => e.eventType.startsWith("run.")).map((e) => (e.data as { attempt?: number }).attempt)).toEqual([1, 1, 2, 2]);
 
   c.send({ type: "snapshot.get", requestId: "s2" });
   const snapshot = await c.waitFor<Extract<ServerMessage, { type: "snapshot" }>>((m) => m.type === "snapshot" && m.requestId === "s2");
   expect(snapshot.prs[0]!.title).toBe("evil title");
+  expect(snapshot.runs.map((r) => r.attempt)).toEqual([2]);
   c.send({ type: "resume", requestId: "r", streamEpoch: "other", afterSequence: 1 });
   expect(await c.waitFor((m) => m.type === "resync.required")).toMatchObject({ requestId: "r" });
 });

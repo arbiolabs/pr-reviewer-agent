@@ -207,6 +207,11 @@
                 },
                 "failureReason": {
                   "type": "string"
+                },
+                "attempt": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "1-based: each manual retry or approval opens the next attempt"
                 }
               }
             }
@@ -637,6 +642,11 @@
                 },
                 "failureReason": {
                   "type": "string"
+                },
+                "attempt": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "1-based: each manual retry or approval opens the next attempt"
                 }
               }
             }
@@ -754,6 +764,11 @@
                 },
                 "failureReason": {
                   "type": "string"
+                },
+                "attempt": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "1-based: each manual retry or approval opens the next attempt"
                 }
               }
             }
@@ -871,6 +886,11 @@
                 },
                 "failureReason": {
                   "type": "string"
+                },
+                "attempt": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "1-based: each manual retry or approval opens the next attempt"
                 }
               }
             }

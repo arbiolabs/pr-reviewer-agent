@@ -1249,7 +1249,8 @@ fn mutation(m: &mut Model, mu: Mutation, fx: &mut Vec<Effect>) {
             Command::Start(StartParams { pr_id: p.id, expected_head_sha: p.head_sha }),
         ),
         (Mutation::Retry, Some(r)) if r.status == RunStatus::Failed => {
-            (format!("Retry run {}?", r.id.short()), Command::Retry(RunParams { run_id: r.id }))
+            let next = r.attempt.map_or(String::new(), |n| format!(" (attempt {})", n + 1));
+            (format!("Retry run {}{next}?", r.id.short()), Command::Retry(RunParams { run_id: r.id }))
         }
         (Mutation::Cancel, Some(r)) if r.status == RunStatus::Running => {
             let what = if r.phase == Phase::AwaitingApproval { "parked" } else { "running" };

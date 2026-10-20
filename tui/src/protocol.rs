@@ -328,6 +328,8 @@ pub struct Run {
     pub started_at: Text,
     pub completed_at: Option<Text>,
     pub failure_reason: Option<Text>,
+    /// 1-based; absent from daemons that predate it.
+    pub attempt: Option<u32>,
 }
 
 impl Run {

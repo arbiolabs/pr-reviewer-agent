@@ -141,6 +141,16 @@ fn cancel_and_retry_name_their_target_and_settle_on_the_run_ending_or_moving() {
 }
 
 #[test]
+fn the_retry_prompt_names_the_attempt_it_opens_when_the_daemon_counts_them() {
+    let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#184");
+    let failed = run_json("rev-184-a", "acme/shop#184", "4444444444444444444444444444444444444444", "FAILED", "FAILED")
+        .replacen('{', r#"{"attempt":1,"#, 1);
+    send(&mut m, &event(109, "acme/shop#184", "rev-184-a", "run.failed", &failed));
+    press(&mut m, KeyCode::Char('R'));
+    assert_eq!(prompt(&m), "Retry run rev-184- (attempt 2)?");
+}
+
+#[test]
 fn a_read_only_daemon_says_why_the_action_keys_do_nothing() {
     let mut m = engine("fixtures/server.welcome.read-only.json", "acme/shop#186");
     assert!(commands(&press(&mut m, KeyCode::Char('s'))).is_empty());

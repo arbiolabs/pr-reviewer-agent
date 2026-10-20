@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { COORDINATOR_STATES, FINDING_STATES, PUBLICATION_STATUSES, publicationStatus, REVIEW_STATES, type ReviewState } from "../domain/machines.ts";
 import type { CandidateFinding } from "../domain/types.ts";
 import { ACCOUNT_KEY, chooseAccount, detectGh, type Env, type GhDetection, listAccounts } from "../github/accounts.ts";
-import { AppStore, type OutboxRow, type PullRow, type RevisionRow, TRANSITIONS } from "../persistence/store.ts";
+import { AppStore, type OutboxRow, REOPENINGS, type PullRow, type RevisionRow, TRANSITIONS } from "../persistence/store.ts";
 import type { ReviewPayload } from "../publish/publisher.ts";
 import { sanitize } from "../protocol/sanitize.ts";
 import type { Account, Finding, FindingDetail, Pr, PublicationChange, PublicationPreview, Run, SequencedEvent } from "../protocol/v1.ts";
@@ -162,7 +162,7 @@ export class AppDbSource implements ControlSource {
       sequence: this.latestSequence(),
       prs: (this.db.prepare("SELECT * FROM pull_requests ORDER BY updated_at DESC, id").all() as PullRow[]).map((p) => this.pr(p)),
       runs: (this.db.prepare("SELECT * FROM review_revisions ORDER BY created_at, id").all() as RevisionRow[]).map((r) =>
-        this.run(r, r.state, r.completed_at, r.state === "FAILED" ? this.failureReason(r.id) : null),
+        this.run(r, r.state, r.completed_at, r.state === "FAILED" ? this.failureReason(r.id) : null, this.attempt(r.id, null)),
       ),
       findings: (this.db.prepare(FINDING_SELECT).all({ id: null, revision: null }) as FindingRow[]).map(toFinding),
       accounts: this.accounts(),
@@ -324,7 +324,7 @@ export class AppDbSource implements ControlSource {
   }
 
   /** A run as of one journal row: everything but phase, completion and failure is fixed when the revision is created. */
-  private run(r: RevisionRow, phase: ReviewState, completedAt: string | null, failureReason: string | null): Run {
+  private run(r: RevisionRow, phase: ReviewState, completedAt: string | null, failureReason: string | null, attempt: number): Run {
     const status = phase === "COMPLETED" || phase === "FAILED" || phase === "SUPERSEDED" ? phase : "RUNNING";
     return {
       id: r.id,
@@ -337,7 +337,16 @@ export class AppDbSource implements ControlSource {
       startedAt: r.created_at,
       ...(status !== "RUNNING" && completedAt ? { completedAt } : {}),
       ...(failureReason ? { failureReason } : {}),
+      attempt,
     };
+  }
+
+  /** The 1-based run attempt as of journal row `seq` (null: now), counted in reopenings like the engine's command keys. */
+  private attempt(revisionId: string, seq: number | null): number {
+    const n = this.db
+      .prepare(`SELECT count(*) AS n FROM audit_events WHERE revision_id = ? AND event IN (${REOPENINGS.map((e) => `'${e}'`).join(", ")}) AND (? IS NULL OR seq <= ?)`)
+      .get(revisionId, seq, seq) as { n: number };
+    return n.n + 1;
   }
 
   private failureReason(revisionId: string): string | null {
@@ -375,9 +384,9 @@ export class AppDbSource implements ControlSource {
     }
     const { from_state: from, to_state: to, event } = row;
     if (!isPhase(from) || !isPhase(to)) return { ...ids, eventType: `journal.${event}`, data: { from, to, event, detail: row.detail } };
-    if (event === "REVISION_CREATED" || event === "MANUAL_RETRY") return { ...ids, eventType: "run.started", data: this.run(rev, to, null, null) };
+    if (event === "REVISION_CREATED" || event === "MANUAL_RETRY") return { ...ids, eventType: "run.started", data: this.run(rev, to, null, null, this.attempt(rev.id, row.seq)) };
     if (to === "COMPLETED" || to === "FAILED" || to === "SUPERSEDED") {
-      return { ...ids, eventType: TERMINAL_EVENT[to], data: this.run(rev, to, row.at, to === "FAILED" ? row.detail : null) };
+      return { ...ids, eventType: TERMINAL_EVENT[to], data: this.run(rev, to, row.at, to === "FAILED" ? row.detail : null, this.attempt(rev.id, row.seq)) };
     }
     return { ...ids, eventType: "review.phase_changed", data: { from, to, event, detail: row.detail } };
   }

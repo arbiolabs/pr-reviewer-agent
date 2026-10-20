@@ -59,6 +59,7 @@ export const Run = Type.Object({
   startedAt: Timestamp,
   completedAt: Type.Optional(Timestamp),
   failureReason: Type.Optional(Type.String()),
+  attempt: Type.Optional(Type.Integer({ minimum: 1, description: "1-based: each manual retry or approval opens the next attempt" })),
 });
 export type Run = Static<typeof Run>;
 

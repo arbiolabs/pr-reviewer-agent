@@ -961,6 +961,7 @@ export const fixtures: Record<string, ClientMessage | ServerMessage | Record<str
     status: "FAILED",
     completedAt: at(109),
     failureReason: "aborted by operator",
+    attempt: 2,
   }),
   "server.event.accounts-updated": accountsUpdated({ seq: 109 }, [personal, { ...work, selected: true }]),
   "server.event.review.publication_changed": publicationChanged({ seq: 109 }, run1, "awaiting_approval"),
