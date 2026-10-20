@@ -284,6 +284,20 @@ fn special_states() {
         ),
         ("accounts_blocked", accounts_blocked(), (120, 38)),
         (
+            "timeline_run_scope",
+            mid_review(Look::default())
+                .select("acme/shop#184")
+                .key(KeyCode::Enter)
+                .key(KeyCode::Char('4'))
+                .key(KeyCode::Char('f')),
+            (120, 38),
+        ),
+        (
+            "timeline_finding_scope",
+            mid_review(Look::default()).select("acme/shop#184").key(KeyCode::Enter).key(KeyCode::Char('t')),
+            (80, 24),
+        ),
+        (
             "completed_without_findings",
             {
                 let mut s = Sim::new(Look::default());

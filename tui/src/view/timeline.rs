@@ -100,10 +100,21 @@ pub fn timeline(c: &Ctx, f: &mut Frame, area: Rect) {
         return;
     };
     let g = c.t.g();
+    // IDs are engine hashes; people know a PR by number and repository, and a finding by its title.
+    let pr = t.query.pr.as_ref().map_or("-".into(), |id| match c.m.domain.prs.get(id) {
+        Some(p) => format!("#{} {}", p.number, p.repository),
+        None => id.to_string(),
+    });
     let scope = match t.scope {
-        TimelineScope::Pr => format!("PR {}", t.query.pr.as_ref().map_or("-".into(), |p| p.to_string())),
-        TimelineScope::Run => format!("run {}", t.query.run.as_ref().map_or("-".into(), |r| r.to_string())),
-        TimelineScope::Finding => format!("finding {}", t.query.finding.as_ref().map_or("-".into(), |x| x.to_string())),
+        TimelineScope::Pr => format!("PR {pr}"),
+        TimelineScope::Run => format!("run {} of {pr}", t.query.run.as_ref().map_or("-", |r| r.short())),
+        TimelineScope::Finding => {
+            let finding = t.query.finding.as_ref().map_or("-".into(), |id| match c.m.domain.findings.get(id) {
+                Some(f) => format!("\"{}\"", c.fit(f.title.as_str(), 32)),
+                None => id.to_string(),
+            });
+            format!("finding {finding} on {pr}")
+        }
     };
     let category = t.category.map_or("all", |x| x.label());
     let phase = t.phase.map_or("all", phase_name);

@@ -1,10 +1,11 @@
 ---
 source: tests/golden.rs
+assertion_line: 140
 expression: ascii_text
 ---
  PR REVIEWER * live | unix:/run/user/501/pr-review/reviewer.sock                                                 ? help
   1 Inbox   2 Review   3 Diff   4 Timeline   5 Settings
-scope PR acme/shop#184 (f) | category all (v) | phase all (P)
+scope PR #184 acme/shop (f) | category all (v) | phase all (P)
 + > TIMELINE (2 of 2) -------------------------------------------------++ EVENT ---------------------------------------+
 |>   12 13:00:12 system finding f-1 ^ HIGH Finding f-1: detected       ||sequence  12 (after 11)                       |
 |    11 13:00:11 agent  tool    read_file src/booking.ts:1-120         ||epoch     epoch-1                             |
