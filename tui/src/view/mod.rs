@@ -91,7 +91,6 @@ pub fn view(m: &Model, f: &mut Frame) {
         minimal(&c, f, area);
         return;
     }
-    f.render_widget(Paragraph::new("").style(t.bg(crate::theme::Bg::Base)), area);
     let banner = banner(&c, area.width);
     let [title, tabs, banner_area, body, footer] = Layout::vertical([
         Constraint::Length(1),
@@ -219,7 +218,7 @@ fn views_line(c: &Ctx) -> Line<'static> {
 }
 
 fn views_w(c: &Ctx) -> usize {
-    if c.width == Width::Narrow { 0 } else { views_line(c).spans.iter().map(|s| crate::text::width(&s.content)).sum() }
+    if c.m.size.0 < 100 { 0 } else { views_line(c).spans.iter().map(|s| crate::text::width(&s.content)).sum() }
 }
 
 #[allow(dead_code)]

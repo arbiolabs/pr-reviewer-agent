@@ -19,10 +19,10 @@ pub const COLUMN: u16 = 100;
 const RAIL_W: u16 = 32;
 
 pub fn spinner(c: &Ctx) -> &'static str {
-    const U: [&str; 10] = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
+    const U: [&str; 4] = ["·", "•", "●", "•"];
     const A: [&str; 4] = ["-", "\\", "|", "/"];
     let n = (c.m.now_ms / 125) as usize;
-    if c.t.ascii { A[n % 4] } else { U[n % 10] }
+    if c.t.ascii { A[n % 4] } else { U[n % 4] }
 }
 
 fn secs(at: &str) -> Option<i64> {
@@ -96,7 +96,7 @@ pub fn screen(c: &Ctx, f: &mut Frame, area: Rect) {
         f.render_widget(p, col);
         return;
     };
-    let (lines, starts) = document(c, pr, col.width as usize);
+    let (lines, starts) = document(c, pr, col.width as usize, area.height < 30);
     let list = c.m.domain.pr_findings(&pr.id);
     let sel = c.m.ui.selected_finding.as_ref().and_then(|id| list.iter().position(|x| &x.id == id));
     let scroll = match sel {
@@ -187,7 +187,7 @@ fn rail_state(c: &Ctx, pr: &Pr) -> (String, Role) {
 // ---------------------------------------------------------------- document
 
 /// The PR as a document, and the line where each finding card starts.
-fn document(c: &Ctx, pr: &Pr, w: usize) -> (Vec<Line<'static>>, Vec<usize>) {
+fn document(c: &Ctx, pr: &Pr, w: usize, compact: bool) -> (Vec<Line<'static>>, Vec<usize>) {
     let g = c.t.g();
     let sep = format!(" {} ", g.sep);
     let run = c.m.domain.latest_run(&pr.id);
@@ -207,7 +207,9 @@ fn document(c: &Ctx, pr: &Pr, w: usize) -> (Vec<Line<'static>>, Vec<usize>) {
         meta.push(format!("run {}", r.id.short()));
     }
     lines.push(Line::from(c.span(c.fit(&meta.join(&sep), w), Role::Muted)));
-    lines.push(Line::raw(""));
+    if !compact {
+        lines.push(Line::raw(""));
+    }
     lines.push(phase_line(c, run, w));
     if let Some(r) = run.filter(|r| r.head_sha != pr.head_sha) {
         let t = format!("{} stale: reviewed {}, the PR head is now {}", g.pending, r.head_sha.short(), pr.head_sha.short());
@@ -219,7 +221,9 @@ fn document(c: &Ctx, pr: &Pr, w: usize) -> (Vec<Line<'static>>, Vec<usize>) {
     let running = run.is_some_and(|r| r.status == RunStatus::Running);
     lines.push(summary_line(c, pr, &findings, w));
     lines.push(Line::from(c.span(rule(c, w), Role::Muted)));
-    lines.push(Line::raw(""));
+    if !compact {
+        lines.push(Line::raw(""));
+    }
 
     if let Some(r) = run.filter(|r| r.status == RunStatus::Failed) {
         lines.push(Line::from(c.span(format!("{} The review did not finish", g.fail), Role::Fail)));
@@ -245,7 +249,7 @@ fn document(c: &Ctx, pr: &Pr, w: usize) -> (Vec<Line<'static>>, Vec<usize>) {
     for f in &findings {
         starts.push(lines.len());
         let selected = sel == Some(&f.id) && c.m.ui.screen == Screen::Review && c.m.ui.focus != Pane::Sidebar;
-        lines.extend(card(c, f, c.m.details.get(&f.id), w, selected));
+        lines.extend(card(c, f, c.m.details.get(&f.id), w, selected, compact));
         lines.push(Line::raw(""));
     }
     (lines, starts)
@@ -258,6 +262,7 @@ fn rule(c: &Ctx, w: usize) -> String {
 fn summary_line(c: &Ctx, pr: &Pr, findings: &[&Finding], w: usize) -> Line<'static> {
     let g = c.t.g();
     let live: Vec<_> = findings.iter().filter(|f| !f.stale).collect();
+    let words = |compact: bool| {
     let mut left = vec![c.span(
         match live.len() {
             0 => "No findings".to_string(),
@@ -270,22 +275,27 @@ fn summary_line(c: &Ctx, pr: &Pr, findings: &[&Finding], w: usize) -> Line<'stat
         let n = live.iter().filter(|f| f.severity == s).count();
         if n > 0 {
             let (glyph, _, role) = c.t.severity(s);
-            left.push(c.span(format!("   {glyph} {n} {}", sev_word(s).to_lowercase()), role));
+            let word = if compact { String::new() } else { format!(" {}", sev_word(s).to_lowercase()) };
+            left.push(c.span(format!("{}{glyph} {n}{word}", if compact { "  " } else { "   " }), role));
         }
     }
     let stale = findings.len() - live.len();
     if stale > 0 {
         left.push(c.span(format!("   {stale} from an older head"), Role::Pending));
     }
+    left
+    };
+    let left = words(false);
     let published = live.iter().filter(|f| f.status == crate::protocol::FindingStatus::Published).count();
     let right = if live.is_empty() {
         vec![]
     } else if published == 0 {
-        vec![c.span(format!("{} not published to GitHub", g.idle), Role::Muted)]
+        vec![c.span(format!("{} none on GitHub yet", g.idle), Role::Muted)]
     } else {
         vec![c.span(format!("{} {published} of {} on GitHub", g.ok, live.len()), Role::Ok)]
     };
     let _ = pr;
+    let left = if spans_w(&left) + spans_w(&right) + 2 > w { words(true) } else { left };
     Line::from(split_row(left, right, w))
 }
 
@@ -430,26 +440,34 @@ fn card_head(c: &Ctx, f: &Finding, w: usize, selected: bool) -> Vec<Vec<Span<'st
     out
 }
 
-fn card(c: &Ctx, f: &Finding, d: Option<&FindingDetail>, w: usize, selected: bool) -> Vec<Line<'static>> {
+fn card(c: &Ctx, f: &Finding, d: Option<&FindingDetail>, w: usize, selected: bool, compact: bool) -> Vec<Line<'static>> {
     let iw = w.saturating_sub(2);
     let mut body = card_head(c, f, iw, selected);
     body.push(vec![]);
     match d {
         None => body.push(vec![c.span(loading(c, &f.id), Role::Muted)]),
         Some(d) => {
-            body.extend(rich(c, d.explanation.as_str(), iw, Role::Normal));
+            let mut prose = rich(c, d.explanation.as_str(), iw, Role::Normal);
+            if compact && prose.len() > 2 {
+                prose.truncate(2);
+                if let Some(last) = prose.last_mut() {
+                    last.push(c.span(format!(" {}", c.t.g().ellipsis), Role::Muted));
+                }
+            }
+            body.extend(prose);
             if let Some(ev) = d.evidence.iter().find(|e| e.kind == EvidenceKind::CodeRef) {
                 body.push(vec![]);
-                body.extend(code_block(c, ev, f, iw, 9));
+                body.extend(code_block(c, ev, f, iw, 11));
             }
             if selected {
-                let more = d.evidence.len().saturating_sub(1);
-                let fix = if d.suggested_fix.is_some() { " · a suggested fix" } else { "" };
+                let fix = if d.suggested_fix.is_some() { " and the fix" } else { "" };
                 body.push(vec![]);
-                body.push(vec![c.span(
-                    format!("Enter reads all {} evidence{fix}, plus {more} more  ·  d opens the diff here", d.evidence.len()),
-                    Role::Muted,
-                )]);
+                body.push(vec![
+                    c.span("Enter", Role::Accent),
+                    c.span(format!(" all {} evidence{fix}    ", d.evidence.len()), Role::Muted),
+                    c.span("d", Role::Accent),
+                    c.span(" diff at this line", Role::Muted),
+                ]);
             }
         }
     }
@@ -521,7 +539,6 @@ fn code_block(c: &Ctx, ev: &Evidence, f: &Finding, w: usize, max: usize) -> Vec<
 /// Enter on a card: the whole finding as an article, every piece of evidence in full.
 pub fn finding_page(c: &Ctx, f: &mut Frame, area: Rect, id: &FindingId, scroll: u16) {
     f.render_widget(Clear, area);
-    f.render_widget(Paragraph::new("").style(c.t.bg(Bg::Base)), area);
     let col = column(area);
     let w = col.width as usize;
     let Some(fd) = c.m.domain.findings.get(id) else {
@@ -555,7 +572,13 @@ pub fn finding_page(c: &Ctx, f: &mut Frame, area: Rect, id: &FindingId, scroll: 
                 if ev.kind == EvidenceKind::CodeRef {
                     body.extend(code_block(c, ev, fd, iw, 40));
                 } else {
-                    let tag = format!("{:?}", ev.kind).to_lowercase();
+                    let tag = match ev.kind {
+                        EvidenceKind::ToolSummary => "tool",
+                        EvidenceKind::TestResult => "test",
+                        EvidenceKind::Scenario => "scenario",
+                        EvidenceKind::Link => "link",
+                        _ => "note",
+                    };
                     for (k, l) in rich(c, ev.text.as_str(), iw.saturating_sub(14), Role::Normal).into_iter().enumerate() {
                         let mut s = vec![c.span(if k == 0 { format!("{tag:<14}") } else { " ".repeat(14) }, Role::Muted)];
                         s.extend(l);
