@@ -176,7 +176,7 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
     if (settled.status !== "done") throw new Error(`analysis ${settled.status}: ${settled.reason}${settled.detail ? ` ${JSON.stringify(settled.detail)}` : ""}`);
     const set = store.candidateSet(revision.id);
     if (!set) throw new Error("the model answered without calling submit_candidates");
-    store.advance(revision.id, "ANALYZE", "CANDIDATES_PERSISTED", `${set.candidates.length} candidate(s)`);
+    store.advance(revision.id, "ANALYZE", "CANDIDATES_PERSISTED", `${set.candidates.length} candidate(s) from ${deps.model.provider}/${deps.model.modelId}`);
     return { phase: "verify", revisionId: revision.id, candidateSetId: set.id };
   };
 
