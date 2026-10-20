@@ -232,3 +232,13 @@ it("claims a review absent only after two complete listings a client timeout apa
   expect(listedAt[2]! - listedAt[1]!).toBeGreaterThanOrEqual(config.github.timeout_ms);
   expect(app.store.auditEvents(revision.id).find((e) => e.event === "CONFIRMED_NOT_POSTED")!.detail).toBe("two complete listings, 300 ms apart, have no review with the marker");
 }, 30_000);
+
+it("supersedes a revision whose PR was merged before the POST, with zero POSTs", async () => {
+  const app = await openPublishing();
+  fake.onGetPull = () => {
+    if (app.store.db.prepare("SELECT count(*) AS n FROM publication_outbox").get()?.n === 1) fake.setPull({ ...fixture.pull, state: "closed", merged: true });
+  };
+  const { revision, outbox } = await publish(app);
+  expect([revision.state, outbox.status, fake.postAttempts]).toEqual(["SUPERSEDED", "failed", 0]);
+  expect(app.store.auditEvents(revision.id).at(-1)).toMatchObject({ from_state: "PUBLISH", event: "PR_NOT_OPEN", to_state: "SUPERSEDED", detail: "pr_not_open: merged" });
+}, 30_000);

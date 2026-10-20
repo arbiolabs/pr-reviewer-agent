@@ -127,7 +127,8 @@ export class Coordinator {
       const open = status === "ACTIVE" || status === "QUIESCING";
       // Debounce: each event restarts the wait, so a burst of pushes reviews only the head GitHub has when it ends.
       store.setPullSchedule(prId, status, open ? this.deps.now() + this.deps.debounceMs : null);
-      if (open) await this.supersedeOlder(prId, live.headSha);
+      // A closed or merged PR supersedes every in-flight revision, whatever its head.
+      await this.supersedeOlder(prId, open ? live.headSha : undefined);
       store.markWebhookProcessed(deliveryId, `${trigger.event} -> ${status}`);
     });
     if (!done) throw new Error(`PR ${prId} is leased by another worker; delivery ${deliveryId} waits`);
@@ -149,8 +150,8 @@ export class Coordinator {
     return state;
   }
 
-  /** §11: older in-flight revisions are marked superseded_requested; those not yet publishing are aborted. */
-  private async supersedeOlder(prId: string, headSha: string): Promise<void> {
+  /** §11: in-flight revisions of other heads (all, with no head) are marked superseded_requested; those not yet publishing are aborted. */
+  private async supersedeOlder(prId: string, headSha: string | undefined): Promise<void> {
     for (const revision of this.deps.store.unfinishedRevisions(prId)) {
       if (revision.head_sha === headSha) continue;
       this.deps.store.requestSupersede(revision.id);

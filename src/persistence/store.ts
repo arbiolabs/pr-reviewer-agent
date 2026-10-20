@@ -236,7 +236,7 @@ export class AppStore {
   private guardPublication(revisionId: string, from: ReviewState, event: ReviewEvent): boolean {
     const outbox = this.outboxForRevision(revisionId);
     if (!outbox) return true;
-    if (from === "PUBLISH" && event === "NEWER_HEAD") {
+    if (from === "PUBLISH" && (event === "NEWER_HEAD" || event === "PR_NOT_OPEN")) {
       if (outbox.status !== "pending") return false;
       this.advanceOutbox(outbox.id, "ABANDON", "superseded");
     }

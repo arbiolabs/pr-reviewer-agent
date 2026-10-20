@@ -265,3 +265,16 @@ it("sends a delivery whose PR GitHub answers 404 for straight to dead, without r
     await fake.close();
   }
 });
+
+it("requests supersede and aborts in-flight revisions when the PR is merged, as for a new head", async () => {
+  const h = harness();
+  h.pr("opened");
+  await h.coordinator.tick();
+  h.advance(30_000);
+  await h.coordinator.tick();
+  h.live.pull = { ...base, state: "closed", merged: true };
+  h.pr("closed", { merged: true });
+  await h.coordinator.tick();
+  expect(h.aborted).toEqual(["task-a"]);
+  expect(h.store.db.prepare("SELECT superseded_requested_at IS NOT NULL AS requested FROM review_revisions").all()).toEqual([{ requested: 1 }]);
+});

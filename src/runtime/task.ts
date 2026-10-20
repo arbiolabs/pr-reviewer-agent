@@ -272,7 +272,11 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
         });
         return toReconcile(revision, outbox.id);
       case "pending": {
-        const { headSha } = await livePull(revision);
+        const { headSha, state, merged } = await livePull(revision);
+        if (state !== "open") {
+          store.advance(revision.id, "PUBLISH", "PR_NOT_OPEN", `pr_not_open: ${merged ? "merged" : "closed"}`);
+          return finished(revision.id, "SUPERSEDED");
+        }
         if (headSha !== revision.head_sha) {
           store.advance(revision.id, "PUBLISH", "NEWER_HEAD", `head moved to ${headSha} before publication`);
           return finished(revision.id, "SUPERSEDED");
@@ -366,16 +370,17 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
     version: 1,
     initial: (input) => ({ phase: "collect", revisionId: input.revisionId }),
     phases: { collect: phase(collect), triage: phase(triage), analyze: phase(analyze), verify: phase(verify), prepare: phase(prepare), publish: phase(publishPhase), reconcile: phase(reconcile) },
-    // An abort is SUPERSEDED only when the live head really moved; otherwise the revision FAILED for that reason.
+    // An abort is SUPERSEDED only when the live head really moved or the PR closed; otherwise the revision FAILED.
     abort: async (task, runtime, context) => {
       const id = task.input.revisionId;
       const reason = `durable task aborted${task.abortReason ? ` (${task.abortReason})` : ""}`;
-      let event: "NEWER_HEAD" | "TERMINAL_ERROR" = "TERMINAL_ERROR";
+      let event: "NEWER_HEAD" | "PR_NOT_OPEN" | "TERMINAL_ERROR" = "TERMINAL_ERROR";
       let detail = reason;
       try {
         const revision = store.revision(id)!;
-        const { headSha } = await livePull(revision);
-        if (headSha !== revision.head_sha) [event, detail] = ["NEWER_HEAD", `${reason}; head moved to ${headSha}`];
+        const { headSha, state, merged } = await livePull(revision);
+        if (state !== "open") [event, detail] = ["PR_NOT_OPEN", `${reason}; pr_not_open: ${merged ? "merged" : "closed"}`];
+        else if (headSha !== revision.head_sha) [event, detail] = ["NEWER_HEAD", `${reason}; head moved to ${headSha}`];
       } catch (error) {
         detail = `${reason}; head check failed: ${error instanceof Error ? error.message : String(error)}`;
       }
