@@ -80,6 +80,7 @@ struct UiSection {
     show_activity: bool,
     ascii: bool,
     background: String,
+    mouse: bool,
 }
 
 impl Default for UiSection {
@@ -90,6 +91,7 @@ impl Default for UiSection {
             show_activity: true,
             ascii: false,
             background: "theme".into(),
+            mouse: true,
         }
     }
 }
@@ -110,6 +112,8 @@ pub struct Settings {
     pub start: Screen,
     pub wanted_pr: Option<PrRef>,
     pub config_path: PathBuf,
+    /// Mouse capture, which turns the terminal's own drag-to-select into a modifier-drag.
+    pub mouse: bool,
 }
 
 fn home() -> PathBuf {
@@ -222,6 +226,7 @@ pub fn resolve(args: Args, no_color: bool) -> Result<Settings, String> {
         start,
         wanted_pr,
         config_path,
+        mouse: file.ui.mouse,
     })
 }
 
@@ -270,6 +275,7 @@ mod tests {
         assert_eq!(resolve(a, false).unwrap().source, Source::Socket("/flag.sock".into()));
 
         assert!(!s.look.terminal_bg);
+        assert!(s.mouse, "mouse capture is on by default");
         std::fs::write(&path, "[ui]\nbackground = \"terminal\"\n").unwrap();
         assert!(resolve(Args { config: Some(path.clone()), ..Args::default() }, false).unwrap().look.terminal_bg);
         std::fs::write(&path, "[ui]\nbackground = \"clear\"\n").unwrap();

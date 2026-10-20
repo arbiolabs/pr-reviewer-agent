@@ -53,3 +53,17 @@ fn sigterm_sighup_and_sigint_exit_through_the_restore_path() {
         assert_restored(&text);
     }
 }
+
+#[test]
+fn mouse_false_leaves_the_terminals_own_drag_to_select_alone() {
+    let dir = std::env::temp_dir().join(format!("pr-review-tui-mouse-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let config = dir.join("config.toml");
+    std::fs::write(&config, "[ui]\nmouse = false\n").unwrap();
+    let text = pty(&format!(
+        r#"PR_REVIEW_TUI_TEST_PANIC=1 "$BIN" --playback "$SCRIPT" --config {}; echo EXIT=$?"#,
+        config.display()
+    ));
+    assert!(text.contains("\u{1b}[?1049h"), "the client drew: {text}");
+    assert!(!text.contains("\u{1b}[?1000h"), "mouse reporting stays off");
+}

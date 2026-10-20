@@ -99,6 +99,15 @@ In Timeline, `Enter` opens the selected event's detail under its row, and `Esc` 
 - Click a finding's card to select it. Click the selected card again to read the finding in full.
 - Scroll the wheel to move the reading column: the open finding, the document, the diff, or the timeline.
 
+While the client captures the mouse, a plain drag no longer selects text in the terminal. To select text, hold the terminal's bypass modifier while you drag: Shift in most terminals, or Option in iTerm2 and macOS Terminal. To give plain drag back to the terminal, turn mouse capture off in the config file:
+
+```toml
+[ui]
+mouse = false   # the default is true
+```
+
+With `mouse = false`, clicks and the wheel do nothing in the client. The keys do everything the mouse does.
+
 ## Change the background
 
 The client reads `<config dir>/pr-review/config.toml`, or the file that `--config` names. The `[ui]` table sets the display:
@@ -109,6 +118,7 @@ theme = "dark"          # or "mono", which turns colors off like NO_COLOR
 background = "theme"    # or "terminal"
 ascii = false           # true is the same as --ascii
 start_view = "review"   # inbox, review, diff, timeline, or settings
+mouse = true            # false leaves drag-to-select to the terminal
 ```
 
 With `background = "theme"`, the default, the client paints its own dark background on every cell. The contrast test checks every text color against these painted surfaces, so the contrast holds in any terminal.

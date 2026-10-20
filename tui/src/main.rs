@@ -102,7 +102,7 @@ async fn run(settings: config::Settings, script: Option<playback::Script>) -> st
     let mut term = signal(SignalKind::terminate())?;
     let mut hup = signal(SignalKind::hangup())?;
     let mut int = signal(SignalKind::interrupt())?;
-    let mut guard = TerminalGuard::enter()?;
+    let mut guard = TerminalGuard::enter(settings.mouse)?;
     let size = guard.terminal.size()?;
     model.size = (size.width, size.height);
     let input = msg_tx.clone();

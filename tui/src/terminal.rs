@@ -20,7 +20,7 @@ pub fn restore() {
 }
 
 impl TerminalGuard {
-    pub fn enter() -> io::Result<TerminalGuard> {
+    pub fn enter(mouse: bool) -> io::Result<TerminalGuard> {
         let previous = std::panic::take_hook();
         std::panic::set_hook(Box::new(move |info| {
             restore();
@@ -28,7 +28,10 @@ impl TerminalGuard {
         }));
         enable_raw_mode()?;
         let guard = TerminalGuard { terminal: Terminal::new(CrosstermBackend::new(io::stdout()))? };
-        execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture, Hide)?;
+        execute!(io::stdout(), EnterAlternateScreen, Hide)?;
+        if mouse {
+            execute!(io::stdout(), EnableMouseCapture)?;
+        }
         Ok(guard)
     }
 }
