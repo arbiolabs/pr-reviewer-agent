@@ -838,7 +838,6 @@ const showSteps: ShowStep[] = [
   // Approval mode: the review is stored and parks until the reader approves the preview.
   [800, (s) => phase(s, signInRun, "PREPARE_PUBLICATION", "AWAITING_APPROVAL", "APPROVAL_REQUIRED")],
   [40, signInPublication("awaiting_approval")],
-  [4000, "heartbeat"],
   [600, (s) => phase(s, signInRun, "AWAITING_APPROVAL", "PUBLISH", "APPROVED"), "review.publish"],
   [300, signInPublication("publishing")],
   [1200, signInPublication("published", SIGNIN_REVIEW_ID)],
