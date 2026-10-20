@@ -58,9 +58,11 @@ export class GitHubPullSource implements PullSource {
     try {
       pull = (await client.request<GitHubPull>("GET", `/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}`)).data;
     } catch (error) {
-      if (error instanceof GitHubError && (error.status === 401 || error.status === 403 || error.status === 404)) {
+      // A rate-limited 403 is retryable and passes through; only a definite refusal is reworded, and stays fatal.
+      if (error instanceof GitHubError && error.class === "fatal" && (error.status === 401 || error.status === 403 || error.status === 404)) {
         const anonymous = client.auth.kind === "token" && client.auth.token === undefined;
-        throw new Error(`cannot read ${ref.owner}/${ref.repo}#${ref.number}: HTTP ${error.status} (${anonymous ? "no GitHub token; set GITHUB_TOKEN or run gh auth login" : "token lacks access"})`);
+        const why = anonymous ? "no GitHub token; set GITHUB_TOKEN or run gh auth login" : "token lacks access";
+        throw new GitHubError("fatal", `cannot read ${ref.owner}/${ref.repo}#${ref.number}: HTTP ${error.status} (${why})`, error.status);
       }
       throw error;
     }

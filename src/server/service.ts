@@ -79,6 +79,7 @@ export async function startService(options: ServiceOptions): Promise<Service> {
     abort: async (taskId) => void (await app.harness.abortTask(Number(taskId) as TaskId, ctx)),
     debounceMs: config.review.debounce_seconds * 1000,
     leaseMs: 5 * 60_000,
+    webhookRetry: { maxAttempts: config.review.webhook_max_attempts, backoffMs: config.review.webhook_backoff_ms },
     owner: `pr-review-${process.pid}-${randomUUID()}`,
     now,
     report: options.report,

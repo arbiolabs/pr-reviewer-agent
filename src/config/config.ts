@@ -14,6 +14,9 @@ export type Config = {
     retry_backoff_ms: number;
     /** A PR's review starts this long after its last triggering event; a later push restarts the wait. */
     debounce_seconds: number;
+    /** A webhook delivery that keeps failing is retried with exponential backoff, then recorded dead. */
+    webhook_max_attempts: number;
+    webhook_backoff_ms: number;
   };
   /** §9.4 rate limits and retries. `max_retries` bounds each request; the client never retries an ambiguous write. */
   github: {
@@ -55,6 +58,8 @@ export const DEFAULT_CONFIG: Config = {
     jev_timeout_ms: 15_000,
     retry_backoff_ms: 1000,
     debounce_seconds: 30,
+    webhook_max_attempts: 6,
+    webhook_backoff_ms: 5000,
   },
   github: { max_retries: 3, backoff_ms: 500, concurrency_per_installation: 2, timeout_ms: 15_000 },
   routing: {

@@ -4,7 +4,10 @@ import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { Coordinator, routeEvent } from "../src/coordinator/coordinator.ts";
 import type { PullInfo } from "../src/domain/types.ts";
+import { GitHubClient, GitHubError } from "../src/github/client.ts";
+import { GitHubPullSource, type PullSource } from "../src/github/pulls.ts";
 import { AppStore } from "../src/persistence/store.ts";
+import { FakeGitHub } from "./fake-github.ts";
 
 const BOT = "durable-review[bot]";
 const base: PullInfo = {
@@ -23,8 +26,10 @@ const base: PullInfo = {
 };
 const head = (c: string) => c.repeat(40);
 
+type HarnessOptions = { getPull?: PullSource["getPull"]; abort?: (id: string) => Promise<void>; report?: (error: unknown) => void };
+
 /** A coordinator over a real store, with GitHub's authoritative PR state and the review starter stubbed. */
-function harness() {
+function harness(options: HarnessOptions = {}) {
   const store = AppStore.open(join(mkdtempSync(join(tmpdir(), "coord-")), "app.sqlite"));
   const live = { pull: { ...base } };
   const started: { head: string; liveHead: string; liveState: string }[] = [];
@@ -33,7 +38,7 @@ function harness() {
   let delivery = 0;
   const coordinator = new Coordinator({
     store,
-    pulls: { getPull: async () => ({ ...live.pull }) },
+    pulls: { getPull: options.getPull ?? (async () => ({ ...live.pull })) },
     botLogin: async () => BOT,
     start: async (pull) => {
       started.push({ head: pull.headSha, liveHead: live.pull.headSha, liveState: live.pull.state });
@@ -41,14 +46,20 @@ function harness() {
       const revision = store.ensureRevision({ prId, baseSha: pull.baseSha, headSha: pull.headSha, policyVersion: "1+publish", reviewerVersion: "m2" });
       store.setDurableTask(revision.id, `task-${pull.headSha.slice(0, 1)}`);
     },
-    abort: async (id) => void aborted.push(id),
+    abort: async (id) => {
+      aborted.push(id);
+      await options.abort?.(id);
+    },
     debounceMs: 30_000,
     leaseMs: 60_000,
     owner: "worker-1",
+    webhookRetry: { maxAttempts: 3, backoffMs: 1000 },
     now: () => clock,
-    report: (error) => {
-      throw error;
-    },
+    report:
+      options.report ??
+      ((error) => {
+        throw error;
+      }),
   });
   const deliver = (eventType: string, payload: object) =>
     store.recordWebhook({ deliveryId: `d${++delivery}`, eventType, payloadHash: "h", payloadJson: JSON.stringify({ repository: { full_name: "acme/shop" }, installation: { id: 9 }, ...payload }) });
@@ -200,4 +211,57 @@ it("a crashed owner's lease blocks the PR until it expires, then another worker 
   expect(h.store.acquireLease(prId, "worker-2", 59_999, 60_000)).toBe(false);
   expect(h.store.acquireLease(prId, "worker-2", 60_000, 60_000)).toBe(true);
   expect(h.store.db.prepare("SELECT owner, expires_at FROM leases").all()).toEqual([{ owner: "worker-2", expires_at: 120_000 }]);
+});
+
+const outcomes = (store: AppStore) => store.db.prepare("SELECT delivery_id, attempts, outcome FROM webhook_events ORDER BY received_at, delivery_id").all();
+
+it("backs poison deliveries off one by one, so a fresh delivery is processed at once and poison rows wait until due", async () => {
+  const calls: number[] = [];
+  const h = harness({
+    getPull: async (ref) => {
+      calls.push(ref.number);
+      if (ref.number !== 1) throw new GitHubError("retryable", `GET /repos/acme/shop/pulls/${ref.number}: HTTP 502`, 502);
+      return { ...base };
+    },
+    report: () => {},
+  });
+  for (let i = 0; i < 100; i++) h.pr("opened", { number: 100 + i });
+  await h.coordinator.tick();
+  expect(calls.length).toBe(100);
+  h.pr("opened");
+  await h.coordinator.tick();
+  expect([calls.length, calls.at(-1)]).toEqual([101, 1]);
+  expect(outcomes(h.store).at(-1)).toEqual({ delivery_id: "d101", attempts: 0, outcome: "PR_OPENED -> ACTIVE" });
+  h.advance(999);
+  await h.coordinator.tick();
+  expect(calls.length).toBe(101);
+  h.advance(1);
+  await h.coordinator.tick();
+  expect(calls.length).toBe(201);
+  // The second failure doubles the wait; the third is the last attempt and the delivery is dead with its reason.
+  h.advance(1999);
+  await h.coordinator.tick();
+  expect(calls.length).toBe(201);
+  h.advance(1);
+  await h.coordinator.tick();
+  h.advance(60_000);
+  await h.coordinator.tick();
+  expect(calls.filter((n) => n !== 1).length).toBe(300);
+  expect(outcomes(h.store)[0]).toEqual({ delivery_id: "d1", attempts: 3, outcome: "dead: GET /repos/acme/shop/pulls/100: HTTP 502" });
+});
+
+it("sends a delivery whose PR GitHub answers 404 for straight to dead, without retrying it", async () => {
+  const fake = await FakeGitHub.start();
+  try {
+    const client = new GitHubClient({ auth: { kind: "token", token: "t" }, baseUrl: fake.url, maxRetries: 2, backoffMs: 1, concurrency: 1, timeoutMs: 5000 });
+    const h = harness({ getPull: (ref) => new GitHubPullSource(() => client).getPull(ref), report: () => {} });
+    h.pr("opened");
+    await h.coordinator.tick();
+    h.advance(3_600_000);
+    await h.coordinator.tick();
+    expect(outcomes(h.store)).toEqual([{ delivery_id: "d1", attempts: 1, outcome: "dead: cannot read acme/shop#1: HTTP 404 (token lacks access)" }]);
+    expect(fake.requests.length).toBe(1);
+  } finally {
+    await fake.close();
+  }
 });

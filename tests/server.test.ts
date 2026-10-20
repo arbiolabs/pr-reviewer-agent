@@ -89,3 +89,13 @@ it("needs the admin token for readiness, inspection and retry, but not for healt
   expect([inspect.status, await inspect.json(), retry.status, ready.status]).toEqual([200, { revision: id }, 202, 200]);
   expect(retried).toEqual([id]);
 });
+
+it("lists dead deliveries with their reason to the admin only", async () => {
+  store.recordWebhook({ deliveryId: "d-9", eventType: "pull_request", payloadHash: "h", payloadJson: "{}" });
+  store.failWebhook("d-9", "cannot read acme/shop#9: HTTP 404 (token lacks access)", null);
+  expect((await fetch(`${url}/webhooks/dead`)).status).toBe(401);
+  const dead = await (await fetch(`${url}/webhooks/dead`, { headers: { authorization: `Bearer ${ADMIN}` } })).json();
+  expect(dead.map(({ processed_at, ...rest }: { processed_at: string }) => rest)).toEqual([
+    { delivery_id: "d-9", event_type: "pull_request", attempts: 1, last_error: "cannot read acme/shop#9: HTTP 404 (token lacks access)" },
+  ]);
+});

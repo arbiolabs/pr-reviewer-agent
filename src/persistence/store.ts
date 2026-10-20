@@ -86,7 +86,8 @@ export type OutboxRow = {
 
 export type OutboxEventRow = { from_status: OutboxStatus; event: OutboxEvent; to_status: OutboxStatus; detail: string | null };
 
-export type WebhookRow = { delivery_id: string; event_type: string; payload_json: string };
+export type WebhookRow = { delivery_id: string; event_type: string; payload_json: string; attempts: number };
+export type DeadWebhookRow = { delivery_id: string; event_type: string; attempts: number; last_error: string | null; processed_at: string };
 
 export type AuditEvent = { seq: number; from_state: string; event: string; to_state: string; detail: string | null; at: string };
 
@@ -470,10 +471,34 @@ export class AppStore {
     return info.changes === 1;
   }
 
-  unprocessedWebhooks(limit = 100): WebhookRow[] {
+  /** Unprocessed deliveries whose backoff has elapsed; one that keeps failing waits and never fills the window. */
+  dueWebhooks(nowMs: number, limit = 100): WebhookRow[] {
     return this.db
-      .prepare("SELECT delivery_id, event_type, payload_json FROM webhook_events WHERE processed_at IS NULL ORDER BY received_at, delivery_id LIMIT ?")
-      .all(limit) as WebhookRow[];
+      .prepare(
+        `SELECT delivery_id, event_type, payload_json, attempts FROM webhook_events
+         WHERE processed_at IS NULL AND (next_attempt_at IS NULL OR next_attempt_at <= ?) ORDER BY received_at, delivery_id LIMIT ?`,
+      )
+      .all(nowMs, limit) as WebhookRow[];
+  }
+
+  countUnprocessedWebhooks(): number {
+    return (this.db.prepare("SELECT count(*) AS n FROM webhook_events WHERE processed_at IS NULL").get() as { n: number }).n;
+  }
+
+  /** Count a failed attempt: retry at `retryAtMs`, or with `null` the delivery is dead and processed with its reason. */
+  failWebhook(deliveryId: string, error: string, retryAtMs: number | null): void {
+    this.db
+      .prepare(
+        `UPDATE webhook_events SET attempts = attempts + 1, last_error = ?, next_attempt_at = ?,
+           processed_at = CASE WHEN ? IS NULL THEN ? END, outcome = CASE WHEN ? IS NULL THEN ? END WHERE delivery_id = ?`,
+      )
+      .run(error, retryAtMs, retryAtMs, now(), retryAtMs, `dead: ${error}`, deliveryId);
+  }
+
+  deadWebhooks(): DeadWebhookRow[] {
+    return this.db
+      .prepare("SELECT delivery_id, event_type, attempts, last_error, processed_at FROM webhook_events WHERE outcome LIKE 'dead: %' ORDER BY processed_at DESC")
+      .all() as DeadWebhookRow[];
   }
 
   markWebhookProcessed(deliveryId: string, outcome: string): void {

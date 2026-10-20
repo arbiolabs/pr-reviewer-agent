@@ -102,7 +102,7 @@ it("turns duplicate webhooks into exactly one review task and one published revi
   await deliver(service.url, "d-3", "issue_comment", comment("ci[bot]", "@durable-review review", "Bot"));
   await deliver(service.url, "d-4", "issue_comment", comment("durable-review[bot]", "@durable-review review"));
   await deliver(service.url, "d-5", "issue_comment", comment("alice", "thanks"));
-  await until(() => app.store.unprocessedWebhooks().length === 0);
+  await until(() => app.store.countUnprocessedWebhooks() === 0);
   await service.idle();
 
   const revisions = app.store.db.prepare("SELECT id, state, policy_version FROM review_revisions").all() as { id: string }[];

@@ -1,6 +1,7 @@
 import { transition } from "../domain/machine.ts";
 import { COORDINATOR_MACHINE, type CoordinatorEvent, type CoordinatorState, type ReviewState } from "../domain/machines.ts";
 import type { PullInfo } from "../domain/types.ts";
+import { GitHubError } from "../github/client.ts";
 import type { PullRef, PullSource } from "../github/pulls.ts";
 import type { AppStore } from "../persistence/store.ts";
 
@@ -74,6 +75,8 @@ export type CoordinatorDeps = {
   debounceMs: number;
   leaseMs: number;
   owner: string;
+  /** A failing delivery waits `backoffMs * 2^(n-1)` after its n-th failure and is dead after `maxAttempts`. */
+  webhookRetry: { maxAttempts: number; backoffMs: number };
   now(): number;
   report(error: unknown): void;
 };
@@ -87,12 +90,17 @@ export class Coordinator {
   }
 
   async tick(): Promise<void> {
-    for (const event of this.deps.store.unprocessedWebhooks()) {
+    const { store, webhookRetry } = this.deps;
+    for (const event of store.dueWebhooks(this.deps.now())) {
       try {
         await this.handle(event.delivery_id, event.event_type, JSON.parse(event.payload_json));
       } catch (error) {
-        // Left unprocessed: the next tick tries again.
         this.deps.report(error);
+        // A definite GitHub refusal (the PR is gone or unreadable) never gets better; anything else backs off.
+        const attempts = event.attempts + 1;
+        const permanent = error instanceof GitHubError && error.class === "fatal";
+        const retryAt = permanent || attempts >= webhookRetry.maxAttempts ? null : this.deps.now() + webhookRetry.backoffMs * 2 ** (attempts - 1);
+        store.failWebhook(event.delivery_id, error instanceof Error ? error.message : String(error), retryAt);
       }
     }
     for (const pr of this.deps.store.duePulls(this.deps.now())) {

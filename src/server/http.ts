@@ -86,6 +86,7 @@ export function createHttpServer(deps: ServerDeps): Server {
       const ready = deps.ready();
       return send(res, ready.ok ? 200 : 503, ready);
     }
+    if (req.method === "GET" && pathname === "/webhooks/dead") return send(res, 200, deps.store.deadWebhooks());
     const review = /^\/reviews\/([0-9a-f]{32})(\/retry)?$/.exec(pathname);
     if (review && req.method === "GET" && !review[2]) {
       const found = deps.inspect(review[1]!);

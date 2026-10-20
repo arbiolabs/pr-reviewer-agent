@@ -66,8 +66,11 @@ The service uses Jev only with `TYPESAFE_API_KEY`, or with `jev.allow_keyless_fo
 | `GET /readyz` | admin bearer | DB, worker loop and data dir |
 | `GET /reviews/:revisionId` | admin bearer | State, transitions, findings, outbox and its events |
 | `POST /reviews/:revisionId/retry` | admin bearer | Audited MANUAL_RETRY of a FAILED revision |
+| `GET /webhooks/dead` | admin bearer | Deliveries that failed every attempt, with the last error |
 
 The worker handles `pull_request` events (opened, reopened, synchronize, closed, review_requested). It also handles an `issue_comment` that mentions `@<app-slug> review` on a PR. It ignores bot senders and its own comments. For each event, it reads the PR from GitHub, and GitHub's state decides open, closed and merged, whatever order the deliveries arrive in. The review of the live head starts `debounce_seconds` after the last event. A new head marks older revisions `superseded_requested` and aborts their tasks, unless they are already publishing. A per-PR lease in `app.sqlite` serializes this. A lease left by a crashed process expires after 5 minutes.
+
+A delivery whose handling fails waits `webhook_backoff_ms`, doubled after each failure, and only due deliveries are fetched, so a failing one never holds up fresh ones. After `webhook_max_attempts` (6) it is recorded dead with its reason. A PR that GitHub answers 401, 403 or 404 for is dead at once.
 
 On startup, the service resumes durable tasks and recreates a task for any unfinished revision. It also reconciles outboxes of finished revisions whose write may have reached GitHub, before anything new is posted.
 
