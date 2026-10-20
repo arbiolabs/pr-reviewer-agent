@@ -313,6 +313,11 @@ it("approves a review end to end over the socket: parked, previewed, published o
     { runId, status: "publishing" },
     { runId, status: "published", reviewId: 1000, url: "https://github.com/acme/shop/pull/1#pullrequestreview-1000" },
   ]);
+  const findingId = (c.events().findLast((e) => e.eventType === "finding.updated")!.data as { id: string }).id;
+  expect((await h.source.finding(findingId)).history.map(({ runId: run, disposition }) => [run, disposition])).toEqual([
+    [runId, "DETECTED"],
+    [runId, "PUBLISHED"],
+  ]);
   // The journal follows causality: the publisher's rows, then the run's end.
   expect(h.app.store.db.prepare("SELECT event, to_state, detail FROM audit_events WHERE revision_id = ? AND seq > ? ORDER BY seq").all(runId, approvalSeq.n)).toEqual([
     { event: "APPROVED", to_state: "PUBLISH", detail: expect.stringMatching(/^approved by /) },

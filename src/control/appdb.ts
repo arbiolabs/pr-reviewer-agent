@@ -204,6 +204,12 @@ export class AppDbSource implements ControlSource {
       const history = this.db
         .prepare("SELECT revision_id, disposition, created_at FROM finding_observations WHERE finding_id = ? ORDER BY created_at")
         .all(findingId) as { revision_id: string; disposition: string; created_at: string }[];
+      // DETECTED leaves only for PUBLISHED (FINDING_MACHINE), so the finding's first status change is its publication.
+      const published = this.db
+        .prepare("SELECT revision_id, at AS created_at FROM audit_events WHERE event = 'FINDING_UPDATED' AND detail = ? ORDER BY seq LIMIT 1")
+        .get(findingId) as { revision_id: string; created_at: string } | undefined;
+      if (published) history.push({ ...published, disposition: "PUBLISHED" });
+      history.sort((a, b) => a.created_at.localeCompare(b.created_at));
       const finding: Omit<FindingDetail, "evidence"> = {
         ...toFinding(row),
         explanation: candidate.explanation,
