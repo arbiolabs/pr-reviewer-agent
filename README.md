@@ -30,6 +30,21 @@ If you kill the process and run the same command again, the review resumes. A re
 
 A revision that FAILED stays failed. A rerun prints the failure reason and tells you to use `--retry`. `review <url> --retry` reopens a FAILED revision. This is a manual override: the audit log records it as `FAILED --MANUAL_RETRY--> COLLECT_CONTEXT`, and the retry runs as a new durable task. It reuses the stored context, routing decision and candidates where they exist. `--retry` is refused for a COMPLETED or SUPERSEDED revision.
 
+## Control daemon and TUI
+
+`pr-review daemon` serves the TUI protocol (`protocol/README.md`) on a Unix socket. It runs in the foreground until SIGINT or SIGTERM, so run it under your own supervisor.
+
+```bash
+node bin/pr-review.mjs daemon [--data .data] [--socket PATH] [--heartbeat 15]   # reads the app DB of a data dir
+node bin/pr-review.mjs daemon --fixture normal                                   # plays protocol/playback/normal.ndjson; no GitHub, no model
+node bin/pr-review.mjs tui [args]                                                # runs pr-review-tui from PATH or tui/target/release/
+```
+
+- **Socket.** The default path is `$XDG_RUNTIME_DIR/pr-review/reviewer.sock`, else `~/Library/Application Support/pr-review/reviewer.sock` on macOS, else `~/.local/state/pr-review/reviewer.sock`. The daemon creates the directory with mode 0700 and the socket with mode 0600. It refuses a directory that is a symlink, belongs to another user, or has a looser mode. It replaces a socket file that nothing listens on, and exits if another daemon is listening.
+- **Read-only.** The daemon reads `app.sqlite` on a read-only connection and takes no data-dir lock, so it runs beside `pr-review review`. Its only write is applying migrations when it starts. It never opens `durable.sqlite`. Disconnecting or closing the TUI changes nothing in a running review.
+- **Commands.** This version has no write capabilities. The daemon answers every `command` with `CAPABILITY_DENIED`.
+- **Fixtures.** `--fixture` takes any script in `protocol/playback/`. The script clock starts at the first snapshot request. Fixture strings are not sanitized, because `hostile` exists to test the client.
+
 ## Layout
 
 | Directory | Contents |
@@ -43,6 +58,8 @@ A revision that FAILED stays failed. A rerun prints the failure reason and tells
 | `src/runtime` | The `pr-review.revision` durable task and how it is wired |
 | `src/models` | The credential store over pi's auth file, harness and model detection, and model choice |
 | `src/cli` | The command-line interface and the report rendering |
+| `src/protocol` | The TUI protocol v1 schemas (TypeBox), fixtures and playback scripts |
+| `src/control` | The control daemon: socket server, the app DB and fixture sources, diff paging |
 
 ## What M1 does not do
 

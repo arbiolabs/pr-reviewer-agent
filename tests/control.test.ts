@@ -3,7 +3,7 @@ import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
-import { startControlServer, type ControlServer, type ServerOptions } from "../src/control/server.ts";
+import { defaultSocketPath, startControlServer, type ControlServer, type ServerOptions } from "../src/control/server.ts";
 import { FixtureSource } from "../src/control/source.ts";
 import { PROTOCOL_DIR } from "../src/protocol/emit.ts";
 import type { PlaybackLine } from "../src/protocol/fixtures.ts";
@@ -111,6 +111,12 @@ describe("handshake", () => {
 });
 
 describe("socket safety", () => {
+  it("defaults to the runtime dir, then the per-platform state dir", () => {
+    expect(defaultSocketPath({ XDG_RUNTIME_DIR: "/run/user/501" }, "linux", "/home/d")).toBe("/run/user/501/pr-review/reviewer.sock");
+    expect(defaultSocketPath({}, "darwin", "/Users/d")).toBe("/Users/d/Library/Application Support/pr-review/reviewer.sock");
+    expect(defaultSocketPath({}, "linux", "/home/d")).toBe("/home/d/.local/state/pr-review/reviewer.sock");
+  });
+
   it("creates the directory 0700 and the socket 0600", async () => {
     const server = await serve({ source: FixtureSource.load("normal") });
     expect(statSync(join(server.path, "..")).mode & 0o777).toBe(0o700);

@@ -113,11 +113,10 @@ export async function startControlServer(options: ServerOptions): Promise<Contro
   const pump = (c: Conn) => {
     if (c.phase !== "streaming") return;
     if (source.epoch() !== c.epoch) return resync(c, `stream epoch changed from ${c.epoch} to ${source.epoch()}`);
-    // A full queue with events still to send is a client that stopped reading.
-    const room = maxQueue - c.queue.length;
-    const events = source.eventsAfter(c.cursor, Math.max(1, Math.min(EVENT_BATCH, room)));
-    if (room <= 0 && events.length > 0) return overflow(c);
-    for (const event of events) {
+    // At least one event even when the queue is full, so a client that stopped reading overflows into a resync.
+    const room = Math.max(1, Math.min(EVENT_BATCH, maxQueue - c.queue.length));
+    for (const event of source.eventsAfter(c.cursor, room)) {
+      if (c.phase !== "streaming") return;
       send(c, event);
       c.cursor = event.sequence;
     }
@@ -255,6 +254,7 @@ export async function startControlServer(options: ServerOptions): Promise<Contro
       }
     }, every);
   const timers = [
+    // ponytail: one journal query per streaming client per tick; share one read per cursor if many clients attach.
     tick(options.pollMs ?? 200, pump),
     tick(options.heartbeatMs ?? 15_000, (c) => {
       if (c.phase === "streaming") send(c, { type: "event", eventType: "heartbeat", streamEpoch: c.epoch, occurredAt: new Date().toISOString() });
