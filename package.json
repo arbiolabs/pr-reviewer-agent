@@ -11,7 +11,7 @@
   },
   "scripts": {
     "typecheck": "tsc --noEmit",
-    "test": "vitest run",
+    "test": "tsc --noEmit && vitest run",
     "pr-review": "node bin/pr-review.mjs",
     "protocol:emit": "node src/protocol/emit.ts"
   },
