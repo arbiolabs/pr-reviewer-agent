@@ -30,6 +30,7 @@ export type RevisionRow = {
 
 export type PullRow = {
   id: string;
+  installation_id: number;
   repository_id: number;
   number: number;
   status: string;

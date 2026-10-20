@@ -69,12 +69,6 @@ it("treats the model as part of reviewer identity: two models give two revisions
   store.close();
 }, 60_000);
 
-it("refuses --publish in M1", async () => {
-  const errors: string[] = [];
-  expect(await main(["review", "https://github.com/acme/shop/pull/1", "--publish"], { err: (t) => errors.push(t) })).toBe(2);
-  expect(errors).toEqual(["pr-review: publishing lands in M2; run with --dry-run\n"]);
-});
-
 it("strips control characters from model text in Markdown and inspect output, and keeps JSON raw", async () => {
   const fixture = createFixture();
   const title = "Order deletion\u001b[2J\u009b31m skips the admin check\r\u0007";

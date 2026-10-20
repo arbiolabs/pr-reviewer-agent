@@ -3,7 +3,7 @@ import { parseArgs } from "node:util";
 import type { AuthInteraction, CredentialStore, Models } from "@earendil-works/pi-ai";
 import { createTypeSafeClient, createZenClient } from "jev-systemone";
 import { loadConfig, saveDefaultModel } from "../config/config.ts";
-import { clientFor } from "../github/client.ts";
+import { clientFor, type GitHubClient } from "../github/client.ts";
 import { GitHubPullSource, parsePullRef, parsePullUrl, type PullSource, resolveGitHubToken } from "../github/pulls.ts";
 import { type DecisionEngine, JevDecisionEngine, type JevRoute, jevSkipReason } from "../jev/decision.ts";
 import { PiAuthFileStore } from "../models/credential-store.ts";
@@ -18,6 +18,8 @@ export const REVIEWER_CODE_VERSION = "m1";
 /** Seams the tests replace: the GitHub read side, the model collection, and where state lives. */
 export type CliDeps = {
   pulls?: PullSource;
+  /** The GitHub client `--publish` and `reconcile` use; a test points it at a fake server. */
+  github?: GitHubClient;
   models?: Models;
   credentials?: CredentialStore;
   engine?: DecisionEngine;
@@ -27,7 +29,9 @@ export type CliDeps = {
 };
 
 const USAGE = `usage:
-  pr-review review <pr-url> --dry-run [--json] [--no-jev] [--model provider/id] [--retry]
+  pr-review review <pr-url> [--dry-run | --publish] [--json] [--no-jev] [--model provider/id] [--retry]
+  pr-review reconcile --revision <revision-id>
+  pr-review serve
   pr-review inspect --pr owner/repo#123 [--json]
   pr-review models [--json]
   pr-review login [provider] [--api-key]`;
@@ -72,19 +76,16 @@ async function review(args: string[], deps: CliDeps, dataDir: string, out: Out, 
     allowPositionals: true,
     options: { "dry-run": { type: "boolean" }, publish: { type: "boolean" }, json: { type: "boolean" }, "no-jev": { type: "boolean" }, model: { type: "string" }, retry: { type: "boolean" } },
   });
-  if (values.publish) {
-    err("pr-review: publishing lands in M2; run with --dry-run\n");
-    return 2;
-  }
-  if (positionals.length !== 1) {
+  if (positionals.length !== 1 || (values.publish && values["dry-run"])) {
     err(`${USAGE}\n`);
     return 2;
   }
   const config = loadConfig();
   const ref = parsePullUrl(positionals[0]!);
   // A test's fake pull source serves local repositories; only the real GitHub source needs the token.
-  const githubToken = deps.pulls ? undefined : await resolveGitHubToken();
-  const github = clientFor(config.github, { kind: "token", token: githubToken });
+  const githubToken = deps.pulls || deps.github ? undefined : await resolveGitHubToken();
+  if (values.publish && !deps.github && githubToken === undefined) throw new Error("--publish needs a GitHub token: set GITHUB_TOKEN or run gh auth login");
+  const github = deps.github ?? clientFor(config.github, { kind: "token", token: githubToken });
   const pulls = deps.pulls ?? new GitHubPullSource(() => github);
   const pull = await pulls.getPull(ref);
 
@@ -106,7 +107,8 @@ async function review(args: string[], deps: CliDeps, dataDir: string, out: Out, 
     dataDir,
     config,
     pulls,
-    githubToken,
+    gitToken: async () => githubToken,
+    github: () => github,
     engine,
     models,
     model: splitRef(choice.ref),
@@ -115,7 +117,7 @@ async function review(args: string[], deps: CliDeps, dataDir: string, out: Out, 
   });
   try {
     app.harness.resume();
-    const started = await startReview(app, pull, config.review.base_policy_version, { retry: values.retry ?? false });
+    const started = await startReview(app, pull, config.review.base_policy_version, { retry: values.retry ?? false, publish: values.publish ?? false });
     err(
       started.taskId === undefined
         ? `revision ${started.revision.id} already ${started.revision.state}; showing the stored result\n`
@@ -123,6 +125,7 @@ async function review(args: string[], deps: CliDeps, dataDir: string, out: Out, 
     );
     const revision = await finishReview(app, started);
     const report = loadReport(app.store, revision.id);
+    if (report.outbox) err(`publication ${report.outbox.status}${report.outbox.github_review_id ? `: review ${report.outbox.github_review_id}` : ""}${report.outbox.last_error ? ` (${report.outbox.last_error})` : ""}\n`);
     if (revision.state === "FAILED") err(`revision ${revision.id} FAILED: ${report.audit.at(-1)?.detail ?? "no reason recorded"}; rerun with --retry to try again\n`);
     if (values.json) out.json(renderJson(report));
     else out(renderMarkdown(report));

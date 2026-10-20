@@ -47,13 +47,15 @@ export type PullInfo = {
 
 export type ChangedFile = { path: string; status: string };
 
-// §5, limited to the phases M1 runs. `attempt` counts retries of the current phase.
+// §5. `attempt` counts retries of the current phase.
 export type ReviewCheckpoint =
   | { phase: "collect"; revisionId: string; attempt?: number }
   | { phase: "triage"; revisionId: string; contextSnapshotId: string; attempt?: number }
   | { phase: "analyze"; revisionId: string; triageDecisionId: string; attempt?: number }
   | { phase: "verify"; revisionId: string; candidateSetId: string; attempt?: number }
-  | { phase: "prepare"; revisionId: string; verifiedSetId: string; attempt?: number };
+  | { phase: "prepare"; revisionId: string; verifiedSetId: string; attempt?: number }
+  | { phase: "publish"; revisionId: string; outboxId: string; attempt?: number }
+  | { phase: "reconcile"; revisionId: string; outboxId: string; attempt?: number };
 
 export function stableId(...parts: (string | number)[]): string {
   return createHash("sha256").update(parts.map(String).join("\u0000")).digest("hex").slice(0, 32);
