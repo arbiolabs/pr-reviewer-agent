@@ -140,7 +140,7 @@ pub fn highlight(c: &Ctx, line: &str, w: usize, bg: Bg) -> Vec<Span<'static>> {
 pub fn rich(c: &Ctx, text: &str, w: usize, role: Role) -> Vec<Vec<Span<'static>>> {
     let code_style = c.s(Role::Type).patch(c.t.bg(Bg::Surface));
     let mut lines = Vec::new();
-    for para in text.split('\n') {
+    for para in crate::text::plain_emoji(text).split('\n') {
         let mut tokens: Vec<(String, bool)> = Vec::new();
         for (n, seg) in para.split('`').enumerate() {
             if n % 2 == 1 {
