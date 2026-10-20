@@ -1,0 +1,84 @@
+{
+  "type": "timeline.page",
+  "requestId": "req-tl",
+  "events": [
+    {
+      "type": "event",
+      "streamEpoch": "epoch-1",
+      "sequence": 34,
+      "prevSequence": 33,
+      "occurredAt": "2026-10-20T14:20:12Z",
+      "prId": "e217a9dd121ea441fc8611508c39a210",
+      "runId": "e7451b06cf78ead5913962040f41cb76",
+      "eventType": "run.failed",
+      "data": {
+        "id": "e7451b06cf78ead5913962040f41cb76",
+        "prId": "e217a9dd121ea441fc8611508c39a210",
+        "baseSha": "63c2516d57df3d1bfd6b41c2d0c69a5b0606e914",
+        "headSha": "c20a27e7d792b8cfe28e745bc1c86819cc1a87bf",
+        "phase": "FAILED",
+        "status": "FAILED",
+        "model": "claude-opus-5-5",
+        "startedAt": "2026-10-20T14:19:50Z",
+        "completedAt": "2026-10-20T14:20:12Z",
+        "failureReason": "Diff too large to review: 212 files and 18,406 changed lines exceed the 8,000-line budget. Most of it is migrations/0042_partition_ledger.sql. Exclude generated files or split the PR."
+      }
+    },
+    {
+      "type": "event",
+      "streamEpoch": "epoch-1",
+      "sequence": 33,
+      "prevSequence": 32,
+      "occurredAt": "2026-10-20T14:20:12Z",
+      "prId": "e217a9dd121ea441fc8611508c39a210",
+      "runId": "e7451b06cf78ead5913962040f41cb76",
+      "eventType": "review.phase_changed",
+      "data": {
+        "from": "COLLECT_CONTEXT",
+        "to": "FAILED",
+        "event": "TERMINAL_ERROR",
+        "detail": null
+      }
+    },
+    {
+      "type": "event",
+      "streamEpoch": "epoch-1",
+      "sequence": 32,
+      "prevSequence": 31,
+      "occurredAt": "2026-10-20T14:19:50Z",
+      "prId": "e217a9dd121ea441fc8611508c39a210",
+      "runId": "e7451b06cf78ead5913962040f41cb76",
+      "eventType": "run.started",
+      "data": {
+        "id": "e7451b06cf78ead5913962040f41cb76",
+        "prId": "e217a9dd121ea441fc8611508c39a210",
+        "baseSha": "63c2516d57df3d1bfd6b41c2d0c69a5b0606e914",
+        "headSha": "c20a27e7d792b8cfe28e745bc1c86819cc1a87bf",
+        "phase": "COLLECT_CONTEXT",
+        "status": "RUNNING",
+        "model": "claude-opus-5-5",
+        "startedAt": "2026-10-20T14:19:50Z",
+        "failureReason": "Diff too large to review: 212 files and 18,406 changed lines exceed the 8,000-line budget. Most of it is migrations/0042_partition_ledger.sql. Exclude generated files or split the PR."
+      }
+    },
+    {
+      "type": "event",
+      "streamEpoch": "epoch-1",
+      "sequence": 31,
+      "prevSequence": 30,
+      "occurredAt": "2026-10-20T14:19:40Z",
+      "prId": "e217a9dd121ea441fc8611508c39a210",
+      "eventType": "pr.updated",
+      "data": {
+        "id": "e217a9dd121ea441fc8611508c39a210",
+        "repository": "acme/api",
+        "number": 345,
+        "title": "Partition ledger_entries by month",
+        "author": "abhatia",
+        "headSha": "c20a27e7d792b8cfe28e745bc1c86819cc1a87bf",
+        "baseSha": "63c2516d57df3d1bfd6b41c2d0c69a5b0606e914",
+        "lifecycle": "ACTIVE"
+      }
+    }
+  ]
+}

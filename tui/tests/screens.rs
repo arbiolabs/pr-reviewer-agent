@@ -198,3 +198,38 @@ fn help_marks_write_keys_the_daemon_does_not_grant() {
     assert!(frame.lines().any(|l| l.trim_end().ends_with("start a review")), "{frame}");
     assert!(frame.contains("retry the run (not offered)"), "{frame}");
 }
+
+#[test]
+fn the_showcase_timeline_has_history_for_every_pr() {
+    use crossterm::event::KeyCode;
+    for (pr, says) in [
+        ("1287", "review finished"),
+        ("341", "review finished"),
+        ("1291", "updated"),
+        ("338", "review superseded by a newer head"),
+        ("345", "review failed"),
+    ] {
+        let mut s = showcase(2);
+        let id = s.m.domain.prs.values().find(|p| p.number.to_string() == pr).unwrap().id.clone();
+        s.m.ui.selected_pr = Some(id);
+        let mut s = s.key(KeyCode::Char('t'));
+        let (frame, _) = render(&mut s.m, 120, 38);
+        assert!(frame.contains(says), "#{pr} timeline lacks {says:?}:\n{frame}");
+    }
+}
+
+#[test]
+fn an_empty_timeline_says_whether_filters_hide_events() {
+    use crossterm::event::KeyCode;
+    let mut quiet = mid_review(Look::default()).select("acme/shop#186").key(KeyCode::Char('t'));
+    let (frame, _) = render(&mut quiet.m, 120, 38);
+    assert!(frame.contains("no events recorded yet"), "{frame}");
+
+    // #184's events are a tool call, a finding and a phase change: no run event.
+    let mut filtered = mid_review(Look::default()).select("acme/shop#184").key(KeyCode::Char('t'));
+    for _ in 0..4 {
+        filtered = filtered.key(KeyCode::Char('v'));
+    }
+    let (frame, _) = render(&mut filtered.m, 120, 38);
+    assert!(frame.contains("no events match the filters (f v P)"), "{frame}");
+}

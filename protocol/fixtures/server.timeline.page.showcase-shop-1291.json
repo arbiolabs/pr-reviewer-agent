@@ -1,0 +1,25 @@
+{
+  "type": "timeline.page",
+  "requestId": "req-tl",
+  "events": [
+    {
+      "type": "event",
+      "streamEpoch": "epoch-1",
+      "sequence": 40,
+      "prevSequence": 39,
+      "occurredAt": "2026-10-20T14:29:30Z",
+      "prId": "bb205280d64320002381b7dac2c86343",
+      "eventType": "pr.updated",
+      "data": {
+        "id": "bb205280d64320002381b7dac2c86343",
+        "repository": "acme/shop",
+        "number": 1291,
+        "title": "Sign-in: send users back to the page they started from",
+        "author": "priya-r",
+        "headSha": "f86859b05d854df42a7de7a71a80c0e600b546c6",
+        "baseSha": "fdff3cdad9d3a8e122f457ff662b452efda66df8",
+        "lifecycle": "ACTIVE"
+      }
+    }
+  ]
+}

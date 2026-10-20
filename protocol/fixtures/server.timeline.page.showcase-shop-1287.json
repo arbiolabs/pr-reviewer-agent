@@ -1,0 +1,276 @@
+{
+  "type": "timeline.page",
+  "requestId": "req-tl",
+  "events": [
+    {
+      "type": "event",
+      "streamEpoch": "epoch-1",
+      "sequence": 24,
+      "prevSequence": 23,
+      "occurredAt": "2026-10-20T13:53:30Z",
+      "prId": "d2bc8e8f23f98a4b203ffeb4519ed00b",
+      "runId": "7f24f52475b0cd1755a7ef64fd8a8080",
+      "eventType": "review.completed",
+      "data": {
+        "id": "7f24f52475b0cd1755a7ef64fd8a8080",
+        "prId": "d2bc8e8f23f98a4b203ffeb4519ed00b",
+        "baseSha": "8b232a84752bd7499aff418d9bc1c156db24822b",
+        "headSha": "647fb3beac66d51005ac1a2cb89fec94e7a3da76",
+        "phase": "COMPLETED",
+        "status": "COMPLETED",
+        "model": "claude-opus-5-5",
+        "startedAt": "2026-10-20T13:49:00Z",
+        "completedAt": "2026-10-20T13:53:30Z"
+      }
+    },
+    {
+      "type": "event",
+      "streamEpoch": "epoch-1",
+      "sequence": 23,
+      "prevSequence": 22,
+      "occurredAt": "2026-10-20T13:53:28Z",
+      "prId": "d2bc8e8f23f98a4b203ffeb4519ed00b",
+      "runId": "7f24f52475b0cd1755a7ef64fd8a8080",
+      "eventType": "review.phase_changed",
+      "data": {
+        "from": "PUBLISH",
+        "to": "COMPLETED",
+        "event": "NO_PUBLICATION_RECORDED",
+        "detail": null
+      }
+    },
+    {
+      "type": "event",
+      "streamEpoch": "epoch-1",
+      "sequence": 22,
+      "prevSequence": 21,
+      "occurredAt": "2026-10-20T13:53:24Z",
+      "prId": "d2bc8e8f23f98a4b203ffeb4519ed00b",
+      "runId": "7f24f52475b0cd1755a7ef64fd8a8080",
+      "eventType": "review.phase_changed",
+      "data": {
+        "from": "PREPARE_PUBLICATION",
+        "to": "PUBLISH",
+        "event": "HEAD_VERIFIED",
+        "detail": null
+      }
+    },
+    {
+      "type": "event",
+      "streamEpoch": "epoch-1",
+      "sequence": 21,
+      "prevSequence": 20,
+      "occurredAt": "2026-10-20T13:53:20Z",
+      "prId": "d2bc8e8f23f98a4b203ffeb4519ed00b",
+      "runId": "7f24f52475b0cd1755a7ef64fd8a8080",
+      "eventType": "review.phase_changed",
+      "data": {
+        "from": "VERIFY",
+        "to": "PREPARE_PUBLICATION",
+        "event": "CANDIDATES_DISPOSED",
+        "detail": null
+      }
+    },
+    {
+      "type": "event",
+      "streamEpoch": "epoch-1",
+      "sequence": 20,
+      "prevSequence": 19,
+      "occurredAt": "2026-10-20T13:53:04Z",
+      "prId": "d2bc8e8f23f98a4b203ffeb4519ed00b",
+      "runId": "7f24f52475b0cd1755a7ef64fd8a8080",
+      "eventType": "finding.updated",
+      "data": {
+        "id": "ddd4e53cecab4ad368ff9cc94a85fe1d",
+        "prId": "d2bc8e8f23f98a4b203ffeb4519ed00b",
+        "runId": "7f24f52475b0cd1755a7ef64fd8a8080",
+        "fingerprint": "a8c3836b4554a33ac6c6fdc32606a389",
+        "status": "DETECTED",
+        "evidenceCount": 3,
+        "stale": false,
+        "title": "Last page of order history still reports a next page",
+        "category": "correctness",
+        "severity": "low",
+        "confidence": 0.83,
+        "file": "src/server/orders/history.ts",
+        "line": 28
+      }
+    },
+    {
+      "type": "event",
+      "streamEpoch": "epoch-1",
+      "sequence": 19,
+      "prevSequence": 18,
+      "occurredAt": "2026-10-20T13:53:01Z",
+      "prId": "d2bc8e8f23f98a4b203ffeb4519ed00b",
+      "runId": "7f24f52475b0cd1755a7ef64fd8a8080",
+      "eventType": "finding.updated",
+      "data": {
+        "id": "ffadc4e5592b38cfb55eaa5e99afddd8",
+        "prId": "d2bc8e8f23f98a4b203ffeb4519ed00b",
+        "runId": "7f24f52475b0cd1755a7ef64fd8a8080",
+        "fingerprint": "03024f507f1702d34b18f583e382ec02",
+        "status": "DETECTED",
+        "evidenceCount": 2,
+        "stale": false,
+        "title": "Order history runs one item query per order",
+        "category": "performance",
+        "severity": "medium",
+        "confidence": 0.9,
+        "file": "src/server/orders/history.ts",
+        "line": 17
+      }
+    },
+    {
+      "type": "event",
+      "streamEpoch": "epoch-1",
+      "sequence": 18,
+      "prevSequence": 17,
+      "occurredAt": "2026-10-20T13:52:56Z",
+      "prId": "d2bc8e8f23f98a4b203ffeb4519ed00b",
+      "runId": "7f24f52475b0cd1755a7ef64fd8a8080",
+      "eventType": "finding.updated",
+      "data": {
+        "id": "9decead4b5f76750560dedb1f9952236",
+        "prId": "d2bc8e8f23f98a4b203ffeb4519ed00b",
+        "runId": "7f24f52475b0cd1755a7ef64fd8a8080",
+        "fingerprint": "08f8d40377e9fa29288a468edde6f184",
+        "status": "DETECTED",
+        "evidenceCount": 3,
+        "stale": false,
+        "title": "Two checkouts can both reserve the last unit",
+        "category": "concurrency",
+        "severity": "high",
+        "confidence": 0.88,
+        "file": "src/server/inventory/reserve.ts",
+        "line": 27
+      }
+    },
+    {
+      "type": "event",
+      "streamEpoch": "epoch-1",
+      "sequence": 17,
+      "prevSequence": 16,
+      "occurredAt": "2026-10-20T13:52:50Z",
+      "prId": "d2bc8e8f23f98a4b203ffeb4519ed00b",
+      "runId": "7f24f52475b0cd1755a7ef64fd8a8080",
+      "eventType": "finding.updated",
+      "data": {
+        "id": "256b685f358390708510348a99c9481b",
+        "prId": "d2bc8e8f23f98a4b203ffeb4519ed00b",
+        "runId": "7f24f52475b0cd1755a7ef64fd8a8080",
+        "fingerprint": "3ffa5a5054fc91930f37c90628a6955b",
+        "status": "DETECTED",
+        "evidenceCount": 3,
+        "stale": false,
+        "title": "Any signed-in customer can refund any order",
+        "category": "security",
+        "severity": "critical",
+        "confidence": 0.94,
+        "file": "src/server/routes/orders.ts",
+        "line": 97
+      }
+    },
+    {
+      "type": "event",
+      "streamEpoch": "epoch-1",
+      "sequence": 16,
+      "prevSequence": 15,
+      "occurredAt": "2026-10-20T13:52:40Z",
+      "prId": "d2bc8e8f23f98a4b203ffeb4519ed00b",
+      "runId": "7f24f52475b0cd1755a7ef64fd8a8080",
+      "eventType": "review.phase_changed",
+      "data": {
+        "from": "ANALYZE",
+        "to": "VERIFY",
+        "event": "CANDIDATES_PERSISTED",
+        "detail": null
+      }
+    },
+    {
+      "type": "event",
+      "streamEpoch": "epoch-1",
+      "sequence": 15,
+      "prevSequence": 14,
+      "occurredAt": "2026-10-20T13:49:45Z",
+      "prId": "d2bc8e8f23f98a4b203ffeb4519ed00b",
+      "runId": "7f24f52475b0cd1755a7ef64fd8a8080",
+      "eventType": "review.phase_changed",
+      "data": {
+        "from": "TRIAGE",
+        "to": "ANALYZE",
+        "event": "ROUTING_PERSISTED",
+        "detail": null
+      }
+    },
+    {
+      "type": "event",
+      "streamEpoch": "epoch-1",
+      "sequence": 14,
+      "prevSequence": 13,
+      "occurredAt": "2026-10-20T13:49:20Z",
+      "prId": "d2bc8e8f23f98a4b203ffeb4519ed00b",
+      "runId": "7f24f52475b0cd1755a7ef64fd8a8080",
+      "eventType": "review.phase_changed",
+      "data": {
+        "from": "COLLECT_CONTEXT",
+        "to": "TRIAGE",
+        "event": "CONTEXT_PERSISTED",
+        "detail": null
+      }
+    },
+    {
+      "type": "event",
+      "streamEpoch": "epoch-1",
+      "sequence": 13,
+      "prevSequence": 12,
+      "occurredAt": "2026-10-20T13:49:10Z",
+      "prId": "d2bc8e8f23f98a4b203ffeb4519ed00b",
+      "runId": "7f24f52475b0cd1755a7ef64fd8a8080",
+      "eventType": "tool.activity",
+      "data": {
+        "tool": "read_diff",
+        "summary": "3 files changed (+41 -6): src/server/routes/orders.ts, src/server/orders/reserve.ts, src/server/orders/history.ts"
+      }
+    },
+    {
+      "type": "event",
+      "streamEpoch": "epoch-1",
+      "sequence": 12,
+      "prevSequence": 11,
+      "occurredAt": "2026-10-20T13:49:00Z",
+      "prId": "d2bc8e8f23f98a4b203ffeb4519ed00b",
+      "runId": "7f24f52475b0cd1755a7ef64fd8a8080",
+      "eventType": "run.started",
+      "data": {
+        "id": "7f24f52475b0cd1755a7ef64fd8a8080",
+        "prId": "d2bc8e8f23f98a4b203ffeb4519ed00b",
+        "baseSha": "8b232a84752bd7499aff418d9bc1c156db24822b",
+        "headSha": "647fb3beac66d51005ac1a2cb89fec94e7a3da76",
+        "phase": "COLLECT_CONTEXT",
+        "status": "RUNNING",
+        "model": "claude-opus-5-5",
+        "startedAt": "2026-10-20T13:49:00Z"
+      }
+    },
+    {
+      "type": "event",
+      "streamEpoch": "epoch-1",
+      "sequence": 11,
+      "prevSequence": 10,
+      "occurredAt": "2026-10-20T13:48:30Z",
+      "prId": "d2bc8e8f23f98a4b203ffeb4519ed00b",
+      "eventType": "pr.updated",
+      "data": {
+        "id": "d2bc8e8f23f98a4b203ffeb4519ed00b",
+        "repository": "acme/shop",
+        "number": 1287,
+        "title": "Orders: self-serve refunds, stock holds at checkout, paged order history",
+        "author": "mkowalski",
+        "headSha": "647fb3beac66d51005ac1a2cb89fec94e7a3da76",
+        "baseSha": "8b232a84752bd7499aff418d9bc1c156db24822b",
+        "lifecycle": "ACTIVE"
+      }
+    }
+  ]
+}

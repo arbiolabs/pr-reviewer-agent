@@ -637,7 +637,83 @@ const showDiffs: [string, Pr, Run, DiffFile[]][] = [
   ["api-338-old", drainOld, drainOldRun, [dispatcherOld]],
   ["api-338", drain, drainRun, [dispatcherNew]],
 ];
+// What the journal recorded before the session opens, one timeline page per snapshot PR. Sequences run up to the
+// snapshot's 40, in time order across PRs, so Timeline has a story for every PR before the script plays anything.
+type Recorded = [t: number, make: (s: Seq) => ServerMessage];
+const started = (r: Run): Run => ({ ...r, phase: "COLLECT_CONTEXT", status: "RUNNING", completedAt: undefined });
+const fullRun = (r: Run, t: number, tools: [number, string, string][], findings: [number, FindingDetail][]): Recorded[] => {
+  const end = Date.parse(r.completedAt!) / 1000 - T0 / 1000;
+  const steps: [Run["phase"], Run["phase"], string, number][] = [
+    ["COLLECT_CONTEXT", "TRIAGE", "CONTEXT_PERSISTED", t + 20],
+    ["TRIAGE", "ANALYZE", "ROUTING_PERSISTED", t + 45],
+    ["ANALYZE", "VERIFY", "CANDIDATES_PERSISTED", (findings[0]?.[0] ?? end - 40) - 10],
+    ["VERIFY", "PREPARE_PUBLICATION", "CANDIDATES_DISPOSED", end - 10],
+    ["PREPARE_PUBLICATION", "PUBLISH", "HEAD_VERIFIED", end - 6],
+    ["PUBLISH", "COMPLETED", "NO_PUBLICATION_RECORDED", end - 2],
+  ];
+  return [
+    [t, (s) => runEvent(s, "run.started", started(r))],
+    ...steps.map(([from, to, event, at]): Recorded => [at, (s) => phase(s, r, from, to, event)]),
+    ...tools.map(([at, tool, summary]): Recorded => [at, (s) => activity(s, r, tool, summary)]),
+    ...findings.map(([at, d]): Recorded => [at, (s) => findingUpdated(s, { ...findingOf(d), stale: false })]),
+    [end, (s) => runEvent(s, "review.completed", r)],
+  ];
+};
+const prOpened = (p: Pr, t: number): Recorded => [t, (s) => ev(s, "pr.updated", p, { prId: p.id })];
+const showHistory: [string, Recorded[]][] = [
+  [
+    "shop-1287",
+    [
+      prOpened(orders, SHOW_OPEN - 2490),
+      ...fullRun(
+        ordersRun,
+        SHOW_OPEN - 2460,
+        [[SHOW_OPEN - 2450, "read_diff", "3 files changed (+41 -6): src/server/routes/orders.ts, src/server/orders/reserve.ts, src/server/orders/history.ts"]],
+        [[ordersSeen, refundAuthz], [ordersSeen + 6, oversell], [ordersSeen + 11, historyN1], [ordersSeen + 14, pagerOffByOne]],
+      ),
+    ],
+  ],
+  ["api-341", [prOpened(requestIds, SHOW_OPEN - 5340), ...fullRun(requestIdsRun, SHOW_OPEN - 5320, [], [])]],
+  ["shop-1291", [prOpened(signIn, SHOW_OPEN - 30)]],
+  [
+    "api-338",
+    [
+      prOpened(drainOld, SHOW_OPEN - 1540),
+      [SHOW_OPEN - 1520, (s) => runEvent(s, "run.started", started(drainOldRun))],
+      [SHOW_OPEN - 1500, (s) => phase(s, drainOldRun, "COLLECT_CONTEXT", "TRIAGE", "CONTEXT_PERSISTED")],
+      [SHOW_OPEN - 1450, (s) => phase(s, drainOldRun, "TRIAGE", "ANALYZE", "ROUTING_PERSISTED")],
+      [SHOW_OPEN - 1300, (s) => phase(s, drainOldRun, "ANALYZE", "VERIFY", "CANDIDATES_PERSISTED")],
+      [SHOW_OPEN - 1290, (s) => findingUpdated(s, { ...findingOf(unDrained), stale: false })],
+      [SHOW_OPEN - 142, (s) => ev(s, "pr.updated", drain, { prId: drain.id })],
+      [SHOW_OPEN - 140, (s) => phase(s, drainOldRun, "VERIFY", "SUPERSEDED", "NEWER_HEAD")],
+      [SHOW_OPEN - 140, (s) => runEvent(s, "run.superseded", drainOldRun)],
+      [SHOW_OPEN - 95, (s) => runEvent(s, "run.started", started(drainRun))],
+      [SHOW_OPEN - 80, (s) => phase(s, drainRun, "COLLECT_CONTEXT", "TRIAGE", "CONTEXT_PERSISTED")],
+    ],
+  ],
+  [
+    "api-345",
+    [
+      prOpened(ledger, SHOW_OPEN - 620),
+      [SHOW_OPEN - 610, (s) => runEvent(s, "run.started", started(ledgerRun))],
+      [SHOW_OPEN - 588, (s) => phase(s, ledgerRun, "COLLECT_CONTEXT", "FAILED", "TERMINAL_ERROR")],
+      [SHOW_OPEN - 588, (s) => runEvent(s, "run.failed", ledgerRun)],
+    ],
+  ],
+];
+const showTimelines = (): [string, ServerMessage][] => {
+  const all = showHistory.flatMap(([name, rows]) => rows.map(([t, make], k) => ({ name, t, k, make })));
+  all.sort((a, b) => a.t - b.t || a.k - b.k);
+  if (all.length > 40) throw new Error(`showcase history has ${all.length} events; the snapshot is at sequence 40`);
+  const events = all.map((e, i) => ({ name: e.name, message: e.make({ seq: 40 - all.length + i + 1, t: e.t }) }));
+  return showHistory.map(([name]): [string, ServerMessage] => [
+    `server.timeline.page.showcase-${name}`,
+    { type: "timeline.page", requestId: "req-tl", events: events.filter((e) => e.name === name).map((e) => e.message).reverse() as Sequenced[] },
+  ]);
+};
+
 const showcaseFixtures: Record<string, ServerMessage> = Object.fromEntries([
+  ...showTimelines(),
   ...showDiffs.map(([name, p, r, files]): [string, ServerMessage] => [
     `server.diff.page.showcase-${name}`,
     { type: "diff.page", requestId: "req-diff", prId: p.id, baseSha: r.baseSha, headSha: r.headSha, files, truncated: false },

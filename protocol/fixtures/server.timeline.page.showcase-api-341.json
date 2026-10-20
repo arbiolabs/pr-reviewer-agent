@@ -1,0 +1,162 @@
+{
+  "type": "timeline.page",
+  "requestId": "req-tl",
+  "events": [
+    {
+      "type": "event",
+      "streamEpoch": "epoch-1",
+      "sequence": 10,
+      "prevSequence": 9,
+      "occurredAt": "2026-10-20T13:04:30Z",
+      "prId": "0c11e2592c6105aa27f93216e41c13bd",
+      "runId": "d2e896c0b8164e789df1aebc801d3b5e",
+      "eventType": "review.completed",
+      "data": {
+        "id": "d2e896c0b8164e789df1aebc801d3b5e",
+        "prId": "0c11e2592c6105aa27f93216e41c13bd",
+        "baseSha": "03bc3b8ed667e7e105384dcd714ae1353ef4b789",
+        "headSha": "10bb915bc07f2bc1a7721f21e57dadb66f3f2414",
+        "phase": "COMPLETED",
+        "status": "COMPLETED",
+        "model": "claude-opus-5-5",
+        "startedAt": "2026-10-20T13:01:20Z",
+        "completedAt": "2026-10-20T13:04:30Z"
+      }
+    },
+    {
+      "type": "event",
+      "streamEpoch": "epoch-1",
+      "sequence": 9,
+      "prevSequence": 8,
+      "occurredAt": "2026-10-20T13:04:28Z",
+      "prId": "0c11e2592c6105aa27f93216e41c13bd",
+      "runId": "d2e896c0b8164e789df1aebc801d3b5e",
+      "eventType": "review.phase_changed",
+      "data": {
+        "from": "PUBLISH",
+        "to": "COMPLETED",
+        "event": "NO_PUBLICATION_RECORDED",
+        "detail": null
+      }
+    },
+    {
+      "type": "event",
+      "streamEpoch": "epoch-1",
+      "sequence": 8,
+      "prevSequence": 7,
+      "occurredAt": "2026-10-20T13:04:24Z",
+      "prId": "0c11e2592c6105aa27f93216e41c13bd",
+      "runId": "d2e896c0b8164e789df1aebc801d3b5e",
+      "eventType": "review.phase_changed",
+      "data": {
+        "from": "PREPARE_PUBLICATION",
+        "to": "PUBLISH",
+        "event": "HEAD_VERIFIED",
+        "detail": null
+      }
+    },
+    {
+      "type": "event",
+      "streamEpoch": "epoch-1",
+      "sequence": 7,
+      "prevSequence": 6,
+      "occurredAt": "2026-10-20T13:04:20Z",
+      "prId": "0c11e2592c6105aa27f93216e41c13bd",
+      "runId": "d2e896c0b8164e789df1aebc801d3b5e",
+      "eventType": "review.phase_changed",
+      "data": {
+        "from": "VERIFY",
+        "to": "PREPARE_PUBLICATION",
+        "event": "CANDIDATES_DISPOSED",
+        "detail": null
+      }
+    },
+    {
+      "type": "event",
+      "streamEpoch": "epoch-1",
+      "sequence": 6,
+      "prevSequence": 5,
+      "occurredAt": "2026-10-20T13:03:40Z",
+      "prId": "0c11e2592c6105aa27f93216e41c13bd",
+      "runId": "d2e896c0b8164e789df1aebc801d3b5e",
+      "eventType": "review.phase_changed",
+      "data": {
+        "from": "ANALYZE",
+        "to": "VERIFY",
+        "event": "CANDIDATES_PERSISTED",
+        "detail": null
+      }
+    },
+    {
+      "type": "event",
+      "streamEpoch": "epoch-1",
+      "sequence": 5,
+      "prevSequence": 4,
+      "occurredAt": "2026-10-20T13:02:05Z",
+      "prId": "0c11e2592c6105aa27f93216e41c13bd",
+      "runId": "d2e896c0b8164e789df1aebc801d3b5e",
+      "eventType": "review.phase_changed",
+      "data": {
+        "from": "TRIAGE",
+        "to": "ANALYZE",
+        "event": "ROUTING_PERSISTED",
+        "detail": null
+      }
+    },
+    {
+      "type": "event",
+      "streamEpoch": "epoch-1",
+      "sequence": 4,
+      "prevSequence": 3,
+      "occurredAt": "2026-10-20T13:01:40Z",
+      "prId": "0c11e2592c6105aa27f93216e41c13bd",
+      "runId": "d2e896c0b8164e789df1aebc801d3b5e",
+      "eventType": "review.phase_changed",
+      "data": {
+        "from": "COLLECT_CONTEXT",
+        "to": "TRIAGE",
+        "event": "CONTEXT_PERSISTED",
+        "detail": null
+      }
+    },
+    {
+      "type": "event",
+      "streamEpoch": "epoch-1",
+      "sequence": 3,
+      "prevSequence": 2,
+      "occurredAt": "2026-10-20T13:01:20Z",
+      "prId": "0c11e2592c6105aa27f93216e41c13bd",
+      "runId": "d2e896c0b8164e789df1aebc801d3b5e",
+      "eventType": "run.started",
+      "data": {
+        "id": "d2e896c0b8164e789df1aebc801d3b5e",
+        "prId": "0c11e2592c6105aa27f93216e41c13bd",
+        "baseSha": "03bc3b8ed667e7e105384dcd714ae1353ef4b789",
+        "headSha": "10bb915bc07f2bc1a7721f21e57dadb66f3f2414",
+        "phase": "COLLECT_CONTEXT",
+        "status": "RUNNING",
+        "model": "claude-opus-5-5",
+        "startedAt": "2026-10-20T13:01:20Z"
+      }
+    },
+    {
+      "type": "event",
+      "streamEpoch": "epoch-1",
+      "sequence": 2,
+      "prevSequence": 1,
+      "occurredAt": "2026-10-20T13:01:00Z",
+      "prId": "0c11e2592c6105aa27f93216e41c13bd",
+      "eventType": "pr.updated",
+      "data": {
+        "id": "0c11e2592c6105aa27f93216e41c13bd",
+        "repository": "acme/api",
+        "number": 341,
+        "title": "Propagate X-Request-ID into structured logs",
+        "author": "tnakamura",
+        "headSha": "10bb915bc07f2bc1a7721f21e57dadb66f3f2414",
+        "baseSha": "03bc3b8ed667e7e105384dcd714ae1353ef4b789",
+        "lifecycle": "MERGED"
+      }
+    }
+  ]
+}

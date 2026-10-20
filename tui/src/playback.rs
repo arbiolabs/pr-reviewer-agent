@@ -1,6 +1,7 @@
 //! `--playback FILE.ndjson`: plays a scripted server session into the app with no socket. The script owns the stream;
-//! requests the script cannot know about (diff, finding detail, timeline) are answered from `protocol/fixtures/` and
-//! from the events already played.
+//! requests the script cannot know about (diff, finding detail, timeline) are answered from `protocol/fixtures/`. A
+//! timeline is the events already played on top of the history the `server.timeline.page.showcase-*` pages recorded
+//! before the session opened.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -113,9 +114,19 @@ pub fn answer(fixtures: &Path, played: &[SequencedEvent], req: &ClientMessage) -
             .unwrap_or_else(|| not_found(rid, format!("no detail for {finding_id}"))),
         ClientMessage::TimelineGet { pr_id, run_id, finding_id, before_sequence, limit, .. } => {
             let limit = u16::from(*limit) as usize;
-            let matching: Vec<&SequencedEvent> = played
-                .iter()
-                .rev()
+            let history: Vec<SequencedEvent> = fixtures_named(fixtures, "server.timeline.page.showcase-", rid)
+                .into_iter()
+                .filter_map(|(_, v)| match serde_json::from_value(v).ok()? {
+                    ServerMessage::TimelinePage { events, .. } => Some(events),
+                    _ => None,
+                })
+                .flatten()
+                .filter(|e| played.iter().all(|p| p.sequence != e.sequence))
+                .collect();
+            let mut all: Vec<&SequencedEvent> = played.iter().chain(&history).collect();
+            all.sort_by_key(|e| std::cmp::Reverse(e.sequence.get()));
+            let matching: Vec<&SequencedEvent> = all
+                .into_iter()
                 .filter(|e| before_sequence.is_none_or(|b| e.sequence.get() < b))
                 .filter(|e| pr_id.is_none() || pr_id == &e.pr_id)
                 .filter(|e| run_id.is_none() || run_id == &e.run_id)
