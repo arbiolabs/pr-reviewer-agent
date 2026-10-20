@@ -57,3 +57,15 @@ it("recovers a review killed mid-ANALYZE with one candidate set, one conversatio
     await second.close();
   }
 }, 30_000);
+
+it("lets only one pr-review at a time use a data dir, and frees it on close", async () => {
+  const fixture = createFixture();
+  const dataDir = mkdtempSync(join(tmpdir(), "lock-"));
+  const first = await open(dataDir, fixture, []);
+  try {
+    await expect(open(dataDir, fixture, [])).rejects.toThrow(`another pr-review is running on ${dataDir}`);
+  } finally {
+    await first.close();
+  }
+  await (await open(dataDir, fixture, [])).close();
+}, 30_000);

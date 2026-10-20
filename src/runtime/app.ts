@@ -4,6 +4,7 @@ import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Models } from "@earendil-works/pi-ai";
 import { createRegistry, defineExtension, Harness, type ModelRef, type TaskId } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
+import lockfile from "proper-lockfile";
 import type { Config } from "../config/config.ts";
 import { TERMINAL_REVIEW_STATES } from "../domain/machines.ts";
 import type { PullInfo } from "../domain/types.ts";
@@ -32,9 +33,36 @@ export type App = { store: AppStore; harness: Harness; task: ReviewTask; reviewe
 
 const ctx = BACKGROUND_CONTEXT;
 
-/** Open both stores and the Harness. Pi Durable owns checkpoints and conversations; the app DB owns business records. */
+/**
+ * Open both stores and the Harness. Pi Durable owns checkpoints and conversations; the app DB owns business records.
+ * The data dir is locked for the App's lifetime.
+ */
 export async function openApp(options: AppOptions): Promise<App> {
   mkdirSync(options.dataDir, { recursive: true });
+  const release = await lockDataDir(options.dataDir);
+  try {
+    return await openLocked(options, release);
+  } catch (error) {
+    await release();
+    throw error;
+  }
+}
+
+/**
+ * One pr-review per data dir: two would run the same durable tasks and share the bare clones. The retries outlast
+ * `stale`, so a rerun after kill -9 takes over the dead process's lock. proper-lockfile removes the lock on exit and
+ * on signals.
+ */
+async function lockDataDir(dir: string): Promise<() => Promise<void>> {
+  try {
+    return await lockfile.lock(dir, { stale: 5000, update: 1000, retries: { retries: 12, minTimeout: 500, maxTimeout: 500 } });
+  } catch (error) {
+    if ((error as { code?: unknown }).code === "ELOCKED") throw new Error(`another pr-review is running on ${dir}`);
+    throw error;
+  }
+}
+
+async function openLocked(options: AppOptions, release: () => Promise<void>): Promise<App> {
   const cacheDir = join(options.dataDir, "repos");
   const store = AppStore.open(join(options.dataDir, "app.sqlite"));
   const workspaces = new Map<string, Workspace>();
@@ -62,8 +90,12 @@ export async function openApp(options: AppOptions): Promise<App> {
     task,
     reviewerVersion: options.reviewerVersion,
     async close() {
-      await harness.close(ctx);
-      store.close();
+      try {
+        await harness.close(ctx);
+        store.close();
+      } finally {
+        await release();
+      }
     },
   };
 }
