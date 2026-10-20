@@ -33,7 +33,8 @@ afterEach(async () => {
 // The client timeout is also how long reconciliation waits before it may claim a review absent. Only the test about
 // that wait gives its client this 300 ms; the others answer through a fake that shares this process's event loop, so a
 // loaded machine can hold a response past 300 ms and turn a clean POST or listing into a timeout.
-const config = { ...DEFAULT_CONFIG, github: { ...DEFAULT_CONFIG.github, timeout_ms: 300 } };
+// A failed phase's retry waits are wall-clock sleeps nothing here asserts on, so they stay short too.
+const config = { ...DEFAULT_CONFIG, review: { ...DEFAULT_CONFIG.review, retry_backoff_ms: 10 }, github: { ...DEFAULT_CONFIG.github, timeout_ms: 300 } };
 
 function testClient(timeoutMs = 5000) {
   return new GitHubClient({
