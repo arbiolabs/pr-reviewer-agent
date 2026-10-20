@@ -360,6 +360,22 @@ describe("account.select", () => {
     expect(d.raw()).not.toContain("hosts.yml");
   }, 30_000);
 
+  it("shows account events in the unscoped timeline, and not in a PR-, run- or finding-scoped one", async () => {
+    const d = await accountsDaemon({ PATH: fakeGh().dir });
+    d.c.send({ type: "snapshot.get", requestId: "s" });
+    await d.c.waitFor((m) => m.type === "snapshot");
+    expect(await d.select("github.com/octo-work")).toMatchObject({ status: "accepted" });
+    const timeline = async (requestId: string, scope: Record<string, string>) => {
+      d.c.send({ type: "timeline.get", requestId, limit: 10, ...scope });
+      const page = await d.c.waitFor<Extract<ServerMessage, { type: "timeline.page" }>>((m) => m.type === "timeline.page" && m.requestId === requestId);
+      return page.events.map((e) => [e.sequence, e.eventType]);
+    };
+    expect(await timeline("all", {})).toEqual([[2, "accounts.updated"], [1, "accounts.updated"]]);
+    expect(await timeline("pr", { prId: "acme/shop#184" })).toEqual([]);
+    expect(await timeline("run", { runId: "rev-184-a" })).toEqual([]);
+    expect(await timeline("finding", { findingId: "f-1" })).toEqual([]);
+  }, 30_000);
+
   it("lists GITHUB_TOKEN as env/GITHUB_TOKEN, refuses to select over it, and never sends its value", async () => {
     const secret = "ghp_ENVsecret987654321";
     const d = await accountsDaemon({ PATH: fakeGh().dir, GITHUB_TOKEN: secret });

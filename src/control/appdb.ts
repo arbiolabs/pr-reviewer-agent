@@ -131,7 +131,7 @@ export class AppDbSource implements ControlSource {
     return this.read(() => {
       const rows = this.db
         .prepare(
-          `${JOURNAL_SELECT} JOIN review_revisions r ON r.id = a.revision_id
+          `${JOURNAL_SELECT} LEFT JOIN review_revisions r ON r.id = a.revision_id
            WHERE (:pr IS NULL OR r.pr_id = :pr) AND (:run IS NULL OR a.revision_id = :run)
            AND (:finding IS NULL OR (a.event IN ('FINDING_OBSERVED', 'FINDING_UPDATED') AND a.detail = :finding))
            AND (:before IS NULL OR a.seq < :before) ORDER BY a.seq DESC LIMIT :limit`,
