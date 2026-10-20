@@ -101,3 +101,26 @@ fn a_burst_rate_is_clamped_to_fit_its_cell() {
     let (frame, _) = render(&mut s.m, 120, 38);
     assert!(frame.contains("99+ calls/s"), "{frame}");
 }
+
+#[test]
+fn settings_describes_the_display_in_plain_words() {
+    let row = |frame: &str, key: &str| -> String {
+        let line = frame
+            .lines()
+            .find(|l| l.trim_start().starts_with(&format!("{key} ")))
+            .unwrap_or_else(|| panic!("{key}:\n{frame}"));
+        line.trim_start()[key.len()..].trim().to_string()
+    };
+    let mut s = showcase(2).key(crossterm::event::KeyCode::Char('5'));
+    let (frame, _) = render(&mut s.m, 120, 38);
+    assert_eq!(row(&frame, "glyphs"), "unicode");
+    assert_eq!(row(&frame, "color"), "on");
+    assert_eq!(row(&frame, "background"), "painted (theme)");
+
+    let look = Look { ascii: true, terminal_bg: true, color: false, ..Look::default() };
+    let mut s = Sim::new(look).play("showcase", 2).key(crossterm::event::KeyCode::Char('5'));
+    let (frame, _) = render(&mut s.m, 120, 38);
+    assert_eq!(row(&frame, "glyphs"), "ascii");
+    assert_eq!(row(&frame, "color"), "off");
+    assert_eq!(row(&frame, "background"), "terminal");
+}

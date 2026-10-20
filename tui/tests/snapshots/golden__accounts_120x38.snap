@@ -27,12 +27,12 @@ expression: text
             activity              0 feed entries kept (cap 2000); 0 tool events applied
 
           Display
-            glyphs, color         unicode, color
-            background            theme: painted ink (dark)
+            glyphs                unicode
+            color                 on
+            background            painted (theme)
 
           Recent errors
             none
-
 
 
 

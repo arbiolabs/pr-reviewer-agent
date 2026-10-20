@@ -27,12 +27,12 @@ expression: ascii_text
             activity              0 feed entries kept (cap 2000); 0 tool events applied
 
           Display
-            glyphs, color         ascii, color
-            background            theme: painted ink (dark)
+            glyphs                ascii
+            color                 on
+            background            painted (theme)
 
           Recent errors
             none
-
 
 
 

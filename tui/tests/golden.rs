@@ -74,7 +74,7 @@ fn accounts_view() {
         assert!(ascii_text.is_ascii(), "accounts {w}x{h} --ascii frame has non-ASCII glyphs");
         let (mono_text, term) = render(&mut n.m, w, h);
         // Settings names the display mode; nothing else may change.
-        let mono_text = mono_text.replace("monochrome (NO_COLOR or theme = \"mono\")", "color");
+        let mono_text = mono_text.replace(&format!("{:<22}off", "color"), &format!("{:<22}on", "color"));
         assert_eq!(mono_text, text, "accounts {w}x{h}: NO_COLOR changed the text");
         assert!(colorless(&term));
     }

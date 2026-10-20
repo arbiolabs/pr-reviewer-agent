@@ -12,7 +12,7 @@ use super::doc::{column, filled};
 use crate::keymap::{Context, help_rows};
 use crate::model::{ConfirmState, Link, Modal};
 use crate::protocol::{Account, AccountState};
-use crate::theme::{Bg, Palette, Role};
+use crate::theme::{Bg, Role};
 
 pub fn modal(c: &Ctx, f: &mut Frame, body: Rect, modal: &Modal) {
     match modal {
@@ -307,25 +307,11 @@ pub fn settings(c: &Ctx, f: &mut Frame, area: Rect) {
     gap(&mut lines);
     lines.push(heading(c, "Display"));
     let look = m.look;
-    lines.push(row(
-        "glyphs, color",
-        format!(
-            "{}, {}",
-            if look.ascii { "ascii" } else { "unicode" },
-            if look.color { "color" } else { "monochrome (NO_COLOR or theme = \"mono\")" }
-        ),
-        Role::Normal,
-    ));
-    lines.push(row(
-        "background",
-        match (look.palette, look.terminal_bg) {
-            (Palette::Dark, true) => "terminal: assumes a dark terminal".into(),
-            (Palette::Light, true) => "terminal: assumes a light terminal".into(),
-            (Palette::Dark, false) => "theme: painted ink (dark)".into(),
-            (Palette::Light, false) => "theme: painted paper (light)".into(),
-        },
-        Role::Normal,
-    ));
+    lines.extend([
+        row("glyphs", if look.ascii { "ascii" } else { "unicode" }.into(), Role::Normal),
+        row("color", if look.color { "on" } else { "off" }.into(), Role::Normal),
+        row("background", if look.terminal_bg { "terminal" } else { "painted (theme)" }.into(), Role::Normal),
+    ]);
     gap(&mut lines);
     lines.push(heading(c, "Recent errors"));
     if let Link::Incompatible { message, .. } = &m.link {

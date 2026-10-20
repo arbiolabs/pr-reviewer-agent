@@ -23,6 +23,6 @@ expression: text
     resyncs / reconnects  0 / 0
     activity              0 feed entries kept (cap 2000); 0 tool events appli…
   Display
-    glyphs, color         unicode, color
-    background            theme: painted ink (dark)
+    glyphs                unicode
+    color                 on
    j/k account  Enter select account  w watch live  r refresh  1-4 views
