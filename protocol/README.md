@@ -157,7 +157,8 @@ The fixtures write control bytes as JSON `\u` escapes.
   check it against.
 - `fixtures/invalid/*.json` holds messages that must be rejected. Each one has a `.why.txt` file next to it.
 - `playback/<name>.ndjson` is a scripted server session. Each line is `{ "delayMs": n, "message": <server message> }`.
-  The script ignores what the client sends.
+  The script ignores what the client sends, except that a line may carry `"after": "<command>"`: it waits until the
+  client sends that command, which playback answers `accepted`, and only then starts its delay.
 - `playback/<name>.expect.json` is the client state after the whole script: `streamEpoch`, `lastSequence`,
   `resyncRequested`, `toolActivityCount` (the number of activity events applied), and `prs`, `runs` and `findings`
   sorted by `id`, plus `accounts` (`id`, `state`, `ghActive`, `selected`, sorted by `id`) when the script's snapshot
@@ -167,7 +168,7 @@ The fixtures write control bytes as JSON `\u` escapes.
 - `--playback` answers `diff.get` with the `fixtures/server.diff.page*.json` whose `prId`, `baseSha` and `headSha` match
   (`server.diff.page.last.json` for a request with a `cursor`), `finding.get` with the
   `fixtures/server.finding.detail*.json` whose finding id matches, and `publication.get` with
-  `fixtures/server.publication.preview.json` when its run id matches. Anything else is `NOT_FOUND`.
+  the `fixtures/server.publication.preview*.json` whose run id matches. Anything else is `NOT_FOUND`.
 
 | Script | Exercises |
 | --- | --- |
@@ -180,4 +181,4 @@ The fixtures write control bytes as JSON `\u` escapes.
 | `burst` | 5,000 `tool.activity` events with no delay |
 | `accounts` | a snapshot with 2 accounts, `command.result accepted` for `account.select`, then `accounts.updated` with the new selection |
 | `approval` | an engine-mode welcome, a run reaching `AWAITING_APPROVAL`, its `publication.preview`, `command.result accepted` for `review.publish`, then `publishing`, `published` with the review id, and `review.completed` |
-| `showcase` | a realistic session for judging TUI designs: 5 PRs in `acme/shop` and `acme/api` (completed with 4 findings, completed clean, one review advancing live for about 18 s, superseded with a stale finding, failed), 2 accounts |
+| `showcase` | a realistic session for judging TUI designs: 5 PRs in `acme/shop` and `acme/api` (completed with 4 findings, completed clean, one review advancing live for about 18 s and then parking for approval, superseded with a stale finding, failed), 2 accounts, an engine-mode daemon. Once the client sends `review.publish`, the parked review publishes and completes |

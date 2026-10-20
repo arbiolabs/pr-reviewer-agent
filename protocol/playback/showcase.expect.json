@@ -1,6 +1,6 @@
 {
   "streamEpoch": "epoch-1",
-  "lastSequence": 80,
+  "lastSequence": 86,
   "resyncRequested": false,
   "toolActivityCount": 29,
   "prs": [
@@ -72,13 +72,13 @@
     {
       "id": "6663d915445dcbffacc5d5255fa69963",
       "title": "Sign-in redirects to any URL passed in returnTo",
-      "status": "DETECTED",
+      "status": "PUBLISHED",
       "stale": false
     },
     {
       "id": "7c768d13420e527545cfc2c3bfeb921e",
       "title": "Session id is no longer rotated at sign-in",
-      "status": "DETECTED",
+      "status": "PUBLISHED",
       "stale": false
     },
     {
@@ -118,6 +118,12 @@
       "state": "ok",
       "ghActive": true,
       "selected": false
+    }
+  ],
+  "publications": [
+    {
+      "runId": "d1ed7b3b7b96a280414a43f18864bd2b",
+      "status": "published"
     }
   ]
 }

@@ -740,6 +740,37 @@ const showTimelines = (): [string, ServerMessage][] => {
   ]);
 };
 
+// What approving #1291 posts: the publisher's summary (src/cli/report.ts renderSummary) and one comment per finding.
+const signInPreviewId = sha256(`payload of ${signInRun.id}`);
+const signInPreview: ServerMessage = {
+  type: "publication.preview",
+  requestId: "req-pub",
+  runId: signInRun.id,
+  previewId: signInPreviewId,
+  headSha: signIn.headSha,
+  body: [
+    "## Automated PR review",
+    "",
+    `Reviewed commit: \`${signIn.headSha}\``,
+    "",
+    "Found 2 actionable issues.",
+    "",
+    ...[openRedirect, sessionFixation].map((f) => `- ${f.severity[0].toUpperCase()}${f.severity.slice(1)}: ${f.title} (\`${f.file}:${f.line}\`)`),
+    "",
+    "Review performed with isolated read-only tools. Human review is still required.",
+    `<!-- durable-review:${signInRun.id}:${signInPreviewId} -->`,
+    "",
+  ].join("\n"),
+  comments: [openRedirect, sessionFixation].map((f) => ({
+    path: f.file,
+    line: f.line!,
+    side: "RIGHT" as const,
+    body: `**${f.severity[0].toUpperCase()}${f.severity.slice(1)}: ${f.title}**\n\n${f.explanation}`,
+  })),
+  event: "COMMENT",
+  status: "awaiting_approval",
+};
+
 const showcaseFixtures: Record<string, ServerMessage> = Object.fromEntries([
   ...showTimelines(),
   ...showDiffs.map(([name, p, r, files]): [string, ServerMessage] => [
@@ -750,11 +781,21 @@ const showcaseFixtures: Record<string, ServerMessage> = Object.fromEntries([
     `server.finding.detail.showcase-${i + 1}`,
     { type: "finding.detail", requestId: "req-finding", finding: d },
   ]),
+  ["server.publication.preview.showcase-shop-1291", signInPreview],
 ]);
 
 const signInActivity = (tool: string, summary: string) => (s: Seq) => activity(s, signInRun, tool, summary);
 const drainActivity = (tool: string, summary: string) => (s: Seq) => activity(s, drainRun, tool, summary);
-type ShowStep = [delayMs: number, make: ((s: Seq) => ServerMessage) | "heartbeat"];
+// The step after `after` waits until the client sends that command; playback accepts it (protocol/README.md).
+type ShowStep = [delayMs: number, make: ((s: Seq) => ServerMessage) | "heartbeat", after?: "review.publish"];
+const signInPublication = (status: PublicationChange["status"], reviewId?: number) => (s: Seq) =>
+  ev(
+    s,
+    "review.publication_changed",
+    { runId: signInRun.id, status, ...(reviewId ? { reviewId, url: `https://github.com/${signIn.repository}/pull/${signIn.number}#pullrequestreview-${reviewId}` } : {}) },
+    { prId: signIn.id, runId: signInRun.id },
+  );
+const SIGNIN_REVIEW_ID = 2209184;
 const showSteps: ShowStep[] = [
   [600, (s) => runEvent(s, "run.started", signInRun)],
   [420, signInActivity("read_diff", "3 files changed (+6 -3): src/server/auth/callback.ts, src/server/auth/login.ts, src/client/pages/SignIn.tsx")],
@@ -794,12 +835,21 @@ const showSteps: ShowStep[] = [
   [580, signInActivity("git_history", "#1077 review thread: rotation required by the 2025 pen test (finding AC-14)")],
   [620, (s) => findingUpdated(s, findingOf(sessionFixation))],
   [1100, (s) => phase(s, signInRun, "VERIFY", "PREPARE_PUBLICATION", "CANDIDATES_DISPOSED")],
-  [800, (s) => phase(s, signInRun, "PREPARE_PUBLICATION", "PUBLISH", "HEAD_VERIFIED")],
-  [900, (s) => phase(s, signInRun, "PUBLISH", "COMPLETED", "NO_PUBLICATION_RECORDED")],
+  // Approval mode: the review is stored and parks until the reader approves the preview.
+  [800, (s) => phase(s, signInRun, "PREPARE_PUBLICATION", "AWAITING_APPROVAL", "APPROVAL_REQUIRED")],
+  [40, signInPublication("awaiting_approval")],
+  [4000, "heartbeat"],
+  [600, (s) => phase(s, signInRun, "AWAITING_APPROVAL", "PUBLISH", "APPROVED"), "review.publish"],
+  [300, signInPublication("publishing")],
+  [1200, signInPublication("published", SIGNIN_REVIEW_ID)],
+  [80, (s) => findingUpdated(s, { ...findingOf(openRedirect), status: "PUBLISHED" })],
+  [60, (s) => findingUpdated(s, { ...findingOf(sessionFixation), status: "PUBLISHED" })],
+  [400, (s) => phase(s, signInRun, "PUBLISH", "COMPLETED", "REVIEW_RECONCILED")],
   [40, (s) => runEvent(s, "review.completed", { ...signInRun, phase: "COMPLETED", status: "COMPLETED", completedAt: at(s.t!) })],
   [4000, "heartbeat"],
   [4000, "heartbeat"],
 ];
+
 
 // ---------- message fixtures ----------
 
@@ -1045,7 +1095,8 @@ export const invalidFixtures: Record<string, [unknown, string]> = {
 
 // ---------- playback scripts ----------
 
-export type PlaybackLine = { delayMs: number; message: ServerMessage };
+/** `after`: the line waits until the client sends that command, then its delay runs (protocol/README.md). */
+export type PlaybackLine = { delayMs: number; after?: string; message: ServerMessage };
 export type Expect = {
   streamEpoch: string;
   lastSequence: number;
@@ -1175,14 +1226,14 @@ const approval = lines(40, [
 // Each step's occurredAt is the script clock, so the timestamps match the cadence the TUI plays at.
 const showcaseScript = (): PlaybackLine[] => {
   let [seq, clock] = [40, SHOW_OPEN];
-  const steps = showSteps.map(([delayMs, make]): PlaybackLine => {
+  const steps = showSteps.map(([delayMs, make, after]): PlaybackLine => {
     clock += delayMs / 1000;
     if (make === "heartbeat") return { delayMs, message: { type: "event", eventType: "heartbeat", streamEpoch: EPOCH, occurredAt: at(clock) } };
     seq += 1;
-    return { delayMs, message: make({ seq, t: clock }) };
+    return { delayMs, ...(after ? { after } : {}), message: make({ seq, t: clock }) };
   });
   return [
-    { delayMs: 0, message: welcome(40, EPOCH, ["account.select"]) },
+    { delayMs: 0, message: welcome(40, EPOCH, ["account.select", ...REVIEW_COMMANDS], "engine") },
     {
       delayMs: 0,
       message: snapshot(
@@ -1290,7 +1341,7 @@ export const playback: Record<string, { script: PlaybackLine[]; expect: Expect }
     script: showcaseScript(),
     expect: {
       streamEpoch: EPOCH,
-      lastSequence: 80,
+      lastSequence: 86,
       resyncRequested: false,
       toolActivityCount: 29,
       prs: prRows(orders, requestIds, signIn, drain, ledger),
@@ -1302,11 +1353,12 @@ export const playback: Record<string, { script: PlaybackLine[]; expect: Expect }
         runRow(drainRun, "ANALYZE", "RUNNING"),
         runRow(ledgerRun),
       ],
-      findings: showDetails.map((f) => ({ id: f.id, title: f.title, status: "DETECTED", stale: f.stale })),
+      findings: showDetails.map((f) => ({ id: f.id, title: f.title, status: f.runId === signInRun.id ? "PUBLISHED" : "DETECTED", stale: f.stale })),
       accounts: [
         { id: "github.com/acme-review-bot", state: "ok", ghActive: false, selected: true },
         { id: "github.com/dperalta", state: "ok", ghActive: true, selected: false },
       ],
+      publications: [{ runId: signInRun.id, status: "published" }],
     },
   },
   approval: {

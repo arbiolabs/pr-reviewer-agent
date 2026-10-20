@@ -1,7 +1,8 @@
 //! `--playback FILE.ndjson`: plays a scripted server session into the app with no socket. The script owns the stream;
 //! requests the script cannot know about (diff, finding detail, timeline) are answered from `protocol/fixtures/`. A
 //! timeline is the events already played on top of the history the `server.timeline.page.showcase-*` pages recorded
-//! before the session opened.
+//! before the session opened. A line with `after: "<command>"` holds until the client sends that command, which the
+//! playback then accepts: the showcase's approval plays only once the reader approves it.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -13,8 +14,15 @@ use crate::net::NetCmd;
 use crate::protocol::{ClientMessage, EventBody, SequencedEvent, ServerMessage};
 use crate::update::{Msg, NetEvent};
 
+pub struct Step {
+    pub delay: Duration,
+    /// The command this line waits for, if any.
+    pub after: Option<String>,
+    pub message: ServerMessage,
+}
+
 pub struct Script {
-    pub steps: Vec<(Duration, ServerMessage)>,
+    pub steps: Vec<Step>,
     pub fixtures: PathBuf,
 }
 
@@ -26,7 +34,8 @@ pub fn load(path: &Path) -> Result<Script, String> {
         let delay = Duration::from_millis(v["delayMs"].as_u64().unwrap_or(0));
         let msg =
             serde_json::from_value(v["message"].clone()).map_err(|e| format!("{}:{}: {e}", path.display(), n + 1))?;
-        steps.push((delay, msg));
+        let after = v["after"].as_str().map(String::from);
+        steps.push(Step { delay, after, message: msg });
     }
     let fixtures = path.parent().unwrap_or(Path::new(".")).join("../fixtures");
     Ok(Script { steps, fixtures })
@@ -37,13 +46,17 @@ pub async fn run(script: Script, tx: mpsc::Sender<Msg>, mut rx: mpsc::Receiver<N
     if tx.send(Msg::Net(NetEvent::Opened)).await.is_err() {
         return;
     }
+    // The commands the script waits for, and those the client has sent.
+    let gates: Vec<String> = script.steps.iter().filter_map(|s| s.after.clone()).collect();
+    let mut sent: Vec<String> = Vec::new();
     let mut steps = script.steps.into_iter();
     let mut next = steps.next();
     loop {
-        let delay = next.as_ref().map(|(d, _)| *d);
+        let open = next.as_ref().is_some_and(|s| s.after.as_ref().is_none_or(|a| sent.contains(a)));
+        let delay = next.as_ref().filter(|_| open).map(|s| s.delay);
         tokio::select! {
             _ = tokio::time::sleep(delay.unwrap_or(Duration::MAX)), if delay.is_some() => {
-                let Some((_, msg)) = next.take() else { continue };
+                let Some(Step { message: msg, .. }) = next.take() else { continue };
                 if let ServerMessage::Event(crate::protocol::Event::Sequenced(e)) = &msg {
                     played.push(e.clone());
                 }
@@ -53,6 +66,21 @@ pub async fn run(script: Script, tx: mpsc::Sender<Msg>, mut rx: mpsc::Receiver<N
                 next = steps.next();
             }
             cmd = rx.recv() => match cmd {
+                Some(NetCmd::Send(ClientMessage::Command(c))) if gates.iter().any(|g| g == c.command.name()) => {
+                    sent.push(c.command.name().to_string());
+                    let reply = ServerMessage::CommandResult(crate::protocol::CommandResult {
+                        request_id: c.request_id,
+                        outcome: crate::protocol::CommandOutcome::Accepted {
+                            operation_id: crate::protocol::Text::new(&match &c.command {
+                                crate::protocol::Command::Publish(p) => format!("review.publish:{}", p.run_id),
+                                _ => c.idempotency_key.clone(),
+                            }),
+                        },
+                    });
+                    if tx.send(Msg::Net(NetEvent::Message(reply))).await.is_err() {
+                        return;
+                    }
+                }
                 Some(NetCmd::Send(req)) => {
                     if let Some(reply) = answer(&script.fixtures, &played, &req)
                         && tx.send(Msg::Net(NetEvent::Message(reply))).await.is_err()

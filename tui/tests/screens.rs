@@ -183,8 +183,11 @@ fn help_at_120_columns_splits_between_sections_without_cutting_text() {
 #[test]
 fn help_marks_write_keys_the_daemon_does_not_grant() {
     use pr_review_tui::protocol::ServerMessage;
-    // The showcase daemon grants account.select only.
-    let mut s = showcase(2).key(crossterm::event::KeyCode::Char('?'));
+    // The fixture daemon grants nothing.
+    let mut s = Sim::new(Look::default());
+    s.server(ServerMessage::parse(&read("fixtures/server.welcome.json")).unwrap());
+    s.server(ServerMessage::parse(&read("fixtures/server.snapshot.json")).unwrap());
+    let mut s = s.key(crossterm::event::KeyCode::Char('?'));
     let (frame, _) = render(&mut s.m, 120, 38);
     for what in ["start a review", "retry the run", "cancel the run", "preview and publish"] {
         assert!(frame.contains(&format!("{what} (not offered)")), "{what}:\n{frame}");
@@ -426,5 +429,36 @@ fn a_read_only_daemon_says_so_in_settings_and_on_the_help_page() {
         ))));
         let (frame, _) = render(&mut s.m, 140, 45);
         assert!(frame.contains(&format!("Write keys are off: {note}.")), "{frame}");
+    }
+}
+
+#[test]
+fn the_showcase_parks_1291_and_its_preview_lands_every_comment_on_the_diff() {
+    use pr_review_tui::protocol::{Event, ServerMessage};
+    let msgs = script("showcase");
+    let parked = msgs
+        .iter()
+        .position(|m| matches!(m, ServerMessage::Event(Event::Sequenced(e)) if matches!(&e.body, pr_review_tui::protocol::EventBody::PublicationChanged(_))))
+        .unwrap();
+    // #338 still runs: the status line names it and counts #1291 as waiting; w visits #338, then #1291.
+    let mut s = showcase(parked + 1).key(crossterm::event::KeyCode::Char('w'));
+    let (frame, _) = render(&mut s.m, 120, 38);
+    assert!(
+        first_line(&frame).contains("reviewing #338") && first_line(&frame).contains("◐ 1 awaiting you"),
+        "{frame}"
+    );
+    let mut s = s.key(crossterm::event::KeyCode::Char('w'));
+    let (frame, _) = render(&mut s.m, 120, 38);
+    assert!(frame.contains("◐ Ready to publish · p previews"), "{frame}");
+    let mut s = s.key(crossterm::event::KeyCode::Char('p'));
+    let (frame, _) = render(&mut s.m, 120, 160);
+    for want in [
+        "Publish this review?",
+        "Found 2 actionable issues.",
+        "**High: Sign-in redirects to any URL passed in returnTo**",
+        "every comment sits on a line of the diff",
+        "y publishes exactly this to GitHub",
+    ] {
+        assert!(frame.contains(want), "{want}:\n{frame}");
     }
 }
