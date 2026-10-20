@@ -444,12 +444,12 @@ fn the_showcase_parks_1291_and_its_preview_lands_every_comment_on_the_diff() {
     let mut s = showcase(parked + 1).key(crossterm::event::KeyCode::Char('w'));
     let (frame, _) = render(&mut s.m, 120, 38);
     assert!(
-        first_line(&frame).contains("reviewing #338") && first_line(&frame).contains("◐ 1 awaiting you"),
+        first_line(&frame).contains("reviewing #338") && first_line(&frame).contains("◔ 1 awaiting you"),
         "{frame}"
     );
     let mut s = s.key(crossterm::event::KeyCode::Char('w'));
     let (frame, _) = render(&mut s.m, 120, 38);
-    assert!(frame.contains("◐ Ready to publish · p previews"), "{frame}");
+    assert!(frame.contains("◔ Ready to publish · p previews"), "{frame}");
     let mut s = s.key(crossterm::event::KeyCode::Char('p'));
     let (frame, _) = render(&mut s.m, 120, 160);
     for want in [

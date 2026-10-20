@@ -294,20 +294,20 @@ fn awaiting_approval_is_its_own_amber_state_in_the_stepper_the_rail_and_the_stat
     use pr_review_tui::theme::{Palette, rgb};
     let (f, term) = parked_frame(Look::default());
     let top = f.lines().next().unwrap();
-    assert!(top.contains("◐ #184 waiting for you · p previews"), "{top}");
+    assert!(top.contains("◔ #184 waiting for you · p previews"), "{top}");
     assert!(!top.contains("reviewing") && !top.contains("nothing running"), "{top}");
-    assert!(f.contains("● Prepare ◐ Publish"), "{f}");
-    assert!(f.contains("◐ waiting for you"), "{f}");
-    assert!(f.lines().any(|l| l.starts_with("▌   shop") && l.contains("◐ awaiting you")), "the rail row: {f}");
-    assert!(f.contains("◐ Ready to publish"), "{f}");
+    assert!(f.contains("● Prepare ◔ Publish"), "{f}");
+    assert!(f.contains("◔ waiting for you"), "{f}");
+    assert!(f.lines().any(|l| l.starts_with("▌   shop") && l.contains("◔ awaiting you")), "the rail row: {f}");
+    assert!(f.contains("◔ Ready to publish"), "{f}");
     assert!(!f.contains("failed") && !f.contains("✓ done"), "neither an error nor done: {f}");
     // Amber: the status line's glyph is drawn in the palette's warn color.
     let buf = term.backend().buffer();
-    let x = (0..120).find(|&x| buf[(x, 0)].symbol() == "◐").unwrap();
+    let x = (0..120).find(|&x| buf[(x, 0)].symbol() == "◔").unwrap();
     assert_eq!(buf[(x, 0)].fg, rgb(Palette::Dark.hex("warn")));
 
     let (f, _) = parked_frame(Look { color: false, ..Look::default() });
-    assert!(f.lines().next().unwrap().contains("◐ #184 waiting for you"), "NO_COLOR keeps the glyph and words: {f}");
+    assert!(f.lines().next().unwrap().contains("◔ #184 waiting for you"), "NO_COLOR keeps the glyph and words: {f}");
     assert!(f.contains("awaiting you"), "{f}");
 
     let (f, _) = parked_frame(Look { ascii: true, ..Look::default() });

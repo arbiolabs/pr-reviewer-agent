@@ -168,7 +168,7 @@ pub struct Glyphs {
 
 const UNICODE: Glyphs = Glyphs {
     ok: "✓",
-    pending: "◐",
+    pending: "◔",
     fail: "✗",
     active: "●",
     idle: "·",

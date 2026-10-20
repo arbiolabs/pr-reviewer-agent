@@ -65,7 +65,7 @@ pub fn phase_index(p: Phase) -> Option<usize> {
     })
 }
 
-/// `●─●─◐─○─○─○`: eleven cells, the current phase pulsing while the run is live.
+/// `●─●─◔─○─○─○`: eleven cells, the current phase pulsing while the run is live.
 pub fn stepper(c: &Ctx, run: &Run) -> Vec<Span<'static>> {
     let cur = phase_index(run.phase);
     let (done, todo, link) = if c.t.ascii { ("+", ".", "-") } else { ("●", "○", "─") };

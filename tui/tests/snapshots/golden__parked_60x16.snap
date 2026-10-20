@@ -2,9 +2,9 @@
 source: tests/golden.rs
 expression: text
 ---
-  pr-review · ◐ #184 waiting for you · p previews   ● live
+  pr-review · ◔ #184 waiting for you · p previews   ● live
 
-  #184 Booking API                     ●─●─●─●─●─◐  ▲1 →0
+  #184 Booking API                     ●─●─●─●─●─◔  ▲1 →0
   ┃ ▲ HIGH   correctness          detected · 82% confident
   ┃ Finding f-1
   ┃ src/booking.ts:42
