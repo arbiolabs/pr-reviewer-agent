@@ -217,7 +217,8 @@ pub fn timeline(c: &Ctx, f: &mut Frame, area: Rect) {
     if let Some(e) = &t.error {
         head.push(Line::from(c.span(c.fit(&format!("timeline unavailable: {e}"), w), Role::Fail)));
     } else if rows.is_empty() {
-        head.push(Line::from(c.span(if t.pending.is_some() { "loading…" } else { "No events match." }, Role::Muted)));
+        let text = if t.pending.is_some() { format!("loading{}", g.ellipsis) } else { "No events match.".into() };
+        head.push(Line::from(c.span(text, Role::Muted)));
     }
     let mut body: Vec<Line<'static>> = Vec::new();
     if t.next_before.is_some() {

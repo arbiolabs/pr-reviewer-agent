@@ -71,7 +71,7 @@ fn header(c: &Ctx, d: &DiffView, anchored: &[&Finding], w: usize) -> Vec<Line<'s
         second.push(c.span("   TRUNCATED", Role::Pending));
     }
     if d.pending.is_some() {
-        second.push(c.span("   loading…", Role::Pending));
+        second.push(c.span(format!("   loading{}", g.ellipsis), Role::Pending));
     } else if let Some(e) = &d.error {
         second.push(c.span(format!("   diff unavailable: {e}"), Role::Fail));
     } else {

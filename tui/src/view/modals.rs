@@ -38,7 +38,7 @@ fn heading(c: &Ctx, text: &str) -> Line<'static> {
 fn confirm(c: &Ctx, f: &mut Frame, body: Rect, title: &str, prompt: &str, command: &str, state: &ConfirmState) {
     let (status, role) = match state {
         ConfirmState::Asking => ("y confirm   n / Esc cancel".to_string(), Role::Title),
-        ConfirmState::Requested(_) => ("requested… waiting for the server".to_string(), Role::Pending),
+        ConfirmState::Requested(_) => (format!("requested{} waiting for the server", c.t.g().ellipsis), Role::Pending),
         ConfirmState::Accepted(op) => (format!("accepted ({op}); waiting for events to confirm it"), Role::Active),
         ConfirmState::Failed(e) => (format!("rejected: {e}"), Role::Fail),
         ConfirmState::TimedOut => ("request timed out; y sends it again, r refreshes".to_string(), Role::Fail),

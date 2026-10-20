@@ -628,7 +628,7 @@ fn fold(c: &Ctx, mut line: Vec<Span<'static>>, w: usize, note: &str) -> Vec<Span
 fn loading(c: &Ctx, id: &FindingId) -> String {
     match c.m.detail_errors.get(id) {
         Some(e) => format!("evidence unavailable: {e}"),
-        None => "loading evidence…".into(),
+        None => format!("loading evidence{}", c.t.g().ellipsis),
     }
 }
 
@@ -802,14 +802,17 @@ fn diff_inset(c: &Ctx, fd: &Finding, w: usize) -> Vec<Vec<Span<'static>>> {
     let note = |text: String, role| vec![vec![c.span(text, role)]];
     let key = crate::update::finding_diff_key(c.m, &fd.id);
     let Some(d) = c.m.diff.as_ref().filter(|d| Some(&d.key) == key.as_ref()) else {
-        return note("loading the diff…".into(), Role::Pending);
+        return note(format!("loading the diff{}", c.t.g().ellipsis), Role::Pending);
     };
     if let Some(e) = &d.error {
         return note(format!("diff unavailable: {e}"), Role::Fail);
     }
     let Some(file) = d.files.iter().find(|x| x.path == fd.file) else {
-        let text = if d.pending.is_some() { "loading the diff…" } else { "this file is not in the diff" };
-        return note(text.into(), Role::Muted);
+        let text = match d.pending {
+            Some(_) => format!("loading the diff{}", c.t.g().ellipsis),
+            None => "this file is not in the diff".into(),
+        };
+        return note(text, Role::Muted);
     };
     let rows = file_rows(file);
     let anchor = fd.line.map(|l| l.get());

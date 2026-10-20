@@ -490,3 +490,39 @@ fn without_color_the_diff_cursor_and_a_selected_phase_heading_show_in_reverse_vi
     assert_eq!(rows.len(), 1, "{rows:?}\n{frame}");
     assert!(rows[0].ends_with(|c: char| c.is_ascii_digit()) && rows[0].contains("───"), "{rows:?}");
 }
+
+/// Every view, waiting on its replies and answered, at each step of the showcase playback: under `--ascii` no cell
+/// holds anything but ASCII.
+#[test]
+fn ascii_frames_stay_ascii_across_the_showcase() {
+    use KeyCode::{Char, Enter};
+    let ascii = Look { ascii: true, ..Look::default() };
+    let routes: [&[KeyCode]; 9] = [
+        &[],
+        &[Enter],
+        &[Enter, Enter],
+        &[Enter, Char('d')],
+        &[Char('w'), Char('t')],
+        &[Char('w'), Char('t'), Enter],
+        &[Char('?')],
+        &[Char('5')],
+        &[Char('A'), Char('j'), Enter, Char('y')],
+    ];
+    let msgs = script("showcase");
+    for keys in routes {
+        for answered in [true, false] {
+            let mut s = Sim::new(ascii).play("showcase", 2);
+            for &k in keys {
+                s = if answered { s.key(k) } else { s.key_unanswered(k) };
+            }
+            for (i, msg) in msgs.iter().enumerate().skip(2) {
+                s.server(msg.clone());
+                for (w, h) in [(80, 24), (120, 38)] {
+                    let (frame, _) = render(&mut s.m, w, h);
+                    let bad: String = frame.chars().filter(|c| !c.is_ascii()).collect();
+                    assert!(bad.is_empty(), "{keys:?} answered={answered} message {i} {w}x{h}: {bad:?}\n{frame}");
+                }
+            }
+        }
+    }
+}
