@@ -6,7 +6,7 @@ You can run it three ways:
 
 - As a CLI that reviews one PR and prints the result, or posts it as a `COMMENT` review.
 - As a GitHub App service that reviews PRs when webhooks arrive.
-- From a terminal workstation, `pr-review tui`, that shows what the reviewer is doing, its findings, and the diff behind each one.
+- From a terminal, `pr-review tui`, which opens on the most severe finding, shows each running review live, and puts every finding beside its code and its diff.
 
 ```text
 $ node bin/pr-review.mjs review https://github.com/diego-arbio-dev/pr-reviewer/pull/2 --publish --model anthropic/claude-opus-5-5
@@ -34,6 +34,12 @@ Each review runs as a durable task with fixed phases: collect context, triage, a
 - **Publish.** The review goes through an outbox. pr-review checks GitHub for its own earlier review before posting. When a write's result is uncertain, it reconciles against GitHub instead of retrying blindly.
 
 [`docs/SPEC.md`](docs/SPEC.md) is the full design.
+
+## The terminal client
+
+![The terminal client lands on a critical finding, scrolls its explanation, opens the diff at its line, watches a review finish with two findings, and opens the timeline.](tui/demo/showcase.gif)
+
+The client opens on the worst finding across the tracked PRs, and `w` follows a review while it runs. [The terminal client](docs/tui.md) covers its views, keys, and settings.
 
 ## Get started
 
@@ -91,7 +97,7 @@ Run every command as `node bin/pr-review.mjs <command>`.
 - [Configuration](docs/configuration.md) covers GitHub tokens and accounts, model choice, Jev, the config file, and where state lives.
 - [Publishing](docs/publishing.md) explains how pr-review avoids posting a review twice, and how to recover an uncertain publication.
 - [Running the service](docs/service.md) covers GitHub App setup, environment variables, endpoints, and deployment.
-- [The terminal client](docs/tui.md) covers the daemon, the TUI's views and keys, and the account selector.
+- [The terminal client](docs/tui.md) covers the daemon, the client's views, keys, mouse, and background setting, and the account selector.
 - [Protocol v1](protocol/README.md) is the reference for the messages between the daemon and the TUI.
 - [`docs/SPEC.md`](docs/SPEC.md) and [`docs/TUI_SPEC.md`](docs/TUI_SPEC.md) are the design specifications.
 

@@ -49,37 +49,75 @@ To try the client without GitHub or a model, play a scripted session:
 
 | Key | View | Shows |
 |---|---|---|
-| `1` | Inbox | Tracked PRs, with review state, head commit, and findings by severity |
-| `2` | Review | The phase stepper, the findings, and recent tool activity |
-| `3` | Diff | Files and hunks pinned to the reviewed base and head, with finding markers |
-| `4` | Timeline | Phase changes, tool activity, and finding updates in order |
-| `5` | Settings | GitHub accounts, connection state, and diagnostics |
+| `1` | Inbox | Tracked PRs, grouped by repository and then by PR number, newest first. Each row has its review state, head commit, and findings by severity. |
+| `2` | Review | One PR as a document: its phase stepper, the live review while one runs, and a card per finding |
+| `3` | Diff | Files and hunks pinned to the reviewed base and head, with each finding written under its line |
+| `4` | Timeline | The PR's events, oldest first, under one heading per phase |
+| `5` | Settings | GitHub accounts, connection state, display settings, and diagnostics |
 
-The layout adapts to the terminal width. At 110 columns or more, the client shows a sidebar, the main view, and a context pane. From 80 to 109 columns, details open over the main view. From 60 to 79 columns, the client shows one pane at a time. Below 60×16, it shows a resize hint.
+The client starts on Review, on the PR with the most severe current finding. The PR list holds its order while reviews run. A new PR takes its sorted place, and the selection stays on the same PR.
+
+The layout adapts to the terminal size:
+
+- At 100 columns or more, the PR list sits beside the reading column. Below 100 columns, the Inbox is a full-width list and `Enter` opens the PR.
+- At 110 columns or more, the diff shows its file list beside the code. Below 110 columns, the code takes the full width and `h` shows the file list.
+- At 120×38, the open finding's card and the head of the next card are both in view.
+- Below 60×16, the client shows a resize hint.
+
+In Review, the open card shows as much of the explanation and the quoted code as fits. A cut explanation ends with `… N more, J scrolls`. `J` scrolls the explanation inside the card while the code stays in view. When the explanation has nothing left below, `J` scrolls the document.
+
+In Diff, a long line wraps onto up to four rows. Each finding is written under its line. When several findings share a line, they stack, and `n` steps through them.
+
+In Timeline, `Enter` opens the selected event's detail under its row, and `Esc` closes it.
 
 ## Keys
 
 | Key | Action |
 |---|---|
 | `j` and `k`, or the arrow keys | Move the selection |
-| `h` and `l` | Move between panes |
-| `Enter` | Open the selected item |
-| `Esc` | Close a dialog or go back |
+| `h` and `l` | Move between panes. In Review, `h` moves to the PR list. In a narrow Diff, `h` shows the file list. |
+| `Enter` | Open the selected item, or a timeline event's detail |
+| `Esc` | Close a dialog, a timeline event's detail, or go back |
 | `g` and `G` | Go to the top or the bottom |
 | `Ctrl-d` and `Ctrl-u` | Page down or up |
-| `d` | Open the selected finding's diff |
-| `t` | Open the timeline |
-| `n` and `N` | Next or previous finding, in Review and Diff |
+| `/` | Filter the PR list by a fuzzy match. In Diff, jump to `path:line`. |
+| `w` | Watch the running review. Press `w` again for the next running PR. |
+| `J` and `K` | Scroll the open finding's explanation down or up, in Review |
+| `d` | Open the diff at the selected finding's line |
+| `t` | Open the selected PR's timeline |
+| `n` and `N` | Next or previous finding, in Review and Diff. In Diff, `n` also steps through findings stacked on one line. |
 | `:` | Jump to `path:line`, in Diff |
 | `f`, `v`, and `P` | Change the timeline's scope, category, or phase filter |
-| `A` | Open the GitHub accounts |
+| `A` | Open the GitHub accounts in Settings |
 | `r` | Refresh from the daemon, or retry a timed-out request |
-| `?` | Show help |
+| `?` | Show help. The help page is built from the keymap. |
 | `q` | Quit the client |
+
+## Use the mouse
+
+- Click a PR in the list to select it.
+- Click a finding's card to select it. Click the selected card again to read the finding in full.
+- Scroll the wheel to move the reading column: the open finding, the document, the diff, or the timeline.
+
+## Change the background
+
+The client reads `<config dir>/pr-review/config.toml`, or the file that `--config` names. The `[ui]` table sets the display:
+
+```toml
+[ui]
+theme = "dark"          # or "mono", which turns colors off like NO_COLOR
+background = "theme"    # or "terminal"
+ascii = false           # true is the same as --ascii
+start_view = "review"   # inbox, review, diff, timeline, or settings
+```
+
+With `background = "theme"`, the default, the client paints its own dark background on every cell. The contrast test checks every text color against these painted surfaces, so the contrast holds in any terminal.
+
+With `background = "terminal"`, the client leaves the terminal's own background in place and still paints the panels, code blocks, selection, and diff lines. This setting assumes a dark terminal background. The contrast test requires 4.5:1 for every text color against black, `#1e1e1e`, and `#282c34`. The worst pair is 5.11:1. On a white terminal, the client's light text measures 1.29:1, so use `theme` there.
 
 ## Choose a GitHub account
 
-The header shows the GitHub identity the reviewer uses: `gh: <login>`, `env token`, or `no GitHub account`. To change it:
+Settings shows the GitHub identity the reviewer uses on its **publishes as** row. To change it:
 
 1. Press `A`.
 2. Select an account and press `Enter`.
