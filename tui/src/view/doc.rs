@@ -15,7 +15,6 @@ use crate::text::width;
 use crate::theme::{Bg, Role, finding_status, phase_name};
 
 pub const COLUMN: u16 = 100;
-const RAIL_W: u16 = 32;
 
 pub fn spinner(c: &Ctx) -> &'static str {
     const U: [&str; 4] = ["•", "●", "●", "•"];
@@ -60,12 +59,12 @@ pub fn time_of(at: &str) -> &str {
     at.get(11..19).unwrap_or(at)
 }
 
-fn spans_w(spans: &[Span]) -> usize {
+pub(crate) fn spans_w(spans: &[Span]) -> usize {
     spans.iter().map(|s| width(&s.content)).sum()
 }
 
 /// Pads `spans` to exactly `w` columns with `style`.
-fn filled(mut spans: Vec<Span<'static>>, w: usize, style: Style) -> Vec<Span<'static>> {
+pub(crate) fn filled(mut spans: Vec<Span<'static>>, w: usize, style: Style) -> Vec<Span<'static>> {
     let used = spans_w(&spans);
     if used < w {
         spans.push(Span::styled(" ".repeat(w - used), style));
@@ -74,7 +73,7 @@ fn filled(mut spans: Vec<Span<'static>>, w: usize, style: Style) -> Vec<Span<'st
 }
 
 /// Left text and right text on one `w`-wide row.
-fn split_row(left: Vec<Span<'static>>, right: Vec<Span<'static>>, w: usize) -> Vec<Span<'static>> {
+pub(crate) fn split_row(left: Vec<Span<'static>>, right: Vec<Span<'static>>, w: usize) -> Vec<Span<'static>> {
     let gap = w.saturating_sub(spans_w(&left) + spans_w(&right));
     let mut out = left;
     if gap > 0 {
@@ -88,41 +87,34 @@ pub fn current(c: &Ctx, pr: &Pr) -> Vec<Finding> {
     c.m.domain.pr_findings(&pr.id).into_iter().filter(|f| !f.stale).cloned().collect()
 }
 
-fn worst(c: &Ctx, pr: &Pr) -> Option<Severity> {
-    current(c, pr).iter().map(|f| f.severity).min()
-}
-
 // ---------------------------------------------------------------- layout
 
 /// Review and Inbox share one screen: Inbox is the same document with the rail in focus.
 pub fn screen(c: &Ctx, f: &mut Frame, area: Rect) {
     let rail_focus = c.m.ui.screen == Screen::Inbox || c.focused(Pane::Sidebar);
-    let wide = area.width >= 100;
-    if !wide && rail_focus {
-        rail(c, f, area, true);
-        return;
+    let (rail, doc_area) = split(area, rail_focus);
+    if let Some(r) = rail {
+        super::rail::rail(c, f, r, rail_focus);
     }
-    let doc_area = if wide {
-        let r = Rect { width: RAIL_W, ..area };
-        rail(c, f, r, rail_focus);
-        Rect { x: area.x + RAIL_W, width: area.width - RAIL_W, ..area }
-    } else {
-        area
-    };
+    let Some(doc_area) = doc_area else { return };
     let col = column(doc_area);
     let Some(pr) = c.m.selected_pr() else {
         let p = Paragraph::new(vec![Line::raw(""), Line::from(c.span("No tracked PRs yet.", Role::Muted))]);
         f.render_widget(p, col);
         return;
     };
-    let (lines, starts) = document(c, pr, col.width as usize, area.height < 30);
-    let list = c.m.domain.pr_findings(&pr.id);
-    let sel = c.m.ui.selected_finding.as_ref().and_then(|id| list.iter().position(|x| &x.id == id));
-    let scroll = match sel {
-        Some(i) if i > 0 && !rail_focus => starts.get(i).map_or(0, |s| s.saturating_sub(1)),
-        _ => 0,
-    };
-    f.render_widget(Paragraph::new(lines).scroll((scroll as u16, 0)), col);
+    let doc = document(c, pr, col.width as usize, col.height as usize);
+    f.render_widget(Paragraph::new(doc.lines.clone()).scroll((doc.scroll(c, col.height as usize), 0)), col);
+}
+
+/// The rail and the document areas. Below 100 columns only one shows: the rail while it has focus.
+pub fn split(area: Rect, rail_focus: bool) -> (Option<Rect>, Option<Rect>) {
+    let rw = super::rail::RAIL_W;
+    match area.width {
+        100.. => (Some(Rect { width: rw, ..area }), Some(Rect { x: area.x + rw, width: area.width - rw, ..area })),
+        _ if rail_focus => (Some(area), None),
+        _ => (None, Some(area)),
+    }
 }
 
 /// The reading column: at most `COLUMN` wide, centered, with a margin.
@@ -131,78 +123,31 @@ pub fn column(area: Rect) -> Rect {
     Rect { x: area.x + (area.width - w) / 2, width: w, ..area }
 }
 
-// ---------------------------------------------------------------- rail
-
-fn rail(c: &Ctx, f: &mut Frame, area: Rect, focused: bool) {
-    let g = c.t.g();
-    let bg = c.t.bg(Bg::Surface);
-    f.render_widget(Paragraph::new("").style(bg), area);
-    let w = area.width as usize;
-    let inner = w.saturating_sub(3);
-    let head_role = if focused { Role::Accent } else { Role::Muted };
-    let mut lines = vec![
-        Line::raw(""),
-        Line::from(filled(vec![Span::raw("  "), c.span("PULL REQUESTS", head_role).patch_style(bg)], w, bg)),
-        Line::raw(""),
-    ];
-    for pr in c.m.inbox() {
-        let selected = c.m.ui.selected_pr.as_ref() == Some(&pr.id);
-        let row_bg = if selected { c.t.bg(Bg::Select) } else { bg };
-        let on = |role: Role| c.s(role).patch(row_bg);
-        let marker = if selected { if c.t.ascii { ">" } else { "▌" } } else { " " };
-        let (glyph, grole) = match worst(c, pr) {
-            Some(s) => {
-                let (gl, _, r) = c.t.severity(s);
-                (gl, r)
-            }
-            None => (g.idle, Role::Muted),
-        };
-        let num = format!("#{} ", pr.number);
-        let title_w = inner.saturating_sub(width(&num) + 2);
-        let first = vec![
-            Span::styled(marker.to_string(), on(Role::Accent)),
-            Span::styled(" ", on(Role::Normal)),
-            Span::styled(format!("{glyph} "), on(grole)),
-            Span::styled(num, on(Role::Accent)),
-            Span::styled(c.fit(pr.title.as_str(), title_w), on(if selected { Role::Title } else { Role::Normal })),
-        ];
-        lines.push(Line::from(filled(first, w, row_bg)));
-        let repo = pr.repository.as_str().rsplit('/').next().unwrap_or("").to_string();
-        let (state, srole) = rail_state(c, pr);
-        let second = vec![
-            Span::styled(marker.to_string(), on(Role::Accent)),
-            Span::styled(format!("   {repo} {} ", g.sep), on(Role::Muted)),
-            Span::styled(c.fit(&state, inner.saturating_sub(width(&repo) + 5)), on(srole)),
-        ];
-        lines.push(Line::from(filled(second, w, row_bg)));
-        lines.push(Line::from(filled(vec![], w, bg)));
-    }
-    f.render_widget(Paragraph::new(lines).style(bg), area);
-}
-
-fn rail_state(c: &Ctx, pr: &Pr) -> (String, Role) {
-    let g = c.t.g();
-    let n = current(c, pr).len();
-    let found = match n {
-        0 => "clean".to_string(),
-        1 => "1 finding".to_string(),
-        n => format!("{n} findings"),
-    };
-    match c.m.domain.latest_run(&pr.id) {
-        None => ("not reviewed".into(), Role::Muted),
-        Some(r) if r.status == RunStatus::Running => {
-            (format!("{} {}", spinner(c), phase_name(r.phase).to_lowercase()), Role::Accent)
-        }
-        Some(r) if r.status == RunStatus::Failed => (format!("{} review failed", g.fail), Role::Fail),
-        Some(_) if n == 0 => (format!("{} clean", g.ok), Role::Ok),
-        Some(_) => (found, Role::Muted),
-    }
-}
-
 // ---------------------------------------------------------------- document
 
-/// The PR as a document, and the line where each finding card starts.
-fn document(c: &Ctx, pr: &Pr, w: usize, compact: bool) -> (Vec<Line<'static>>, Vec<usize>) {
+/// The PR rendered as one scrollable document, and where the selected card sits in it.
+pub struct Doc {
+    pub lines: Vec<Line<'static>>,
+    /// Lines `[start, end)` of the expanded card.
+    pub card: Option<(usize, usize)>,
+    /// The finding each line belongs to, for mouse hits.
+    pub owners: Vec<Option<FindingId>>,
+}
+
+impl Doc {
+    /// Scroll so the expanded card shows whole, the PR header kept when it fits too, then the reader's own offset.
+    pub fn scroll(&self, c: &Ctx, height: usize) -> u16 {
+        let auto = match self.card {
+            Some((start, end)) if end > height => end.saturating_sub(height).min(start.saturating_sub(1)),
+            _ => 0,
+        };
+        let max = self.lines.len().saturating_sub(height.min(self.lines.len()) / 2);
+        (auto as i64 + i64::from(c.m.ui.doc_scroll)).clamp(0, max as i64) as u16
+    }
+}
+
+pub fn document(c: &Ctx, pr: &Pr, w: usize, height: usize) -> Doc {
+    let compact = height < 28;
     let g = c.t.g();
     let sep = format!(" {} ", g.sep);
     let run = c.m.domain.latest_run(&pr.id);
@@ -255,20 +200,28 @@ fn document(c: &Ctx, pr: &Pr, w: usize, compact: bool) -> (Vec<Line<'static>>, V
         lines.push(Line::raw(""));
     }
     if running {
-        live(c, pr, w, &mut lines);
+        let log = if findings.is_empty() { height.saturating_sub(lines.len() + 6).max(5) } else { 4 };
+        live(c, pr, w, log, &mut lines);
     }
     if findings.is_empty() && run.is_some_and(|r| r.status == RunStatus::Completed) {
         lines.push(Line::from(c.span(format!("{} No actionable issues found in the reviewed scope.", g.ok), Role::Ok)));
     }
     let sel = c.m.ui.selected_finding.as_ref();
-    let mut starts = Vec::new();
+    let focused = c.m.ui.screen == Screen::Review && c.m.ui.focus != Pane::Sidebar;
+    let mut owners = vec![None; lines.len()];
+    let mut card_at = None;
     for f in &findings {
-        starts.push(lines.len());
-        let selected = sel == Some(&f.id) && c.m.ui.screen == Screen::Review && c.m.ui.focus != Pane::Sidebar;
-        lines.extend(card(c, f, c.m.details.get(&f.id), w, selected, compact));
+        let start = lines.len();
+        let open = sel == Some(&f.id);
+        let budget = if open { height.saturating_sub(1) } else { 0 };
+        lines.extend(card(c, f, c.m.details.get(&f.id), w, open && focused, budget));
+        if open {
+            card_at = Some((start, lines.len()));
+        }
         lines.push(Line::raw(""));
+        owners.resize(lines.len(), Some(f.id.clone()));
     }
-    (lines, starts)
+    Doc { lines, card: card_at, owners }
 }
 
 fn rule(c: &Ctx, w: usize) -> String {
@@ -376,15 +329,37 @@ fn phase_line(c: &Ctx, run: Option<&Run>, w: usize) -> Line<'static> {
     Line::from(split_row(spans, right, w))
 }
 
-/// The running review: the newest tool calls for this PR, newest last, with the spinner on the newest.
-fn live(c: &Ctx, pr: &Pr, w: usize, lines: &mut Vec<Line<'static>>) {
+/// The running review: a sparkline of tool calls, a phase bar per live run (this PR first), and this PR's newest
+/// `log` events, newest last with the pulse on it.
+fn live(c: &Ctx, pr: &Pr, w: usize, log: usize, lines: &mut Vec<Line<'static>>) {
+    use super::live::{per_sec, phase_bar, rate, sparkline};
     let g = c.t.g();
-    lines
-        .push(Line::from(vec![c.span(format!("{} ", spinner(c)), Role::Accent), c.span("Reviewing now", Role::Title)]));
+    let spark_w = (w / 4).clamp(8, 30);
+    let rate_now = per_sec(c, Some(&pr.id));
+    let left = vec![c.span(format!("{} ", spinner(c)), Role::Accent), c.span("Reviewing now", Role::Title)];
+    let right = vec![
+        c.span(sparkline(c, &rate(c, Some(&pr.id), spark_w)), Role::Accent),
+        c.span(format!("  {rate_now:.1} calls/s"), Role::Muted),
+    ];
+    lines.push(Line::from(split_row(left, right, w)));
+    lines.push(Line::raw(""));
+    let mut runs: Vec<_> = c.m.domain.runs.values().filter(|r| r.status == RunStatus::Running).collect();
+    runs.sort_by_key(|r| (r.pr_id != pr.id, c.m.domain.prs.get(&r.pr_id).map(|p| p.number)));
+    for r in runs {
+        let Some(p) = c.m.domain.prs.get(&r.pr_id) else { continue };
+        let calls = c.m.domain.activity.iter().filter(|a| a.pr_id.as_ref() == Some(&p.id)).count();
+        let this = p.id == pr.id;
+        let label = format!("{:<7}", format!("#{}", p.number));
+        let tail = format!("  {:<8} {:>3} calls", super::doc::phase_label(r.phase), calls);
+        let seg = w.saturating_sub(width(&label) + width(&tail) + 6) / 6;
+        let mut s = vec![c.span(label, if this { Role::Title } else { Role::Muted })];
+        s.extend(phase_bar(c, r, seg.clamp(2, 10)));
+        s.push(c.span(tail, if this { Role::Accent } else { Role::Muted }));
+        lines.push(Line::from(s));
+    }
     lines.push(Line::raw(""));
     let items: Vec<_> = c.m.domain.activity.iter().filter(|a| a.pr_id.as_ref() == Some(&pr.id)).collect();
-    let take = 12;
-    let shown = &items[items.len().saturating_sub(take)..];
+    let shown = &items[items.len().saturating_sub(log)..];
     for (i, a) in shown.iter().enumerate() {
         let newest = i + 1 == shown.len();
         let at = time_of(a.at.as_str()).to_string();
@@ -464,45 +439,69 @@ fn card_head(c: &Ctx, f: &Finding, w: usize, selected: bool) -> Vec<Vec<Span<'st
     out
 }
 
-fn card(
-    c: &Ctx,
-    f: &Finding,
-    d: Option<&FindingDetail>,
-    w: usize,
-    selected: bool,
-    compact: bool,
-) -> Vec<Line<'static>> {
+/// A finding card. Folded (`budget` 0): the head and the first line of the explanation. Open: the explanation and
+/// the cited code, fitted to `budget` rows by the fold rule: the code keeps at least 5 lines around its anchor, the
+/// explanation keeps at least 3, and whatever is cut says how much and that Enter reads it all.
+fn card(c: &Ctx, f: &Finding, d: Option<&FindingDetail>, w: usize, focused: bool, budget: usize) -> Vec<Line<'static>> {
     let iw = w.saturating_sub(2);
-    let mut body = card_head(c, f, iw, selected);
+    let mut body = card_head(c, f, iw, focused || budget > 0);
+    let Some(d) = d else {
+        body.push(vec![c.span(loading(c, &f.id), Role::Muted)]);
+        return barred(c, f.severity, focused, body);
+    };
+    let mut prose = rich(c, d.explanation.as_str(), iw, Role::Normal);
+    if budget == 0 {
+        if prose.len() > 1 {
+            prose.truncate(1);
+            prose[0] = fold(c, std::mem::take(&mut prose[0]), iw, "");
+        }
+        body.extend(prose);
+        return barred(c, f.severity, focused, body);
+    }
+    let ev = d.evidence.iter().find(|e| e.kind == EvidenceKind::CodeRef);
+    let hint = 2;
+    let fixed = body.len() + 1 + hint;
+    let code_full = ev.map_or(0, |e| e.text.as_str().split('\n').count().min(11) + 2);
+    let room = budget.saturating_sub(fixed);
+    let code_rows = code_full.min(room.saturating_sub(prose.len().min(3) + 1).max(7.min(code_full)));
+    let prose_rows = room.saturating_sub(code_rows + usize::from(ev.is_some())).max(3);
     body.push(vec![]);
-    match d {
-        None => body.push(vec![c.span(loading(c, &f.id), Role::Muted)]),
-        Some(d) => {
-            let mut prose = rich(c, d.explanation.as_str(), iw, Role::Normal);
-            if compact && prose.len() > 2 {
-                prose.truncate(2);
-                if let Some(last) = prose.last_mut() {
-                    last.push(c.span(format!(" {}", c.t.g().ellipsis), Role::Muted));
-                }
-            }
-            body.extend(prose);
-            if let Some(ev) = d.evidence.iter().find(|e| e.kind == EvidenceKind::CodeRef) {
-                body.push(vec![]);
-                body.extend(code_block(c, ev, f, iw, 11));
-            }
-            if selected {
-                let fix = if d.suggested_fix.is_some() { " and the fix" } else { "" };
-                body.push(vec![]);
-                body.push(vec![
-                    c.span("Enter", Role::Accent),
-                    c.span(format!(" all {} evidence{fix}    ", d.evidence.len()), Role::Muted),
-                    c.span("d", Role::Accent),
-                    c.span(" diff at this line", Role::Muted),
-                ]);
-            }
+    if prose.len() > prose_rows {
+        let hidden = prose.len() - prose_rows + 1;
+        prose.truncate(prose_rows);
+        let last = prose.pop().unwrap_or_default();
+        prose.push(fold(c, last, iw, &format!("{hidden} more lines, Enter reads all")));
+    }
+    body.extend(prose);
+    if let Some(ev) = ev {
+        body.push(vec![]);
+        body.extend(code_block(c, ev, f, iw, code_rows.saturating_sub(2).max(5)));
+    }
+    body.push(vec![]);
+    let fix = if d.suggested_fix.is_some() { ", the fix" } else { "" };
+    body.push(vec![
+        c.span("Enter", Role::Accent),
+        c.span(format!(" all {} evidence{fix} and the diff    ", d.evidence.len()), Role::Muted),
+        c.span("d", Role::Accent),
+        c.span(" diff at this line", Role::Muted),
+    ]);
+    barred(c, f.severity, focused, body)
+}
+
+/// Ends a cut line with the fold mark and an optional note, inside `w` columns.
+fn fold(c: &Ctx, mut line: Vec<Span<'static>>, w: usize, note: &str) -> Vec<Span<'static>> {
+    let mark = if note.is_empty() { format!(" {}", c.t.g().ellipsis) } else { format!(" {} {note}", c.t.g().ellipsis) };
+    while !line.is_empty() && spans_w(&line) + width(&mark) > w {
+        let last = line.pop().unwrap_or_default();
+        let keep = w.saturating_sub(spans_w(&line) + width(&mark));
+        if keep > 0 && !last.content.trim().is_empty() {
+            let cut = crate::text::fit_len(&last.content, keep);
+            line.push(Span::styled(last.content[..cut].to_string(), last.style));
+            break;
         }
     }
-    barred(c, f.severity, selected, body)
+    line.push(c.span(mark, Role::Muted));
+    line
 }
 
 fn loading(c: &Ctx, id: &FindingId) -> String {

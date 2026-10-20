@@ -4,7 +4,9 @@
 mod code;
 mod diff;
 mod doc;
+mod live;
 mod modals;
+mod rail;
 mod timeline;
 
 use ratatui::Frame;

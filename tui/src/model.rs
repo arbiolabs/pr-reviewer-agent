@@ -103,6 +103,8 @@ pub struct Activity {
     pub at: Text,
     pub pr_id: Option<PrId>,
     pub kind: ActivityKind,
+    /// Client clock when it was applied: the live rate is about what the reviewer does now, not journal time.
+    pub recv_ms: u64,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -388,6 +390,8 @@ pub struct Ui {
     pub selected_pr: Option<PrId>,
     pub selected_finding: Option<FindingId>,
     pub feed_scroll: usize,
+    /// Lines the reader scrolled the document past where the selection puts it; reset when the selection moves.
+    pub doc_scroll: i32,
     pub pr_filter: String,
     /// From `--pr`: selected once it shows up in a snapshot.
     pub wanted_pr: Option<PrRef>,
@@ -450,6 +454,7 @@ impl Model {
                 selected_pr: None,
                 selected_finding: None,
                 feed_scroll: 0,
+                doc_scroll: 0,
                 pr_filter: String::new(),
                 wanted_pr,
                 selected_account: None,

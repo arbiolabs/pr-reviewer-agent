@@ -518,7 +518,7 @@ fn apply_body(m: &mut Model, e: &SequencedEvent, fx: &mut Vec<Effect>) {
         _ => e.pr_id.clone(),
     };
     if let Some(kind) = kind {
-        d.push_activity(Activity { sequence: seq, at: e.occurred_at.clone(), pr_id: pr, kind });
+        d.push_activity(Activity { sequence: seq, at: e.occurred_at.clone(), pr_id: pr, kind, recv_ms: m.now_ms });
     }
     if let EventBody::FindingUpdated(f) = &e.body
         && matches!(m.top_modal(), Some(Modal::Finding { id, .. }) if id == &f.id)
