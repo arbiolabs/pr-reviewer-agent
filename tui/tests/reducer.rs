@@ -146,7 +146,7 @@ fn y_and_write_shortcuts_never_send_anything() {
     }
     assert_eq!(
         m.notice.as_ref().map(|n| n.text.as_str()),
-        Some("review.start unavailable: the server grants no write capability (read-only)")
+        Some("review.start unavailable: the daemon does not grant it")
     );
 }
 

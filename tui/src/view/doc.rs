@@ -824,17 +824,30 @@ fn fix_block(c: &Ctx, code: &str, w: usize) -> Vec<Vec<Span<'static>>> {
 /// Rows of the change itself around the finding's anchor, from the diff the reader loads when it opens, so the
 /// finding reads against what the PR changed without leaving the page.
 fn diff_inset(c: &Ctx, fd: &Finding, w: usize) -> Vec<Vec<Span<'static>>> {
+    let key = crate::update::finding_diff_key(c.m, &fd.id);
+    inset(c, key.as_ref(), &fd.file, fd.line.map(|l| l.get()), c.t.severity(fd.severity).2, w)
+}
+
+/// Up to eleven rows of `path`'s change in the diff `key` names, around head line `anchor`, which is lifted and
+/// marked in `mark`.
+pub(crate) fn inset(
+    c: &Ctx,
+    key: Option<&crate::model::DiffKey>,
+    path: &crate::protocol::Text,
+    anchor: Option<u32>,
+    mark: Role,
+    w: usize,
+) -> Vec<Vec<Span<'static>>> {
     use crate::model::{DiffRow, file_rows};
     use crate::protocol::LineKind;
     let note = |text: String, role| vec![vec![c.span(text, role)]];
-    let key = crate::update::finding_diff_key(c.m, &fd.id);
-    let Some(d) = c.m.diff.as_ref().filter(|d| Some(&d.key) == key.as_ref()) else {
+    let Some(d) = c.m.diff.as_ref().filter(|d| Some(&d.key) == key) else {
         return note(format!("loading the diff{}", c.t.g().ellipsis), Role::Pending);
     };
     if let Some(e) = &d.error {
         return note(format!("diff unavailable: {e}"), Role::Fail);
     }
-    let Some(file) = d.files.iter().find(|x| x.path == fd.file) else {
+    let Some(file) = d.files.iter().find(|x| &x.path == path) else {
         let text = match d.pending {
             Some(_) => format!("loading the diff{}", c.t.g().ellipsis),
             None => "this file is not in the diff".into(),
@@ -842,7 +855,6 @@ fn diff_inset(c: &Ctx, fd: &Finding, w: usize) -> Vec<Vec<Span<'static>>> {
         return note(text, Role::Muted);
     };
     let rows = file_rows(file);
-    let anchor = fd.line.map(|l| l.get());
     let at = anchor
         .and_then(|a| rows.iter().position(|r| matches!(r, DiffRow::Line(l) if l.new.is_some_and(|n| n >= a))))
         .unwrap_or(0);
@@ -876,11 +888,7 @@ fn diff_inset(c: &Ctx, fd: &Finding, w: usize) -> Vec<Vec<Span<'static>>> {
                 };
                 let bg = if hit { Bg::Anchor } else { bg };
                 let st = c.t.bg(bg);
-                let (mark, mrole) = if hit {
-                    (if c.t.ascii { ">" } else { "▶" }, c.t.severity(fd.severity).2)
-                } else {
-                    (" ", Role::Muted)
-                };
+                let (mark, mrole) = if hit { (if c.t.ascii { ">" } else { "▶" }, mark) } else { (" ", Role::Muted) };
                 let num = l.new.or(l.old).map_or(String::new(), |n| n.to_string());
                 let mut s = vec![
                     Span::styled(format!(" {mark}"), c.s(mrole).patch(st)),

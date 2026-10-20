@@ -16,6 +16,8 @@ pub enum Context {
     Help,
     FindingModal,
     ConfirmModal,
+    /// The publication page: `y` approves the preview it shows, `o` opens the published review.
+    PublicationModal,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -74,6 +76,7 @@ pub enum Action {
     InputSubmit,
     InputCancel,
     Confirm,
+    OpenUrl,
 }
 
 const NONE: KeyModifiers = KeyModifiers::NONE;
@@ -151,6 +154,8 @@ const TABLE: &[(Context, KeyCode, KeyModifiers, Action)] = &[
     (C::FindingModal, K::Char('N'), SHIFT, A::PrevFinding),
     (C::FindingModal, K::Char('N'), NONE, A::PrevFinding),
     (C::ConfirmModal, K::Char('y'), NONE, A::Confirm),
+    (C::PublicationModal, K::Char('y'), NONE, A::Confirm),
+    (C::PublicationModal, K::Char('o'), NONE, A::OpenUrl),
     (C::ConfirmModal, K::Char('n'), NONE, A::Back),
 ];
 
@@ -159,6 +164,7 @@ pub fn context(screen: Screen, modal: Option<&Modal>) -> Context {
         Some(Modal::Help { .. }) => C::Help,
         Some(Modal::Finding { .. }) => C::FindingModal,
         Some(Modal::Confirm { .. }) => C::ConfirmModal,
+        Some(Modal::Publication { .. }) => C::PublicationModal,
         Some(Modal::Input { .. }) | None => match screen {
             Screen::Inbox => C::Inbox,
             Screen::Review => C::Review,
@@ -218,12 +224,14 @@ pub fn help_rows() -> Vec<(Context, String, &'static str, Option<&'static str>)>
             A::Mutation(Mutation::Start) => "start a review",
             A::Mutation(Mutation::Retry) => "retry the run",
             A::Mutation(Mutation::Cancel) => "cancel the run",
-            A::Mutation(Mutation::Publish) => "publish the findings",
+            A::Mutation(Mutation::Publish) => "preview and publish",
             A::NextFinding | A::PrevFinding => "next / previous finding",
             A::JumpTo => "jump to path:line",
             A::CycleScope => "timeline scope",
             A::CycleCategory => "timeline category",
             A::CyclePhase => "timeline phase",
+            A::Confirm if ctx == C::PublicationModal => "publish this preview",
+            A::OpenUrl => "open the published review",
             _ => return None,
         })
     };

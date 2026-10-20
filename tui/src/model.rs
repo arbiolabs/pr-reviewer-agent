@@ -88,6 +88,22 @@ pub struct ServerInfo {
     pub server_version: Text,
     pub session_id: Text,
     pub capabilities: Vec<Text>,
+    /// `None` from a daemon that predates engine mode.
+    pub mode: Option<DaemonMode>,
+    pub read_only_reason: Option<Text>,
+}
+
+impl ServerInfo {
+    /// Why a review command is not offered, for the `(not offered)` notes; `None` when the daemon gave no reason.
+    pub fn commands_off(&self) -> Option<&'static str> {
+        match (self.mode, &self.read_only_reason) {
+            (Some(DaemonMode::ReadOnly), Some(r)) if r.as_str().contains("--allow-commands") => {
+                Some("commands are off (start the daemon with --allow-commands)")
+            }
+            (Some(DaemonMode::ReadOnly), _) => Some("daemon is read-only"),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -196,6 +212,15 @@ pub enum Modal {
         buffer: String,
         before: String,
     },
+    /// The publication preview of a parked run, full page. `y` here, and only here and in `Confirm`, sends
+    /// `review.publish`, naming the preview it shows.
+    Publication {
+        run_id: RunId,
+        scroll: u16,
+        preview: Preview,
+        /// `Asking` until `y` sends the approval.
+        publish: ConfirmState,
+    },
     /// The only place `y` acts. Generic over the command it confirms.
     Confirm {
         title: String,
@@ -203,6 +228,13 @@ pub enum Modal {
         command: Command,
         state: ConfirmState,
     },
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum Preview {
+    Loading(RequestId),
+    Failed(Text),
+    Ready(Box<PublicationPreview>),
 }
 
 #[derive(Clone, Debug, PartialEq)]

@@ -18,8 +18,23 @@ pub fn dispatch(m: &mut Model, msg: Msg, net: &mpsc::Sender<NetCmd>) -> bool {
             Effect::Close => {
                 let _ = net.try_send(NetCmd::Close);
             }
+            Effect::OpenUrl(url) => open_url(m, &url),
             Effect::Quit => return true,
         }
     }
     false
+}
+
+/// Hands a published review's URL to the desktop's opener, detached and silent so it cannot draw over the TUI.
+fn open_url(m: &mut Model, url: &str) {
+    let opener = if cfg!(target_os = "macos") { "open" } else { "xdg-open" };
+    let spawned = std::process::Command::new(opener)
+        .arg(url)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .spawn();
+    if let Err(e) = spawned {
+        m.diag.error(m.now_ms, format!("could not run {opener}: {e}"));
+    }
 }

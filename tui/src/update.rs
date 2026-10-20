@@ -91,6 +91,8 @@ pub enum Effect {
     Send(ClientMessage),
     /// Stop reconnecting: the server is incompatible.
     Close,
+    /// Open a published review in the browser, on an explicit keypress. Always an `https://github.com/` URL.
+    OpenUrl(String),
     Quit,
 }
 
@@ -165,11 +167,7 @@ fn expire_requests(m: &mut Model) {
         m.sent_at.iter().filter(|(_, at)| now.saturating_sub(**at) >= timeout).map(|(id, _)| id.clone()).collect();
     for id in expired {
         m.sent_at.remove(&id);
-        let confirm = m.ui.modals.iter_mut().find_map(|x| match x {
-            Modal::Confirm { state, .. } if *state == ConfirmState::Requested(id.clone()) => Some(state),
-            _ => None,
-        });
-        if let Some(state) = confirm {
+        if let Some(state) = waiting_confirm(m, &id) {
             *state = ConfirmState::TimedOut;
             m.dirty = true;
         } else if fail_request(m, &id, Text::new(TIMED_OUT)) {
@@ -178,9 +176,27 @@ fn expire_requests(m: &mut Model) {
     }
 }
 
+/// The confirmation, in a panel or the publication page, that waits on the reply to `id`.
+fn waiting_confirm<'a>(m: &'a mut Model, id: &RequestId) -> Option<&'a mut ConfirmState> {
+    m.ui.modals.iter_mut().find_map(|x| match x {
+        Modal::Confirm { state, .. } | Modal::Publication { publish: state, .. }
+            if *state == ConfirmState::Requested(id.clone()) =>
+        {
+            Some(state)
+        }
+        _ => None,
+    })
+}
+
 /// Clears the pending marker that waits on `id` and shows `message` there. False when nothing waits on it.
 fn fail_request(m: &mut Model, id: &RequestId, message: Text) -> bool {
-    if let Some(f) = m.detail_requests.remove(id) {
+    let preview = m.ui.modals.iter_mut().find_map(|x| match x {
+        Modal::Publication { preview, .. } if *preview == Preview::Loading(id.clone()) => Some(preview),
+        _ => None,
+    });
+    if let Some(preview) = preview {
+        *preview = Preview::Failed(message);
+    } else if let Some(f) = m.detail_requests.remove(id) {
         m.detail_errors.insert(f, message);
     } else if let Some(d) = m.diff.as_mut().filter(|d| d.pending.as_ref() == Some(id)) {
         d.pending = None;
@@ -253,6 +269,11 @@ fn net(m: &mut Model, e: NetEvent, fx: &mut Vec<Effect>) {
             {
                 d.error = Some(lost);
             }
+            for x in &mut m.ui.modals {
+                if let Modal::Publication { preview: preview @ Preview::Loading(_), .. } = x {
+                    *preview = Preview::Failed(Text::new("connection lost before the preview arrived"));
+                }
+            }
             m.detail_requests.clear();
             m.snapshot_request = None;
             m.stale_snapshots.clear();
@@ -278,7 +299,16 @@ fn snapshot_get(m: &mut Model, fx: &mut Vec<Effect>) {
 
 fn server_message(m: &mut Model, msg: ServerMessage, fx: &mut Vec<Effect>) {
     match msg {
-        ServerMessage::Welcome { protocol_version, server_version, session_id, capabilities, stream_epoch, .. } => {
+        ServerMessage::Welcome {
+            protocol_version,
+            server_version,
+            session_id,
+            capabilities,
+            stream_epoch,
+            mode,
+            read_only_reason,
+            ..
+        } => {
             if protocol_version != PROTOCOL_VERSION {
                 let message = Text::new(&format!("server speaks protocol {protocol_version}"));
                 if transition(m, LinkInput::Mismatch { supported: vec![protocol_version], message }) {
@@ -286,7 +316,8 @@ fn server_message(m: &mut Model, msg: ServerMessage, fx: &mut Vec<Effect>) {
                 }
                 return;
             }
-            m.server = Some(ServerInfo { protocol_version, server_version, session_id, capabilities });
+            m.server =
+                Some(ServerInfo { protocol_version, server_version, session_id, capabilities, mode, read_only_reason });
             let resuming = m.stream.epoch.as_ref() == Some(&stream_epoch);
             if !transition(m, LinkInput::Welcomed { resuming }) {
                 return;
@@ -334,13 +365,18 @@ fn server_message(m: &mut Model, msg: ServerMessage, fx: &mut Vec<Effect>) {
                 }
             }
         }
-        ServerMessage::PublicationPreview(_) => {}
+        ServerMessage::PublicationPreview(p) => {
+            for x in &mut m.ui.modals {
+                if let Modal::Publication { run_id, preview, .. } = x
+                    && *run_id == p.run_id
+                    && matches!(&*preview, Preview::Loading(id) if Some(id) == p.request_id.as_ref())
+                {
+                    *preview = Preview::Ready(Box::new(p.clone()));
+                }
+            }
+        }
         ServerMessage::CommandResult(r) => {
-            let confirm = m.ui.modals.iter_mut().find_map(|x| match x {
-                Modal::Confirm { state, .. } if *state == ConfirmState::Requested(r.request_id.clone()) => Some(state),
-                _ => None,
-            });
-            if let Some(state) = confirm {
+            if let Some(state) = waiting_confirm(m, &r.request_id) {
                 *state = match r.outcome {
                     CommandOutcome::Accepted { operation_id } => ConfirmState::Accepted(operation_id),
                     CommandOutcome::Rejected { code, message } => {
@@ -430,8 +466,23 @@ fn apply_snapshot(m: &mut Model, s: Snapshot, fx: &mut Vec<Effect>) {
         let (scope, query) = (t.scope, t.query.clone());
         load_timeline(m, scope, query, fx);
     }
-    if let Some(Modal::Finding { id, .. }) = m.top_modal().cloned() {
-        fetch_detail(m, &id, fx);
+    match m.top_modal().cloned() {
+        Some(Modal::Finding { id, .. }) => fetch_detail(m, &id, fx),
+        Some(Modal::Publication { run_id, preview: Preview::Loading(_) | Preview::Failed(_), .. }) => {
+            fetch_preview(m, run_id, fx)
+        }
+        _ => {}
+    }
+}
+
+/// Asks for `run`'s stored payload; the top publication page shows it when it arrives.
+fn fetch_preview(m: &mut Model, run: RunId, fx: &mut Vec<Effect>) {
+    let request = send(m, fx, |request_id| ClientMessage::PublicationGet { request_id, run_id: run.clone() });
+    if let Some(Modal::Publication { preview, .. }) = m.ui.modals.last_mut() {
+        *preview = match request {
+            Some(id) => Preview::Loading(id),
+            None => Preview::Failed(Text::new(OFFLINE)),
+        };
     }
 }
 
@@ -537,6 +588,7 @@ fn apply_body(m: &mut Model, e: &SequencedEvent, fx: &mut Vec<Effect>) {
     if let Some(kind) = kind {
         d.push_activity(Activity { sequence: seq, at: e.occurred_at.clone(), pr_id: pr, kind, recv_ms: m.now_ms });
     }
+    settle_command(m, e);
     if let EventBody::FindingUpdated(f) = &e.body
         && matches!(m.top_modal(), Some(Modal::Finding { id, .. }) if id == &f.id)
     {
@@ -560,6 +612,45 @@ fn settle_account_select(m: &mut Model, accounts: &[Account]) {
     if let Some(a) = accounts.iter().find(|a| a.selected) {
         notice(m, format!("GitHub reads and publishing now use {} on {}", a.login, a.host));
     }
+}
+
+/// A start, retry or cancel is done when an event shows its effect, never on `accepted`: the run it started, the
+/// retried run moving again, the cancelled run ending. That event closes the panel, even one whose reply was dropped.
+fn settle_command(m: &mut Model, e: &SequencedEvent) {
+    let shows = |command: &Command| match (command, &e.body) {
+        (Command::Start(p), EventBody::Run(RunChange::Started | RunChange::Failed, r)) => {
+            r.pr_id == p.pr_id && r.head_sha == p.expected_head_sha
+        }
+        (Command::Retry(p), EventBody::Run(_, r)) => r.id == p.run_id,
+        (Command::Retry(p), EventBody::PhaseChanged(c)) => c.run_id == p.run_id,
+        (Command::Cancel(p), EventBody::Run(RunChange::Failed | RunChange::Superseded, r)) => r.id == p.run_id,
+        (Command::Cancel(p), EventBody::PhaseChanged(c)) => {
+            c.run_id == p.run_id && matches!(c.to, Phase::Failed | Phase::Superseded)
+        }
+        _ => false,
+    };
+    let done = |modal: &Modal| match modal {
+        Modal::Confirm { command, state, .. } => {
+            !matches!(state, ConfirmState::Asking | ConfirmState::Failed(_)) && shows(command)
+        }
+        _ => false,
+    };
+    let Some(i) = m.ui.modals.iter().position(done) else { return };
+    let Modal::Confirm { command, .. } = m.ui.modals.remove(i) else { return };
+    let what = match &e.body {
+        EventBody::Run(RunChange::Started, r) => format!("run {} started at {}", r.id.short(), r.head_sha.short()),
+        EventBody::Run(RunChange::Failed, r) => {
+            let why = r.failure_reason.as_ref().map_or(String::new(), |x| format!(": {x}"));
+            format!("run {} failed{why}", r.id.short())
+        }
+        EventBody::Run(RunChange::Superseded, r) => format!("run {} superseded by a newer head", r.id.short()),
+        EventBody::Run(RunChange::Completed, r) => format!("run {} completed", r.id.short()),
+        EventBody::PhaseChanged(c) => {
+            format!("run {} is now {}", c.run_id.short(), crate::theme::phase_name(c.to))
+        }
+        _ => return,
+    };
+    notice(m, format!("{} done: {what}", command.name()));
 }
 
 /// Re-resolves selections by ID after the lists changed; an ID that vanished falls back to the first entry.
@@ -979,7 +1070,14 @@ fn act(m: &mut Model, a: Action, fx: &mut Vec<Effect>) {
         }
         Action::NextFinding => next_finding(m, 1, fx),
         Action::PrevFinding => next_finding(m, -1, fx),
-        Action::Mutation(mu) => mutation(m, mu),
+        Action::Mutation(mu) => mutation(m, mu, fx),
+        Action::OpenUrl => {
+            if let Some(Modal::Publication { run_id, .. }) = m.top_modal()
+                && let Some(url) = published_url(m, run_id)
+            {
+                fx.push(Effect::OpenUrl(url));
+            }
+        }
         Action::Accounts => {
             goto(m, Screen::Settings, fx);
             if m.domain.accounts.is_none() {
@@ -1113,36 +1211,89 @@ fn click(m: &mut Model, x: u16, y: u16, fx: &mut Vec<Effect>) {
     }
 }
 
-fn mutation(m: &mut Model, mu: Mutation) {
-    let cap = mu.capability();
-    let why = if !m.link.accepts_events() {
-        "the client is not live"
-    } else if !m.may_write(cap) {
-        "the server grants no write capability (read-only)"
+/// Why `capability` cannot be sent now, in the words the help page and the notices use; `None` when it can.
+pub fn write_block(m: &Model, capability: &str) -> Option<&'static str> {
+    if !m.link.accepts_events() {
+        Some("the client is not live")
+    } else if m.may_write(capability) {
+        None
     } else {
-        let pr = m.selected_pr().cloned();
-        let run = pr.as_ref().and_then(|p| m.domain.latest_run(&p.id)).cloned();
-        let ask = match (mu, pr, run) {
-            (Mutation::Start, Some(p), _) => Some((
-                format!("Start a review of #{} at {}?", p.number, p.head_sha.short()),
-                Command::Start(StartParams { pr_id: p.id, expected_head_sha: p.head_sha }),
-            )),
-            (Mutation::Retry, _, Some(r)) => {
-                Some((format!("Retry run {}?", r.id), Command::Retry(RunParams { run_id: r.id })))
-            }
-            (Mutation::Cancel, _, Some(r)) => {
-                Some((format!("Cancel run {}?", r.id), Command::Cancel(RunParams { run_id: r.id })))
-            }
-            _ => None,
-        };
-        let Some((prompt, command)) = ask else {
-            notice(m, format!("{cap} unavailable: nothing selected it applies to, or no preview yet"));
-            return;
-        };
-        confirm(m, cap, prompt, command);
+        Some(m.server.as_ref().and_then(|s| s.commands_off()).unwrap_or("the daemon does not grant it"))
+    }
+}
+
+/// `s`, `R`, `c` and `p` on the selected PR: a confirmation panel naming the exact target, or a notice saying why not.
+fn mutation(m: &mut Model, mu: Mutation, fx: &mut Vec<Effect>) {
+    let cap = mu.capability();
+    if let Some(why) = write_block(m, cap) {
+        notice(m, format!("{cap} unavailable: {why}"));
+        return;
+    }
+    let Some(p) = m.selected_pr().cloned() else {
+        notice(m, format!("{cap} unavailable: no PR selected"));
         return;
     };
-    notice(m, format!("{cap} unavailable: {why}"));
+    let run = m.domain.latest_run(&p.id).cloned();
+    let (prompt, command) = match (mu, run) {
+        (Mutation::Start, _) => (
+            format!("Start a review of #{} at {}?", p.number, p.head_sha.short()),
+            Command::Start(StartParams { pr_id: p.id, expected_head_sha: p.head_sha }),
+        ),
+        (Mutation::Retry, Some(r)) if r.status == RunStatus::Failed => {
+            (format!("Retry run {}?", r.id.short()), Command::Retry(RunParams { run_id: r.id }))
+        }
+        (Mutation::Cancel, Some(r)) if r.status == RunStatus::Running => {
+            let what = if r.phase == Phase::AwaitingApproval { "parked" } else { "running" };
+            (format!("Cancel the {what} review of #{}?", p.number), Command::Cancel(RunParams { run_id: r.id }))
+        }
+        (Mutation::Publish, Some(r)) if r.phase == Phase::AwaitingApproval => {
+            open_publication(m, r, fx);
+            return;
+        }
+        (mu, _) => {
+            let why = match mu {
+                Mutation::Retry => "its latest run has not failed",
+                Mutation::Cancel => "no review is running on it",
+                _ => "no review is awaiting approval on it",
+            };
+            notice(m, format!("{cap} unavailable for #{}: {why}", p.number));
+            return;
+        }
+    };
+    confirm(m, cap, prompt, command);
+}
+
+/// The publication page for a parked run: its stored payload, and the diff its comments sit on.
+fn open_publication(m: &mut Model, r: Run, fx: &mut Vec<Effect>) {
+    m.ui.modals.retain(|x| !matches!(x, Modal::Publication { .. }));
+    m.ui.modals.push(Modal::Publication {
+        run_id: r.id.clone(),
+        scroll: 0,
+        preview: Preview::Failed(Text::new(OFFLINE)),
+        publish: ConfirmState::Asking,
+    });
+    fetch_preview(m, r.id, fx);
+    load_diff(m, DiffKey { pr: r.pr_id, base: r.base_sha, head: r.head_sha }, None, fx);
+}
+
+/// Why `y` on this preview would not publish it, or `None` when it would. A preview is stale once its run left
+/// AWAITING_APPROVAL or the PR has a newer head than the one it was written for.
+pub fn publish_block(m: &Model, p: &PublicationPreview) -> Option<String> {
+    if let Some(why) = write_block(m, "review.publish") {
+        return Some(why.to_string());
+    }
+    let Some(run) = m.domain.runs.get(&p.run_id) else { return Some("the run is no longer tracked".into()) };
+    if run.phase != Phase::AwaitingApproval {
+        return Some(format!(
+            "stale: the run is now {}, no longer awaiting approval",
+            crate::theme::phase_name(run.phase)
+        ));
+    }
+    let head = m.domain.prs.get(&run.pr_id).map_or(&run.head_sha, |pr| &pr.head_sha);
+    if *head != p.head_sha || run.head_sha != p.head_sha {
+        return Some(format!("stale: the PR head is now {}; this preview is for {}", head.short(), p.head_sha.short()));
+    }
+    None
 }
 
 /// Opens the generic confirmation modal; `y` inside it sends `command`.
@@ -1150,11 +1301,26 @@ pub fn confirm(m: &mut Model, title: &str, prompt: String, command: Command) {
     m.ui.modals.push(Modal::Confirm { title: title.into(), prompt, command, state: ConfirmState::Asking });
 }
 
+/// The review's GitHub URL once it is published, and only an `https://github.com/` one.
+pub fn published_url(m: &Model, run: &RunId) -> Option<String> {
+    let p = m.domain.publications.get(run).filter(|p| p.status == PublicationStatus::Published)?;
+    p.url.as_ref().map(|u| u.to_string()).filter(|u| u.starts_with("https://github.com/"))
+}
+
 fn send_confirmed(m: &mut Model, fx: &mut Vec<Effect>) {
-    let Some(Modal::Confirm { command, state: ConfirmState::Asking | ConfirmState::TimedOut, .. }) =
-        m.top_modal().cloned()
-    else {
-        return;
+    let command = match m.top_modal().cloned() {
+        Some(Modal::Confirm { command, state: ConfirmState::Asking | ConfirmState::TimedOut, .. }) => command,
+        Some(Modal::Publication {
+            run_id,
+            preview: Preview::Ready(p),
+            publish: ConfirmState::Asking | ConfirmState::TimedOut,
+            ..
+        }) if publish_block(m, &p).is_none() => Command::Publish(PublishParams {
+            run_id,
+            preview_id: p.preview_id.clone(),
+            expected_head_sha: p.head_sha.clone(),
+        }),
+        _ => return,
     };
     let idempotency_key = command.idempotency_key();
     let Some(request_id) =
@@ -1162,7 +1328,7 @@ fn send_confirmed(m: &mut Model, fx: &mut Vec<Effect>) {
     else {
         return;
     };
-    if let Some(Modal::Confirm { state, .. }) = m.ui.modals.last_mut() {
+    if let Some(Modal::Confirm { state, .. } | Modal::Publication { publish: state, .. }) = m.ui.modals.last_mut() {
         *state = ConfirmState::Requested(request_id);
     }
 }
@@ -1214,6 +1380,9 @@ fn move_by(m: &mut Model, delta: isize, fx: &mut Vec<Effect>) {
         match top {
             Modal::Finding { scroll, .. } => *scroll = (*scroll as isize + delta).clamp(0, u16::MAX as isize) as u16,
             Modal::Help { scroll } => *scroll = (*scroll as isize + delta).clamp(0, help_limit as isize) as u16,
+            Modal::Publication { scroll, .. } => {
+                *scroll = (*scroll as isize + delta).clamp(0, u16::MAX as isize) as u16
+            }
             Modal::Input { .. } | Modal::Confirm { .. } => {}
         }
         return;

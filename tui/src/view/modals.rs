@@ -20,6 +20,9 @@ pub fn modal(c: &Ctx, f: &mut Frame, body: Rect, modal: &Modal) {
         Modal::Confirm { title, prompt, command, state } => confirm(c, f, body, title, prompt, command.name(), state),
         Modal::Help { scroll } => help(c, f, body, *scroll),
         Modal::Finding { id, scroll } => super::doc::finding_page(c, f, body, id, *scroll),
+        Modal::Publication { run_id, scroll, preview, publish } => {
+            super::publish::page(c, f, body, run_id, *scroll, preview, publish)
+        }
     }
 }
 
@@ -125,6 +128,7 @@ pub fn help_lines(c: &Ctx, body: Rect) -> Vec<Line<'static>> {
         (Context::Diff, "Diff"),
         (Context::Timeline, "Timeline"),
         (Context::FindingModal, "Finding reader"),
+        (Context::PublicationModal, "Publication preview"),
     ]
     .into_iter()
     .map(|(ctx, name)| section(ctx, name))

@@ -141,21 +141,30 @@ pub fn rich(c: &Ctx, text: &str, w: usize, role: Role) -> Vec<Vec<Span<'static>>
     let code_style = c.s(Role::Type).patch(c.t.bg(Bg::Surface));
     let mut lines = Vec::new();
     for para in crate::text::plain_emoji(text).split('\n') {
-        let mut tokens: Vec<(String, bool)> = Vec::new();
+        // Each token, and whether it touches the one before with no space between: `(` and a code span after it,
+        // or a code span and the punctuation after it, stay one word, written exactly as the text has them.
+        let mut tokens: Vec<(String, bool, bool)> = Vec::new();
+        let mut open = false;
         for (n, seg) in para.split('`').enumerate() {
             if n % 2 == 1 {
                 let chip = if c.t.color { seg.to_string() } else { format!("`{seg}`") };
-                tokens.push((chip, true));
+                tokens.push((chip, true, open));
+                open = true;
             } else {
-                tokens.extend(seg.split(' ').filter(|s| !s.is_empty()).map(|s| (s.to_string(), false)));
+                let parts: Vec<&str> = seg.split(' ').collect();
+                let last = parts.len() - 1;
+                for (k, part) in parts.into_iter().enumerate() {
+                    if !part.is_empty() {
+                        tokens.push((part.to_string(), false, k == 0 && open));
+                    }
+                    open = k == last && !part.is_empty();
+                }
             }
         }
-        // Punctuation right after a code span sticks to it, so the two wrap as one word.
         let mut words: Vec<Vec<(String, bool)>> = Vec::new();
-        for (tok, code) in tokens {
-            let glue = !code && tok.starts_with(|ch: char| ",.;:)".contains(ch));
+        for (tok, code, glue) in tokens {
             match words.last_mut() {
-                Some(word) if glue && word.last().is_some_and(|(_, c)| *c) => word.push((tok, code)),
+                Some(word) if glue => word.push((tok, code)),
                 _ => words.push(vec![(tok, code)]),
             }
         }

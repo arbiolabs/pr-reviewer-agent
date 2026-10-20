@@ -6,6 +6,7 @@ mod diff;
 mod doc;
 mod live;
 mod modals;
+mod publish;
 mod rail;
 mod timeline;
 
@@ -340,6 +341,7 @@ fn footer_line(c: &Ctx, width: u16) -> Line<'static> {
         (Some(Modal::Help { .. }), _) => "j/k scroll  Esc close  q quit",
         (Some(Modal::Finding { .. }), _) => "j/k scroll  n/N finding  d diff at anchor  t timeline  Esc close",
         (Some(Modal::Confirm { .. }), _) => "y confirm  n/Esc cancel",
+        (Some(Modal::Publication { .. }), _) => "j/k scroll  y publish  o open on GitHub  Esc close",
         (_, Screen::Inbox) => "j/k pull request  Enter read  / search  ? help  q quit",
         (_, Screen::Review) if c.m.ui.focus == Pane::Sidebar => {
             "j/k pull request  Enter read  / search  l findings  ? help  q quit"
