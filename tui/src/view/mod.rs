@@ -297,6 +297,9 @@ fn footer_line(c: &Ctx, width: u16) -> Line<'static> {
         (Some(Modal::Event { .. }), _) => "Esc close",
         (Some(Modal::Confirm { .. }), _) => "y confirm  n/Esc cancel",
         (_, Screen::Inbox) => "j/k pull request  Enter read  / search  ? help  q quit",
+        (_, Screen::Review) if c.m.ui.focus == Pane::Sidebar => {
+            "j/k pull request  Enter read  / search  l findings  ? help  q quit"
+        }
         (_, Screen::Review) => {
             "j/k finding  Enter read  d diff  J/K scroll  h pull requests  t timeline  ? help  q quit"
         }

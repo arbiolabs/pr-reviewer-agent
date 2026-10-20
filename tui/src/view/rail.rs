@@ -133,14 +133,17 @@ fn pr_rows(c: &Ctx, pr: &Pr, w: usize, selected: bool, rh: usize) -> Vec<Line<'s
     if sha_room >= 9 && run.is_none_or(|r| r.status != RunStatus::Running) {
         left.push(Span::styled(pr.head_sha.short().to_string(), on(Role::Muted)));
     }
-    let mut out = vec![Line::from(filled(first, w, row_bg)), Line::from(filled(split_row(left, right, w), w, row_bg))];
+    let mut out = vec![
+        Line::from(filled(first, w, row_bg)).style(row_bg),
+        Line::from(filled(split_row(left, right, w), w, row_bg)).style(row_bg),
+    ];
     if rh == 3 {
         out.push(Line::from(filled(vec![], w, bg)));
     }
     out
 }
 
-/// `◆1 ▲1 ●1 ○1 →2`: findings per severity, then how many are on GitHub.
+/// `◆1 ▲1 ●1 ○1 →2`: findings per severity, then how many are on GitHub (`→0`, muted, when none is).
 pub fn counts(c: &Ctx, findings: &[Finding], bg: Style) -> Vec<Span<'static>> {
     let mut s = Vec::new();
     for sev in [Severity::Critical, Severity::High, Severity::Medium, Severity::Low] {
@@ -151,8 +154,7 @@ pub fn counts(c: &Ctx, findings: &[Finding], bg: Style) -> Vec<Span<'static>> {
         }
     }
     let published = findings.iter().filter(|f| f.status == FindingStatus::Published).count();
-    if published > 0 {
-        s.push(Span::styled(format!("{}{published} ", c.t.g().arrow), c.s(Role::Ok).patch(bg)));
-    }
+    let role = if published == 0 { Role::Muted } else { Role::Ok };
+    s.push(Span::styled(format!("{}{published} ", c.t.g().arrow), c.s(role).patch(bg)));
     s
 }
