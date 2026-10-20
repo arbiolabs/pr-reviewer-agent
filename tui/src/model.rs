@@ -473,14 +473,12 @@ impl Model {
         }
     }
 
-    /// Tracked PRs matching the search filter, in an order that never moves under the cursor: open before closed, then
-    /// by repository, newest number first. Activity shows in the row's glyph, not in its position.
+    /// Tracked PRs matching the search filter, in an order that never moves under the cursor: grouped by repository
+    /// (alphabetically), newest number first. Activity shows in the row's glyph, not in its position.
     pub fn inbox(&self) -> Vec<&Pr> {
         let mut v: Vec<_> = self.domain.prs.values().filter(|p| fuzzy(&self.ui.pr_filter, &pr_haystack(p))).collect();
-        let done = |p: &Pr| matches!(p.lifecycle, Lifecycle::Closed | Lifecycle::Merged);
         v.sort_by(|a, b| {
-            (done(a), &a.repository, std::cmp::Reverse(a.number), &a.id).cmp(&(
-                done(b),
+            (&a.repository, std::cmp::Reverse(a.number), &a.id).cmp(&(
                 &b.repository,
                 std::cmp::Reverse(b.number),
                 &b.id,

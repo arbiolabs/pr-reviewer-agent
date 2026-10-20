@@ -42,6 +42,26 @@ fn pr_event(seq: u64, number: u64, title: &str) -> String {
 }
 
 #[test]
+fn a_new_pr_takes_its_sorted_place_and_the_cursor_stays_on_its_pr() {
+    let mut m = live();
+    let order = |m: &Model| m.inbox().iter().map(|p| format!("{}#{}", p.repository, p.number)).collect::<Vec<_>>();
+    press(&mut m, KeyCode::Char('k'));
+    assert_eq!(m.ui.selected_pr, Some(PrId::new("acme/shop#185")));
+    // Another repository sorts by name; inside one, newer numbers come first.
+    for (seq, repo, number) in [(109, "acme/api", 7), (110, "acme/shop", 190), (111, "acme/shop", 1)] {
+        let json = pr_event(seq, number, "new").replace("acme/shop", repo);
+        send(&mut m, &json);
+        assert_eq!(m.ui.selected_pr, Some(PrId::new("acme/shop#185")), "after {repo}#{number}");
+    }
+    assert_eq!(
+        order(&m),
+        ["acme/api#7", "acme/shop#190", "acme/shop#186", "acme/shop#185", "acme/shop#184", "acme/shop#1"]
+    );
+    press(&mut m, KeyCode::Char('k'));
+    assert_eq!(m.ui.selected_pr, Some(PrId::new("acme/shop#186")));
+}
+
+#[test]
 fn the_inbox_order_holds_still_while_prs_change_and_selection_follows_the_id() {
     let mut m = live();
     let order = |m: &Model| m.inbox().iter().map(|p| p.number).collect::<Vec<_>>();

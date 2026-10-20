@@ -1263,18 +1263,11 @@ fn open_diff(m: &mut Model, fx: &mut Vec<Effect>) {
         })
         .and_then(|id| m.domain.findings.get(&id).cloned());
     m.ui.modals.clear();
-    match finding {
-        Some(f) => {
-            let run = m.domain.runs.get(&f.run_id);
-            let pr = m.domain.prs.get(&f.pr_id);
-            let (base, head) = match (run, pr) {
-                (Some(r), _) => (r.base_sha.clone(), r.head_sha.clone()),
-                (None, Some(p)) => (p.base_sha.clone(), p.head_sha.clone()),
-                (None, None) => return,
-            };
+    match finding.and_then(|f| Some((finding_diff_key(m, &f.id)?, f))) {
+        Some((key, f)) => {
             m.ui.selected_pr = Some(f.pr_id.clone());
             m.ui.selected_finding = Some(f.id.clone());
-            load_diff(m, DiffKey { pr: f.pr_id, base, head }, Some((f.file, f.line.map(|l| l.get()))), fx);
+            load_diff(m, key, Some((f.file, f.line.map(|l| l.get()))), fx);
         }
         None => goto(m, Screen::Diff, fx),
     }
