@@ -12,6 +12,16 @@ use crate::protocol::{Finding, Lifecycle, Phase, Pr, Run, RunChange, RunStatus, 
 use crate::text::width;
 use crate::theme::{Role, finding_status, phase_name};
 
+pub fn sev_label(s: Severity) -> &'static str {
+    match s {
+        Severity::Critical => "CRITICAL",
+        Severity::High => "HIGH",
+        Severity::Medium => "MEDIUM",
+        Severity::Low => "LOW",
+        Severity::Unknown => "UNKNOWN",
+    }
+}
+
 pub fn phase_label(p: Phase) -> &'static str {
     match p {
         Phase::CollectContext => "collect",

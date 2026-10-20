@@ -96,92 +96,90 @@ pub fn detail_lines(c: &Ctx, e: &SequencedEvent, phase: Option<Phase>, w: usize)
 }
 
 pub fn timeline(c: &Ctx, f: &mut Frame, area: Rect) {
+    let col = super::doc::column(area);
+    let w = col.width as usize;
     let Some(t) = &c.m.timeline else {
-        let text = "  No timeline loaded. Select a PR and press 4 or t.";
-        f.render_widget(Paragraph::new(vec![Line::raw(""), Line::from(c.span(text, Role::Muted))]), area);
+        let text = "No timeline loaded. Select a PR and press t.";
+        f.render_widget(Paragraph::new(vec![Line::raw(""), Line::from(c.span(text, Role::Muted))]), col);
         return;
     };
     let g = c.t.g();
     let pr = t.query.pr.as_ref().map_or("-".into(), |id| pr_label(c, id));
     let scope = match t.scope {
-        TimelineScope::Pr => format!("PR {pr}"),
-        TimelineScope::Run => format!("run {} of {pr}", t.query.run.as_ref().map_or("-", |r| r.short())),
-        TimelineScope::Finding => {
-            let finding = t.query.finding.as_ref().map_or("-".into(), |id| match c.m.domain.findings.get(id) {
-                Some(f) => format!("\"{}\"", c.fit(f.title.as_str(), 32)),
-                None => id.to_string(),
-            });
-            format!("finding {finding} on {pr}")
-        }
+        TimelineScope::Pr => "the whole PR".to_string(),
+        TimelineScope::Run => format!("run {}", t.query.run.as_ref().map_or("-", |r| r.short())),
+        TimelineScope::Finding => match t.query.finding.as_ref().and_then(|id| c.m.domain.findings.get(id)) {
+            Some(f) => format!("\"{}\"", c.fit(f.title.as_str(), 40)),
+            None => "a finding".into(),
+        },
     };
-    let category = t.category.map_or("all", |x| x.label());
-    let phase = t.phase.map_or("all", phase_name);
     let rows = timeline_rows(c.m, t);
-    let state = if t.pending.is_some() {
-        format!(" {} loading...", g.sep)
-    } else if t.next_before.is_some() {
-        format!(" {} older events: move to the end to load", g.sep)
-    } else {
-        String::new()
-    };
-    let head = format!("scope {scope} (f) {} category {category} (v) {} phase {phase} (P){state}", g.sep, g.sep);
-    let [head_area, body] = Layout::vertical([Constraint::Length(1), Constraint::Min(1)]).areas(area);
-    f.render_widget(Paragraph::new(Line::from(c.span(c.fit(&head, head_area.width as usize), Role::Muted))), head_area);
-
-    let (list_area, detail_area) = match c.width {
-        Width::Wide => {
-            let [l, r] = Layout::horizontal([Constraint::Min(50), Constraint::Length(48)]).areas(body);
-            (l, Some(r))
-        }
-        _ => (body, None),
-    };
-    let block = c.pane(
-        &format!("TIMELINE ({} of {})", rows.len(), t.events.len()),
-        c.focused(Pane::Main) || c.focused(Pane::Sidebar),
-    );
-    let inner = block.inner(list_area);
-    f.render_widget(block, list_area);
-    let w = inner.width as usize;
+    let mut lines = vec![
+        Line::raw(""),
+        Line::from(vec![c.span(format!("{pr}  "), Role::Muted), c.span("Timeline", Role::Title)]),
+        Line::from(c.span(
+            c.fit(
+                &format!(
+                    "{} of {} events {} {scope} (f) {} {} (v) {} phase {} (P)",
+                    rows.len(),
+                    t.events.len(),
+                    g.sep,
+                    g.sep,
+                    t.category.map_or("all kinds", |x| x.label()),
+                    g.sep,
+                    t.phase.map_or("any", phase_name)
+                ),
+                w,
+            ),
+            Role::Muted,
+        )),
+        Line::raw(""),
+    ];
     if let Some(e) = &t.error {
-        let line = Line::from(c.span(c.fit(&format!(" timeline unavailable: {e}"), w), Role::Fail));
-        f.render_widget(Paragraph::new(vec![line]), inner);
+        lines.push(Line::from(c.span(c.fit(&format!("timeline unavailable: {e}"), w), Role::Fail)));
     } else if rows.is_empty() {
-        let text = if t.pending.is_some() { " loading..." } else { " no events match" };
-        f.render_widget(Paragraph::new(vec![Line::from(c.span(text, Role::Muted))]), inner);
-    } else {
-        let sel = t.selected.and_then(|s| rows.iter().position(|(e, _)| e.sequence.get() == s));
-        let narrow = c.width == Width::Narrow;
-        let lines: Vec<Line> = window(rows.len(), sel, inner.height as usize)
-            .map(|i| {
-                let (e, _) = rows[i];
-                let selected = Some(i) == sel;
-                let (text, role) = summary(c, e);
-                let cursor = if selected { g.cursor } else { " " };
-                let mut spans = vec![
-                    Span::raw(cursor.to_string()),
-                    c.span(pad_left(&e.sequence.to_string(), 5), Role::Muted),
-                    c.span(format!(" {} ", time_of(e.occurred_at.as_str())), Role::Muted),
-                ];
-                if !narrow {
-                    spans.push(c.span(format!("{:<7}", actor(e)), Role::Muted));
-                    spans.push(c.span(format!("{:<8}", EventCategory::of(&e.body).label()), Role::Muted));
-                }
-                let used: usize = spans.iter().map(|s| width(&s.content)).sum();
-                spans.push(c.span(c.pad(&text, w.saturating_sub(used)), role));
-                let line = Line::from(spans);
-                if selected { line.style(c.s(Role::Selected)) } else { line }
-            })
-            .collect();
-        f.render_widget(Paragraph::new(lines), inner);
+        lines.push(Line::from(c.span(if t.pending.is_some() { "loading…" } else { "No events match." }, Role::Muted)));
     }
-
-    if let Some(area) = detail_area {
-        let block = c.pane("EVENT", false);
-        let inner = block.inner(area);
-        f.render_widget(block, area);
-        let selected = t.selected.and_then(|s| rows.iter().find(|(e, _)| e.sequence.get() == s));
-        if let Some((e, phase)) = selected {
-            f.render_widget(Paragraph::new(detail_lines(c, e, *phase, inner.width as usize)), inner);
-        }
+    let sel = t.selected.and_then(|s| rows.iter().position(|(e, _)| e.sequence.get() == s));
+    let h = (col.height as usize).saturating_sub(lines.len() + 1);
+    let stem = if c.t.ascii { "|" } else { "│" };
+    for i in window(rows.len(), sel, h) {
+        let (e, _) = rows[i];
+        let selected = Some(i) == sel;
+        let (text, role) = summary(c, e);
+        let cat = EventCategory::of(&e.body);
+        let (node, nrole, trole) = match &e.body {
+            EventBody::PhaseChanged(_) => ("●", Role::Accent, Role::Focus),
+            EventBody::Run(..) => ("◆", role, Role::Title),
+            EventBody::FindingUpdated(_) => ("▲", role, role),
+            EventBody::ToolActivity(_) => (stem, Role::Muted, Role::Normal),
+            _ => ("·", Role::Muted, Role::Normal),
+        };
+        let node = if c.t.ascii && node != stem { "*" } else { node };
+        let st = if selected { c.t.bg(crate::theme::Bg::Select) } else { c.t.bg(crate::theme::Bg::Base) };
+        let on = |r: Role| c.s(r).patch(st);
+        let label = match &e.body {
+            EventBody::ToolActivity(a) => format!("{:<12} ", c.fit(a.tool.as_str(), 12)),
+            _ => String::new(),
+        };
+        let body = match &e.body {
+            EventBody::ToolActivity(a) => a.summary.to_string(),
+            EventBody::PhaseChanged(p) => format!("{} {} {}", phase_name(p.from), g.arrow, phase_name(p.to)),
+            _ => text,
+        };
+        let mut spans = vec![
+            Span::styled(format!("{}  ", time_of(e.occurred_at.as_str())), on(Role::Muted)),
+            Span::styled(format!("{node}  "), on(nrole)),
+            Span::styled(label, on(Role::Accent)),
+        ];
+        let used: usize = spans.iter().map(|s| width(&s.content)).sum();
+        spans.push(Span::styled(c.pad(&body, w.saturating_sub(used + 8)), on(trole)));
+        spans.push(Span::styled(format!("{:>8}", cat.label()), on(Role::Muted)));
+        lines.push(Line::from(spans));
     }
+    if t.next_before.is_some() {
+        lines.push(Line::from(c.span("older events load as you reach the end", Role::Muted)));
+    }
+    f.render_widget(Paragraph::new(lines), col);
+    let _ = (Layout::vertical([Constraint::Min(1)]), Width::Wide, pad_left("", 0), fit_len("", 0), Pane::Main);
 }

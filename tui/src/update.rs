@@ -882,12 +882,8 @@ fn act(m: &mut Model, a: Action, fx: &mut Vec<Effect>) {
         Action::OpenDiff => open_diff(m, fx),
         Action::OpenTimeline => {
             m.ui.modals.retain(|x| !matches!(x, Modal::Finding { .. }));
-            let scope = if m.ui.screen == Screen::Review && m.ui.focus == Pane::Main && m.ui.selected_finding.is_some()
-            {
-                TimelineScope::Finding
-            } else {
-                TimelineScope::Pr
-            };
+            // The document is the PR, so its timeline is the PR's; f narrows to the run or the finding.
+            let scope = TimelineScope::Pr;
             m.ui.screen = Screen::Timeline;
             let q = timeline_query(m, scope);
             load_timeline(m, scope, q, fx);
