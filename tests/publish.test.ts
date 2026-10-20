@@ -30,23 +30,25 @@ afterEach(async () => {
   await fake.close();
 });
 
-// The client timeout is also how long reconciliation waits before it may claim a review absent.
-const config = { ...DEFAULT_CONFIG, github: { ...DEFAULT_CONFIG.github, timeout_ms: 300 } };
+// The client timeout is also how long reconciliation waits before it may claim a review absent. Only the test about
+// that wait gives its client this 300 ms; the others answer through a fake that shares this process's event loop, so a
+// loaded machine can hold a response past 300 ms and turn a clean POST or listing into a timeout.
+// A failed phase's retry waits are wall-clock sleeps nothing here asserts on, so they stay short too.
+const config = { ...DEFAULT_CONFIG, review: { ...DEFAULT_CONFIG.review, retry_backoff_ms: 10 }, github: { ...DEFAULT_CONFIG.github, timeout_ms: 300 } };
 
-function testClient() {
+function testClient(timeoutMs = 5000) {
   return new GitHubClient({
     auth: { kind: "token", token: "ghp_test" },
     baseUrl: fake.url,
     maxRetries: 2,
     backoffMs: 1,
     concurrency: 2,
-    timeoutMs: config.github.timeout_ms,
+    timeoutMs,
     sleep: async (ms) => void sleeps.push(ms),
   });
 }
 
-async function openPublishing(responses: FauxResponseStep[] = [readDiff(), submitDefect(fixture)], dataDir = mkdtempSync(join(tmpdir(), "publish-"))) {
-  const client = testClient();
+async function openPublishing(responses: FauxResponseStep[] = [readDiff(), submitDefect(fixture)], dataDir = mkdtempSync(join(tmpdir(), "publish-")), client = testClient()) {
   const app = await openApp({
     dataDir,
     config,
@@ -211,7 +213,7 @@ it("never POSTs when the listing before the first POST keeps failing, and leaves
 it("waits out the client timeout before reconciling, so a review GitHub stores late is found, not posted twice", async () => {
   fake.postBehaviors = ["slow-insert"];
   fake.slowInsertMs = 450;
-  const app = await openPublishing();
+  const app = await openPublishing(undefined, undefined, testClient(config.github.timeout_ms));
   const { revision, outbox, outboxEvents } = await publish(app);
   expect([revision.state, outbox.status, outbox.github_review_id, fake.postAttempts, fake.reviews.length]).toEqual(["COMPLETED", "published", 1000, 1, 1]);
   expect(outboxEvents).toEqual(["pending SEND sending", "sending UNCERTAIN needs_reconciliation", "needs_reconciliation FOUND published"]);

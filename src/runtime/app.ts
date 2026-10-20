@@ -29,6 +29,8 @@ export type AppOptions = {
   /** Part of revision identity: a different reviewer (code or model) is a different review. */
   reviewerVersion: string;
   onReport?: (error: unknown) => void;
+  /** How long to wait for another process's data-dir lock before giving up; see `lockDataDir`. */
+  lockWaitMs?: number;
 };
 
 export type App = { store: AppStore; harness: Harness; task: ReviewTask; reviewerVersion: string; close(): Promise<void> };
@@ -41,7 +43,7 @@ const ctx = BACKGROUND_CONTEXT;
  */
 export async function openApp(options: AppOptions): Promise<App> {
   mkdirSync(options.dataDir, { recursive: true });
-  const release = await lockDataDir(options.dataDir);
+  const release = await lockDataDir(options.dataDir, options.lockWaitMs);
   try {
     return await openLocked(options, release);
   } catch (error) {
@@ -55,10 +57,11 @@ export async function openApp(options: AppOptions): Promise<App> {
  * `stale`, so a rerun after kill -9 takes over the dead process's lock. proper-lockfile removes the lock on exit and
  * on signals.
  */
-export async function lockDataDir(dir: string): Promise<() => Promise<void>> {
+export async function lockDataDir(dir: string, waitMs = 6000): Promise<() => Promise<void>> {
   try {
     // Inside the dir, not proper-lockfile's default sibling `<dir>.lock`: a volume's parent (say `/`) is often read-only.
-    return await lockfile.lock(dir, { lockfilePath: join(dir, "lock"), stale: 5000, update: 1000, retries: { retries: 12, minTimeout: 500, maxTimeout: 500 } });
+    const retries = { retries: Math.ceil(waitMs / 500), minTimeout: 500, maxTimeout: 500 };
+    return await lockfile.lock(dir, { lockfilePath: join(dir, "lock"), stale: 5000, update: 1000, retries });
   } catch (error) {
     if ((error as { code?: unknown }).code === "ELOCKED") throw new Error(`another pr-review is running on ${dir}`);
     throw error;

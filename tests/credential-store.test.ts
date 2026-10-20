@@ -66,11 +66,14 @@ it("waits for a lock held by another process the way pi takes it, then re-reads 
 
 it("refreshes the lock mtime often enough that pi's 10 s sync-path stale check never steals it", async () => {
   const path = tempAuth();
-  let age = Number.NaN;
+  const mtime = () => statSync(`${path}.lock`).mtimeMs;
+  let refreshedAfter = Number.NaN;
   await new PiAuthFileStore(path).modify("openai", async () => {
-    await sleep(4500);
-    age = Date.now() - statSync(`${path}.lock`).mtimeMs;
+    // Both times are the lock's own mtimes, so a late timer or a slow stat in this process cannot skew the interval.
+    const taken = mtime();
+    while (mtime() === taken) await sleep(50);
+    refreshedAfter = mtime() - taken;
     return { type: "api_key", key: "o" };
   });
-  expect(age).toBeLessThan(2000);
+  expect(refreshedAfter).toBeLessThan(4500);
 }, 15_000);
