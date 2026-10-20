@@ -390,8 +390,8 @@ fn accounts_that_cannot_be_selected_say_why_and_open_no_modal() {
         reasons,
         [
             ("env/GITHUB_TOKEN".to_string(), Some("set by the daemon env")),
-            ("github.com/diego-arbio-dev".to_string(), Some("GITHUB_TOKEN wins")),
-            ("github.com/octo-work".to_string(), Some("GITHUB_TOKEN wins")),
+            ("github.com/diego-arbio-dev".to_string(), Some("env token wins")),
+            ("github.com/octo-work".to_string(), Some("env token wins")),
             ("github.com/old-bot".to_string(), Some("run gh auth login")),
         ]
     );

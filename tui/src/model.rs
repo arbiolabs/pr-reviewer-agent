@@ -533,7 +533,7 @@ impl Model {
         } else if a.state != AccountState::Ok {
             "run gh auth login"
         } else if env() {
-            "GITHUB_TOKEN wins"
+            "env token wins"
         } else if a.selected {
             "already selected"
         } else if !self.link.accepts_events() {
