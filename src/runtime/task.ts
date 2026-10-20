@@ -231,12 +231,20 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
     version: 1,
     initial: (input) => ({ phase: "collect", revisionId: input.revisionId }),
     phases: { collect: phase(collect), triage: phase(triage), analyze: phase(analyze), verify: phase(verify), prepare: phase(prepare) },
+    // An abort is SUPERSEDED only when the live head really moved; otherwise the revision FAILED for that reason.
     abort: async (task, runtime, context) => {
       const id = task.input.revisionId;
-      const state =
-        store.advanceFromCurrent(id, "NEWER_HEAD", "durable task aborted") ??
-        store.advanceFromCurrent(id, "TERMINAL_ERROR", "durable task aborted") ??
-        store.revision(id)!.state;
+      const reason = `durable task aborted${task.abortReason ? ` (${task.abortReason})` : ""}`;
+      let event: "NEWER_HEAD" | "TERMINAL_ERROR" = "TERMINAL_ERROR";
+      let detail = reason;
+      try {
+        const revision = store.revision(id)!;
+        const { headSha } = await livePull(revision);
+        if (headSha !== revision.head_sha) [event, detail] = ["NEWER_HEAD", `${reason}; head moved to ${headSha}`];
+      } catch (error) {
+        detail = `${reason}; head check failed: ${error instanceof Error ? error.message : String(error)}`;
+      }
+      const state = store.advanceFromCurrent(id, event, detail) ?? store.advanceFromCurrent(id, "TERMINAL_ERROR", detail) ?? store.revision(id)!.state;
       await runtime.commit(() => ({ status: "terminal", outcome: { status: "aborted", reason: `revision ${state}` } }), context);
     },
   });

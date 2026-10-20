@@ -69,3 +69,32 @@ it("lets only one pr-review at a time use a data dir, and frees it on close", as
   }
   await (await open(dataDir, fixture, [])).close();
 }, 30_000);
+
+async function abortMidAnalyze(moveHead: boolean) {
+  const fixture = createFixture();
+  let inFlight!: () => void;
+  const reachedAnalyze = new Promise<void>((resolve) => (inFlight = resolve));
+  const app = await open(mkdtempSync(join(tmpdir(), "abort-")), fixture, [readDiff(), blockUntilAborted(() => inFlight())]);
+  try {
+    const started = await startReview(app, fixture.pull, "1");
+    app.harness.resume();
+    await reachedAnalyze;
+    if (moveHead) fixture.pulls.pull = { ...fixture.pull, headSha: "f".repeat(40) };
+    await app.harness.abortTask(started.taskId!, BACKGROUND_CONTEXT);
+    const revision = await finishReview(app, started);
+    return { state: revision.state, last: app.store.auditEvents(revision.id).at(-1) };
+  } finally {
+    await app.close();
+  }
+}
+
+it("fails an aborted review whose head did not move, with the abort as the reason", async () => {
+  expect(await abortMidAnalyze(false)).toMatchObject({ state: "FAILED", last: { event: "TERMINAL_ERROR", detail: "durable task aborted" } });
+}, 30_000);
+
+it("supersedes an aborted review only when the head moved", async () => {
+  expect(await abortMidAnalyze(true)).toMatchObject({
+    state: "SUPERSEDED",
+    last: { event: "NEWER_HEAD", detail: `durable task aborted; head moved to ${"f".repeat(40)}` },
+  });
+}, 30_000);
