@@ -7,6 +7,7 @@ import { afterEach, beforeEach, expect, it } from "vitest";
 import { DEFAULT_CONFIG } from "../src/config/config.ts";
 import { GitHubClient } from "../src/github/client.ts";
 import { GitHubPullSource } from "../src/github/pulls.ts";
+import { AppStore } from "../src/persistence/store.ts";
 import { openApp } from "../src/runtime/app.ts";
 import { REVIEW_TASK_NAME } from "../src/runtime/task.ts";
 import { type Service, startService } from "../src/server/service.ts";
@@ -168,4 +169,24 @@ it("POST /reviews/:id/retry reopens a rejected revision through the audited MANU
   expect(app.store.auditEvents(id).find((e) => e.event === "MANUAL_RETRY")!.detail).toBe(`manual override: POST /reviews/${id}/retry (retry 1)`);
   expect(app.store.outboxEvents(app.store.outboxForRevision(id)!.id).map((e) => e.event)).toEqual(["SEND", "REJECTED", "MANUAL_RETRY", "SEND", "SENT"]);
   expect([fake.postAttempts, fake.reviews.length]).toEqual([2, 1]);
+}, 60_000);
+
+it("reclaims its own leases at once after a crash: the lease owner is stable per data dir", async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "service-lease-"));
+  const first = await serve(dataDir);
+  const owner = (first.app.store.db.prepare("SELECT value FROM meta WHERE key = 'lease_owner'").get() as { value: string }).value;
+  const prId = first.app.store.upsertPull(fixture.pull);
+  await first.close();
+  services.splice(0);
+
+  // A crash mid-tick leaves the lease behind, five minutes from expiry.
+  const crashed = AppStore.open(join(dataDir, "app.sqlite"));
+  crashed.db.prepare("INSERT INTO leases (pr_id, owner, expires_at) VALUES (?, ?, ?)").run(prId, owner, Date.now() + 5 * 60_000);
+  crashed.close();
+
+  const second = await serve(dataDir);
+  await deliver(second.service.url, "d-1", "pull_request", { action: "opened", pull_request: { number: 1 } });
+  await until(() => second.app.store.db.prepare("SELECT count(*) AS n FROM review_revisions WHERE state = 'COMPLETED'").get()?.n === 1);
+  await second.service.idle();
+  expect(fake.postAttempts).toBe(1);
 }, 60_000);

@@ -536,6 +536,11 @@ export class AppStore {
     return info.changes === 1;
   }
 
+  /** This data dir's lease owner, stable across restarts. */
+  leaseOwner(): string {
+    return (this.db.prepare("SELECT value FROM meta WHERE key = 'lease_owner'").get() as { value: string }).value;
+  }
+
   releaseLease(prId: string, owner: string): void {
     this.db.prepare("DELETE FROM leases WHERE pr_id = ? AND owner = ?").run(prId, owner);
   }

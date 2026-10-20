@@ -1,6 +1,5 @@
 import { accessSync, constants } from "node:fs";
 import type { AddressInfo } from "node:net";
-import { randomUUID } from "node:crypto";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { TaskId } from "@earendil-works/pi-durable";
 import { loadReport, renderJson } from "../cli/report.ts";
@@ -82,7 +81,7 @@ export async function startService(options: ServiceOptions): Promise<Service> {
     debounceMs: config.review.debounce_seconds * 1000,
     leaseMs: 5 * 60_000,
     webhookRetry: { maxAttempts: config.review.webhook_max_attempts, backoffMs: config.review.webhook_backoff_ms },
-    owner: `pr-review-${process.pid}-${randomUUID()}`,
+    owner: store.leaseOwner(),
     now,
     report: options.report,
   });
