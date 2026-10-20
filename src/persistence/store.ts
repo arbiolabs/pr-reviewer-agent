@@ -186,6 +186,10 @@ export class AppStore {
       .run(revisionId, from, event, to, detail, at);
   }
 
+  retryCount(revisionId: string): number {
+    return (this.db.prepare("SELECT count(*) AS n FROM audit_events WHERE revision_id = ? AND event = 'MANUAL_RETRY'").get(revisionId) as { n: number }).n;
+  }
+
   auditEvents(revisionId: string): AuditEvent[] {
     return this.db
       .prepare("SELECT seq, from_state, event, to_state, detail, at FROM audit_events WHERE revision_id = ? ORDER BY seq")

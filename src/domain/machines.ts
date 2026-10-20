@@ -27,6 +27,7 @@ export const REVIEW_EVENTS = [
   "CONFIRMED_NOT_POSTED",
   "NEWER_HEAD",
   "TERMINAL_ERROR",
+  "MANUAL_RETRY",
 ] as const;
 export type ReviewEvent = (typeof REVIEW_EVENTS)[number];
 
@@ -41,10 +42,12 @@ export const REVIEW_MACHINE: Table<ReviewState, ReviewEvent> = {
   PUBLISH: { REVIEW_RECONCILED: "COMPLETED", NO_PUBLICATION_RECORDED: "COMPLETED", WRITE_UNCERTAIN: "RECONCILE" },
   RECONCILE: { REVIEW_RECONCILED: "COMPLETED", CONFIRMED_NOT_POSTED: "PUBLISH", TERMINAL_ERROR: "FAILED" },
   COMPLETED: {},
-  FAILED: {},
+  // §4.1 manual override: only an explicit `--retry` leaves FAILED. COMPLETED and SUPERSEDED stay final.
+  FAILED: { MANUAL_RETRY: "COLLECT_CONTEXT" },
   SUPERSEDED: {},
 };
 
+/** Terminal for automatic progress; FAILED can still be reopened by the audited MANUAL_RETRY override. */
 export const TERMINAL_REVIEW_STATES: readonly ReviewState[] = ["COMPLETED", "FAILED", "SUPERSEDED"];
 
 // §4.1 PR coordinator machine. DEBOUNCE_ELAPSED is not in the spec's event list; QUIESCING needs a way back.

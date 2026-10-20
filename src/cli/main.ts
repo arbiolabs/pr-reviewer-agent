@@ -26,7 +26,7 @@ export type CliDeps = {
 };
 
 const USAGE = `usage:
-  pr-review review <pr-url> --dry-run [--json] [--no-jev] [--model provider/id]
+  pr-review review <pr-url> --dry-run [--json] [--no-jev] [--model provider/id] [--retry]
   pr-review inspect --pr owner/repo#123 [--json]
   pr-review models [--json]
   pr-review login [provider]`;
@@ -60,7 +60,7 @@ async function review(args: string[], deps: CliDeps, dataDir: string, out: (t: s
   const { values, positionals } = parseArgs({
     args,
     allowPositionals: true,
-    options: { "dry-run": { type: "boolean" }, publish: { type: "boolean" }, json: { type: "boolean" }, "no-jev": { type: "boolean" }, model: { type: "string" } },
+    options: { "dry-run": { type: "boolean" }, publish: { type: "boolean" }, json: { type: "boolean" }, "no-jev": { type: "boolean" }, model: { type: "string" }, retry: { type: "boolean" } },
   });
   if (values.publish) {
     err("pr-review: publishing lands in M2; run with --dry-run\n");
@@ -99,7 +99,7 @@ async function review(args: string[], deps: CliDeps, dataDir: string, out: (t: s
   });
   try {
     app.harness.resume();
-    const started = await startReview(app, pull, config.review.base_policy_version);
+    const started = await startReview(app, pull, config.review.base_policy_version, { retry: values.retry ?? false });
     err(
       started.taskId === undefined
         ? `revision ${started.revision.id} already ${started.revision.state}; showing the stored result\n`
@@ -107,6 +107,7 @@ async function review(args: string[], deps: CliDeps, dataDir: string, out: (t: s
     );
     const revision = await finishReview(app, started);
     const report = loadReport(app.store, revision.id);
+    if (revision.state === "FAILED") err(`revision ${revision.id} FAILED: ${report.audit.at(-1)?.detail ?? "no reason recorded"}; rerun with --retry to try again\n`);
     out(values.json ? `${JSON.stringify(renderJson(report), null, 2)}\n` : renderMarkdown(report));
     return revision.state === "COMPLETED" ? 0 : 1;
   } finally {

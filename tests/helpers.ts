@@ -1,5 +1,5 @@
 import { createModels, type FauxResponseStep, fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
-import { DEFAULT_CONFIG } from "../src/config/config.ts";
+import { type Config, DEFAULT_CONFIG } from "../src/config/config.ts";
 import { type App, openApp } from "../src/runtime/app.ts";
 import { createFixture, DEFECT, type Fixture } from "./fixture.ts";
 
@@ -30,14 +30,20 @@ export function submitDefect(fixture: Fixture) {
 
 export const readDiff = () => fauxAssistantMessage([fauxToolCall("read_diff", { file: DEFECT.file })], { stopReason: "toolUse" });
 
-export async function open(dataDir: string, fixture: Fixture, responses: FauxResponseStep[]): Promise<App> {
-  const faux = fauxProvider({ provider: "faux", models: [{ id: "reviewer" }] });
+/** A model collection whose only model, `faux/reviewer`, answers with `responses` in order. */
+export function fauxModels(responses: FauxResponseStep[]) {
+  const faux = fauxProvider({ provider: "faux", models: [{ id: "reviewer", reasoning: true }] });
   faux.setResponses(responses);
   const models = createModels();
   models.setProvider(faux.provider);
+  return models;
+}
+
+export async function open(dataDir: string, fixture: Fixture, responses: FauxResponseStep[], config: Config = DEFAULT_CONFIG): Promise<App> {
+  const models = fauxModels(responses);
   return openApp({
     dataDir,
-    config: DEFAULT_CONFIG,
+    config,
     pulls: fixture.pulls,
     engine: undefined,
     models,

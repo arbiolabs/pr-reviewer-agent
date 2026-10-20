@@ -23,7 +23,8 @@ import { PinnedRepo, syncRepo } from "../source/git.ts";
 
 export const REVIEW_TASK_NAME = "pr-review.revision";
 
-export type ReviewInput = { revisionId: string };
+/** `retry` counts the MANUAL_RETRY overrides before this task: each override gets its own durable task. */
+export type ReviewInput = { revisionId: string; retry?: number };
 export type ReviewResult = { revisionId: string; state: ReviewState };
 export type ReviewTask = Task<ReviewInput, ReviewCheckpoint, ReviewResult, object>;
 
@@ -90,8 +91,12 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
   }
 
   const collect: PhaseBody<"collect"> = async (cp, revision) => {
+    // After a crash this converges without a second audit row; after --retry it re-enters TRIAGE on the pinned context.
     const existing = store.snapshot(revision.id);
-    if (existing) return { phase: "triage", revisionId: revision.id, contextSnapshotId: existing.id };
+    if (existing) {
+      store.advance(revision.id, "COLLECT_CONTEXT", "CONTEXT_PERSISTED", "reused the stored context snapshot");
+      return { phase: "triage", revisionId: revision.id, contextSnapshotId: existing.id };
+    }
     const pull = await livePull(revision);
     if (pull.headSha !== revision.head_sha) {
       store.advance(revision.id, "COLLECT_CONTEXT", "NEWER_HEAD", `head moved to ${pull.headSha}`);
@@ -122,7 +127,10 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
 
   const triage: PhaseBody<"triage"> = async (cp, revision) => {
     const existing = store.decision(revision.id);
-    if (existing) return { phase: "analyze", revisionId: revision.id, triageDecisionId: existing.id };
+    if (existing) {
+      store.advance(revision.id, "TRIAGE", "ROUTING_PERSISTED", `reused routing decision: ${existing.selectedMode}`);
+      return { phase: "analyze", revisionId: revision.id, triageDecisionId: existing.id };
+    }
     const snapshot = store.snapshot(revision.id)!;
     const input: TriageInput = { title: snapshot.pr.title, body: snapshot.pr.body, changedFiles: snapshot.changedFiles, diffExcerpt: snapshot.diff };
     const { outcome, raw }: { outcome: JevOutcome; raw?: unknown } = deps.engine
@@ -147,6 +155,15 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
   };
 
   const analyze: PhaseBody<"analyze"> = async (cp, revision, runtime, context) => {
+    if (!store.candidateSet(revision.id)) await converse(cp, revision, runtime, context);
+    const set = store.candidateSet(revision.id);
+    if (!set) throw new Error("the model answered without calling submit_candidates");
+    store.advance(revision.id, "ANALYZE", "CANDIDATES_PERSISTED", `${set.candidates.length} candidate(s) from ${deps.model.provider}/${deps.model.modelId}`);
+    return { phase: "verify", revisionId: revision.id, candidateSetId: set.id };
+  };
+
+  /** Ask the review model; its `submit_candidates` call stores the candidate set. */
+  async function converse(cp: Extract<ReviewCheckpoint, { phase: "analyze" }>, revision: RevisionRow, runtime: Runtime, context: Context) {
     let child: ConversationId | undefined;
     // A rerun after a crash finds the conversation it created through the ownership index instead of making another.
     await runtime.commit(async (tx) => {
@@ -174,11 +191,7 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
     const requestId = cp.attempt ? `analyze:${revision.id}:${cp.attempt}` : `analyze:${revision.id}`;
     const settled = await (await conversation.submit({ type: "input", content, requestId }, context)).wait(context);
     if (settled.status !== "done") throw new Error(`analysis ${settled.status}: ${settled.reason}${settled.detail ? ` ${JSON.stringify(settled.detail)}` : ""}`);
-    const set = store.candidateSet(revision.id);
-    if (!set) throw new Error("the model answered without calling submit_candidates");
-    store.advance(revision.id, "ANALYZE", "CANDIDATES_PERSISTED", `${set.candidates.length} candidate(s) from ${deps.model.provider}/${deps.model.modelId}`);
-    return { phase: "verify", revisionId: revision.id, candidateSetId: set.id };
-  };
+  }
 
   const verify: PhaseBody<"verify"> = async (cp, revision) => {
     const set = store.candidateSet(revision.id)!;

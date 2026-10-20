@@ -70,23 +70,34 @@ export async function openApp(options: AppOptions): Promise<App> {
 export type StartedReview = { revision: RevisionRow; taskId: TaskId<ReviewResult> | undefined };
 
 /**
- * Converge on exactly one durable task per revision: an existing task for the revision is found by scanning in the
- * same commit that would create it. A terminal revision gets no task; its stored result is the answer.
+ * Converge on exactly one durable task per revision attempt: an existing task for the attempt is found by scanning in
+ * the same commit that would create it. A terminal revision gets no task; its stored result is the answer. `retry`
+ * reopens a FAILED revision through the audited MANUAL_RETRY override (§4.1); the machine refuses it from any other
+ * terminal state.
  */
-export async function startReview(app: App, pull: PullInfo, policyVersion: string): Promise<StartedReview> {
+export async function startReview(app: App, pull: PullInfo, policyVersion: string, options: { retry?: boolean } = {}): Promise<StartedReview> {
   const prId = app.store.upsertPull(pull);
-  const revision = app.store.ensureRevision({ prId, baseSha: pull.baseSha, headSha: pull.headSha, policyVersion, reviewerVersion: app.reviewerVersion });
+  let revision = app.store.ensureRevision({ prId, baseSha: pull.baseSha, headSha: pull.headSha, policyVersion, reviewerVersion: app.reviewerVersion });
+  if (options.retry && TERMINAL_REVIEW_STATES.includes(revision.state)) {
+    const n = app.store.retryCount(revision.id) + 1;
+    app.store.advance(revision.id, revision.state, "MANUAL_RETRY", `manual override: pr-review review --retry (retry ${n})`);
+    revision = app.store.revision(revision.id)!;
+  }
   if (TERMINAL_REVIEW_STATES.includes(revision.state)) return { revision, taskId: undefined };
+  const retry = app.store.retryCount(revision.id);
   const root = await app.harness.root(ctx);
   const taskId = await root.commit(async (tx) => {
     // ponytail: linear scan of every review task; index revision -> task in a session document if this grows.
     for (let page = await tx.scanTasks({ kind: REVIEW_TASK_NAME }, 100); ; ) {
-      const found = page.items.find((t) => (t.input as ReviewInput).revisionId === revision.id);
+      const found = page.items.find((t) => {
+        const input = t.input as ReviewInput;
+        return input.revisionId === revision.id && (input.retry ?? 0) === retry;
+      });
       if (found) return found.id as TaskId<ReviewResult>;
       if (!page.next) break;
       page = await tx.scanTasks({ kind: REVIEW_TASK_NAME }, 100, page.next);
     }
-    return tx.createTask(app.task, { revisionId: revision.id }, { ownership: { kind: "conversation" } });
+    return tx.createTask(app.task, { revisionId: revision.id, retry }, { ownership: { kind: "conversation" } });
   }, ctx);
   app.store.setDurableTask(revision.id, String(taskId));
   return { revision: app.store.revision(revision.id)!, taskId };
