@@ -33,7 +33,7 @@ it("derives the same revision id on reopen and applies migrations once", () => {
   store.close();
   const reopened = AppStore.open(path);
   expect(reopened.ensureRevision(key).id).toBe(first.id);
-  expect(reopened.db.prepare("SELECT name FROM schema_migrations").all()).toEqual([{ name: "001_init.sql" }, { name: "002_code_read.sql" }]);
+  expect(reopened.db.prepare("SELECT name FROM schema_migrations").all()).toEqual([{ name: "001_init.sql" }, { name: "002_code_read.sql" }, { name: "050_stream_meta.sql" }]);
   expect(reopened.revisionsForPr(prId).length).toBe(1);
 });
 
@@ -61,4 +61,22 @@ it("rolls back the transition when a write in the same transaction fails", () =>
   ).toThrow("disk full");
   expect(store.revision(rev.id)!.state).toBe("COLLECT_CONTEXT");
   expect(store.auditEvents(rev.id)).toEqual([]);
+});
+
+it("journals tool activity and revision creation without adding to the audit trail", () => {
+  const { store } = openFresh();
+  const prId = store.upsertPull(pull);
+  const rev = store.ensureRevision({ prId, baseSha: pull.baseSha, headSha: pull.headSha, policyVersion: "1", reviewerVersion: "m1" });
+  store.ensureRevision({ prId, baseSha: pull.baseSha, headSha: pull.headSha, policyVersion: "1", reviewerVersion: "m1" });
+  store.advance(rev.id, "COLLECT_CONTEXT", "CONTEXT_PERSISTED");
+  store.appendActivity(rev.id, "read_file", `src/\u001b[31mx.ts\n${"y".repeat(300)}`);
+  const journal = store.db.prepare("SELECT seq, from_state, event, to_state, detail FROM audit_events ORDER BY seq").all();
+  expect(journal).toEqual([
+    { seq: 1, from_state: "COLLECT_CONTEXT", event: "PR_UPDATED", to_state: "COLLECT_CONTEXT", detail: null },
+    { seq: 2, from_state: "COLLECT_CONTEXT", event: "REVISION_CREATED", to_state: "COLLECT_CONTEXT", detail: null },
+    { seq: 3, from_state: "COLLECT_CONTEXT", event: "CONTEXT_PERSISTED", to_state: "TRIAGE", detail: null },
+    { seq: 4, from_state: "TRIAGE", event: "TOOL_ACTIVITY", to_state: "TRIAGE", detail: `read_file src/x.ts ${"y".repeat(181)}` },
+  ]);
+  expect(store.auditEvents(rev.id).map((e) => e.seq)).toEqual([3]);
+  expect(store.db.prepare("SELECT key, length(value) AS n FROM meta").all()).toEqual([{ key: "stream_epoch", n: 32 }]);
 });

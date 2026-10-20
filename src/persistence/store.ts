@@ -1,8 +1,9 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { transition } from "../domain/machine.ts";
-import { REVIEW_MACHINE, type ReviewEvent, type ReviewState, TERMINAL_REVIEW_STATES } from "../domain/machines.ts";
+import { REVIEW_EVENTS, REVIEW_MACHINE, type ReviewEvent, type ReviewState, TERMINAL_REVIEW_STATES } from "../domain/machines.ts";
 import { type CandidateFinding, type ChangedFile, type Disposition, type PullInfo, stableId } from "../domain/types.ts";
+import { sanitize } from "../protocol/sanitize.ts";
 
 const MIGRATIONS_DIR = new URL("../../migrations/", import.meta.url);
 
@@ -63,6 +64,9 @@ export type FindingView = {
 export type AuditEvent = { seq: number; from_state: string; event: string; to_state: string; detail: string | null; at: string };
 
 const now = () => new Date().toISOString();
+
+// The journal also holds stream-only rows (tool activity, migration 050's triggers); a revision's audit trail is its transitions.
+const TRANSITIONS = `event IN (${REVIEW_EVENTS.map((e) => `'${e}'`).join(", ")})`;
 
 export class AppStore {
   readonly db: DatabaseSync;
@@ -197,8 +201,16 @@ export class AppStore {
 
   auditEvents(revisionId: string): AuditEvent[] {
     return this.db
-      .prepare("SELECT seq, from_state, event, to_state, detail, at FROM audit_events WHERE revision_id = ? ORDER BY seq")
+      .prepare(`SELECT seq, from_state, event, to_state, detail, at FROM audit_events WHERE revision_id = ? AND ${TRANSITIONS} ORDER BY seq`)
       .all(revisionId) as AuditEvent[];
+  }
+
+  /** Journal one tool call for the control stream: tool name plus its path or query, never file contents. */
+  appendActivity(revisionId: string, tool: string, summary: string): void {
+    const detail = Array.from(sanitize(`${tool} ${summary}`).replace(/\s+/g, " ")).slice(0, 200).join("");
+    this.db
+      .prepare("INSERT INTO audit_events (revision_id, from_state, event, to_state, detail, at) SELECT id, state, 'TOOL_ACTIVITY', state, ?, ? FROM review_revisions WHERE id = ?")
+      .run(detail, now(), revisionId);
   }
 
   saveSnapshot(snapshot: Omit<Snapshot, "id">): string {
