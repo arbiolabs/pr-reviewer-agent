@@ -169,7 +169,6 @@ it("approves a review end to end over the socket: parked, previewed, published o
   c.send({ type: "snapshot.get", requestId: "s" });
   const snap = await c.waitFor<Extract<ServerMessage, { type: "snapshot" }>>((m) => m.type === "snapshot");
 
-  // Guards before anything runs.
   expect(await command(c, { command: "review.start", params: { prId: "nope", expectedHeadSha: fixture.headSha } })).toEqual(rejected("NOT_FOUND", "no PR nope"));
   expect(await command(c, { command: "review.start", params: { prId, expectedHeadSha: "0".repeat(40) } })).toEqual(rejected("REVISION_STALE", `the head of acme/shop#1 is now ${fixture.headSha}`));
   expect(await command(c, { command: "review.start", params: { prId, expectedHeadSha: fixture.headSha } }, "k")).toEqual(rejected("INVALID_REQUEST", `idempotencyKey must be review.start:${prId}:${fixture.headSha}`));

@@ -47,6 +47,26 @@ If a revision failed with `cannot_safely_decide`:
 
 `--retry` reopens a failed revision. The audit log records it as `FAILED --MANUAL_RETRY--> COLLECT_CONTEXT`. pr-review refuses `--retry` for a completed or superseded revision.
 
+## Approval mode
+
+With `"review": { "publish_mode": "approval" }`, pr-review prepares the review but does not post it. The run stops in the state `AWAITING_APPROVAL` with the payload stored in the outbox, and the CLI prints the approve command:
+
+```bash
+node bin/pr-review.mjs approve --revision <revision-id> --preview <payload-hash>
+```
+
+`--preview` is the hash of the stored payload. It makes the approval name exactly the text that is posted: a payload with another hash is refused. The terminal client shows the same payload, with its inline comments and the target commit, and sends the same approval through the daemon.
+
+An approval re-reads the PR first. If the head moved or the PR closed, the run is superseded and nothing is posted. Otherwise the approval is recorded in the audit log as `AWAITING_APPROVAL --APPROVED--> PUBLISH`, and the publication steps above run unchanged: the listing before the first post, `sending` committed before the post, and reconciliation on an uncertain result. A repeated approval, or an `approve` run again after a crash, resumes that publication instead of posting again.
+
+While a run awaits approval:
+
+- A new head on the PR supersedes it. The stored payload is abandoned, because nothing was sent.
+- A cancel from the client fails it with the reason `cancelled from the TUI`. `review --retry` reopens it as a new attempt, which awaits approval again.
+- `pr-review review` on the same head shows the stored result instead of starting over.
+
+Approval mode is for the daemon and the CLI. Under `pr-review serve`, runs also park in `AWAITING_APPROVAL`, but the daemon cannot take the data directory lock while `serve` runs, so approve them with `pr-review approve` once `serve` has stopped.
+
 ## Match reviews by author
 
 Reconciliation also checks that the review's author is pr-review itself. With a personal token, pr-review reads its login from `GET /user`. A GitHub App installation token (`ghs_...`) cannot read `/user`. With such a token, set `github.bot_login` in the config, or `PR_REVIEW_BOT_LOGIN`, to the app's bot login, such as `my-app[bot]`. Without it, reconciliation cannot decide and leaves the outbox `needs_reconciliation`.

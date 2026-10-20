@@ -87,7 +87,8 @@ To post the review to the PR, add `--publish`. pr-review posts one `COMMENT` rev
 | `login [provider] [--api-key]` | Store a model credential in pi's auth file. |
 | `accounts [--json]` | List your `gh` accounts and show which one pr-review uses. |
 | `accounts use <login>` | Use that `gh` account for GitHub reads and publishing in this data directory. |
-| `daemon [--socket PATH] [--data DIR] [--fixture NAME]` | Serve review state to the terminal client over a Unix socket. |
+| `approve --revision <id> --preview <hash>` | Publish a review that waits for approval (`publish_mode: "approval"`), exactly the stored payload, once. |
+| `daemon [--socket PATH] [--data DIR] [--fixture NAME] [--allow-commands]` | Serve review state to the terminal client over a Unix socket, and run its start, retry, cancel, and publish commands when allowed. |
 | `tui [args]` | Start the terminal client, `pr-review-tui`. |
 
 Run every command as `node bin/pr-review.mjs <command>`.
@@ -133,5 +134,5 @@ The Rust terminal client is in `tui/`. Migrations are in `migrations/`. Commits 
 
 - Verification is static. pr-review runs no tests against PR code, and no second model double-checks a finding.
 - Each commit gets a fresh review. Tracking a finding across commits, marking it resolved, and replying in review threads are not built yet.
-- The terminal client is read-only, apart from choosing a GitHub account. Starting, cancelling, and approving reviews from the TUI are not built yet.
+- The daemon accepts start, retry, cancel, and publish commands only when enabled, and only while it holds the data directory itself. The terminal client's screens for these actions are not built yet.
 - There is no labeled benchmark yet, so precision and recall are not measured.
