@@ -549,3 +549,55 @@ fn an_account_select_with_no_reply_times_out_and_y_sends_it_again() {
     assert_ne!(c.request_id, first);
     assert_eq!(c.idempotency_key, "account.select:github.com/octo-work");
 }
+
+/// The showcase script played up to `events` live events past the snapshot.
+fn showcase(events: usize) -> Model {
+    let mut m = model();
+    update(&mut m, Msg::Net(NetEvent::Opened));
+    for msg in script("showcase").into_iter().take(2 + events) {
+        update(&mut m, Msg::Net(NetEvent::Message(msg)));
+    }
+    m
+}
+
+#[test]
+fn w_opens_the_review_the_status_line_names_then_steps_to_the_next_running_one() {
+    let mut m = showcase(9);
+    let number = |m: &Model| m.selected_pr().map(|p| p.number);
+    assert_eq!(number(&m), Some(1287));
+    press(&mut m, KeyCode::Char('/'));
+    press(&mut m, KeyCode::Char('x'));
+    press(&mut m, KeyCode::Enter);
+    press(&mut m, KeyCode::Char('w'));
+    assert_eq!((m.ui.screen, m.ui.focus, number(&m)), (Screen::Review, Pane::Main, Some(1291)));
+    assert_eq!(m.ui.pr_filter, "");
+    press(&mut m, KeyCode::Char('w'));
+    assert_eq!(number(&m), Some(338));
+    press(&mut m, KeyCode::Char('w'));
+    assert_eq!(number(&m), Some(1291));
+}
+
+#[test]
+fn shift_j_scrolls_the_open_card_and_moving_to_another_finding_resets_it() {
+    let mut m = showcase(0);
+    press(&mut m, KeyCode::Enter);
+    let shift = |m: &mut Model, c| update(m, Msg::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::SHIFT)));
+    shift(&mut m, 'J');
+    shift(&mut m, 'J');
+    shift(&mut m, 'K');
+    assert_eq!(m.ui.doc_scroll, 1);
+    press(&mut m, KeyCode::Char('j'));
+    assert_eq!(m.ui.doc_scroll, 0);
+    shift(&mut m, 'K');
+    assert_eq!(m.ui.doc_scroll, 0);
+}
+
+#[test]
+fn opening_a_finding_loads_its_revisions_diff_without_leaving_the_screen() {
+    let mut m = showcase(0);
+    press(&mut m, KeyCode::Enter);
+    let fx = press(&mut m, KeyCode::Enter);
+    assert!(matches!(m.top_modal(), Some(Modal::Finding { .. })));
+    assert_eq!(m.ui.screen, Screen::Review);
+    assert!(fx.iter().any(|e| matches!(e, Effect::Send(ClientMessage::DiffGet { .. }))), "{fx:?}");
+}

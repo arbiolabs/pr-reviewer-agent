@@ -338,3 +338,22 @@ fn minimal(c: &Ctx, f: &mut Frame, area: Rect) {
         .collect();
     f.render_widget(Paragraph::new(lines), area);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::{activity_words, whole};
+    use crate::model::ActivityKind;
+    use crate::protocol::Text;
+
+    #[test]
+    fn the_status_line_drops_whole_parts_instead_of_cutting_text() {
+        let kind = ActivityKind::Tool {
+            tool: Text::new("search_code"),
+            summary: Text::new("\"returnTo\": 6 matches in 3 files"),
+        };
+        assert_eq!(whole(activity_words(&kind), 80), "search_code \"returnTo\": 6 matches in 3 files");
+        assert_eq!(whole(activity_words(&kind), 30), "search_code \"returnTo\"");
+        assert_eq!(whole(activity_words(&kind), 12), "search_code");
+        assert_eq!(whole(activity_words(&kind), 5), "");
+    }
+}

@@ -1217,10 +1217,13 @@ fn watch(m: &mut Model) {
         .filter_map(|r| Some((m.domain.prs.get(&r.pr_id)?.number, r.pr_id.clone())))
         .collect();
     running.sort();
-    let Some(first) = running.first().map(|r| r.1.clone()) else {
+    if running.is_empty() {
         notice(m, "no review is running");
         return;
-    };
+    }
+    // First the review the status line names: the running PR with the newest activity.
+    let newest = m.domain.activity.iter().rev().find_map(|a| running.iter().find(|r| a.pr_id.as_ref() == Some(&r.1)));
+    let first = newest.unwrap_or(&running[0]).1.clone();
     let at = running.iter().position(|r| Some(&r.1) == m.ui.selected_pr.as_ref());
     let watching = m.ui.screen == Screen::Review && m.top_modal().is_none();
     let next = match at {

@@ -670,23 +670,13 @@ pub fn finding_page(c: &Ctx, f: &mut Frame, area: Rect, id: &FindingId, scroll: 
                 if ev.kind == EvidenceKind::CodeRef {
                     body.extend(code_block(c, ev, fd, iw, 40));
                 } else {
-                    let tag = match ev.kind {
-                        EvidenceKind::ToolSummary => "tool",
-                        EvidenceKind::TestResult => "test",
-                        EvidenceKind::Scenario => "scenario",
-                        EvidenceKind::Link => "link",
-                        _ => "note",
-                    };
-                    for (k, l) in rich(c, ev.text.as_str(), iw.saturating_sub(14), Role::Normal).into_iter().enumerate()
-                    {
-                        let mut s =
-                            vec![c.span(if k == 0 { format!("{tag:<14}") } else { " ".repeat(14) }, Role::Muted)];
-                        s.extend(l);
-                        body.push(s);
-                    }
+                    body.extend(trail(c, ev, iw));
                 }
                 body.push(vec![]);
             }
+            section(&mut body, "Diff at the anchor");
+            body.extend(diff_inset(c, fd, iw));
+            body.push(vec![]);
             section(&mut body, "How the reviewer checked");
             body.extend(rich(c, d.reasoning_summary.as_str(), iw, Role::Normal));
             body.push(vec![c.span("model-written summary, not a confirmation", Role::Muted)]);
@@ -697,12 +687,7 @@ pub fn finding_page(c: &Ctx, f: &mut Frame, area: Rect, id: &FindingId, scroll: 
                 body.extend(rich(c, prose, iw, Role::Normal));
                 if !code.is_empty() {
                     body.push(vec![]);
-                    let surface = c.t.bg(Bg::Surface);
-                    for l in code.split('\n') {
-                        let mut s = vec![Span::styled("  ", surface)];
-                        s.extend(highlight(c, l, iw.saturating_sub(3), Bg::Surface));
-                        body.push(filled(s, iw, surface));
-                    }
+                    body.extend(fix_block(c, code, iw));
                 }
                 body.push(vec![]);
             }
@@ -718,4 +703,124 @@ pub fn finding_page(c: &Ctx, f: &mut Frame, area: Rect, id: &FindingId, scroll: 
     }
     lines.extend(barred(c, fd.severity, true, body));
     f.render_widget(Paragraph::new(lines).scroll((scroll, 0)), col);
+}
+
+/// A tool, test or scenario line from the evidence: `◎ search_code "x": 4 matches`, wrapped under its text.
+fn trail(c: &Ctx, ev: &Evidence, w: usize) -> Vec<Vec<Span<'static>>> {
+    let tag = match ev.kind {
+        EvidenceKind::ToolSummary => "",
+        EvidenceKind::TestResult => "test ",
+        EvidenceKind::Scenario => "scenario ",
+        EvidenceKind::Link => "link ",
+        _ => "note ",
+    };
+    let icon = if c.t.ascii { "* " } else { "◎ " };
+    let mut out = Vec::new();
+    for (k, l) in rich(c, &format!("{tag}{}", ev.text), w.saturating_sub(2), Role::Normal).into_iter().enumerate() {
+        let mut s = vec![c.span(if k == 0 { icon } else { "  " }, Role::Accent)];
+        s.extend(l);
+        out.push(s);
+    }
+    out
+}
+
+/// The suggested change as an inset block on the surface, each line marked as an addition.
+fn fix_block(c: &Ctx, code: &str, w: usize) -> Vec<Vec<Span<'static>>> {
+    let surface = c.t.bg(Bg::Surface);
+    let mut out = vec![filled(vec![Span::styled("  suggested change", c.s(Role::Muted).patch(surface))], w, surface)];
+    let bar = if c.t.ascii { "|" } else { "│" };
+    for l in code.trim_end().split('\n') {
+        let mut s = vec![
+            Span::styled("  + ", c.s(Role::Add).patch(surface)),
+            Span::styled(format!("{bar} "), c.s(Role::Muted).patch(surface)),
+        ];
+        s.extend(highlight(c, l, w.saturating_sub(7), Bg::Surface));
+        out.push(filled(s, w, surface));
+    }
+    out
+}
+
+/// Rows of the change itself around the finding's anchor, from the diff the reader loads when it opens, so the
+/// finding reads against what the PR changed without leaving the page.
+fn diff_inset(c: &Ctx, fd: &Finding, w: usize) -> Vec<Vec<Span<'static>>> {
+    use crate::model::{DiffRow, file_rows};
+    use crate::protocol::LineKind;
+    let note = |text: String, role| vec![vec![c.span(text, role)]];
+    let key = crate::update::finding_diff_key(c.m, &fd.id);
+    let Some(d) = c.m.diff.as_ref().filter(|d| Some(&d.key) == key.as_ref()) else {
+        return note("loading the diff…".into(), Role::Pending);
+    };
+    if let Some(e) = &d.error {
+        return note(format!("diff unavailable: {e}"), Role::Fail);
+    }
+    let Some(file) = d.files.iter().find(|x| x.path == fd.file) else {
+        let text = if d.pending.is_some() { "loading the diff…" } else { "this file is not in the diff" };
+        return note(text.into(), Role::Muted);
+    };
+    let rows = file_rows(file);
+    let anchor = fd.line.map(|l| l.get());
+    let at = anchor
+        .and_then(|a| rows.iter().position(|r| matches!(r, DiffRow::Line(l) if l.new.is_some_and(|n| n >= a))))
+        .unwrap_or(0);
+    let surface = c.t.bg(Bg::Surface);
+    let mut out = vec![filled(
+        vec![
+            Span::styled(
+                format!("  {}", c.fit(file.path.as_str(), w.saturating_sub(30))),
+                c.s(Role::Muted).patch(surface),
+            ),
+            Span::styled(format!("  +{}", file.additions), c.s(Role::Add).patch(surface)),
+            Span::styled(format!(" -{}", file.deletions), c.s(Role::Del).patch(surface)),
+            Span::styled("   d opens the full diff", c.s(Role::Muted).patch(surface)),
+        ],
+        w,
+        surface,
+    )];
+    let num_w = 4;
+    for row in &rows[super::window(rows.len(), Some(at), 11)] {
+        match row {
+            DiffRow::Header(h) => {
+                let text = c.fit(h.header.as_str(), w.saturating_sub(4));
+                out.push(filled(vec![Span::styled(format!("  {text}"), c.s(Role::Hunk).patch(surface))], w, surface));
+            }
+            DiffRow::Line(l) => {
+                let hit = anchor.is_some() && l.new == anchor;
+                let (sign, role, bg) = match l.kind {
+                    LineKind::Add => ("+", Role::Add, Bg::Add),
+                    LineKind::Del => ("-", Role::Del, Bg::Del),
+                    _ => (" ", Role::Muted, Bg::Surface),
+                };
+                let bg = if hit { Bg::Anchor } else { bg };
+                let st = c.t.bg(bg);
+                let (mark, mrole) = if hit {
+                    (if c.t.ascii { ">" } else { "▶" }, c.t.severity(fd.severity).2)
+                } else {
+                    (" ", Role::Muted)
+                };
+                let num = l.new.or(l.old).map_or(String::new(), |n| n.to_string());
+                let mut s = vec![
+                    Span::styled(format!(" {mark}"), c.s(mrole).patch(st)),
+                    Span::styled(format!("{num:>num_w$} "), c.s(if hit { Role::Title } else { Role::Muted }).patch(st)),
+                    Span::styled(format!("{sign} "), c.s(role).patch(st)),
+                ];
+                let room = w.saturating_sub(spans_w(&s) + 1);
+                s.extend(highlight(c, l.text.as_str(), room, bg));
+                out.push(filled(s, w, st));
+            }
+        }
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::fold_rule;
+
+    #[test]
+    fn the_fold_rule_cuts_the_explanation_to_three_then_the_code_to_five_then_the_explanation_to_one() {
+        assert_eq!(fold_rule(30, 4, 11, true), (4, 11));
+        assert_eq!(fold_rule(14, 4, 11, true), (3, 8));
+        assert_eq!(fold_rule(9, 6, 11, true), (1, 5));
+        assert_eq!(fold_rule(10, 6, 0, false), (6, 0));
+    }
 }
