@@ -35,7 +35,8 @@ export type RevisionRow = {
 };
 
 /** The audited events that reopen a revision; each starts its own durable task attempt. */
-export type Reopening = "MANUAL_RETRY" | "APPROVED";
+export const REOPENINGS = ["MANUAL_RETRY", "APPROVED"] as const;
+export type Reopening = (typeof REOPENINGS)[number];
 
 export type CommandRecord = { command: string; operationId: string };
 
@@ -234,6 +235,8 @@ export class AppStore {
     this.db
       .prepare("UPDATE review_revisions SET state = ?, completed_at = ? WHERE id = ?")
       .run(to, TERMINAL_REVIEW_STATES.includes(to) ? at : null, revisionId);
+    // The new attempt's abort must report its own reason, not the cancel that ended the last one.
+    if ((REOPENINGS as readonly string[]).includes(event)) this.db.prepare("UPDATE review_revisions SET cancel_reason = NULL WHERE id = ?").run(revisionId);
     this.db
       .prepare("INSERT INTO audit_events (revision_id, from_state, event, to_state, detail, at) VALUES (?, ?, ?, ?, ?, ?)")
       .run(revisionId, from, event, to, detail, at);
@@ -344,7 +347,7 @@ export class AppStore {
 
   /** The revision's reopenings in order; their count is the durable task attempt, and the last one says where it starts. */
   reopenings(revisionId: string): Reopening[] {
-    return (this.db.prepare("SELECT event FROM audit_events WHERE revision_id = ? AND event IN ('MANUAL_RETRY', 'APPROVED') ORDER BY seq").all(revisionId) as { event: Reopening }[]).map((r) => r.event);
+    return (this.db.prepare(`SELECT event FROM audit_events WHERE revision_id = ? AND event IN (${REOPENINGS.map((e) => `'${e}'`).join(", ")}) ORDER BY seq`).all(revisionId) as { event: Reopening }[]).map((r) => r.event);
   }
 
   /** Mark a revision as cancelled by a human before its durable task is aborted; the abort handler reports `reason`. */

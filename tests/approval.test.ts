@@ -157,6 +157,28 @@ it("cancels a running review with the TUI's reason, and refuses while a GitHub w
   expect(await refused(cancel(h.app, "nope", "x"))).toEqual(["NOT_FOUND", "no run nope"]);
 }, 30_000);
 
+it("reports a later abort with its own reason, not the cancel that ended the earlier attempt", async () => {
+  const reached: (() => void)[] = [];
+  const blocked: FauxResponseStep = (_context, options) =>
+    new Promise((resolve) => {
+      reached.shift()!();
+      options?.signal?.addEventListener("abort", () => resolve(fauxAssistantMessage("", { stopReason: "aborted" })), { once: true });
+    });
+  const h = await openApproving([readDiff(), blocked, readDiff(), blocked]);
+  const first = new Promise<void>((resolve) => reached.push(resolve));
+  const started = await startReview(h.app, fixture.pull, "1", { publish: true });
+  await first;
+  await cancel(h.app, started.revision.id, "cancelled from the TUI");
+  expect((await finishReview(h.app, started)).state).toBe("FAILED");
+
+  const second = new Promise<void>((resolve) => reached.push(resolve));
+  const retried = await retry(h.app, started.revision.id, "tui via daemon");
+  await second;
+  await h.app.harness.abortTask(retried.taskId!, BACKGROUND_CONTEXT);
+  const revision = await finishReview(h.app, retried);
+  expect([revision.state, h.app.store.auditEvents(revision.id).at(-1)]).toEqual(["FAILED", expect.objectContaining({ from_state: "ANALYZE", event: "TERMINAL_ERROR", detail: "durable task aborted" })]);
+}, 30_000);
+
 const SCRIPT = new URL("./fixtures/cli-publish.ts", import.meta.url).pathname;
 function run(env: Record<string, string>): Promise<{ code: number | null; signal: string | null; stderr: string; stdout: string }> {
   const child = spawn(process.execPath, [SCRIPT], { env: { ...process.env, ...env } });
