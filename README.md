@@ -76,7 +76,7 @@ A delivery whose handling fails waits `webhook_backoff_ms`, doubled after each f
 
 On startup, the service resumes durable tasks and recreates a task for any unfinished revision. It also reconciles outboxes of finished revisions whose write may have reached GitHub, before anything new is posted.
 
-**Deploy.** The `Dockerfile` runs `serve` as the non-root `node` user, with git installed and state on the `/data` volume. Register the app from `github-app.yml`, which lists the permissions and events. Then install the app on a repository and point its webhook URL at `/webhooks/github`. For a local test, a forwarding tunnel such as smee.io or `cloudflared` works.
+**Deploy.** The `Dockerfile` runs `serve` as the non-root `node` user, with git installed and state on the `/data` volume. Register the app from `github-app.yml`, which lists the permissions and events. Then install the app on a repository and point its webhook URL at `/webhooks/github`. For a local test, a forwarding tunnel such as smee.io or `cloudflared` works. The receiver accepts bodies up to 25 MB, GitHub's maximum payload, so on a public address put a reverse proxy with connection and rate limits in front of it.
 
 ## Layout
 
