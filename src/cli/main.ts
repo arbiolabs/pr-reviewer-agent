@@ -3,6 +3,7 @@ import { parseArgs } from "node:util";
 import type { AuthInteraction, CredentialStore, Models } from "@earendil-works/pi-ai";
 import { createTypeSafeClient, createZenClient } from "jev-systemone";
 import { loadConfig, saveDefaultModel } from "../config/config.ts";
+import { clientFor } from "../github/client.ts";
 import { GitHubPullSource, parsePullRef, parsePullUrl, type PullSource, resolveGitHubToken } from "../github/pulls.ts";
 import { type DecisionEngine, JevDecisionEngine, type JevRoute, jevSkipReason } from "../jev/decision.ts";
 import { PiAuthFileStore } from "../models/credential-store.ts";
@@ -83,7 +84,8 @@ async function review(args: string[], deps: CliDeps, dataDir: string, out: Out, 
   const ref = parsePullUrl(positionals[0]!);
   // A test's fake pull source serves local repositories; only the real GitHub source needs the token.
   const githubToken = deps.pulls ? undefined : await resolveGitHubToken();
-  const pulls = deps.pulls ?? new GitHubPullSource(githubToken);
+  const github = clientFor(config.github, { kind: "token", token: githubToken });
+  const pulls = deps.pulls ?? new GitHubPullSource(() => github);
   const pull = await pulls.getPull(ref);
 
   const models = deps.models ?? buildModels(deps.credentials ?? new PiAuthFileStore());

@@ -1,8 +1,10 @@
 import { execFile } from "node:child_process";
 import { promisify } from "node:util";
 import type { PullInfo } from "../domain/types.ts";
+import { type GitHubClient, GitHubError } from "./client.ts";
 
-export type PullRef = { owner: string; repo: string; number: number };
+/** `installationId` picks the GitHub App installation to read through; absent means token auth. */
+export type PullRef = { owner: string; repo: string; number: number; installationId?: number };
 
 export interface PullSource {
   getPull(ref: PullRef): Promise<PullInfo>;
@@ -41,30 +43,29 @@ type GitHubPull = {
   base: { sha: string; repo: { id: number; full_name: string; clone_url: string; private: boolean } };
 };
 
+/** Reads PRs through the client for the ref's installation (installation 0 is token auth). */
 export class GitHubPullSource implements PullSource {
-  private readonly token: string | undefined;
+  private readonly clientFor: (installationId: number) => GitHubClient;
 
-  constructor(token: string | undefined) {
-    this.token = token;
+  constructor(clientFor: (installationId: number) => GitHubClient) {
+    this.clientFor = clientFor;
   }
 
   async getPull(ref: PullRef): Promise<PullInfo> {
-    const response = await fetch(`https://api.github.com/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}`, {
-      headers: {
-        accept: "application/vnd.github+json",
-        "x-github-api-version": "2022-11-28",
-        "user-agent": "pr-review-m1",
-        ...(this.token ? { authorization: `Bearer ${this.token}` } : {}),
-      },
-      signal: AbortSignal.timeout(15_000),
-    });
-    if (response.status === 401 || response.status === 403 || response.status === 404) {
-      throw new Error(`cannot read ${ref.owner}/${ref.repo}#${ref.number}: HTTP ${response.status} (${this.token ? "token lacks access" : "no GitHub token; set GITHUB_TOKEN or run gh auth login"})`);
+    const installationId = ref.installationId ?? 0;
+    const client = this.clientFor(installationId);
+    let pull: GitHubPull;
+    try {
+      pull = (await client.request<GitHubPull>("GET", `/repos/${ref.owner}/${ref.repo}/pulls/${ref.number}`)).data;
+    } catch (error) {
+      if (error instanceof GitHubError && (error.status === 401 || error.status === 403 || error.status === 404)) {
+        const anonymous = client.auth.kind === "token" && client.auth.token === undefined;
+        throw new Error(`cannot read ${ref.owner}/${ref.repo}#${ref.number}: HTTP ${error.status} (${anonymous ? "no GitHub token; set GITHUB_TOKEN or run gh auth login" : "token lacks access"})`);
+      }
+      throw error;
     }
-    if (!response.ok) throw new Error(`GitHub API error ${response.status} for ${ref.owner}/${ref.repo}#${ref.number}`);
-    const pull = (await response.json()) as GitHubPull;
     return {
-      installationId: 0,
+      installationId,
       repositoryId: pull.base.repo.id,
       fullName: pull.base.repo.full_name,
       number: pull.number,

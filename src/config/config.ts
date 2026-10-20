@@ -12,6 +12,15 @@ export type Config = {
     base_policy_version: string;
     jev_timeout_ms: number;
     retry_backoff_ms: number;
+    /** A PR's review starts this long after its last triggering event; a later push restarts the wait. */
+    debounce_seconds: number;
+  };
+  /** §9.4 rate limits and retries. `max_retries` bounds each request; the client never retries an ambiguous write. */
+  github: {
+    max_retries: number;
+    backoff_ms: number;
+    concurrency_per_installation: number;
+    timeout_ms: number;
   };
   routing: {
     mandatory_deep_paths: string[];
@@ -45,7 +54,9 @@ export const DEFAULT_CONFIG: Config = {
     base_policy_version: "1",
     jev_timeout_ms: 15_000,
     retry_backoff_ms: 1000,
+    debounce_seconds: 30,
   },
+  github: { max_retries: 3, backoff_ms: 500, concurrency_per_installation: 2, timeout_ms: 15_000 },
   routing: {
     mandatory_deep_paths: ["**/auth/**", "**/payments/**", "**/booking/**", "**/migrations/**"],
     jev_deep_threshold: 0.7,
