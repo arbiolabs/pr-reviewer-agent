@@ -409,3 +409,15 @@ fn every_view_survives_every_size() {
     }
     let _ = NetCmd::Close;
 }
+
+#[test]
+fn j_reads_the_explanation_before_the_document_moves() {
+    let mut s = Sim::new(Look::default()).play("showcase", 2).key(KeyCode::Enter);
+    let (before, _) = render(&mut s.m, 120, 38);
+    assert!(before.contains("2 more, J scrolls"), "{before}");
+    let mut s = s.key(KeyCode::Char('J')).key(KeyCode::Char('J'));
+    let (after, _) = render(&mut s.m, 120, 38);
+    assert!(after.contains("Orders: self-serve refunds"), "the PR header stays:\n{after}");
+    assert!(after.contains("2 more above, K scrolls back"), "{after}");
+    assert!(after.contains("refund another customer's order"), "the explanation's last line shows:\n{after}");
+}

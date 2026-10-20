@@ -171,6 +171,8 @@ pub struct Doc {
     pub card: Option<(usize, usize)>,
     /// The first line of each finding's card, in order, so a click resolves to the card under it.
     pub owners: Vec<(usize, FindingId)>,
+    /// Rows the open card's explanation scrolls through before J moves the document itself.
+    pub prose_rest: usize,
 }
 
 impl Doc {
@@ -181,7 +183,8 @@ impl Doc {
             _ => 0,
         };
         let max = self.lines.len().saturating_sub(height.min(self.lines.len()) / 2);
-        (auto as i64 + i64::from(c.m.ui.doc_scroll)).clamp(0, max as i64) as u16
+        let own = (c.m.ui.doc_scroll.max(0) as usize).saturating_sub(self.prose_rest);
+        (auto + own).min(max) as u16
     }
 }
 
@@ -252,20 +255,23 @@ pub fn document(c: &Ctx, pr: &Pr, w: usize, height: usize) -> Doc {
     let above = if compact { 1 } else { lines.len() };
     let mut card_at = None;
     let mut owners = Vec::new();
+    let mut prose_rest = 0;
     for (i, f) in findings.iter().enumerate() {
         let start = lines.len();
         owners.push((start, f.id.clone()));
         let open = sel == Some(&f.id);
         let next = if i + 1 < findings.len() && !compact { NEXT_HEAD } else { 0 };
         let budget = if open { height.saturating_sub(above + next).max(MIN_CARD) } else { 0 };
-        lines.extend(card(c, f, c.m.details.get(&f.id), w, open && focused, budget));
+        let (body, rest) = card(c, f, c.m.details.get(&f.id), w, open && focused, budget);
+        lines.extend(body);
+        prose_rest += rest;
         lines.push(Line::raw(""));
         if open {
             card_at = Some((start, lines.len() + next.saturating_sub(1)));
         }
     }
     let card = card_at.map(|(s, e)| (s, e.min(lines.len())));
-    Doc { lines, card, owners }
+    Doc { lines, card, owners, prose_rest }
 }
 
 /// Rows the next card's head needs to stay in view under the open card: its severity, title and location.
@@ -496,12 +502,20 @@ fn card_head(c: &Ctx, f: &Finding, w: usize, selected: bool) -> Vec<Vec<Span<'st
 /// the cited code, fitted to `budget` rows by the fold rule. The explanation gives way first, down to 3 lines, then
 /// the code, down to 5 lines around its anchor, then the explanation again, down to 1. The explanation scrolls inside
 /// its window with J/K, so the code under it never moves; each cut edge says how much it hides.
-fn card(c: &Ctx, f: &Finding, d: Option<&FindingDetail>, w: usize, focused: bool, budget: usize) -> Vec<Line<'static>> {
+/// The card's lines, and how many rows its explanation can scroll.
+fn card(
+    c: &Ctx,
+    f: &Finding,
+    d: Option<&FindingDetail>,
+    w: usize,
+    focused: bool,
+    budget: usize,
+) -> (Vec<Line<'static>>, usize) {
     let iw = w.saturating_sub(2);
     let mut body = card_head(c, f, iw, focused || budget > 0);
     let Some(d) = d else {
         body.push(vec![c.span(loading(c, &f.id), Role::Muted)]);
-        return barred(c, f.severity, focused, body);
+        return (barred(c, f.severity, focused, body), 0);
     };
     let prose = rich(c, d.explanation.as_str(), iw, Role::Normal);
     if budget == 0 {
@@ -511,12 +525,13 @@ fn card(c: &Ctx, f: &Finding, d: Option<&FindingDetail>, w: usize, focused: bool
             prose[0] = fold(c, std::mem::take(&mut prose[0]), iw, "");
         }
         body.extend(prose);
-        return barred(c, f.severity, focused, body);
+        return (barred(c, f.severity, focused, body), 0);
     }
     let ev = d.evidence.iter().find(|e| e.kind == EvidenceKind::CodeRef);
     let src_len = ev.map_or(0, |e| e.text.as_str().split('\n').count());
     let room = budget.saturating_sub(body.len() + 4);
     let (prose_rows, code_lines) = fold_rule(room, prose.len(), src_len.min(11), ev.is_some());
+    let rest = prose.len().saturating_sub(prose_rows);
     body.push(vec![]);
     body.extend(prose_window(c, prose, prose_rows, c.m.ui.doc_scroll.max(0) as usize, iw));
     if let Some(ev) = ev {
@@ -545,7 +560,7 @@ fn card(c: &Ctx, f: &Finding, d: Option<&FindingDetail>, w: usize, focused: bool
         hint.truncate(2);
     }
     body.push(hint);
-    barred(c, f.severity, focused, body)
+    (barred(c, f.severity, focused, body), rest)
 }
 
 /// How many explanation rows and code lines fit in `room` rows; the code block adds a path row and a cut note.
@@ -581,7 +596,7 @@ fn prose_window(
     let below = prose.len() - rows - offset;
     let mut out: Vec<_> = prose.into_iter().skip(offset).take(rows).collect();
     if offset > 0 && rows > 1 {
-        out[0] = vec![c.span(format!("{} {offset} more above, K scrolls back", g.ellipsis), Role::Muted)];
+        out[0] = vec![c.span(format!("{} {} more above, K scrolls back", g.ellipsis, offset + 1), Role::Muted)];
     }
     if below > 0 {
         let last = out.pop().unwrap_or_default();
