@@ -1,0 +1,47 @@
+{
+  "type": "finding.detail",
+  "requestId": "req-finding",
+  "finding": {
+    "id": "9decead4b5f76750560dedb1f9952236",
+    "prId": "d2bc8e8f23f98a4b203ffeb4519ed00b",
+    "runId": "7f24f52475b0cd1755a7ef64fd8a8080",
+    "fingerprint": "08f8d40377e9fa29288a468edde6f184",
+    "status": "DETECTED",
+    "evidenceCount": 3,
+    "stale": false,
+    "title": "Two checkouts can both reserve the last unit",
+    "category": "concurrency",
+    "severity": "high",
+    "confidence": 0.88,
+    "file": "src/server/inventory/reserve.ts",
+    "line": 27,
+    "explanation": "reserveStock now reads the row, checks availability in application code, and writes back an absolute `reserved` value. Two checkouts for the last unit can read the same row, both pass the `available < qty` check, and both write `item.reserved + qty`. The second write overwrites the first, so two reservations hold one unit and `reserved` undercounts. The removed reserve_stock() SQL function did the check and the increment under a row lock.",
+    "reasoningSummary": "The diff deletes the only call to reserve_stock(). git_history shows it was added in #977 to fix overselling on limited drops. The new code runs outside db.$transaction, and an update with a computed literal is not a compare-and-set.",
+    "suggestedFix": "Make the check and the increment one conditional statement, and create the reservation in the same transaction:\n\nconst held = await tx.$executeRaw`UPDATE inventory SET reserved = reserved + ${qty} WHERE sku = ${sku} AND on_hand - reserved >= ${qty}`;\nif (held === 0) throw new OutOfStockError(sku);\n\nOr restore the reserve_stock() call.",
+    "evidence": [
+      {
+        "kind": "code_ref",
+        "path": "src/server/inventory/reserve.ts",
+        "start": 19,
+        "end": 27,
+        "refSha": "647fb3beac66d51005ac1a2cb89fec94e7a3da76",
+        "text": "  const item = await db.inventory.findUnique({ where: { sku } });\n  if (!item) throw new UnknownSkuError(sku);\n  const available = item.onHand - item.reserved;\n  if (available < qty) {\n    throw new OutOfStockError(sku, available);\n  }\n  await db.inventory.update({\n    where: { sku },\n    data: { reserved: item.reserved + qty },"
+      },
+      {
+        "kind": "scenario",
+        "text": "Carts A and B check out TEE-BLK-M (onHand 10, reserved 9) 4 ms apart. Both read reserved = 9 and see 1 available. Both write reserved = 10. Two reservations now exist for one unit."
+      },
+      {
+        "kind": "tool_summary",
+        "text": "git log -S reserve_stock: added in #977 \"Fix oversell on limited drops\" (row lock inside the SQL function)"
+      }
+    ],
+    "history": [
+      {
+        "runId": "7f24f52475b0cd1755a7ef64fd8a8080",
+        "disposition": "DETECTED",
+        "at": "2026-10-20T13:52:56Z"
+      }
+    ]
+  }
+}

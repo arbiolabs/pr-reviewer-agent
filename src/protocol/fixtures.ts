@@ -1,5 +1,6 @@
 // Source of protocol/fixtures and protocol/playback. Edit here, then run `pnpm protocol:emit`.
-import type { Account, ClientMessage, DiffFile, Finding, FindingDetail, Pr, Run, ServerMessage } from "./v1.ts";
+import { sha256, stableId } from "../domain/types.ts";
+import type { Account, ClientMessage, DiffFile, Evidence, Finding, FindingDetail, Pr, Run, ServerMessage } from "./v1.ts";
 
 const EPOCH = "epoch-1";
 const T0 = Date.parse("2026-10-20T13:00:00Z");
@@ -125,6 +126,576 @@ const selectCommand = (a: Account) => ({
   params: { accountId: a.id },
   idempotencyKey: `account.select:${a.id}`,
 });
+
+// ---------- showcase: a believable session for judging TUI designs ----------
+// Diffs are written as unified-diff text; findings and evidence look their lines up in them, so a cited line can never
+// disagree with the hunk the Diff view shows.
+
+type Hunk = DiffFile["hunks"][number];
+type DiffLine = Hunk["lines"][number];
+
+const hunk = (oldStart: number, newStart: number, context: string, body: string): Hunk => {
+  let o = oldStart;
+  let n = newStart;
+  const rows = body.split("\n").slice(1, -1).map((raw): DiffLine => {
+    const [mark, text] = [raw[0] ?? " ", raw.slice(1)];
+    if (mark === "+") return { kind: "add", new: n++, text };
+    if (mark === "-") return { kind: "del", old: o++, text };
+    if (mark !== " ") throw new Error(`diff line has no +, - or space marker: ${raw}`);
+    return { kind: "context", old: o++, new: n++, text };
+  });
+  const header = `@@ -${oldStart},${o - oldStart} +${newStart},${n - newStart} @@${context ? ` ${context}` : ""}`;
+  return { header, oldStart, newStart, lines: rows };
+};
+
+const diffFile = (path: string, hunks: Hunk[], status: DiffFile["status"] = "modified"): DiffFile => {
+  const all = hunks.flatMap((h) => h.lines);
+  return {
+    path,
+    status,
+    additions: all.filter((l) => l.kind === "add").length,
+    deletions: all.filter((l) => l.kind === "del").length,
+    hunks,
+    truncated: false,
+  };
+};
+
+/** The head-revision line number of the one line containing `needle`. */
+const lineOf = (file: DiffFile, needle: string): number => {
+  const hits = file.hunks.flatMap((h) => h.lines).filter((l) => l.kind !== "del" && l.text.includes(needle));
+  if (hits.length !== 1) throw new Error(`${file.path}: ${hits.length} head lines contain ${JSON.stringify(needle)}`);
+  return hits[0]!.new!;
+};
+
+/** A code_ref evidence item quoting head lines `from`..`to` (each found by its text) exactly as the diff has them. */
+const cite = (file: DiffFile, refSha: string, from: string, to: string): Evidence => {
+  const [start, end] = [lineOf(file, from), lineOf(file, to)];
+  const text = file.hunks
+    .flatMap((h) => h.lines)
+    .filter((l) => l.kind !== "del" && l.new! >= start && l.new! <= end)
+    .map((l) => l.text);
+  if (text.length !== end - start + 1) throw new Error(`${file.path}:${start}-${end} spans a gap between hunks`);
+  return { kind: "code_ref", path: file.path, start, end, refSha, text: text.join("\n") };
+};
+
+const hexSha = (seed: string) => sha256(seed).slice(0, 40);
+const showPr = (repository: string, number: number, title: string, author: string, extra: Partial<Pr> = {}): Pr => ({
+  id: stableId("pr", repository, number),
+  repository,
+  number,
+  title,
+  author,
+  headSha: hexSha(`${repository}#${number} head`),
+  baseSha: hexSha(`${repository}#${number} base`),
+  lifecycle: "ACTIVE",
+  ...extra,
+});
+const showRun = (p: Pr, startedAt: number, extra: Partial<Run> = {}): Run => ({
+  id: stableId("revision", p.id, p.headSha),
+  prId: p.id,
+  baseSha: p.baseSha,
+  headSha: p.headSha,
+  phase: "COMPLETED",
+  status: "COMPLETED",
+  model: "claude-opus-5-5",
+  startedAt: at(startedAt),
+  ...extra,
+});
+
+type Authored = Pick<
+  FindingDetail,
+  "title" | "category" | "severity" | "confidence" | "file" | "line" | "explanation" | "reasoningSummary" | "suggestedFix" | "evidence"
+>;
+const showDetail = (r: Run, seenAt: number, a: Authored, extra: Partial<Finding> = {}): FindingDetail => {
+  const fingerprint = stableId("fingerprint", r.prId, a.file, a.title);
+  return {
+    id: stableId("finding", r.id, fingerprint),
+    prId: r.prId,
+    runId: r.id,
+    fingerprint,
+    status: "DETECTED",
+    evidenceCount: a.evidence.length,
+    stale: false,
+    ...a,
+    ...extra,
+    history: [{ runId: r.id, disposition: "DETECTED", at: at(seenAt) }],
+  };
+};
+const findingOf = ({ explanation: _e, reasoningSummary: _r, suggestedFix: _s, evidence: _v, history: _h, ...f }: FindingDetail): Finding => f;
+
+// The session opens at 14:30; T0 is 13:00.
+const SHOW_OPEN = 5400;
+
+// 1. acme/shop#1287: COMPLETED, one finding of each severity.
+const orders = showPr("acme/shop", 1287, "Orders: self-serve refunds, stock holds at checkout, paged order history", "mkowalski");
+const ordersRun = showRun(orders, SHOW_OPEN - 2460, { completedAt: at(SHOW_OPEN - 2190) });
+
+const ordersRoute = diffFile("src/server/routes/orders.ts", [
+  hunk(4, 4, "", `
+ import { requireAuth } from "../http/auth.ts";
+ import { toOrderDto } from "../orders/dto.ts";
++import { RefundBody } from "../schemas/refund.ts";
+ import type { Db, Payments } from "../deps.ts";
+`),
+  hunk(84, 85, "export function ordersRouter(db: Db, payments: Payments) {", `
+   router.get("/orders/:id", requireAuth, async (req, res) => {
+     const order = await db.order.findUnique({ where: { id: req.params.id } });
+     if (!order || order.customerId !== req.user.id) return res.sendStatus(404);
+     res.json(toOrderDto(order));
+   });
+
++  router.post("/orders/:id/refund", requireAuth, async (req, res) => {
++    const { amountCents, reason } = RefundBody.parse(req.body);
++    const order = await db.order.findUnique({
++      where: { id: req.params.id },
++      include: { payment: true },
++    });
++    if (!order) return res.sendStatus(404);
++    if (amountCents > order.totalCents - order.refundedCents) {
++      return res.status(422).json({ error: "refund exceeds captured amount" });
++    }
++    const refund = await payments.refund(order.payment.providerId, amountCents, { reason });
++    await db.order.update({
++      where: { id: order.id },
++      data: { refundedCents: { increment: amountCents } },
++    });
++    res.status(201).json({ refundId: refund.id });
++  });
++
+   return router;
+ }
+`),
+]);
+
+const reserve = diffFile("src/server/inventory/reserve.ts", [
+  hunk(16, 16, "", `
+ const HOLD_MINUTES = 15;
+
+ export async function reserveStock(db: Db, sku: string, qty: number, cartId: string) {
+-  const [{ ok }] = await db.$queryRaw<{ ok: boolean }[]>\`SELECT reserve_stock(\${sku}, \${qty}, \${cartId}) AS ok\`;
+-  if (!ok) throw new OutOfStockError(sku);
++  const item = await db.inventory.findUnique({ where: { sku } });
++  if (!item) throw new UnknownSkuError(sku);
++  const available = item.onHand - item.reserved;
++  if (available < qty) {
++    throw new OutOfStockError(sku, available);
++  }
++  await db.inventory.update({
++    where: { sku },
++    data: { reserved: item.reserved + qty },
++  });
++  await db.reservation.create({
++    data: { sku, qty, cartId, expiresAt: addMinutes(new Date(), HOLD_MINUTES) },
++  });
+ }
+`),
+]);
+
+const history = diffFile(
+  "src/server/orders/history.ts",
+  [
+    hunk(0, 1, "", `
++import type { Db } from "../deps.ts";
++
++export const PAGE_SIZE = 20;
++
++export async function orderHistory(db: Db, customerId: string, page: number) {
++  const total = await db.order.count({ where: { customerId } });
++  const lastPage = Math.max(1, Math.ceil(total / PAGE_SIZE));
++  const orders = await db.order.findMany({
++    where: { customerId },
++    orderBy: { placedAt: "desc" },
++    skip: (page - 1) * PAGE_SIZE,
++    take: PAGE_SIZE,
++  });
++
++  const withItems = [];
++  for (const order of orders) {
++    const items = await db.orderItem.findMany({
++      where: { orderId: order.id },
++      include: { product: true },
++    });
++    withItems.push({ ...order, items });
++  }
++
++  return {
++    orders: withItems,
++    page,
++    lastPage,
++    hasNext: page <= lastPage,
++    hasPrev: page > 1,
++  };
++}
+`),
+  ],
+  "added",
+);
+
+const ordersSeen = SHOW_OPEN - 2230;
+const refundAuthz = showDetail(ordersRun, ordersSeen, {
+  title: "Any signed-in customer can refund any order",
+  category: "security",
+  severity: "critical",
+  confidence: 0.94,
+  file: ordersRoute.path,
+  line: lineOf(ordersRoute, "if (!order) return res.sendStatus(404);"),
+  explanation:
+    "POST /orders/:id/refund loads the order by id and refunds it without checking that the caller owns it. `requireAuth` only proves the caller is signed in. Order ids appear in receipt emails and support tickets, so anyone who learns one can refund another customer's order up to the captured amount while it still ships.",
+  reasoningSummary:
+    "Compared the new handler with GET /orders/:id in the same router, which returns 404 when order.customerId is not req.user.id. requireAuth (src/server/http/auth.ts) sets req.user and checks nothing else. No router-level middleware checks ownership or the support role.",
+  suggestedFix:
+    'Apply the same ownership check as the GET handler before refunding, and let support staff through explicitly:\n\nif (!order || (order.customerId !== req.user.id && !req.user.roles.includes("support"))) {\n  return res.sendStatus(404);\n}',
+  evidence: [
+    cite(ordersRoute, orders.headSha, 'router.post("/orders/:id/refund"', "const refund = await payments.refund("),
+    cite(ordersRoute, orders.headSha, 'router.get("/orders/:id"', "res.json(toOrderDto(order));"),
+    { kind: "tool_summary", text: 'search_code "customerId !== req.user.id": 4 matches; every other order route checks ownership' },
+  ],
+});
+const oversell = showDetail(ordersRun, ordersSeen + 6, {
+  title: "Two checkouts can both reserve the last unit",
+  category: "concurrency",
+  severity: "high",
+  confidence: 0.88,
+  file: reserve.path,
+  line: lineOf(reserve, "data: { reserved: item.reserved + qty },"),
+  explanation:
+    "reserveStock now reads the row, checks availability in application code, and writes back an absolute `reserved` value. Two checkouts for the last unit can read the same row, both pass the `available < qty` check, and both write `item.reserved + qty`. The second write overwrites the first, so two reservations hold one unit and `reserved` undercounts. The removed reserve_stock() SQL function did the check and the increment under a row lock.",
+  reasoningSummary:
+    "The diff deletes the only call to reserve_stock(). git_history shows it was added in #977 to fix overselling on limited drops. The new code runs outside db.$transaction, and an update with a computed literal is not a compare-and-set.",
+  suggestedFix:
+    "Make the check and the increment one conditional statement, and create the reservation in the same transaction:\n\nconst held = await tx.$executeRaw`UPDATE inventory SET reserved = reserved + ${qty} WHERE sku = ${sku} AND on_hand - reserved >= ${qty}`;\nif (held === 0) throw new OutOfStockError(sku);\n\nOr restore the reserve_stock() call.",
+  evidence: [
+    cite(reserve, orders.headSha, "const item = await db.inventory.findUnique(", "data: { reserved: item.reserved + qty },"),
+    {
+      kind: "scenario",
+      text: "Carts A and B check out TEE-BLK-M (onHand 10, reserved 9) 4 ms apart. Both read reserved = 9 and see 1 available. Both write reserved = 10. Two reservations now exist for one unit.",
+    },
+    { kind: "tool_summary", text: 'git log -S reserve_stock: added in #977 "Fix oversell on limited drops" (row lock inside the SQL function)' },
+  ],
+});
+const historyN1 = showDetail(ordersRun, ordersSeen + 11, {
+  title: "Order history runs one item query per order",
+  category: "performance",
+  severity: "medium",
+  confidence: 0.9,
+  file: history.path,
+  line: lineOf(history, "const items = await db.orderItem.findMany({"),
+  explanation:
+    "orderHistory fetches a page of orders, then awaits a separate orderItem.findMany for each one, in sequence. A full page costs 22 round trips (count, page, 20 item lookups) and none of them overlap, so latency grows with the page size. Repeat customers hit a full page on every visit.",
+  reasoningSummary:
+    "The loop awaits inside for...of, so the queries are sequential. The Order model already has an `items` relation (prisma/schema.prisma), so the items can come back with the orders in one query.",
+  suggestedFix:
+    'Load the items with the orders and drop the loop:\n\nconst orders = await db.order.findMany({\n  where: { customerId },\n  orderBy: { placedAt: "desc" },\n  skip: (page - 1) * PAGE_SIZE,\n  take: PAGE_SIZE,\n  include: { items: { include: { product: true } } },\n});',
+  evidence: [
+    cite(history, orders.headSha, "const withItems = [];", "withItems.push({ ...order, items });"),
+    { kind: "tool_summary", text: 'search_code "orderHistory(": 1 caller, GET /account/orders (src/server/routes/account.ts:61), PAGE_SIZE 20' },
+  ],
+});
+const pagerOffByOne = showDetail(ordersRun, ordersSeen + 14, {
+  title: "Last page of order history still reports a next page",
+  category: "correctness",
+  severity: "low",
+  confidence: 0.83,
+  file: history.path,
+  line: lineOf(history, "hasNext: page <= lastPage,"),
+  explanation:
+    "`lastPage` is 1-based and inclusive, so `page <= lastPage` is still true on the last page. The account page renders a Next link there. Following it skips past every order and shows an empty list labelled \"Page 4 of 3\".",
+  reasoningSummary: "page is 1-based (skip uses page - 1), and lastPage is ceil(total / PAGE_SIZE), the number of the last page. The comparison should be strict.",
+  suggestedFix: "Use a strict comparison: hasNext: page < lastPage,",
+  evidence: [
+    cite(history, orders.headSha, "return {", "hasPrev: page > 1,"),
+    cite(history, orders.headSha, "const total = await db.order.count(", "take: PAGE_SIZE,"),
+    { kind: "scenario", text: "47 orders, PAGE_SIZE 20: lastPage = 3. On page 3, hasNext = (3 <= 3) = true. Page 4 skips 60 rows and returns none." },
+  ],
+});
+
+// 2. acme/api#341: COMPLETED, nothing actionable.
+const requestIds = showPr("acme/api", 341, "Propagate X-Request-ID into structured logs", "tnakamura", { lifecycle: "MERGED" });
+const requestIdsRun = showRun(requestIds, SHOW_OPEN - 5320, { completedAt: at(SHOW_OPEN - 5130) });
+const requestIdGo = diffFile(
+  "internal/httpx/requestid.go",
+  [
+    hunk(0, 1, "", `
++package httpx
++
++import (
++\t"context"
++\t"log/slog"
++\t"net/http"
++
++\t"github.com/google/uuid"
++)
++
++type ctxKey struct{}
++
++// RequestID reuses an inbound X-Request-ID or mints one, and attaches it to the request's logger.
++func RequestID(next http.Handler) http.Handler {
++\treturn http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
++\t\tid := r.Header.Get("X-Request-ID")
++\t\tif id == "" || len(id) > 64 {
++\t\t\tid = uuid.NewString()
++\t\t}
++\t\tw.Header().Set("X-Request-ID", id)
++\t\tlogger := slog.Default().With("request_id", id)
++\t\tnext.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, logger)))
++\t})
++}
++
++// Logger returns the request-scoped logger, or the default one outside a request.
++func Logger(ctx context.Context) *slog.Logger {
++\tif l, ok := ctx.Value(ctxKey{}).(*slog.Logger); ok {
++\t\treturn l
++\t}
++\treturn slog.Default()
++}
+`),
+  ],
+  "added",
+);
+const apiMain = diffFile("cmd/api/main.go", [
+  hunk(47, 47, "func main() {", `
+ \tdeps := mustDeps(cfg)
+-\thandler := routes(deps)
++\thandler := httpx.RequestID(routes(deps))
+ \tsrv := &http.Server{Addr: cfg.Addr, Handler: handler, ReadHeaderTimeout: 5 * time.Second}
+`),
+]);
+
+// 3. acme/shop#1291: RUNNING when the script starts; it advances live and ends COMPLETED with two findings.
+const signIn = showPr("acme/shop", 1291, "Sign-in: send users back to the page they started from", "priya-r");
+const signInRun = showRun(signIn, SHOW_OPEN + 0.6, { phase: "COLLECT_CONTEXT", status: "RUNNING" });
+const loginTs = diffFile("src/server/auth/login.ts", [
+  hunk(6, 6, "export function loginRouter(oauth: OAuthClient) {", `
+   router.get("/login", (req, res) => {
++    const returnTo = typeof req.query.returnTo === "string" ? req.query.returnTo : "/";
++    res.cookie("returnTo", returnTo, { httpOnly: true, sameSite: "lax", maxAge: 10 * 60 * 1000 });
+     res.redirect(oauth.authorizeUrl());
+   });
+`),
+]);
+const callbackTs = diffFile("src/server/auth/callback.ts", [
+  hunk(10, 10, "export function callbackRouter(oauth: OAuthClient) {", `
+   const router = Router();
+
+   router.get("/auth/callback", async (req, res) => {
+     const { code, state } = CallbackQuery.parse(req.query);
+     const session = await oauth.exchange(code, state);
+-    await regenerateSession(req);
+     req.session.userId = session.userId;
+-    res.redirect("/");
++    const returnTo = req.cookies.returnTo ?? "/";
++    res.clearCookie("returnTo");
++    res.redirect(returnTo);
+   });
+
+   return router;
+`),
+]);
+const signInTsx = diffFile("src/client/pages/SignIn.tsx", [
+  hunk(31, 31, "export function SignInButton() {", `
+ export function SignInButton() {
+-  return <a href="/login">Sign in</a>;
++  const returnTo = encodeURIComponent(location.pathname + location.search);
++  return <a href={\`/login?returnTo=\${returnTo}\`}>Sign in</a>;
+ }
+`),
+]);
+
+// The script's clock: seconds after T0 at which the stream reaches each finding.
+const SIGNIN_REDIRECT_AT = SHOW_OPEN + 14.24;
+const SIGNIN_SESSION_AT = SHOW_OPEN + 15.44;
+const openRedirect = showDetail(signInRun, SIGNIN_REDIRECT_AT, {
+  title: "Sign-in redirects to any URL passed in returnTo",
+  category: "security",
+  severity: "high",
+  confidence: 0.92,
+  file: callbackTs.path,
+  line: lineOf(callbackTs, "res.redirect(returnTo);"),
+  explanation:
+    "/login stores `req.query.returnTo` in a cookie without checking it, and /auth/callback redirects to that cookie after a real sign-in. A link to https://shop.acme.com/login?returnTo=https://acme-shop.help/verify takes the customer through the genuine sign-in page and then to the attacker's site, which can ask them to re-enter their password or card. Browsers also treat //evil.example and /\\evil.example as absolute.",
+  reasoningSummary:
+    "Followed returnTo from SignIn.tsx through the login cookie to res.redirect in the callback. Nothing on that path validates it. The repo already has safeRedirect() in src/server/http/safeRedirect.ts, used by logout and account settings, but not here.",
+  suggestedFix:
+    'Redirect through the existing helper, which accepts only same-origin paths that start with a single "/":\n\nimport { safeRedirect } from "../http/safeRedirect.ts";\n\nsafeRedirect(res, req.cookies.returnTo, "/");',
+  evidence: [
+    cite(callbackTs, signIn.headSha, 'router.get("/auth/callback"', "res.redirect(returnTo);"),
+    cite(loginTs, signIn.headSha, 'router.get("/login"', "res.redirect(oauth.authorizeUrl());"),
+    {
+      kind: "scenario",
+      text: "GET /login?returnTo=https%3A%2F%2Facme-shop.help%2Fverify, then sign in with valid credentials: 302 Location: https://acme-shop.help/verify",
+    },
+  ],
+});
+const sessionFixation = showDetail(signInRun, SIGNIN_SESSION_AT, {
+  title: "Session id is no longer rotated at sign-in",
+  category: "security",
+  severity: "medium",
+  confidence: 0.74,
+  file: callbackTs.path,
+  line: lineOf(callbackTs, "req.session.userId = session.userId;"),
+  explanation:
+    "The PR deletes the `regenerateSession(req)` call that ran before the user id was written. Without it, the session id a visitor had before signing in stays valid afterwards. Anyone who planted that id, on a shared computer or through a cookie set on a sibling subdomain, is now signed in as the victim.",
+  reasoningSummary:
+    "The deleted line was the only call to regenerateSession. express-session keeps the existing id unless regenerate() is called. The PR description does not mention removing it, so it looks accidental.",
+  suggestedFix: "Restore the call before writing the user id:\n\nawait regenerateSession(req);\nreq.session.userId = session.userId;",
+  evidence: [
+    cite(callbackTs, signIn.headSha, "const { code, state } = CallbackQuery.parse(req.query);", "res.redirect(returnTo);"),
+    { kind: "tool_summary", text: 'search_code "regenerateSession(": 1 definition (src/server/session.ts:52), 0 callers after this PR' },
+  ],
+});
+
+// 4. acme/api#338: the first run SUPERSEDED with a now-stale finding; the author pushed a fix and a new run is under way.
+const drainOld = showPr("acme/api", 338, "Drain webhook workers on SIGTERM", "jdoyle");
+const drain = { ...drainOld, headSha: hexSha("acme/api#338 head 2") };
+const drainOldRun = showRun(drainOld, SHOW_OPEN - 1520, { phase: "SUPERSEDED", status: "SUPERSEDED", completedAt: at(SHOW_OPEN - 140) });
+const drainRun = showRun(drain, SHOW_OPEN - 95, { phase: "TRIAGE", status: "RUNNING" });
+const dispatcherOld = diffFile("internal/webhooks/dispatcher.go", [
+  hunk(58, 58, "func (d *Dispatcher) Run(ctx context.Context) error {", `
+ // Run starts the delivery workers and blocks until ctx is cancelled.
+ func (d *Dispatcher) Run(ctx context.Context) error {
+-\tgo d.loop(ctx)
+-\treturn nil
++\tfor i := 0; i < d.workers; i++ {
++\t\tgo func() {
++\t\t\tfor job := range d.jobs {
++\t\t\t\td.deliver(ctx, job)
++\t\t\t}
++\t\t}()
++\t}
++\t<-ctx.Done()
++\treturn ctx.Err()
+ }
+`),
+]);
+const dispatcherNew = diffFile("internal/webhooks/dispatcher.go", [
+  hunk(58, 58, "func (d *Dispatcher) Run(ctx context.Context) error {", `
+ // Run starts the delivery workers and blocks until ctx is cancelled.
+ func (d *Dispatcher) Run(ctx context.Context) error {
+-\tgo d.loop(ctx)
+-\treturn nil
++\tvar wg sync.WaitGroup
++\tfor i := 0; i < d.workers; i++ {
++\t\twg.Add(1)
++\t\tgo func() {
++\t\t\tdefer wg.Done()
++\t\t\tfor job := range d.jobs {
++\t\t\t\td.deliver(context.WithoutCancel(ctx), job)
++\t\t\t}
++\t\t}()
++\t}
++\t<-ctx.Done()
++\tclose(d.jobs)
++\twg.Wait()
++\treturn ctx.Err()
+ }
+`),
+]);
+const unDrained = showDetail(
+  drainOldRun,
+  SHOW_OPEN - 1290,
+  {
+    title: "Run returns before in-flight deliveries finish",
+    category: "concurrency",
+    severity: "high",
+    confidence: 0.86,
+    file: dispatcherOld.path,
+    line: lineOf(dispatcherOld, "return ctx.Err()"),
+    explanation:
+      "Run returns as soon as ctx is cancelled, without closing d.jobs or waiting for the workers. cmd/worker exits when Run returns, so a delivery in flight at SIGTERM is cut off mid-request. It is never marked delivered, so the receiver gets it again after the restart. The workers also pass the cancelled ctx to deliver, which aborts the HTTP call immediately.",
+    reasoningSummary:
+      "Nothing in Run joins the goroutines it starts. cmd/worker/main.go calls os.Exit(0) right after dispatcher.Run returns. deliver() marks a job done only after the receiver answers 2xx.",
+    suggestedFix:
+      "Track the workers with a sync.WaitGroup, close d.jobs once ctx is done, and wait before returning. Give in-flight deliveries a context that survives the cancellation (context.WithoutCancel plus a timeout) so they can finish.",
+    evidence: [
+      cite(dispatcherOld, drainOld.headSha, "func (d *Dispatcher) Run(ctx context.Context) error {", "return ctx.Err()"),
+      { kind: "tool_summary", text: "read_file cmd/worker/main.go:40-58: os.Exit(0) runs immediately after dispatcher.Run returns" },
+    ],
+  },
+  { stale: true },
+);
+
+// 5. acme/api#345: FAILED before analysis.
+const ledger = showPr("acme/api", 345, "Partition ledger_entries by month", "abhatia");
+const ledgerRun = showRun(ledger, SHOW_OPEN - 610, {
+  phase: "FAILED",
+  status: "FAILED",
+  completedAt: at(SHOW_OPEN - 588),
+  failureReason:
+    "Diff too large to review: 212 files and 18,406 changed lines exceed the 8,000-line budget. Most of it is migrations/0042_partition_ledger.sql. Exclude generated files or split the PR.",
+});
+
+const showAccounts = [
+  account("github.com", "dperalta", { ghActive: true }),
+  account("github.com", "acme-review-bot", { selected: true, scopes: ["read:org", "repo"] }),
+];
+
+const showDetails = [refundAuthz, oversell, historyN1, pagerOffByOne, openRedirect, sessionFixation, unDrained];
+const showDiffs: [string, Pr, Run, DiffFile[]][] = [
+  ["shop-1287", orders, ordersRun, [ordersRoute, reserve, history]],
+  ["api-341", requestIds, requestIdsRun, [apiMain, requestIdGo]],
+  ["shop-1291", signIn, signInRun, [signInTsx, callbackTs, loginTs]],
+  ["api-338-old", drainOld, drainOldRun, [dispatcherOld]],
+  ["api-338", drain, drainRun, [dispatcherNew]],
+];
+const showcaseFixtures: Record<string, ServerMessage> = Object.fromEntries([
+  ...showDiffs.map(([name, p, r, files]): [string, ServerMessage] => [
+    `server.diff.page.showcase-${name}`,
+    { type: "diff.page", requestId: "req-diff", prId: p.id, baseSha: r.baseSha, headSha: r.headSha, files, truncated: false },
+  ]),
+  ...showDetails.map((d, i): [string, ServerMessage] => [
+    `server.finding.detail.showcase-${i + 1}`,
+    { type: "finding.detail", requestId: "req-finding", finding: d },
+  ]),
+]);
+
+const signInActivity = (tool: string, summary: string) => (s: Seq) => activity(s, signInRun, tool, summary);
+const drainActivity = (tool: string, summary: string) => (s: Seq) => activity(s, drainRun, tool, summary);
+type ShowStep = [delayMs: number, make: ((s: Seq) => ServerMessage) | "heartbeat"];
+const showSteps: ShowStep[] = [
+  [600, (s) => runEvent(s, "run.started", signInRun)],
+  [420, signInActivity("read_diff", "3 files changed (+6 -3): src/server/auth/callback.ts, src/server/auth/login.ts, src/client/pages/SignIn.tsx")],
+  [510, signInActivity("git_history", "src/server/auth/: 14 commits in 90 days; last change #1240 \"Move sessions to Redis\" (mkowalski)")],
+  [900, (s) => phase(s, signInRun, "COLLECT_CONTEXT", "TRIAGE", "CONTEXT_PERSISTED")],
+  [340, signInActivity("read_file", "src/server/auth/callback.ts:1-38")],
+  [290, signInActivity("search_code", "\"returnTo\": 6 matches in 3 files")],
+  [450, (s) => phase(s, drainRun, "TRIAGE", "ANALYZE", "ROUTING_PERSISTED")],
+  [800, (s) => phase(s, signInRun, "TRIAGE", "ANALYZE", "ROUTING_PERSISTED")],
+  [310, signInActivity("read_file", "src/server/auth/login.ts:1-24")],
+  [180, drainActivity("read_diff", "1 file changed (+15 -2): internal/webhooks/dispatcher.go")],
+  [260, signInActivity("read_file", "src/client/pages/SignIn.tsx:1-58")],
+  [420, signInActivity("search_code", "\"res.redirect(\": 11 matches in 7 files")],
+  [380, signInActivity("read_file", "src/server/http/safeRedirect.ts:1-24")],
+  [230, drainActivity("read_file", "internal/webhooks/dispatcher.go:1-112")],
+  [550, signInActivity("git_history", "src/server/http/safeRedirect.ts: added in #1102 \"Block open redirects on /logout\" (tnakamura)")],
+  [300, signInActivity("search_code", "\"safeRedirect(\": 2 matches, src/server/routes/logout.ts:14, src/server/routes/account.ts:52")],
+  [470, "heartbeat"],
+  [160, signInActivity("read_file", "src/server/routes/logout.ts:1-30")],
+  [480, signInActivity("search_code", "\"regenerateSession(\": 1 definition (src/server/session.ts:52), 0 callers")],
+  [350, signInActivity("git_history", "src/server/auth/callback.ts: regenerateSession(req) added in #1077 \"Rotate session id on sign-in\"")],
+  [210, drainActivity("search_code", "\"dispatcher.Run(\": 1 match, cmd/worker/main.go:44")],
+  [390, signInActivity("read_file", "src/server/session.ts:40-64")],
+  [270, signInActivity("search_code", "\"req.session.userId =\": 3 matches in auth/callback.ts, auth/dev.ts, tests/helpers/login.ts")],
+  [600, signInActivity("read_file", "tests/auth/callback.test.ts:1-80")],
+  [330, signInActivity("search_code", "\"returnTo\" in tests/: 1 match, callback.test.ts:44 (relative path only)")],
+  [240, drainActivity("read_file", "cmd/worker/main.go:30-60")],
+  [410, signInActivity("read_file", "src/server/app.ts:1-40")],
+  [450, signInActivity("read_file", "src/server/http/auth.ts:1-46")],
+  [380, signInActivity("search_code", "\"returnTo\" in src/client/: 2 matches, pages/SignIn.tsx:32, components/Header.tsx:18")],
+  [190, signInActivity("search_code", "\"cookieParser(\": src/server/app.ts:22, no signing secret")],
+  [900, (s) => phase(s, signInRun, "ANALYZE", "VERIFY", "CANDIDATES_PERSISTED")],
+  [360, signInActivity("read_file", "src/server/auth/callback.ts:12-22")],
+  [290, signInActivity("read_file", "src/server/auth/login.ts:6-11")],
+  [440, signInActivity("search_code", "\"isSafeReturnPath|safeRedirect\" on the sign-in path: 0 matches")],
+  [380, (s) => findingUpdated(s, findingOf(openRedirect))],
+  [580, signInActivity("git_history", "#1077 review thread: rotation required by the 2025 pen test (finding AC-14)")],
+  [620, (s) => findingUpdated(s, findingOf(sessionFixation))],
+  [1100, (s) => phase(s, signInRun, "VERIFY", "PREPARE_PUBLICATION", "CANDIDATES_DISPOSED")],
+  [800, (s) => phase(s, signInRun, "PREPARE_PUBLICATION", "PUBLISH", "HEAD_VERIFIED")],
+  [900, (s) => phase(s, signInRun, "PUBLISH", "COMPLETED", "NO_PUBLICATION_RECORDED")],
+  [40, (s) => runEvent(s, "review.completed", { ...signInRun, phase: "COMPLETED", status: "COMPLETED", completedAt: at(s.t!) })],
+  [4000, "heartbeat"],
+  [4000, "heartbeat"],
+];
 
 // ---------- message fixtures ----------
 
@@ -304,6 +875,7 @@ export const fixtures: Record<string, ClientMessage | ServerMessage | Record<str
   "server.error": { type: "error", requestId: "req-finding", code: "NOT_FOUND", message: "no finding f-9" },
   "server.error.protocol-mismatch": { type: "error", requestId: "req-hello", code: "PROTOCOL_MISMATCH", message: "unsupported protocolVersion 2", supported: [1] },
   "server.error.no-request-id": { type: "error", code: "INVALID_REQUEST", message: "line is not valid JSON" },
+  ...showcaseFixtures,
 };
 
 // ---------- negative fixtures: name -> [message, why] ----------
@@ -471,6 +1043,33 @@ const accounts = lines(40, [
   accountsUpdated({ seq: 11 }, [personal, { ...work, selected: true }]),
 ]);
 
+
+// Each step's occurredAt is the script clock, so the timestamps match the cadence the TUI plays at.
+const showcaseScript = (): PlaybackLine[] => {
+  let [seq, clock] = [40, SHOW_OPEN];
+  const steps = showSteps.map(([delayMs, make]): PlaybackLine => {
+    clock += delayMs / 1000;
+    if (make === "heartbeat") return { delayMs, message: { type: "event", eventType: "heartbeat", streamEpoch: EPOCH, occurredAt: at(clock) } };
+    seq += 1;
+    return { delayMs, message: make({ seq, t: clock }) };
+  });
+  return [
+    { delayMs: 0, message: welcome(40, EPOCH, ["account.select"]) },
+    {
+      delayMs: 0,
+      message: snapshot(
+        40,
+        [orders, requestIds, signIn, drain, ledger],
+        [ordersRun, requestIdsRun, drainOldRun, drainRun, ledgerRun],
+        [refundAuthz, oversell, historyN1, pagerOffByOne, unDrained].map(findingOf),
+        EPOCH,
+        showAccounts,
+      ),
+    },
+    ...steps,
+  ];
+};
+
 const runRow = (r: Run, phase = r.phase, status = r.status) => ({ id: r.id, phase, status });
 const baseExpect = (over: Partial<Expect>): Expect => ({
   streamEpoch: EPOCH,
@@ -558,6 +1157,29 @@ export const playback: Record<string, { script: PlaybackLine[]; expect: Expect }
         { id: work.id, state: "ok", ghActive: false, selected: true },
       ],
     }),
+  },
+  showcase: {
+    script: showcaseScript(),
+    expect: {
+      streamEpoch: EPOCH,
+      lastSequence: 80,
+      resyncRequested: false,
+      toolActivityCount: 29,
+      prs: prRows(orders, requestIds, signIn, drain, ledger),
+      runs: [
+        runRow(ordersRun),
+        runRow(requestIdsRun),
+        runRow(signInRun, "COMPLETED", "COMPLETED"),
+        runRow(drainOldRun),
+        runRow(drainRun, "ANALYZE", "RUNNING"),
+        runRow(ledgerRun),
+      ],
+      findings: showDetails.map((f) => ({ id: f.id, title: f.title, status: "DETECTED", stale: f.stale })),
+      accounts: [
+        { id: "github.com/acme-review-bot", state: "ok", ghActive: false, selected: true },
+        { id: "github.com/dperalta", state: "ok", ghActive: true, selected: false },
+      ],
+    },
   },
   burst: { script: burst, expect: baseExpect({ lastSequence: 5010, toolActivityCount: 5000 }) },
 };

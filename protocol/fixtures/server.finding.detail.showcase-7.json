@@ -1,0 +1,43 @@
+{
+  "type": "finding.detail",
+  "requestId": "req-finding",
+  "finding": {
+    "id": "a740a91f716286fea0e5881556791333",
+    "prId": "93da1c66980faac69f5b91a8afad6c2e",
+    "runId": "554ffb5bdeae41d386b08a9038dd6058",
+    "fingerprint": "b0080bbfb7456df3e727436d355ff33a",
+    "status": "DETECTED",
+    "evidenceCount": 2,
+    "stale": true,
+    "title": "Run returns before in-flight deliveries finish",
+    "category": "concurrency",
+    "severity": "high",
+    "confidence": 0.86,
+    "file": "internal/webhooks/dispatcher.go",
+    "line": 68,
+    "explanation": "Run returns as soon as ctx is cancelled, without closing d.jobs or waiting for the workers. cmd/worker exits when Run returns, so a delivery in flight at SIGTERM is cut off mid-request. It is never marked delivered, so the receiver gets it again after the restart. The workers also pass the cancelled ctx to deliver, which aborts the HTTP call immediately.",
+    "reasoningSummary": "Nothing in Run joins the goroutines it starts. cmd/worker/main.go calls os.Exit(0) right after dispatcher.Run returns. deliver() marks a job done only after the receiver answers 2xx.",
+    "suggestedFix": "Track the workers with a sync.WaitGroup, close d.jobs once ctx is done, and wait before returning. Give in-flight deliveries a context that survives the cancellation (context.WithoutCancel plus a timeout) so they can finish.",
+    "evidence": [
+      {
+        "kind": "code_ref",
+        "path": "internal/webhooks/dispatcher.go",
+        "start": 59,
+        "end": 68,
+        "refSha": "3b9a99ce32db947502a0518d4169f63ff2d76109",
+        "text": "func (d *Dispatcher) Run(ctx context.Context) error {\n\tfor i := 0; i < d.workers; i++ {\n\t\tgo func() {\n\t\t\tfor job := range d.jobs {\n\t\t\t\td.deliver(ctx, job)\n\t\t\t}\n\t\t}()\n\t}\n\t<-ctx.Done()\n\treturn ctx.Err()"
+      },
+      {
+        "kind": "tool_summary",
+        "text": "read_file cmd/worker/main.go:40-58: os.Exit(0) runs immediately after dispatcher.Run returns"
+      }
+    ],
+    "history": [
+      {
+        "runId": "554ffb5bdeae41d386b08a9038dd6058",
+        "disposition": "DETECTED",
+        "at": "2026-10-20T14:08:30Z"
+      }
+    ]
+  }
+}

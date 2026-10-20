@@ -1,0 +1,192 @@
+{
+  "type": "diff.page",
+  "requestId": "req-diff",
+  "prId": "bb205280d64320002381b7dac2c86343",
+  "baseSha": "fdff3cdad9d3a8e122f457ff662b452efda66df8",
+  "headSha": "f86859b05d854df42a7de7a71a80c0e600b546c6",
+  "files": [
+    {
+      "path": "src/client/pages/SignIn.tsx",
+      "status": "modified",
+      "additions": 2,
+      "deletions": 1,
+      "hunks": [
+        {
+          "header": "@@ -31,3 +31,4 @@ export function SignInButton() {",
+          "oldStart": 31,
+          "newStart": 31,
+          "lines": [
+            {
+              "kind": "context",
+              "old": 31,
+              "new": 31,
+              "text": "export function SignInButton() {"
+            },
+            {
+              "kind": "del",
+              "old": 32,
+              "text": "  return <a href=\"/login\">Sign in</a>;"
+            },
+            {
+              "kind": "add",
+              "new": 32,
+              "text": "  const returnTo = encodeURIComponent(location.pathname + location.search);"
+            },
+            {
+              "kind": "add",
+              "new": 33,
+              "text": "  return <a href={`/login?returnTo=${returnTo}`}>Sign in</a>;"
+            },
+            {
+              "kind": "context",
+              "old": 33,
+              "new": 34,
+              "text": "}"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/server/auth/callback.ts",
+      "status": "modified",
+      "additions": 3,
+      "deletions": 2,
+      "hunks": [
+        {
+          "header": "@@ -10,11 +10,12 @@ export function callbackRouter(oauth: OAuthClient) {",
+          "oldStart": 10,
+          "newStart": 10,
+          "lines": [
+            {
+              "kind": "context",
+              "old": 10,
+              "new": 10,
+              "text": "  const router = Router();"
+            },
+            {
+              "kind": "context",
+              "old": 11,
+              "new": 11,
+              "text": ""
+            },
+            {
+              "kind": "context",
+              "old": 12,
+              "new": 12,
+              "text": "  router.get(\"/auth/callback\", async (req, res) => {"
+            },
+            {
+              "kind": "context",
+              "old": 13,
+              "new": 13,
+              "text": "    const { code, state } = CallbackQuery.parse(req.query);"
+            },
+            {
+              "kind": "context",
+              "old": 14,
+              "new": 14,
+              "text": "    const session = await oauth.exchange(code, state);"
+            },
+            {
+              "kind": "del",
+              "old": 15,
+              "text": "    await regenerateSession(req);"
+            },
+            {
+              "kind": "context",
+              "old": 16,
+              "new": 15,
+              "text": "    req.session.userId = session.userId;"
+            },
+            {
+              "kind": "del",
+              "old": 17,
+              "text": "    res.redirect(\"/\");"
+            },
+            {
+              "kind": "add",
+              "new": 16,
+              "text": "    const returnTo = req.cookies.returnTo ?? \"/\";"
+            },
+            {
+              "kind": "add",
+              "new": 17,
+              "text": "    res.clearCookie(\"returnTo\");"
+            },
+            {
+              "kind": "add",
+              "new": 18,
+              "text": "    res.redirect(returnTo);"
+            },
+            {
+              "kind": "context",
+              "old": 18,
+              "new": 19,
+              "text": "  });"
+            },
+            {
+              "kind": "context",
+              "old": 19,
+              "new": 20,
+              "text": ""
+            },
+            {
+              "kind": "context",
+              "old": 20,
+              "new": 21,
+              "text": "  return router;"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/server/auth/login.ts",
+      "status": "modified",
+      "additions": 2,
+      "deletions": 0,
+      "hunks": [
+        {
+          "header": "@@ -6,3 +6,5 @@ export function loginRouter(oauth: OAuthClient) {",
+          "oldStart": 6,
+          "newStart": 6,
+          "lines": [
+            {
+              "kind": "context",
+              "old": 6,
+              "new": 6,
+              "text": "  router.get(\"/login\", (req, res) => {"
+            },
+            {
+              "kind": "add",
+              "new": 7,
+              "text": "    const returnTo = typeof req.query.returnTo === \"string\" ? req.query.returnTo : \"/\";"
+            },
+            {
+              "kind": "add",
+              "new": 8,
+              "text": "    res.cookie(\"returnTo\", returnTo, { httpOnly: true, sameSite: \"lax\", maxAge: 10 * 60 * 1000 });"
+            },
+            {
+              "kind": "context",
+              "old": 7,
+              "new": 9,
+              "text": "    res.redirect(oauth.authorizeUrl());"
+            },
+            {
+              "kind": "context",
+              "old": 8,
+              "new": 10,
+              "text": "  });"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    }
+  ],
+  "truncated": false
+}

@@ -1,0 +1,43 @@
+{
+  "type": "finding.detail",
+  "requestId": "req-finding",
+  "finding": {
+    "id": "7c768d13420e527545cfc2c3bfeb921e",
+    "prId": "bb205280d64320002381b7dac2c86343",
+    "runId": "d1ed7b3b7b96a280414a43f18864bd2b",
+    "fingerprint": "e722525b2fc5de75e9322530acf9d42f",
+    "status": "DETECTED",
+    "evidenceCount": 2,
+    "stale": false,
+    "title": "Session id is no longer rotated at sign-in",
+    "category": "security",
+    "severity": "medium",
+    "confidence": 0.74,
+    "file": "src/server/auth/callback.ts",
+    "line": 15,
+    "explanation": "The PR deletes the `regenerateSession(req)` call that ran before the user id was written. Without it, the session id a visitor had before signing in stays valid afterwards. Anyone who planted that id, on a shared computer or through a cookie set on a sibling subdomain, is now signed in as the victim.",
+    "reasoningSummary": "The deleted line was the only call to regenerateSession. express-session keeps the existing id unless regenerate() is called. The PR description does not mention removing it, so it looks accidental.",
+    "suggestedFix": "Restore the call before writing the user id:\n\nawait regenerateSession(req);\nreq.session.userId = session.userId;",
+    "evidence": [
+      {
+        "kind": "code_ref",
+        "path": "src/server/auth/callback.ts",
+        "start": 13,
+        "end": 18,
+        "refSha": "f86859b05d854df42a7de7a71a80c0e600b546c6",
+        "text": "    const { code, state } = CallbackQuery.parse(req.query);\n    const session = await oauth.exchange(code, state);\n    req.session.userId = session.userId;\n    const returnTo = req.cookies.returnTo ?? \"/\";\n    res.clearCookie(\"returnTo\");\n    res.redirect(returnTo);"
+      },
+      {
+        "kind": "tool_summary",
+        "text": "search_code \"regenerateSession(\": 1 definition (src/server/session.ts:52), 0 callers after this PR"
+      }
+    ],
+    "history": [
+      {
+        "runId": "d1ed7b3b7b96a280414a43f18864bd2b",
+        "disposition": "DETECTED",
+        "at": "2026-10-20T14:30:15.440Z"
+      }
+    ]
+  }
+}

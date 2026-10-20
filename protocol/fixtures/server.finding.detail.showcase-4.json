@@ -1,0 +1,51 @@
+{
+  "type": "finding.detail",
+  "requestId": "req-finding",
+  "finding": {
+    "id": "ddd4e53cecab4ad368ff9cc94a85fe1d",
+    "prId": "d2bc8e8f23f98a4b203ffeb4519ed00b",
+    "runId": "7f24f52475b0cd1755a7ef64fd8a8080",
+    "fingerprint": "a8c3836b4554a33ac6c6fdc32606a389",
+    "status": "DETECTED",
+    "evidenceCount": 3,
+    "stale": false,
+    "title": "Last page of order history still reports a next page",
+    "category": "correctness",
+    "severity": "low",
+    "confidence": 0.83,
+    "file": "src/server/orders/history.ts",
+    "line": 28,
+    "explanation": "`lastPage` is 1-based and inclusive, so `page <= lastPage` is still true on the last page. The account page renders a Next link there. Following it skips past every order and shows an empty list labelled \"Page 4 of 3\".",
+    "reasoningSummary": "page is 1-based (skip uses page - 1), and lastPage is ceil(total / PAGE_SIZE), the number of the last page. The comparison should be strict.",
+    "suggestedFix": "Use a strict comparison: hasNext: page < lastPage,",
+    "evidence": [
+      {
+        "kind": "code_ref",
+        "path": "src/server/orders/history.ts",
+        "start": 24,
+        "end": 29,
+        "refSha": "647fb3beac66d51005ac1a2cb89fec94e7a3da76",
+        "text": "  return {\n    orders: withItems,\n    page,\n    lastPage,\n    hasNext: page <= lastPage,\n    hasPrev: page > 1,"
+      },
+      {
+        "kind": "code_ref",
+        "path": "src/server/orders/history.ts",
+        "start": 6,
+        "end": 12,
+        "refSha": "647fb3beac66d51005ac1a2cb89fec94e7a3da76",
+        "text": "  const total = await db.order.count({ where: { customerId } });\n  const lastPage = Math.max(1, Math.ceil(total / PAGE_SIZE));\n  const orders = await db.order.findMany({\n    where: { customerId },\n    orderBy: { placedAt: \"desc\" },\n    skip: (page - 1) * PAGE_SIZE,\n    take: PAGE_SIZE,"
+      },
+      {
+        "kind": "scenario",
+        "text": "47 orders, PAGE_SIZE 20: lastPage = 3. On page 3, hasNext = (3 <= 3) = true. Page 4 skips 60 rows and returns none."
+      }
+    ],
+    "history": [
+      {
+        "runId": "7f24f52475b0cd1755a7ef64fd8a8080",
+        "disposition": "DETECTED",
+        "at": "2026-10-20T13:53:04Z"
+      }
+    ]
+  }
+}

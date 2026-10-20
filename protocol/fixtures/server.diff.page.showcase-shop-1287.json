@@ -1,0 +1,480 @@
+{
+  "type": "diff.page",
+  "requestId": "req-diff",
+  "prId": "d2bc8e8f23f98a4b203ffeb4519ed00b",
+  "baseSha": "8b232a84752bd7499aff418d9bc1c156db24822b",
+  "headSha": "647fb3beac66d51005ac1a2cb89fec94e7a3da76",
+  "files": [
+    {
+      "path": "src/server/routes/orders.ts",
+      "status": "modified",
+      "additions": 19,
+      "deletions": 0,
+      "hunks": [
+        {
+          "header": "@@ -4,3 +4,4 @@",
+          "oldStart": 4,
+          "newStart": 4,
+          "lines": [
+            {
+              "kind": "context",
+              "old": 4,
+              "new": 4,
+              "text": "import { requireAuth } from \"../http/auth.ts\";"
+            },
+            {
+              "kind": "context",
+              "old": 5,
+              "new": 5,
+              "text": "import { toOrderDto } from \"../orders/dto.ts\";"
+            },
+            {
+              "kind": "add",
+              "new": 6,
+              "text": "import { RefundBody } from \"../schemas/refund.ts\";"
+            },
+            {
+              "kind": "context",
+              "old": 6,
+              "new": 7,
+              "text": "import type { Db, Payments } from \"../deps.ts\";"
+            }
+          ]
+        },
+        {
+          "header": "@@ -84,8 +85,26 @@ export function ordersRouter(db: Db, payments: Payments) {",
+          "oldStart": 84,
+          "newStart": 85,
+          "lines": [
+            {
+              "kind": "context",
+              "old": 84,
+              "new": 85,
+              "text": "  router.get(\"/orders/:id\", requireAuth, async (req, res) => {"
+            },
+            {
+              "kind": "context",
+              "old": 85,
+              "new": 86,
+              "text": "    const order = await db.order.findUnique({ where: { id: req.params.id } });"
+            },
+            {
+              "kind": "context",
+              "old": 86,
+              "new": 87,
+              "text": "    if (!order || order.customerId !== req.user.id) return res.sendStatus(404);"
+            },
+            {
+              "kind": "context",
+              "old": 87,
+              "new": 88,
+              "text": "    res.json(toOrderDto(order));"
+            },
+            {
+              "kind": "context",
+              "old": 88,
+              "new": 89,
+              "text": "  });"
+            },
+            {
+              "kind": "context",
+              "old": 89,
+              "new": 90,
+              "text": ""
+            },
+            {
+              "kind": "add",
+              "new": 91,
+              "text": "  router.post(\"/orders/:id/refund\", requireAuth, async (req, res) => {"
+            },
+            {
+              "kind": "add",
+              "new": 92,
+              "text": "    const { amountCents, reason } = RefundBody.parse(req.body);"
+            },
+            {
+              "kind": "add",
+              "new": 93,
+              "text": "    const order = await db.order.findUnique({"
+            },
+            {
+              "kind": "add",
+              "new": 94,
+              "text": "      where: { id: req.params.id },"
+            },
+            {
+              "kind": "add",
+              "new": 95,
+              "text": "      include: { payment: true },"
+            },
+            {
+              "kind": "add",
+              "new": 96,
+              "text": "    });"
+            },
+            {
+              "kind": "add",
+              "new": 97,
+              "text": "    if (!order) return res.sendStatus(404);"
+            },
+            {
+              "kind": "add",
+              "new": 98,
+              "text": "    if (amountCents > order.totalCents - order.refundedCents) {"
+            },
+            {
+              "kind": "add",
+              "new": 99,
+              "text": "      return res.status(422).json({ error: \"refund exceeds captured amount\" });"
+            },
+            {
+              "kind": "add",
+              "new": 100,
+              "text": "    }"
+            },
+            {
+              "kind": "add",
+              "new": 101,
+              "text": "    const refund = await payments.refund(order.payment.providerId, amountCents, { reason });"
+            },
+            {
+              "kind": "add",
+              "new": 102,
+              "text": "    await db.order.update({"
+            },
+            {
+              "kind": "add",
+              "new": 103,
+              "text": "      where: { id: order.id },"
+            },
+            {
+              "kind": "add",
+              "new": 104,
+              "text": "      data: { refundedCents: { increment: amountCents } },"
+            },
+            {
+              "kind": "add",
+              "new": 105,
+              "text": "    });"
+            },
+            {
+              "kind": "add",
+              "new": 106,
+              "text": "    res.status(201).json({ refundId: refund.id });"
+            },
+            {
+              "kind": "add",
+              "new": 107,
+              "text": "  });"
+            },
+            {
+              "kind": "add",
+              "new": 108,
+              "text": ""
+            },
+            {
+              "kind": "context",
+              "old": 90,
+              "new": 109,
+              "text": "  return router;"
+            },
+            {
+              "kind": "context",
+              "old": 91,
+              "new": 110,
+              "text": "}"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/server/inventory/reserve.ts",
+      "status": "modified",
+      "additions": 13,
+      "deletions": 2,
+      "hunks": [
+        {
+          "header": "@@ -16,6 +16,17 @@",
+          "oldStart": 16,
+          "newStart": 16,
+          "lines": [
+            {
+              "kind": "context",
+              "old": 16,
+              "new": 16,
+              "text": "const HOLD_MINUTES = 15;"
+            },
+            {
+              "kind": "context",
+              "old": 17,
+              "new": 17,
+              "text": ""
+            },
+            {
+              "kind": "context",
+              "old": 18,
+              "new": 18,
+              "text": "export async function reserveStock(db: Db, sku: string, qty: number, cartId: string) {"
+            },
+            {
+              "kind": "del",
+              "old": 19,
+              "text": "  const [{ ok }] = await db.$queryRaw<{ ok: boolean }[]>`SELECT reserve_stock(${sku}, ${qty}, ${cartId}) AS ok`;"
+            },
+            {
+              "kind": "del",
+              "old": 20,
+              "text": "  if (!ok) throw new OutOfStockError(sku);"
+            },
+            {
+              "kind": "add",
+              "new": 19,
+              "text": "  const item = await db.inventory.findUnique({ where: { sku } });"
+            },
+            {
+              "kind": "add",
+              "new": 20,
+              "text": "  if (!item) throw new UnknownSkuError(sku);"
+            },
+            {
+              "kind": "add",
+              "new": 21,
+              "text": "  const available = item.onHand - item.reserved;"
+            },
+            {
+              "kind": "add",
+              "new": 22,
+              "text": "  if (available < qty) {"
+            },
+            {
+              "kind": "add",
+              "new": 23,
+              "text": "    throw new OutOfStockError(sku, available);"
+            },
+            {
+              "kind": "add",
+              "new": 24,
+              "text": "  }"
+            },
+            {
+              "kind": "add",
+              "new": 25,
+              "text": "  await db.inventory.update({"
+            },
+            {
+              "kind": "add",
+              "new": 26,
+              "text": "    where: { sku },"
+            },
+            {
+              "kind": "add",
+              "new": 27,
+              "text": "    data: { reserved: item.reserved + qty },"
+            },
+            {
+              "kind": "add",
+              "new": 28,
+              "text": "  });"
+            },
+            {
+              "kind": "add",
+              "new": 29,
+              "text": "  await db.reservation.create({"
+            },
+            {
+              "kind": "add",
+              "new": 30,
+              "text": "    data: { sku, qty, cartId, expiresAt: addMinutes(new Date(), HOLD_MINUTES) },"
+            },
+            {
+              "kind": "add",
+              "new": 31,
+              "text": "  });"
+            },
+            {
+              "kind": "context",
+              "old": 21,
+              "new": 32,
+              "text": "}"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/server/orders/history.ts",
+      "status": "added",
+      "additions": 31,
+      "deletions": 0,
+      "hunks": [
+        {
+          "header": "@@ -0,0 +1,31 @@",
+          "oldStart": 0,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "import type { Db } from \"../deps.ts\";"
+            },
+            {
+              "kind": "add",
+              "new": 2,
+              "text": ""
+            },
+            {
+              "kind": "add",
+              "new": 3,
+              "text": "export const PAGE_SIZE = 20;"
+            },
+            {
+              "kind": "add",
+              "new": 4,
+              "text": ""
+            },
+            {
+              "kind": "add",
+              "new": 5,
+              "text": "export async function orderHistory(db: Db, customerId: string, page: number) {"
+            },
+            {
+              "kind": "add",
+              "new": 6,
+              "text": "  const total = await db.order.count({ where: { customerId } });"
+            },
+            {
+              "kind": "add",
+              "new": 7,
+              "text": "  const lastPage = Math.max(1, Math.ceil(total / PAGE_SIZE));"
+            },
+            {
+              "kind": "add",
+              "new": 8,
+              "text": "  const orders = await db.order.findMany({"
+            },
+            {
+              "kind": "add",
+              "new": 9,
+              "text": "    where: { customerId },"
+            },
+            {
+              "kind": "add",
+              "new": 10,
+              "text": "    orderBy: { placedAt: \"desc\" },"
+            },
+            {
+              "kind": "add",
+              "new": 11,
+              "text": "    skip: (page - 1) * PAGE_SIZE,"
+            },
+            {
+              "kind": "add",
+              "new": 12,
+              "text": "    take: PAGE_SIZE,"
+            },
+            {
+              "kind": "add",
+              "new": 13,
+              "text": "  });"
+            },
+            {
+              "kind": "add",
+              "new": 14,
+              "text": ""
+            },
+            {
+              "kind": "add",
+              "new": 15,
+              "text": "  const withItems = [];"
+            },
+            {
+              "kind": "add",
+              "new": 16,
+              "text": "  for (const order of orders) {"
+            },
+            {
+              "kind": "add",
+              "new": 17,
+              "text": "    const items = await db.orderItem.findMany({"
+            },
+            {
+              "kind": "add",
+              "new": 18,
+              "text": "      where: { orderId: order.id },"
+            },
+            {
+              "kind": "add",
+              "new": 19,
+              "text": "      include: { product: true },"
+            },
+            {
+              "kind": "add",
+              "new": 20,
+              "text": "    });"
+            },
+            {
+              "kind": "add",
+              "new": 21,
+              "text": "    withItems.push({ ...order, items });"
+            },
+            {
+              "kind": "add",
+              "new": 22,
+              "text": "  }"
+            },
+            {
+              "kind": "add",
+              "new": 23,
+              "text": ""
+            },
+            {
+              "kind": "add",
+              "new": 24,
+              "text": "  return {"
+            },
+            {
+              "kind": "add",
+              "new": 25,
+              "text": "    orders: withItems,"
+            },
+            {
+              "kind": "add",
+              "new": 26,
+              "text": "    page,"
+            },
+            {
+              "kind": "add",
+              "new": 27,
+              "text": "    lastPage,"
+            },
+            {
+              "kind": "add",
+              "new": 28,
+              "text": "    hasNext: page <= lastPage,"
+            },
+            {
+              "kind": "add",
+              "new": 29,
+              "text": "    hasPrev: page > 1,"
+            },
+            {
+              "kind": "add",
+              "new": 30,
+              "text": "  };"
+            },
+            {
+              "kind": "add",
+              "new": 31,
+              "text": "}"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    }
+  ],
+  "truncated": false
+}

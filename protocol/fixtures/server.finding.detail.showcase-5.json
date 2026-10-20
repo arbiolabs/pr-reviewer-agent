@@ -1,0 +1,51 @@
+{
+  "type": "finding.detail",
+  "requestId": "req-finding",
+  "finding": {
+    "id": "6663d915445dcbffacc5d5255fa69963",
+    "prId": "bb205280d64320002381b7dac2c86343",
+    "runId": "d1ed7b3b7b96a280414a43f18864bd2b",
+    "fingerprint": "e160104632fbd9d015b91dc821373312",
+    "status": "DETECTED",
+    "evidenceCount": 3,
+    "stale": false,
+    "title": "Sign-in redirects to any URL passed in returnTo",
+    "category": "security",
+    "severity": "high",
+    "confidence": 0.92,
+    "file": "src/server/auth/callback.ts",
+    "line": 18,
+    "explanation": "/login stores `req.query.returnTo` in a cookie without checking it, and /auth/callback redirects to that cookie after a real sign-in. A link to https://shop.acme.com/login?returnTo=https://acme-shop.help/verify takes the customer through the genuine sign-in page and then to the attacker's site, which can ask them to re-enter their password or card. Browsers also treat //evil.example and /\\evil.example as absolute.",
+    "reasoningSummary": "Followed returnTo from SignIn.tsx through the login cookie to res.redirect in the callback. Nothing on that path validates it. The repo already has safeRedirect() in src/server/http/safeRedirect.ts, used by logout and account settings, but not here.",
+    "suggestedFix": "Redirect through the existing helper, which accepts only same-origin paths that start with a single \"/\":\n\nimport { safeRedirect } from \"../http/safeRedirect.ts\";\n\nsafeRedirect(res, req.cookies.returnTo, \"/\");",
+    "evidence": [
+      {
+        "kind": "code_ref",
+        "path": "src/server/auth/callback.ts",
+        "start": 12,
+        "end": 18,
+        "refSha": "f86859b05d854df42a7de7a71a80c0e600b546c6",
+        "text": "  router.get(\"/auth/callback\", async (req, res) => {\n    const { code, state } = CallbackQuery.parse(req.query);\n    const session = await oauth.exchange(code, state);\n    req.session.userId = session.userId;\n    const returnTo = req.cookies.returnTo ?? \"/\";\n    res.clearCookie(\"returnTo\");\n    res.redirect(returnTo);"
+      },
+      {
+        "kind": "code_ref",
+        "path": "src/server/auth/login.ts",
+        "start": 6,
+        "end": 9,
+        "refSha": "f86859b05d854df42a7de7a71a80c0e600b546c6",
+        "text": "  router.get(\"/login\", (req, res) => {\n    const returnTo = typeof req.query.returnTo === \"string\" ? req.query.returnTo : \"/\";\n    res.cookie(\"returnTo\", returnTo, { httpOnly: true, sameSite: \"lax\", maxAge: 10 * 60 * 1000 });\n    res.redirect(oauth.authorizeUrl());"
+      },
+      {
+        "kind": "scenario",
+        "text": "GET /login?returnTo=https%3A%2F%2Facme-shop.help%2Fverify, then sign in with valid credentials: 302 Location: https://acme-shop.help/verify"
+      }
+    ],
+    "history": [
+      {
+        "runId": "d1ed7b3b7b96a280414a43f18864bd2b",
+        "disposition": "DETECTED",
+        "at": "2026-10-20T14:30:14.240Z"
+      }
+    ]
+  }
+}

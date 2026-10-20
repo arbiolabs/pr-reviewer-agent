@@ -39,7 +39,10 @@ fn every_script_reaches_its_expected_state() {
         .filter_map(|e| e.unwrap().file_name().to_str()?.strip_suffix(".ndjson").map(String::from))
         .collect();
     names.sort();
-    assert_eq!(names, ["accounts", "burst", "duplicate", "epoch-change", "gap", "hostile", "normal", "superseded"]);
+    assert_eq!(
+        names,
+        ["accounts", "burst", "duplicate", "epoch-change", "gap", "hostile", "normal", "showcase", "superseded"]
+    );
     for name in names {
         let (m, _) = replay(&name);
         assert_eq!(summary(&m), expect(&name), "{name}");
@@ -93,4 +96,37 @@ fn burst_is_fast_and_keeps_at_most_the_activity_cap() {
     assert_eq!(m.domain.activity.back().map(|a| a.sequence), Some(5_010));
     // Budget: 5,000 events through the reducer in under 500 ms, even unoptimized.
     assert!(took < Duration::from_millis(500), "burst took {took:?}");
+}
+
+#[test]
+fn showcase_answers_every_finding_with_quoted_code_and_a_hunk_holding_its_line() {
+    use pr_review_tui::playback;
+    use pr_review_tui::protocol::{EvidenceKind, ServerMessage};
+    use serde_json::json;
+
+    let (m, _) = replay("showcase");
+    let fixtures = protocol_dir().join("fixtures");
+    let ask = |req: serde_json::Value| playback::answer(&fixtures, &[], &serde_json::from_value(req).unwrap()).unwrap();
+    assert_eq!(m.domain.findings.len(), 7);
+    for f in m.domain.findings.values() {
+        let ServerMessage::FindingDetail { finding: d, .. } =
+            ask(json!({ "type": "finding.get", "requestId": "r", "findingId": f.id.as_str() }))
+        else {
+            panic!("{}: no detail", f.title)
+        };
+        let code = d.evidence.iter().find(|e| e.kind == EvidenceKind::CodeRef).expect("a code_ref");
+        let (start, end) = (code.start.unwrap(), code.end.unwrap());
+        assert_eq!(code.text.as_str().lines().count() as u32, end - start + 1, "{}", f.title);
+
+        let run = &m.domain.runs[&f.run_id];
+        let req = json!({ "type": "diff.get", "requestId": "r", "prId": f.pr_id.as_str(),
+            "baseSha": run.base_sha.as_str(), "headSha": run.head_sha.as_str() });
+        let ServerMessage::DiffPage(page) = ask(req) else { panic!("{}: no diff", f.title) };
+        let line = f.line.unwrap().get();
+        let file = page.files.iter().find(|d| d.path == f.file).expect("the finding's file");
+        let row = file.hunks.iter().flat_map(|h| &h.lines).find(|l| l.new == Some(line)).expect("the finding's line");
+        assert_eq!(code.path.as_ref(), Some(&f.file), "{}", f.title);
+        assert!((start..=end).contains(&line), "{}: the first code_ref quotes the flagged line", f.title);
+        assert_eq!(code.text.as_str().lines().nth((line - start) as usize), Some(row.text.as_str()), "{}", f.title);
+    }
 }
