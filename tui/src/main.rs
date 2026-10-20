@@ -4,7 +4,7 @@ use std::process::ExitCode;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use crossterm::event::{self, Event as TermEvent};
+use crossterm::event::{self, Event as TermEvent, MouseEventKind};
 use pr_review_tui::app::dispatch;
 use pr_review_tui::config::{self, Source};
 use pr_review_tui::model::Model;
@@ -110,6 +110,10 @@ async fn run(settings: config::Settings, script: Option<playback::Script>) -> st
         loop {
             let msg = match event::read() {
                 Ok(TermEvent::Key(k)) => Msg::Key(k),
+                // Motion events would wake the app on every cell the pointer crosses.
+                Ok(TermEvent::Mouse(e)) if !matches!(e.kind, MouseEventKind::Moved | MouseEventKind::Drag(_)) => {
+                    Msg::Mouse(e)
+                }
                 Ok(TermEvent::Resize(w, h)) => Msg::Resize(w, h),
                 Ok(_) => continue,
                 Err(_) => return,

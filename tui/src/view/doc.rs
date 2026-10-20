@@ -145,6 +145,20 @@ pub fn column(area: Rect) -> Rect {
     Rect { x: area.x + (area.width - w) / 2, width: w, ..area }
 }
 
+/// What a click at (`x`, `y`) on the Review or Inbox screen in `area` lands on.
+pub fn hit(c: &Ctx, area: Rect, x: u16, y: u16) -> Option<super::Hit> {
+    let rail_focus = c.m.ui.screen == Screen::Inbox || c.focused(Pane::Sidebar);
+    let (rail, doc_area) = split(area, rail_focus);
+    if let Some(r) = rail.filter(|r| x < r.x + r.width) {
+        return super::rail::pr_at(c, r, y).map(super::Hit::Pr);
+    }
+    let col = column(doc_area?);
+    let pr = c.m.selected_pr()?;
+    let doc = document(c, pr, col.width as usize, col.height as usize);
+    let line = (y.checked_sub(col.y)? + doc.scroll(c, col.height as usize)) as usize;
+    doc.owners.iter().rev().find(|(start, _)| *start <= line).map(|(_, id)| super::Hit::Finding(id.clone()))
+}
+
 // ---------------------------------------------------------------- document
 
 /// The PR rendered as one scrollable document, and where the selected card sits in it.
@@ -152,6 +166,8 @@ pub struct Doc {
     pub lines: Vec<Line<'static>>,
     /// Lines `[start, end)` of the expanded card, plus the head of the card after it.
     pub card: Option<(usize, usize)>,
+    /// The first line of each finding's card, in order, so a click resolves to the card under it.
+    pub owners: Vec<(usize, FindingId)>,
 }
 
 impl Doc {
@@ -232,8 +248,10 @@ pub fn document(c: &Ctx, pr: &Pr, w: usize, height: usize) -> Doc {
     let focused = c.m.ui.screen == Screen::Review && c.m.ui.focus != Pane::Sidebar;
     let above = if compact { 1 } else { lines.len() };
     let mut card_at = None;
+    let mut owners = Vec::new();
     for (i, f) in findings.iter().enumerate() {
         let start = lines.len();
+        owners.push((start, f.id.clone()));
         let open = sel == Some(&f.id);
         let next = if i + 1 < findings.len() && !compact { NEXT_HEAD } else { 0 };
         let budget = if open { height.saturating_sub(above + next).max(MIN_CARD) } else { 0 };
@@ -244,7 +262,7 @@ pub fn document(c: &Ctx, pr: &Pr, w: usize, height: usize) -> Doc {
         }
     }
     let card = card_at.map(|(s, e)| (s, e.min(lines.len())));
-    Doc { lines, card }
+    Doc { lines, card, owners }
 }
 
 /// Rows the next card's head needs to stay in view under the open card: its severity, title and location.

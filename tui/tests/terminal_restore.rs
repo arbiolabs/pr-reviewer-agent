@@ -22,6 +22,9 @@ fn assert_restored(text: &str) {
     let enter = text.find("\u{1b}[?1049h").expect("entered the alternate screen");
     let leave = text.find("\u{1b}[?1049l").expect("left the alternate screen");
     assert!(enter < leave);
+    let mouse_on = text.find("\u{1b}[?1000h").expect("turned mouse reporting on");
+    let mouse_off = text.rfind("\u{1b}[?1000l").expect("turned mouse reporting off");
+    assert!(mouse_on < mouse_off, "mouse reporting is off again after exit");
     let after = &text[text.find("EXIT=").unwrap()..];
     let before = &text[..enter];
     for flag in [" icanon", " echo "] {

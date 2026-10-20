@@ -3,7 +3,7 @@
 
 use std::collections::VecDeque;
 
-use crossterm::event::KeyEvent;
+use crossterm::event::{KeyEvent, MouseButton, MouseEvent, MouseEventKind};
 
 use crate::keymap::{self, Action, Mutation};
 use crate::model::*;
@@ -15,6 +15,8 @@ pub const TIMED_OUT: &str = "request timed out; r to retry";
 #[derive(Debug)]
 pub enum Msg {
     Key(KeyEvent),
+    /// A click or a wheel turn; the input thread drops every other mouse event.
+    Mouse(MouseEvent),
     Resize(u16, u16),
     /// Milliseconds since the client started.
     Tick(u64),
@@ -114,6 +116,7 @@ pub fn update(m: &mut Model, msg: Msg) -> Vec<Effect> {
                 act(m, a, &mut fx);
             }
         }
+        Msg::Mouse(e) => mouse(m, e, &mut fx),
         Msg::Net(e) => net(m, e, &mut fx),
     }
     prefetch(m, &mut fx);
@@ -978,6 +981,61 @@ fn act(m: &mut Model, a: Action, fx: &mut Vec<Effect>) {
                 jump_to(m, &buffer, fx);
             }
         }
+    }
+}
+
+/// Lines one wheel notch moves.
+const WHEEL: isize = 3;
+
+/// The wheel scrolls the reading column: the open reader, the document, the diff or the timeline. A click selects the
+/// PR or the finding under it; a click on the selected finding reads it.
+fn mouse(m: &mut Model, e: MouseEvent, fx: &mut Vec<Effect>) {
+    let delta = match e.kind {
+        MouseEventKind::ScrollDown => WHEEL,
+        MouseEventKind::ScrollUp => -WHEEL,
+        MouseEventKind::Down(MouseButton::Left) => {
+            click(m, e.column, e.row, fx);
+            return;
+        }
+        _ => return,
+    };
+    match (m.top_modal(), m.ui.screen) {
+        (Some(Modal::Finding { .. }), _) => move_by(m, delta, fx),
+        (Some(_), _) => {}
+        (None, Screen::Inbox | Screen::Review) => {
+            m.ui.doc_scroll = (m.ui.doc_scroll + delta as i32).max(0);
+        }
+        (None, Screen::Diff) => {
+            m.ui.focus = Pane::Main;
+            move_by(m, delta, fx);
+        }
+        (None, Screen::Timeline) => move_by(m, delta, fx),
+        (None, Screen::Settings) => {}
+    }
+}
+
+fn click(m: &mut Model, x: u16, y: u16, fx: &mut Vec<Effect>) {
+    match crate::view::hit(m, x, y) {
+        Some(crate::view::Hit::Pr(id)) => {
+            if m.ui.selected_pr.as_ref() != Some(&id) {
+                m.ui.selected_pr = Some(id);
+                m.ui.selected_finding = None;
+                m.ui.feed_scroll = 0;
+                m.ui.doc_scroll = 0;
+                reselect(m);
+            }
+        }
+        Some(crate::view::Hit::Finding(id)) => {
+            m.ui.screen = Screen::Review;
+            m.ui.focus = Pane::Main;
+            if m.ui.selected_finding.as_ref() == Some(&id) {
+                open_finding(m, id, fx);
+            } else {
+                m.ui.selected_finding = Some(id);
+                m.ui.doc_scroll = 0;
+            }
+        }
+        None => {}
     }
 }
 

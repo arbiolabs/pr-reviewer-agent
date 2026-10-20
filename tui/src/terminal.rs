@@ -4,6 +4,7 @@
 use std::io::{self, Stdout};
 
 use crossterm::cursor::{Hide, Show};
+use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
 use crossterm::execute;
 use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode};
 use ratatui::Terminal;
@@ -15,7 +16,7 @@ pub struct TerminalGuard {
 
 pub fn restore() {
     let _ = disable_raw_mode();
-    let _ = execute!(io::stdout(), LeaveAlternateScreen, Show);
+    let _ = execute!(io::stdout(), DisableMouseCapture, LeaveAlternateScreen, Show);
 }
 
 impl TerminalGuard {
@@ -27,7 +28,7 @@ impl TerminalGuard {
         }));
         enable_raw_mode()?;
         let guard = TerminalGuard { terminal: Terminal::new(CrosstermBackend::new(io::stdout()))? };
-        execute!(io::stdout(), EnterAlternateScreen, Hide)?;
+        execute!(io::stdout(), EnterAlternateScreen, EnableMouseCapture, Hide)?;
         Ok(guard)
     }
 }

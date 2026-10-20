@@ -64,10 +64,8 @@ pub fn rail(c: &Ctx, f: &mut Frame, area: Rect, focused: bool) {
         let text = if total == 0 { "  nothing tracked yet" } else { "  no PR matches" };
         lines.push(Line::from(filled(vec![Span::styled(text, c.s(Role::Muted).patch(bg))], w, bg)));
     }
-    let rh = row_h(c, area.height) as usize;
+    let (range, rh) = visible(c, &prs, area.height);
     let sel = c.m.ui.selected_pr.as_ref().and_then(|id| prs.iter().position(|p| &p.id == id));
-    let fits = (area.height as usize).saturating_sub(RAIL_HEAD as usize) / rh;
-    let range = window(prs.len(), sel, fits);
     if range.start > 0 {
         lines.pop();
         let more = format!("  {} {} more above", c.t.g().arrow, range.start);
@@ -85,6 +83,23 @@ pub fn rail(c: &Ctx, f: &mut Frame, area: Rect, focused: bool) {
         lines.push(Line::from(filled(vec![Span::styled(more, c.s(Role::Muted).patch(bg))], w, bg)));
     }
     f.render_widget(Paragraph::new(lines).style(bg), area);
+}
+
+/// Which of `prs` the rail shows in `height` rows, and the rows each takes.
+fn visible(c: &Ctx, prs: &[&Pr], height: u16) -> (std::ops::Range<usize>, usize) {
+    let rh = row_h(c, height) as usize;
+    let sel = c.m.ui.selected_pr.as_ref().and_then(|id| prs.iter().position(|p| &p.id == id));
+    let fits = (height as usize).saturating_sub(RAIL_HEAD as usize) / rh;
+    (window(prs.len(), sel, fits), rh)
+}
+
+/// The PR whose rows cover screen row `y` of a rail drawn in `area`.
+pub fn pr_at(c: &Ctx, area: Rect, y: u16) -> Option<crate::protocol::PrId> {
+    let prs = c.m.inbox();
+    let (range, rh) = visible(c, &prs, area.height);
+    let k = (y.checked_sub(area.y + RAIL_HEAD)? as usize) / rh;
+    let i = range.start + k;
+    (i < range.end).then(|| prs[i].id.clone())
 }
 
 fn pr_rows(c: &Ctx, pr: &Pr, w: usize, selected: bool, rh: usize) -> Vec<Line<'static>> {

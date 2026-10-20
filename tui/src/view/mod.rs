@@ -71,10 +71,52 @@ pub(crate) fn window(len: usize, selected: Option<usize>, height: usize) -> std:
     start..start + height
 }
 
+/// What a click lands on.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Hit {
+    Pr(crate::protocol::PrId),
+    Finding(crate::protocol::FindingId),
+}
+
+fn ctx(m: &Model, width: u16) -> Ctx<'_> {
+    Ctx {
+        m,
+        t: Theme { color: m.look.color, ascii: m.look.ascii, terminal_bg: m.look.terminal_bg },
+        width: Width::of(width),
+    }
+}
+
+/// The title, spacer, banner, body and footer rows.
+fn regions(c: &Ctx, area: Rect) -> [Rect; 5] {
+    let banner = banner(c, area.width).is_some();
+    Layout::vertical([
+        Constraint::Length(1),
+        Constraint::Length(1),
+        Constraint::Length(u16::from(banner)),
+        Constraint::Min(1),
+        Constraint::Length(1),
+    ])
+    .areas(area)
+}
+
+/// The view's own layout, recomputed for the reducer: what sits at screen cell (`x`, `y`). Modals take every click.
+pub fn hit(m: &Model, x: u16, y: u16) -> Option<Hit> {
+    let area = Rect::new(0, 0, m.size.0, m.size.1);
+    let c = ctx(m, area.width);
+    if area.width < MIN_W || area.height < MIN_H || m.top_modal().is_some() {
+        return None;
+    }
+    let body = regions(&c, area)[3];
+    if !matches!(m.ui.screen, Screen::Inbox | Screen::Review) || y < body.y || y >= body.y + body.height {
+        return None;
+    }
+    doc::hit(&c, body, x, y)
+}
+
 pub fn view(m: &Model, f: &mut Frame) {
     let area = f.area();
-    let t = Theme { color: m.look.color, ascii: m.look.ascii, terminal_bg: m.look.terminal_bg };
-    let c = Ctx { m, t, width: Width::of(area.width) };
+    let c = ctx(m, area.width);
+    let t = c.t;
     if area.width == 0 || area.height == 0 {
         return;
     }
@@ -84,14 +126,7 @@ pub fn view(m: &Model, f: &mut Frame) {
     }
     f.render_widget(Paragraph::new("").style(t.bg(crate::theme::Bg::Base)), area);
     let banner = banner(&c, area.width);
-    let [title, tabs, banner_area, body, footer] = Layout::vertical([
-        Constraint::Length(1),
-        Constraint::Length(1),
-        Constraint::Length(u16::from(banner.is_some())),
-        Constraint::Min(1),
-        Constraint::Length(1),
-    ])
-    .areas(area);
+    let [title, tabs, banner_area, body, footer] = regions(&c, area);
     f.render_widget(Paragraph::new(status_line(&c, title.width)), title);
     let _ = tabs;
     if let Some(b) = banner {

@@ -662,3 +662,51 @@ fn enter_opens_an_events_detail_inline_and_esc_folds_it_before_leaving() {
     press(&mut m, KeyCode::Esc);
     assert_eq!(m.ui.screen, Screen::Review);
 }
+
+/// Where `text` is drawn on a 120x38 frame of `m`.
+fn drawn_at(m: &mut Model, text: &str) -> (u16, u16) {
+    use ratatui::{Terminal, backend::TestBackend};
+    update(m, Msg::Resize(120, 38));
+    let mut term = Terminal::new(TestBackend::new(120, 38)).unwrap();
+    term.draw(|f| pr_review_tui::view::view(m, f)).unwrap();
+    let buf = term.backend().buffer().clone();
+    for y in 0..38 {
+        let row: String = (0..120).map(|x| buf[(x, y)].symbol().chars().next().unwrap_or(' ')).collect();
+        if let Some(x) = row.find(text) {
+            return (row[..x].chars().count() as u16, y);
+        }
+    }
+    panic!("{text} is not on screen");
+}
+
+fn mouse(m: &mut Model, kind: crossterm::event::MouseEventKind, (column, row): (u16, u16)) {
+    let e = crossterm::event::MouseEvent { kind, column, row, modifiers: KeyModifiers::NONE };
+    update(m, Msg::Mouse(e));
+}
+
+#[test]
+fn a_click_selects_the_pr_or_finding_under_it_and_the_wheel_scrolls_the_document() {
+    use crossterm::event::{MouseButton, MouseEventKind as K};
+    let mut m = showcase(0);
+    let at = drawn_at(&mut m, "#1291");
+    mouse(&mut m, K::Down(MouseButton::Left), at);
+    assert_eq!(m.selected_pr().map(|p| p.number), Some(1291));
+
+    let at = drawn_at(&mut m, "#1287");
+    mouse(&mut m, K::Down(MouseButton::Left), at);
+    let second = m.domain.pr_findings(&m.ui.selected_pr.clone().unwrap())[1].clone();
+    assert_ne!(m.ui.selected_finding.as_ref(), Some(&second.id));
+    let at = drawn_at(&mut m, second.title.as_str());
+    mouse(&mut m, K::Down(MouseButton::Left), at);
+    assert_eq!(m.ui.selected_finding.as_ref(), Some(&second.id));
+    assert_eq!(m.top_modal(), None);
+    let at = drawn_at(&mut m, second.title.as_str());
+    mouse(&mut m, K::Down(MouseButton::Left), at);
+    assert!(matches!(m.top_modal(), Some(Modal::Finding { id, .. }) if id == &second.id), "a second click reads it");
+
+    press(&mut m, KeyCode::Esc);
+    mouse(&mut m, K::ScrollDown, (60, 20));
+    mouse(&mut m, K::ScrollDown, (60, 20));
+    mouse(&mut m, K::ScrollUp, (60, 20));
+    assert_eq!(m.ui.doc_scroll, 3);
+}
