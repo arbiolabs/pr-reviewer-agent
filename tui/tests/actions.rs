@@ -436,3 +436,26 @@ fn the_ready_to_publish_line_takes_the_cursor_and_enter_or_a_click_opens_the_pre
     };
     assert!(asks_for_the_preview(&update(&mut m, Msg::Mouse(click))));
 }
+
+fn footer(m: &mut Model) -> String {
+    frame(m).lines().last().unwrap().to_string()
+}
+
+#[test]
+fn the_preview_footer_offers_y_only_while_it_can_publish_and_o_only_once_there_is_a_url() {
+    let mut m = previewing();
+    let f = footer(&mut m);
+    assert!(f.contains("y publish") && !f.contains("o open"), "{f}");
+
+    let rid = commands(&press(&mut m, KeyCode::Char('y')))[0].request_id.clone();
+    send(&mut m, &read("fixtures/server.command.result.accepted.json").replace("req-cmd", rid.as_str()));
+    for msg in script("approval").into_iter().skip(7).take(2) {
+        server(&mut m, msg);
+    }
+    let f = footer(&mut m);
+    assert!(!f.contains("y publish") && !f.contains("o open"), "publishing: {f}");
+
+    server(&mut m, script("approval").remove(9));
+    let f = footer(&mut m);
+    assert!(!f.contains("y publish") && f.contains("o open on GitHub"), "published: {f}");
+}

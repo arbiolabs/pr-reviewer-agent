@@ -385,6 +385,12 @@ fn footer_line(c: &Ctx, width: u16) -> Line<'static> {
     let watch = running && c.m.top_modal().is_none();
     let parked = c.m.selected_pr().and_then(|p| c.m.domain.latest_run(&p.id)).is_some_and(|r| r.parked());
     let mut hints: Vec<&str> = hints.split("  ").collect();
+    if let Some(Modal::Publication { run_id, preview, publish, .. }) = c.m.top_modal() {
+        let can_publish = matches!(publish, crate::model::ConfirmState::Asking | crate::model::ConfirmState::TimedOut)
+            && matches!(preview, crate::model::Preview::Ready(p) if crate::update::publish_block(c.m, p).is_none());
+        let url = crate::update::published_url(c.m, run_id).is_some();
+        hints.retain(|h| (*h != "y publish" || can_publish) && (*h != "o open on GitHub" || url));
+    }
     if watch {
         hints.insert(2.min(hints.len()), "w watch live");
     }

@@ -39,4 +39,4 @@ expression: ascii_text
      >  42 +     slot.held = true;
         43     }
 
-   j/k scroll  y publish  o open on GitHub  Esc close                1 inbox  2 review  3 diff  4 timeline  5 settings
+   j/k scroll  y publish  Esc close                                  1 inbox  2 review  3 diff  4 timeline  5 settings

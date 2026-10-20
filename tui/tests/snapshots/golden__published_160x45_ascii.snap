@@ -46,4 +46,4 @@ expression: ascii_text
                         every comment sits on a line of the diff
 
 
-   j/k scroll  y publish  o open on GitHub  Esc close                                                        1 inbox  2 review  3 diff  4 timeline  5 settings
+   j/k scroll  o open on GitHub  Esc close                                                                   1 inbox  2 review  3 diff  4 timeline  5 settings

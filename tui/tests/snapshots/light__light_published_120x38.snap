@@ -39,7 +39,7 @@ expression: frame
         41 -   if (slot.free) {
         41 +   if (slot.free && !slot.held) {
      ▶  42 +     slot.held = true;
-   j/k scroll  y publish  o open on GitHub  Esc close                1 inbox  2 review  3 diff  4 timeline  5 settings
+   j/k scroll  o open on GitHub  Esc close                           1 inbox  2 review  3 diff  4 timeline  5 settings
 
 aabbbbbbbbbacadabbbbbbbbbabbbbadddddddaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaeaeeeeaa
 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
@@ -78,7 +78,7 @@ aaaagggghhgggggkkkkkgllllglgkkkkkgmmmmlllllggggggggggggggggggggggggggggggggggggg
 aaaannnnoonpnnnqqnrrrrrrrrrrrnrnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnaaaa
 aaaassssttsusssvvswwwwwwwwwwswwswwwwwwwwwwwswsssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssaaaa
 aaaaxyxxzzxAxxxxxzzzzzzzzzxzxBBBBzxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxaaaa
-aaacccaccccccaacacccccccaacaccccaccaccccccaacccacccccaaaaaaaaaaaaaaaacacccccaacaddddddaacaccccaacaccccccccaacaccccccccaa
+aaacccaccccccaacaccccaccaccccccaacccacccccaaaaaaaaaaaaaaaaaaaaaaaaaaacacccccaacaddddddaacaccccaacaccccccccaacaccccccccaa
 
 a - on base
 b text on base
