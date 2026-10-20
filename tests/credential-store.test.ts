@@ -63,3 +63,14 @@ it("waits for a lock held by another process the way pi takes it, then re-reads 
     openai: { type: "api_key", key: "o" },
   });
 }, 10_000);
+
+it("refreshes the lock mtime often enough that pi's 10 s sync-path stale check never steals it", async () => {
+  const path = tempAuth();
+  let age = Number.NaN;
+  await new PiAuthFileStore(path).modify("openai", async () => {
+    await sleep(4500);
+    age = Date.now() - statSync(`${path}.lock`).mtimeMs;
+    return { type: "api_key", key: "o" };
+  });
+  expect(age).toBeLessThan(2000);
+}, 15_000);

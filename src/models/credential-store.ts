@@ -67,6 +67,8 @@ export class PiAuthFileStore implements CredentialStore {
     const release = await lockfile.lock(this.path, {
       realpath: false,
       stale: 30_000,
+      // pi's sync path (lockSync) uses the default 10 s stale; the default update (stale / 2 = 15 s) would let it steal our lock.
+      update: 4000,
       retries: { retries: 60, minTimeout: 10, maxTimeout: 1000, randomize: true },
       onCompromised: (error) => {
         compromised = error;
