@@ -49,6 +49,7 @@ pub fn phase_label(p: Phase) -> &'static str {
         Phase::Analyze => "analyze",
         Phase::Verify => "verify",
         Phase::PreparePublication => "prepare",
+        Phase::AwaitingApproval => "awaiting you",
         Phase::Publish => "publish",
         Phase::Reconcile => "reconcile",
         Phase::Completed => "done",
@@ -360,7 +361,7 @@ fn phase_line(c: &Ctx, run: Option<&Run>, w: usize) -> Line<'static> {
         Phase::Analyze => 2,
         Phase::Verify => 3,
         Phase::PreparePublication => 4,
-        Phase::Publish | Phase::Reconcile => 5,
+        Phase::AwaitingApproval | Phase::Publish | Phase::Reconcile => 5,
         Phase::Completed => 6,
         _ => 7,
     };

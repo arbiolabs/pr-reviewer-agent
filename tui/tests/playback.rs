@@ -42,7 +42,18 @@ fn every_script_reaches_its_expected_state() {
     names.sort();
     assert_eq!(
         names,
-        ["accounts", "burst", "duplicate", "epoch-change", "gap", "hostile", "normal", "showcase", "superseded"]
+        [
+            "accounts",
+            "approval",
+            "burst",
+            "duplicate",
+            "epoch-change",
+            "gap",
+            "hostile",
+            "normal",
+            "showcase",
+            "superseded"
+        ]
     );
     for name in names {
         let (m, _) = replay(&name);

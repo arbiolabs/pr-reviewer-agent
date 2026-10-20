@@ -59,7 +59,7 @@ pub fn phase_index(p: Phase) -> Option<usize> {
         Phase::Analyze => 2,
         Phase::Verify => 3,
         Phase::PreparePublication => 4,
-        Phase::Publish | Phase::Reconcile => 5,
+        Phase::AwaitingApproval | Phase::Publish | Phase::Reconcile => 5,
         Phase::Completed => 6,
         Phase::Failed | Phase::Superseded | Phase::Unknown => return None,
     })

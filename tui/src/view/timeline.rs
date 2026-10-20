@@ -50,6 +50,13 @@ pub fn summary(c: &Ctx, e: &SequencedEvent) -> (String, Role) {
             let selected = accounts.iter().find(|a| a.selected).map_or("none".into(), |a| a.id.to_string());
             (format!("GitHub accounts updated: {} listed, selected {selected}", accounts.len()), Role::Normal)
         }
+        EventBody::PublicationChanged(p) => {
+            let url = p.url.as_ref().map_or(String::new(), |u| format!(" {u}"));
+            (
+                format!("publication {}{url}", crate::theme::publication_status(p.status).0),
+                crate::theme::publication_status(p.status).1,
+            )
+        }
         EventBody::Other(kind) => (format!("{kind} (not shown by this client version)"), Role::Muted),
     }
 }

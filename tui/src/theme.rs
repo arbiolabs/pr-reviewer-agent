@@ -3,7 +3,7 @@
 
 use ratatui::style::{Color, Modifier, Style};
 
-use crate::protocol::{FindingStatus, Phase, RunStatus, Severity};
+use crate::protocol::{FindingStatus, Phase, PublicationStatus, RunStatus, Severity};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Role {
@@ -304,6 +304,18 @@ pub fn finding_status(s: FindingStatus) -> (&'static str, Role) {
     }
 }
 
+/// A publication's status in words. Only `published` reads as done.
+pub fn publication_status(s: PublicationStatus) -> (&'static str, Role) {
+    match s {
+        PublicationStatus::AwaitingApproval => ("awaiting your approval", Role::Pending),
+        PublicationStatus::Publishing => ("publishing", Role::Active),
+        PublicationStatus::Published => ("published", Role::Ok),
+        PublicationStatus::Uncertain => ("uncertain: the daemon is checking GitHub", Role::Pending),
+        PublicationStatus::Failed => ("failed", Role::Fail),
+        PublicationStatus::Unknown => ("unknown", Role::Muted),
+    }
+}
+
 pub fn phase_name(p: Phase) -> &'static str {
     match p {
         Phase::CollectContext => "COLLECT_CONTEXT",
@@ -311,6 +323,7 @@ pub fn phase_name(p: Phase) -> &'static str {
         Phase::Analyze => "ANALYZE",
         Phase::Verify => "VERIFY",
         Phase::PreparePublication => "PREPARE_PUBLICATION",
+        Phase::AwaitingApproval => "AWAITING_APPROVAL",
         Phase::Publish => "PUBLISH",
         Phase::Reconcile => "RECONCILE",
         Phase::Completed => "COMPLETED",

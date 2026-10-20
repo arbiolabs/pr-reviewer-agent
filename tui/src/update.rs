@@ -334,6 +334,7 @@ fn server_message(m: &mut Model, msg: ServerMessage, fx: &mut Vec<Effect>) {
                 }
             }
         }
+        ServerMessage::PublicationPreview(_) => {}
         ServerMessage::CommandResult(r) => {
             let confirm = m.ui.modals.iter_mut().find_map(|x| match x {
                 Modal::Confirm { state, .. } if *state == ConfirmState::Requested(r.request_id.clone()) => Some(state),
@@ -520,6 +521,10 @@ fn apply_body(m: &mut Model, e: &SequencedEvent, fx: &mut Vec<Effect>) {
             d.accounts = Some(accounts.clone());
             settle_account_select(m, accounts);
             return;
+        }
+        EventBody::PublicationChanged(p) => {
+            d.publications.insert(p.run_id.clone(), p.clone());
+            None
         }
         EventBody::Other(_) => None,
     };
@@ -837,6 +842,9 @@ pub fn event_text(e: &SequencedEvent) -> String {
         EventBody::PhaseChanged(p) => format!("{:?} {:?} {}", p.from, p.to, p.event),
         EventBody::FindingUpdated(f) => format!("{} {} {:?} {:?}", f.title, f.file, f.severity, f.status),
         EventBody::ToolActivity(a) => format!("{} {}", a.tool, a.summary),
+        EventBody::PublicationChanged(p) => {
+            format!("publication {:?} {}", p.status, p.url.as_ref().map_or("", |u| u.as_str()))
+        }
         EventBody::AccountsUpdated(a) => a.iter().map(|x| x.login.to_string()).collect::<Vec<_>>().join(" "),
         EventBody::Other(kind) => kind.to_string(),
     }

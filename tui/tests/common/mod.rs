@@ -60,6 +60,10 @@ pub fn summary(m: &Model) -> Value {
             .map(|a| json!({"id": a.id.as_str(), "state": a.state, "ghActive": a.gh_active, "selected": a.selected}))
             .collect();
     }
+    if !m.domain.publications.is_empty() {
+        v["publications"] =
+            m.domain.publications.values().map(|p| json!({"runId": p.run_id.as_str(), "status": p.status})).collect();
+    }
     v
 }
 

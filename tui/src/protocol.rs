@@ -100,6 +100,8 @@ pub enum Phase {
     Analyze,
     Verify,
     PreparePublication,
+    /// The review is stored and parked for a human: publish mode `approval`. Its run is still `RUNNING`.
+    AwaitingApproval,
     Publish,
     Reconcile,
     Completed,
@@ -254,8 +256,7 @@ pub enum PublicationStatus {
     Unknown,
 }
 
-/// Data of a `review.publication_changed` event. The M3 wiring step adds it to `EventBody`; until then it parses from
-/// the event's `data` (see tests/contract.rs).
+/// Data of a `review.publication_changed` event.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PublicationChanged {
@@ -275,7 +276,7 @@ pub struct ReviewComment {
 }
 
 /// The `publication.preview` reply (TUI_SPEC §5.5): the exact summary and inline comments, the target SHA, and the
-/// `preview_id` a `review.publish` must name. The M3 wiring step adds it to `ServerMessage`.
+/// `preview_id` a `review.publish` must name.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct PublicationPreview {
@@ -287,14 +288,6 @@ pub struct PublicationPreview {
     pub comments: Vec<ReviewComment>,
     pub event: Text,
     pub status: PublicationStatus,
-}
-
-/// The `publication.get` request. The M3 wiring step adds it to `ClientMessage`.
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
-#[serde(tag = "type", rename = "publication.get", rename_all = "camelCase")]
-pub struct PublicationGet {
-    pub request_id: RequestId,
-    pub run_id: RunId,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize)]
@@ -493,6 +486,8 @@ pub enum ServerMessage {
     FindingDetail { request_id: Option<RequestId>, finding: FindingDetail },
     #[serde(rename = "timeline.page", rename_all = "camelCase")]
     TimelinePage { request_id: Option<RequestId>, events: Vec<SequencedEvent>, next_before_sequence: Option<u64> },
+    #[serde(rename = "publication.preview")]
+    PublicationPreview(PublicationPreview),
     #[serde(rename = "command.result")]
     CommandResult(CommandResult),
     #[serde(rename = "error", rename_all = "camelCase")]
@@ -544,6 +539,7 @@ pub enum EventBody {
     FindingUpdated(Finding),
     ToolActivity(ToolActivity),
     AccountsUpdated(Vec<Account>),
+    PublicationChanged(PublicationChanged),
     /// An event type this client does not know. It carries nothing, but still advances `lastApplied`.
     Other(Text),
 }
@@ -640,6 +636,9 @@ impl TryFrom<RawEvent> for SequencedEvent {
                 let a: RawAccounts = from_value(data("accounts.updated")?)?;
                 EventBody::AccountsUpdated(a.accounts)
             }
+            "review.publication_changed" => {
+                EventBody::PublicationChanged(from_value(data("review.publication_changed")?)?)
+            }
             other => EventBody::Other(Text::new(other)),
         };
         Ok(SequencedEvent {
@@ -717,6 +716,8 @@ pub enum ClientMessage {
         before_sequence: Option<u64>,
         limit: Limit,
     },
+    #[serde(rename = "publication.get", rename_all = "camelCase")]
+    PublicationGet { request_id: RequestId, run_id: RunId },
     /// Sent only from the confirmation modal, and only for a capability the server granted.
     #[serde(rename = "command")]
     Command(CommandRequest),
@@ -730,7 +731,8 @@ impl ClientMessage {
             | ClientMessage::Resume { request_id, .. }
             | ClientMessage::DiffGet { request_id, .. }
             | ClientMessage::FindingGet { request_id, .. }
-            | ClientMessage::TimelineGet { request_id, .. } => request_id,
+            | ClientMessage::TimelineGet { request_id, .. }
+            | ClientMessage::PublicationGet { request_id, .. } => request_id,
             ClientMessage::Command(c) => &c.request_id,
         }
     }

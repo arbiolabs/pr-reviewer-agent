@@ -144,6 +144,11 @@ pub fn answer(fixtures: &Path, played: &[SequencedEvent], req: &ClientMessage) -
                 next_before_sequence: next,
             });
         }
+        ClientMessage::PublicationGet { run_id, .. } => fixtures_named(fixtures, "server.publication.preview", rid)
+            .into_iter()
+            .map(|(_, v)| v)
+            .find(|v| v["runId"] == run_id.as_str())
+            .unwrap_or_else(|| not_found(rid, format!("no preview for {run_id}"))),
         ClientMessage::Command(_) => json!({
             "type": "command.result", "requestId": rid, "status": "rejected", "code": "CAPABILITY_DENIED",
             "message": "commands are not available in playback",
