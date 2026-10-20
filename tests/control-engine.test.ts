@@ -301,6 +301,18 @@ it("approves a review end to end over the socket: parked, previewed, published o
   const published = c.events().find((e) => e.eventType === "review.publication_changed" && (e.data as { status: string }).status === "published")!;
   expect(published.data).toEqual({ runId, status: "published", reviewId: 1000, url: "https://github.com/acme/shop/pull/1#pullrequestreview-1000" });
   expect([fake.postAttempts, fake.reviews.length, h.app.store.revision(runId)!.state]).toEqual([1, 1, "COMPLETED"]);
+  // A replay after publication carries what was true at each row: no review URL before the review existed.
+  expect(
+    h.source
+      .eventsAfter(snap.sequence, 100)
+      .filter((e) => e.eventType === "review.publication_changed")
+      .map((e) => e.data),
+  ).toEqual([
+    { runId, status: "awaiting_approval" },
+    { runId, status: "publishing" },
+    { runId, status: "published", reviewId: 1000, url: "https://github.com/acme/shop/pull/1#pullrequestreview-1000" },
+  ]);
+
 
   // The replayed approval is the recorded one: same answer, no second attempt, no second POST.
   expect(operation(await command(c, { command: "review.publish", params: { runId, previewId: outbox.payload_hash, expectedHeadSha: fixture.headSha } }))).toEqual(operation(approved));

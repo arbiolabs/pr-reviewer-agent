@@ -296,10 +296,13 @@ export class AppDbSource implements ControlSource {
     return this.db.prepare("SELECT * FROM publication_outbox WHERE revision_id = ? ORDER BY updated_at DESC LIMIT 1").get(revisionId) as OutboxRow | undefined;
   }
 
-  /** `review.publication_changed` data: the journaled status, plus the review GitHub gave us once it is known. */
+  /**
+   * `review.publication_changed` data: the journaled status, plus the review on a `published` row. The outbox gets its
+   * review id in the same write that makes it `published`, its final status, so that row is the first one it was true at.
+   */
   private publicationChange(rev: RevisionRow, status: string): PublicationChange {
     const known = (PUBLICATION_STATUSES as readonly string[]).includes(status) ? (status as PublicationChange["status"]) : "failed";
-    const reviewId = this.outboxOf(rev.id)?.github_review_id;
+    const reviewId = known === "published" ? this.outboxOf(rev.id)?.github_review_id : undefined;
     if (!reviewId) return { runId: rev.id, status: known };
     const pr = this.db.prepare("SELECT repo_full_name, number FROM pull_requests WHERE id = ?").get(rev.pr_id) as { repo_full_name: string; number: number };
     return { runId: rev.id, status: known, reviewId, url: `https://github.com/${pr.repo_full_name}/pull/${pr.number}#pullrequestreview-${reviewId}` };
