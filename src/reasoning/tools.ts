@@ -70,6 +70,7 @@ export function createReviewTools(deps: ToolDeps): Extension {
           const ws = await workspace(api, context);
           const file = ws.files.get(assertSafePath(args.file));
           if (file === undefined) throw new Error(`${args.file} is not a changed file with a head side`);
+          deps.store.markCodeRead(ws.revision.id);
           return text(capBytes(file.text));
         },
       }),
@@ -83,6 +84,7 @@ export function createReviewTools(deps: ToolDeps): Extension {
           const sha = args.ref === "base" ? ws.repo.baseSha : ws.repo.headSha;
           const source = await ws.repo.show(sha, args.path);
           if (source === undefined) throw new Error(`${args.path} does not exist at ${args.ref} (${sha})`);
+          deps.store.markCodeRead(ws.revision.id);
           return text(capBytes(`${args.path} @ ${sha}\n${numbered(source)}`));
         },
       }),
@@ -93,7 +95,9 @@ export function createReviewTools(deps: ToolDeps): Extension {
         replay: "safe",
         execute: async (args, api, context) => {
           const ws = await workspace(api, context);
-          return text(await ws.repo.grep(args.query, args.scope));
+          const found = await ws.repo.grep(args.query, args.scope);
+          deps.store.markCodeRead(ws.revision.id);
+          return text(found);
         },
       }),
       defineTool({
@@ -119,11 +123,16 @@ export function createReviewTools(deps: ToolDeps): Extension {
       }),
       defineTool({
         name: "submit_candidates",
-        description: "Submit the final list of candidate defects for verification. Call exactly once; an empty list is valid.",
+        description:
+          "Submit the final list of candidate defects for verification. Call exactly once. An empty list is valid after you have read the diff or code.",
         parameters: SubmitCandidatesSchema,
         replay: "safe",
         execute: async (args, api, context) => {
           const ws = await workspace(api, context);
+          // §2 invariant 9: "no findings" is a result only when the code was looked at.
+          if (args.candidates.length === 0 && !deps.store.revision(ws.revision.id)?.code_read_at) {
+            throw new Error("An empty submission needs a look at the code first: call read_diff, read_file or search_code, then submit again. Nothing was stored.");
+          }
           const { stored } = deps.store.saveCandidateSet(ws.revision.id, args.candidates as CandidateFinding[]);
           return {
             ...text(stored ? `Stored ${args.candidates.length} candidate(s) for verification.` : "Candidates were already submitted for this revision; this call changed nothing."),

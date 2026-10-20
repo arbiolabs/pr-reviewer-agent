@@ -19,4 +19,4 @@ Each candidate must:
 - set `evidenceKind` to `confirmed_by_static_trace` only when the cited code alone demonstrates the defect, otherwise `suspected` or `unreproducible`;
 - set `confidence` honestly between 0 and 1.
 
-Finish by calling `submit_candidates` exactly once. An empty list is a valid and common result.
+Finish by calling `submit_candidates` exactly once. An empty list is a valid and common result once you have read the diff or the code; without that read it is rejected.

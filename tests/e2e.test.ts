@@ -41,9 +41,10 @@ Review performed with isolated read-only tools. Human review is still required.
   }
 }, 30_000);
 
-it("reports zero findings when the model submits an empty list", async () => {
+it("reports zero findings when the model reads the diff and submits an empty list", async () => {
   const fixture = createFixture();
   const app = await open(mkdtempSync(join(tmpdir(), "e2e-")), fixture, [
+    readDiff(),
     fauxAssistantMessage([fauxToolCall("submit_candidates", { candidates: [] })], { stopReason: "toolUse" }),
   ]);
   try {
@@ -57,6 +58,7 @@ it("reports zero findings when the model submits an empty list", async () => {
 it("supersedes the revision when the head moves before publication", async () => {
   const fixture = createFixture();
   const app = await open(mkdtempSync(join(tmpdir(), "e2e-")), fixture, [
+    readDiff(),
     async () => {
       fixture.pulls.pull = { ...fixture.pull, headSha: "f".repeat(40) };
       return fauxAssistantMessage([fauxToolCall("submit_candidates", { candidates: [] })], { stopReason: "toolUse" });
@@ -66,6 +68,28 @@ it("supersedes the revision when the head moves before publication", async () =>
     const revision = await finishReview(app, await startReview(app, fixture.pull, "1"));
     expect(revision.state).toBe("SUPERSEDED");
     expect(app.store.auditEvents(revision.id).at(-1)).toMatchObject({ event: "NEWER_HEAD", detail: `head moved to ${"f".repeat(40)}` });
+  } finally {
+    await app.close();
+  }
+}, 30_000);
+
+it("rejects an empty submission until the model has read the code, then completes", async () => {
+  const fixture = createFixture();
+  const empty = () => fauxAssistantMessage([fauxToolCall("submit_candidates", { candidates: [] })], { stopReason: "toolUse" });
+  let afterRejection = "";
+  const app = await open(mkdtempSync(join(tmpdir(), "e2e-")), fixture, [
+    empty(),
+    (context) => {
+      afterRejection = JSON.stringify(context);
+      return readDiff();
+    },
+    empty(),
+  ]);
+  try {
+    const revision = await finishReview(app, await startReview(app, fixture.pull, "1"));
+    expect(afterRejection).toContain("An empty submission needs a look at the code first");
+    expect(revision.state).toBe("COMPLETED");
+    expect(app.store.candidateSet(revision.id)!.candidates).toEqual([]);
   } finally {
     await app.close();
   }

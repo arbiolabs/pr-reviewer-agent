@@ -48,7 +48,7 @@ it("treats the model as part of reviewer identity: two models give two revisions
   const dataDir = mkdtempSync(join(tmpdir(), "identity-"));
   const faux = fauxProvider({ provider: "faux", models: [{ id: "one", reasoning: true }, { id: "two", reasoning: true }] });
   const empty = () => fauxAssistantMessage([fauxToolCall("submit_candidates", { candidates: [] })], { stopReason: "toolUse" });
-  faux.setResponses([empty(), empty()]);
+  faux.setResponses([readDiff(), empty(), readDiff(), empty()]);
   const models = createModels();
   models.setProvider(faux.provider);
   process.env.PR_REVIEW_DATA_DIR = dataDir;

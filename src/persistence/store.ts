@@ -15,6 +15,7 @@ export type RevisionRow = {
   reviewer_version: string;
   state: ReviewState;
   durable_task_id: string | null;
+  code_read_at: string | null;
   created_at: string;
   completed_at: string | null;
 };
@@ -142,6 +143,10 @@ export class AppStore {
 
   revisionsForPr(prId: string): RevisionRow[] {
     return this.db.prepare("SELECT * FROM review_revisions WHERE pr_id = ? ORDER BY created_at, id").all(prId) as RevisionRow[];
+  }
+
+  markCodeRead(revisionId: string): void {
+    this.db.prepare("UPDATE review_revisions SET code_read_at = ? WHERE id = ? AND code_read_at IS NULL").run(now(), revisionId);
   }
 
   setDurableTask(revisionId: string, taskId: string): void {
