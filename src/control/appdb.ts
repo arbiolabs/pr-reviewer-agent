@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { COORDINATOR_STATES, FINDING_STATES, PUBLICATION_STATUSES, publicationStatus, REVIEW_STATES, type ReviewState } from "../domain/machines.ts";
 import type { CandidateFinding } from "../domain/types.ts";
 import { ACCOUNT_KEY, chooseAccount, detectGh, type Env, type GhDetection, listAccounts } from "../github/accounts.ts";
-import { AppStore, type OutboxRow, type PullRow, type RevisionRow } from "../persistence/store.ts";
+import { AppStore, type OutboxRow, type PullRow, type RevisionRow, TRANSITIONS } from "../persistence/store.ts";
 import type { ReviewPayload } from "../publish/publisher.ts";
 import { sanitize } from "../protocol/sanitize.ts";
 import type { Account, Finding, FindingDetail, Pr, PublicationChange, PublicationPreview, Run, SequencedEvent } from "../protocol/v1.ts";
@@ -338,7 +338,7 @@ export class AppDbSource implements ControlSource {
   }
 
   private failureReason(revisionId: string): string | null {
-    const row = this.db.prepare("SELECT detail FROM audit_events WHERE revision_id = ? AND to_state = 'FAILED' ORDER BY seq DESC LIMIT 1").get(revisionId) as
+    const row = this.db.prepare(`SELECT detail FROM audit_events WHERE revision_id = ? AND to_state = 'FAILED' AND ${TRANSITIONS} ORDER BY seq DESC LIMIT 1`).get(revisionId) as
       | { detail: string | null }
       | undefined;
     return row?.detail ?? null;

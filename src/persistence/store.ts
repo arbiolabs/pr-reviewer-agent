@@ -105,8 +105,8 @@ const now = () => new Date().toISOString();
 
 /** Outbox events whose detail is why publication is not done; `last_error` keeps the latest one. */
 const OUTBOX_ERRORS: readonly OutboxEvent[] = ["NOT_SENT", "UNCERTAIN", "REJECTED", "ABANDON", "UNDECIDED"];
-// The journal also holds stream-only rows (tool activity, migration 050's triggers); a revision's audit trail is its transitions.
-const TRANSITIONS = `event IN (${REVIEW_EVENTS.map((e) => `'${e}'`).join(", ")})`;
+/** The journal also holds stream-only rows (tool activity, publication status); a revision's audit trail is its transitions. */
+export const TRANSITIONS = `event IN (${REVIEW_EVENTS.map((e) => `'${e}'`).join(", ")})`;
 
 export class AppStore {
   readonly db: DatabaseSync;
