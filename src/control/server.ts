@@ -79,6 +79,10 @@ export async function startControlServer(options: ServerOptions): Promise<Contro
   const { socketPath, source } = options;
   const maxQueue = options.maxQueue ?? 2000;
   const conns = new Set<Conn>();
+  // listen() succeeds on a longer path, but the kernel truncates sun_path, so no client could ever connect.
+  const limit = process.platform === "darwin" ? 103 : 107;
+  const length = Buffer.byteLength(socketPath);
+  if (length > limit) throw new Error(`socket path is ${length} bytes, over the ${limit}-byte limit for a Unix socket on ${process.platform}; pass a shorter --socket`);
   ensurePrivateDir(dirname(socketPath));
   await clearStaleSocket(socketPath);
 

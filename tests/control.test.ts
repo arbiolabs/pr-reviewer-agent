@@ -1,4 +1,4 @@
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, symlinkSync, writeFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -121,6 +121,21 @@ describe("socket safety", () => {
     const server = await serve({ source: FixtureSource.load("normal") });
     expect(statSync(join(server.path, "..")).mode & 0o777).toBe(0o700);
     expect(statSync(server.path).mode & 0o777).toBe(0o600);
+  });
+
+  it("refuses a socket path the kernel would truncate, before creating anything, and serves one at the limit", async () => {
+    const limit = process.platform === "darwin" ? 103 : 107;
+    const root = mkdtempSync(join(tmpdir(), "ctl-"));
+    const at = (bytes: number) => `${root}/d/${"s".repeat(bytes - `${root}/d/`.length)}`;
+    expect(Buffer.byteLength(at(limit + 1))).toBe(limit + 1);
+    await expect(startControlServer({ socketPath: at(limit + 1), source: FixtureSource.load("normal") })).rejects.toThrow(
+      `socket path is ${limit + 1} bytes, over the ${limit}-byte limit for a Unix socket on ${process.platform}; pass a shorter --socket`,
+    );
+    expect(existsSync(join(root, "d"))).toBe(false);
+    const server = await serve({ source: FixtureSource.load("normal"), socketPath: at(limit) });
+    const c = await TestClient.connect(server.path);
+    expect(await c.hello()).toMatchObject({ type: "welcome" });
+    await c.close();
   });
 
   it("refuses a symlinked directory and a loose-mode directory", async () => {
