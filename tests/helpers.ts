@@ -45,7 +45,7 @@ export async function open(dataDir: string, fixture: Fixture, responses: FauxRes
     dataDir,
     config,
     pulls: fixture.pulls,
-    engine: undefined,
+    engine: { skipped: "Jev disabled by --no-jev" },
     models,
     model: { provider: "faux", modelId: "reviewer" },
     reviewerVersion: "m1+faux/reviewer",

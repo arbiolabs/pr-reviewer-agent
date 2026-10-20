@@ -1,6 +1,6 @@
 import { expect, it } from "vitest";
 import { DEFAULT_CONFIG } from "../src/config/config.ts";
-import { askJev, type JevJudgment, MockDecisionEngine, selectReviewMode } from "../src/jev/decision.ts";
+import { askJev, type JevJudgment, jevSkipReason, MockDecisionEngine, selectReviewMode } from "../src/jev/decision.ts";
 
 const input = { title: "t", body: "", changedFiles: [], diffExcerpt: "" };
 
@@ -56,4 +56,13 @@ it("lets Jev raise the mode, and treats null confidence or out-of-range values a
   expect(selectReviewMode({ ok: true, judgment: judgment({ riskScore: 3 }) }, [], DEFAULT_CONFIG).reasons).toEqual([
     "Jev returned invalid riskScore 3; using standard",
   ]);
+});
+
+it("skips Jev for a private repository unless it is keyed or the config allows keyless", () => {
+  const base = { noJev: false, keyed: false, privateRepo: true, allowKeylessForPrivate: false };
+  expect(jevSkipReason(base)).toBe("jev_skipped_private_repo");
+  expect(jevSkipReason({ ...base, keyed: true })).toBe(undefined);
+  expect(jevSkipReason({ ...base, allowKeylessForPrivate: true })).toBe(undefined);
+  expect(jevSkipReason({ ...base, privateRepo: false })).toBe(undefined);
+  expect(jevSkipReason({ ...base, keyed: true, noJev: true })).toBe("Jev disabled by --no-jev");
 });

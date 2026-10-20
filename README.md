@@ -18,6 +18,7 @@ pnpm typecheck && pnpm test
 - **GitHub access.** The tool reads `GITHUB_TOKEN`, then `gh auth token`. Without a token it can read public repositories only.
 - **Models.** Credentials come from `~/.pi/agent/auth.json`, which pi shares, or from provider environment variables such as `ANTHROPIC_API_KEY`. The tool picks the model in this order: `--model`, then `PR_REVIEW_MODEL`, then `models.default` in `pr-review.config.json`. If none of these is set, a TTY shows a picker. Without a TTY, the tool takes the first available model in `models.preferred`. The model is part of the reviewer identity, so reviewing the same head with another model creates a new revision.
 - **Jev.** By default the tool uses the keyless OpenCode Zen tier. If `TYPESAFE_API_KEY` is set, it uses TypeSafe instead. `--no-jev` skips Jev and uses the fallback route.
+- **Jev and private repositories.** The PR title, description and a diff excerpt go to Jev. For a private repository without `TYPESAFE_API_KEY`, the tool does not call the keyless endpoint: it takes the fallback route and records the reason `jev_skipped_private_repo`. To allow the keyless endpoint for private repositories, set `"jev": { "allow_keyless_for_private": true }` in `pr-review.config.json`.
 - **Config.** `pr-review.config.json` is optional. It overrides the defaults in `src/config/config.ts`. An unknown key or a wrong type is an error.
 - **State.** All state lives in `.data/` (or `PR_REVIEW_DATA_DIR`):
   - `app.sqlite` holds business records.

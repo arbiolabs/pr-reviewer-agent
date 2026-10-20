@@ -109,6 +109,19 @@ export class MockDecisionEngine implements DecisionEngine {
   }
 }
 
+/** An engine to ask, or the fallback route with the reason Jev was not asked. */
+export type JevRoute = DecisionEngine | { skipped: string };
+
+/**
+ * Why this review must not ask Jev, or `undefined` when it may. Without TYPESAFE_API_KEY Jev means the keyless Zen
+ * endpoint, which a private repository's diff never reaches unless `jev.allow_keyless_for_private` says so.
+ */
+export function jevSkipReason(o: { noJev: boolean; keyed: boolean; privateRepo: boolean; allowKeylessForPrivate: boolean }): string | undefined {
+  if (o.noJev) return "Jev disabled by --no-jev";
+  if (o.privateRepo && !o.keyed && !o.allowKeylessForPrivate) return "jev_skipped_private_repo";
+  return undefined;
+}
+
 export type JevOutcome = { ok: true; judgment: JevJudgment } | { ok: false; error: string };
 
 const rank = (mode: ReviewMode) => REVIEW_MODES.indexOf(mode);

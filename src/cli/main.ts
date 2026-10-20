@@ -4,7 +4,7 @@ import type { AuthInteraction, CredentialStore, Models } from "@earendil-works/p
 import { createTypeSafeClient, createZenClient } from "jev-systemone";
 import { loadConfig, saveDefaultModel } from "../config/config.ts";
 import { GitHubPullSource, parsePullRef, parsePullUrl, type PullSource, resolveGitHubToken } from "../github/pulls.ts";
-import { type DecisionEngine, JevDecisionEngine } from "../jev/decision.ts";
+import { type DecisionEngine, JevDecisionEngine, type JevRoute, jevSkipReason } from "../jev/decision.ts";
 import { PiAuthFileStore } from "../models/credential-store.ts";
 import { buildModels, detectModels } from "../models/detect.ts";
 import { chooseModel, listAvailableModels, splitRef } from "../models/select.ts";
@@ -95,9 +95,11 @@ async function review(args: string[], deps: CliDeps, dataDir: string, out: Out, 
   if (choice.kind !== "chosen") throw new Error("no model chosen");
   err(`model: ${choice.ref} (${choice.source})\n`);
 
-  const engine = values["no-jev"]
-    ? undefined
-    : (deps.engine ?? new JevDecisionEngine(process.env.TYPESAFE_API_KEY ? createTypeSafeClient() : createZenClient()));
+  const keyed = Boolean(process.env.TYPESAFE_API_KEY);
+  const skipped = jevSkipReason({ noJev: values["no-jev"] ?? false, keyed, privateRepo: pull.private, allowKeylessForPrivate: config.jev.allow_keyless_for_private });
+  const engine: JevRoute = skipped
+    ? { skipped }
+    : (deps.engine ?? new JevDecisionEngine(keyed ? createTypeSafeClient() : createZenClient()));
   const app = await openApp({
     dataDir,
     config,

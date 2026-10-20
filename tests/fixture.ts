@@ -72,6 +72,7 @@ export function createFixture(root = mkdtempSync(join(tmpdir(), "fixture-"))): F
     headSha,
     state: "open",
     merged: false,
+    private: false,
     cloneUrl: repoDir,
   };
   return { repoDir, baseSha, headSha, pull, pulls: new FakePullSource(pull) };

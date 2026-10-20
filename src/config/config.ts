@@ -23,6 +23,10 @@ export type Config = {
     min_severity: Severity;
     min_confidence: number;
   };
+  jev: {
+    /** Let a private repository's diff go to the keyless OpenCode Zen tier when TYPESAFE_API_KEY is unset. */
+    allow_keyless_for_private: boolean;
+  };
   models: {
     /** `provider/id`; empty means pick one. */
     default: string;
@@ -48,6 +52,7 @@ export const DEFAULT_CONFIG: Config = {
     jev_critical_threshold: 0.9,
   },
   verification: { min_severity: "medium", min_confidence: 0.5 },
+  jev: { allow_keyless_for_private: false },
   models: {
     default: "",
     preferred: ["anthropic/claude-opus-5-5", "anthropic/claude-fable-5-1", "anthropic/claude-sonnet-5-5", "openai/*"],

@@ -16,6 +16,7 @@ const pull: PullInfo = {
   headSha: "h".repeat(40),
   state: "open",
   merged: false,
+  private: false,
   cloneUrl: "file:///nowhere",
 };
 

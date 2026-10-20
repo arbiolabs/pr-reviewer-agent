@@ -40,6 +40,8 @@ export type PullInfo = {
   headSha: string;
   state: "open" | "closed";
   merged: boolean;
+  /** GitHub repository visibility; a private diff never goes to the keyless Jev endpoint. */
+  private: boolean;
   cloneUrl: string;
 };
 

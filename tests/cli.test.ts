@@ -5,6 +5,7 @@ import { join } from "node:path";
 import { createModels, fauxAssistantMessage, fauxProvider, fauxToolCall } from "@earendil-works/pi-ai";
 import { expect, it } from "vitest";
 import { main } from "../src/cli/main.ts";
+import { MockDecisionEngine } from "../src/jev/decision.ts";
 import { AppStore } from "../src/persistence/store.ts";
 import { createFixture } from "./fixture.ts";
 import { fauxModels, readDiff, submitDefect } from "./helpers.ts";
@@ -96,4 +97,31 @@ it("strips control characters from model text in Markdown and inspect output, an
   } finally {
     delete process.env.PR_REVIEW_DATA_DIR;
   }
+}, 60_000);
+
+it("never sends a private repository to the keyless Jev endpoint, and records the skipped route", async () => {
+  const fixture = createFixture();
+  fixture.pulls.pull = { ...fixture.pull, private: true };
+  const calls: string[] = [];
+  const engine = new MockDecisionEngine((input) => {
+    calls.push(input.title);
+    throw new Error("must not be called");
+  });
+  const dataDir = mkdtempSync(join(tmpdir(), "private-"));
+  const key = process.env.TYPESAFE_API_KEY;
+  delete process.env.TYPESAFE_API_KEY;
+  process.env.PR_REVIEW_DATA_DIR = dataDir;
+  try {
+    const deps = { pulls: fixture.pulls, engine, models: fauxModels([readDiff(), submitDefect(fixture)]), isTTY: false, out: () => {}, err: () => {} };
+    expect(await main(["review", "https://github.com/acme/shop/pull/1", "--model", "faux/reviewer"], deps)).toBe(0);
+  } finally {
+    delete process.env.PR_REVIEW_DATA_DIR;
+    if (key !== undefined) process.env.TYPESAFE_API_KEY = key;
+  }
+  expect(calls).toEqual([]);
+  const store = AppStore.open(join(dataDir, "app.sqlite"));
+  expect(store.db.prepare("SELECT provider, error, selected_mode, reasons_json FROM decision_records").all()).toEqual([
+    { provider: "none", error: "jev_skipped_private_repo", selected_mode: "standard", reasons_json: JSON.stringify(["Jev failed: jev_skipped_private_repo; using standard"]) },
+  ]);
+  store.close();
 }, 60_000);

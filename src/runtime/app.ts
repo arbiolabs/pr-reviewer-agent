@@ -9,7 +9,7 @@ import type { Config } from "../config/config.ts";
 import { TERMINAL_REVIEW_STATES } from "../domain/machines.ts";
 import type { PullInfo } from "../domain/types.ts";
 import type { PullSource } from "../github/pulls.ts";
-import type { DecisionEngine } from "../jev/decision.ts";
+import type { JevRoute } from "../jev/decision.ts";
 import { AppStore, type RevisionRow } from "../persistence/store.ts";
 import { createReviewTools, type Workspace } from "../reasoning/tools.ts";
 import { parseDiff } from "../source/diff.ts";
@@ -21,7 +21,7 @@ export type AppOptions = {
   config: Config;
   pulls: PullSource;
   githubToken?: string | undefined;
-  engine: DecisionEngine | undefined;
+  engine: JevRoute;
   models: Models;
   model: ModelRef;
   /** Part of revision identity: a different reviewer (code or model) is a different review. */

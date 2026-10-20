@@ -38,7 +38,7 @@ type GitHubPull = {
   state: "open" | "closed";
   merged: boolean;
   head: { sha: string };
-  base: { sha: string; repo: { id: number; full_name: string; clone_url: string } };
+  base: { sha: string; repo: { id: number; full_name: string; clone_url: string; private: boolean } };
 };
 
 export class GitHubPullSource implements PullSource {
@@ -74,6 +74,7 @@ export class GitHubPullSource implements PullSource {
       headSha: pull.head.sha,
       state: pull.state,
       merged: pull.merged,
+      private: pull.base.repo.private,
       cloneUrl: pull.base.repo.clone_url,
     };
   }

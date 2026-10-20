@@ -14,7 +14,7 @@ import type { Config } from "../config/config.ts";
 import type { ReviewState } from "../domain/machines.ts";
 import { type ReviewCheckpoint, type ReviewMode, sha256 } from "../domain/types.ts";
 import type { PullSource } from "../github/pulls.ts";
-import { askJev, type DecisionEngine, type JevOutcome, selectReviewMode, type TriageInput, type TriageResult } from "../jev/decision.ts";
+import { askJev, type JevOutcome, type JevRoute, selectReviewMode, type TriageInput, type TriageResult } from "../jev/decision.ts";
 import type { AppStore, RevisionRow } from "../persistence/store.ts";
 import { buildReviewRequest } from "../reasoning/request.ts";
 import { TargetDoc, type Workspace } from "../reasoning/tools.ts";
@@ -31,8 +31,7 @@ export type ReviewTask = Task<ReviewInput, ReviewCheckpoint, ReviewResult, objec
 export type ReviewTaskDeps = {
   store: AppStore;
   pulls: PullSource;
-  /** `undefined` runs the fallback route, as `--no-jev` asks. */
-  engine: DecisionEngine | undefined;
+  engine: JevRoute;
   config: Config;
   cacheDir: string;
   /** Sent to git only as a per-command header on clone and fetch, for private repositories. */
@@ -135,17 +134,18 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
     }
     const snapshot = store.snapshot(revision.id)!;
     const input: TriageInput = { title: snapshot.pr.title, body: snapshot.pr.body, changedFiles: snapshot.changedFiles, diffExcerpt: snapshot.diff };
-    const { outcome, raw }: { outcome: JevOutcome; raw?: unknown } = deps.engine
-      ? await askJev(deps.engine, input, config.review.jev_timeout_ms)
-      : { outcome: { ok: false, error: "Jev disabled by --no-jev" } };
+    const route = deps.engine;
+    const engine = "skipped" in route ? undefined : route;
+    const { outcome, raw }: { outcome: JevOutcome; raw?: unknown } =
+      "skipped" in route ? { outcome: { ok: false, error: route.skipped } } : await askJev(route, input, config.review.jev_timeout_ms);
     const { mode, reasons } = selectReviewMode(outcome, snapshot.changedFiles.map((f) => f.path), config);
     const normalized: TriageResult | undefined = outcome.ok ? { ...outcome.judgment, selectedReviewMode: mode } : undefined;
     store.advance(revision.id, "TRIAGE", "ROUTING_PERSISTED", `${mode}: ${reasons.join("; ")}`, () => {
       store.saveDecision({
         revisionId: revision.id,
         inputHash: sha256(JSON.stringify(input)),
-        provider: deps.engine?.provider ?? "none",
-        modelId: deps.engine?.modelId ?? "none",
+        provider: engine?.provider ?? "none",
+        modelId: engine?.modelId ?? "none",
         rawResponse: raw,
         error: outcome.ok ? null : outcome.error,
         normalized,
