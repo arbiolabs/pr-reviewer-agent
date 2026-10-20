@@ -187,10 +187,12 @@ impl Theme {
         base.fg(rgb(hex(name)))
     }
 
-    /// A background fill; nothing without color. With `terminal_bg`, `Base` is the terminal's own background.
+    /// A background fill. Without color only the selection shows, in reverse video. With `terminal_bg`, `Base` is the
+    /// terminal's own background.
     pub fn bg(&self, bg: Bg) -> Style {
         if !self.color {
-            return Style::default();
+            let reversed = if bg == Bg::Select { Modifier::REVERSED } else { Modifier::empty() };
+            return Style::default().add_modifier(reversed);
         }
         if self.terminal_bg && bg == Bg::Base {
             return Style::default().bg(Color::Reset);

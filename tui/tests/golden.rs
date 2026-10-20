@@ -444,3 +444,49 @@ fn a_huge_diff_renders_a_frame_in_bounded_time() {
     // About 2 ms in the test profile (opt-level 1) and 1 ms in release; it took 600 ms before the rows were windowed.
     assert!(took < std::time::Duration::from_millis(30), "frame took {took:?}");
 }
+
+/// The text of the reverse-video cells on each row that has any: what NO_COLOR shows as selected.
+fn reversed(term: &Terminal<TestBackend>) -> Vec<String> {
+    let buf = term.backend().buffer();
+    let (w, h) = (buf.area.width, buf.area.height);
+    (0..h)
+        .map(|y| {
+            (0..w)
+                .map(|x| &buf[(x, y)])
+                .filter(|c| c.modifier.contains(ratatui::style::Modifier::REVERSED))
+                .map(|c| c.symbol())
+                .collect::<String>()
+        })
+        .filter(|row| !row.is_empty())
+        .map(|row| row.trim().to_string())
+        .collect()
+}
+
+#[test]
+fn without_color_the_diff_cursor_and_a_selected_phase_heading_show_in_reverse_video() {
+    let mono = Look { color: false, ..Look::default() };
+    let (_, mut diff) = states(mono).remove(2);
+    let (_, term) = render(&mut diff.m, 120, 38);
+    assert_eq!(
+        reversed(&term),
+        ["▌ ▲ booking.ts", "▌   src                     +2 -1", "▲        42 +     slot.held = true;"]
+    );
+
+    let mut s = Sim::new(mono).play("showcase", 12).key(KeyCode::Char('w')).key(KeyCode::Char('t'));
+    let phase = |s: &Sim| {
+        let t = s.m.timeline.as_ref().unwrap();
+        let e = t.events.iter().find(|e| Some(e.sequence.get()) == t.selected).unwrap();
+        matches!(e.body, pr_review_tui::protocol::EventBody::PhaseChanged(_))
+    };
+    for _ in 0..20 {
+        if phase(&s) {
+            break;
+        }
+        s = s.key(KeyCode::Char('k'));
+    }
+    assert!(phase(&s), "a phase change is selected");
+    let (frame, term) = render(&mut s.m, 120, 38);
+    let rows = reversed(&term);
+    assert_eq!(rows.len(), 1, "{rows:?}\n{frame}");
+    assert!(rows[0].ends_with(|c: char| c.is_ascii_digit()) && rows[0].contains("───"), "{rows:?}");
+}
