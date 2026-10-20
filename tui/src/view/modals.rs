@@ -30,6 +30,7 @@ pub fn modal(c: &Ctx, f: &mut Frame, body: Rect, modal: &Modal) {
                     (format!("accepted ({op}); waiting for events to confirm it"), Role::Active)
                 }
                 ConfirmState::Failed(e) => (format!("rejected: {e}"), Role::Fail),
+                ConfirmState::TimedOut => ("request timed out; y sends it again, r refreshes".to_string(), Role::Fail),
             };
             let rows = |s: &str| crate::text::width(s).div_ceil(62).max(1) as u16;
             let h = 4 + rows(prompt) + rows(&status);

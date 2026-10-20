@@ -94,6 +94,7 @@ async fn run(settings: config::Settings, script: Option<playback::Script>) -> st
         (None, Source::Playback(_)) => unreachable!("playback scripts are loaded before run"),
     }
     let mut model = Model::new(endpoint, settings.look, settings.start, settings.wanted_pr);
+    model.request_timeout_ms = settings.request_timeout.as_millis() as u64;
     tracing::info!(endpoint = %model.diag.endpoint, config = %settings.config_path.display(), "start");
 
     let mut guard = TerminalGuard::enter()?;

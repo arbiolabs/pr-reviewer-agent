@@ -10,6 +10,7 @@ use crate::model::*;
 use crate::protocol::*;
 
 pub const NOTICE_MS: u64 = 4_000;
+pub const TIMED_OUT: &str = "request timed out; r to retry";
 
 #[derive(Debug)]
 pub enum Msg {
@@ -99,6 +100,7 @@ pub fn update(m: &mut Model, msg: Msg) -> Vec<Effect> {
                 m.notice = None;
                 m.dirty = true;
             }
+            expire_requests(m);
             // Ages on the banner and the diagnostics screen tick.
             if m.ui.screen == Screen::Settings || !m.link.accepts_events() {
                 m.dirty = true;
@@ -120,7 +122,44 @@ pub fn update(m: &mut Model, msg: Msg) -> Vec<Effect> {
 fn request(m: &mut Model) -> RequestId {
     let id = RequestId::new(&format!("req-{}", m.next_request));
     m.next_request += 1;
+    m.sent_at.insert(id.clone(), m.now_ms);
     id
+}
+
+/// Ends every request older than the timeout that is still waited on, as if the server had answered with an error.
+fn expire_requests(m: &mut Model) {
+    let (now, timeout) = (m.now_ms, m.request_timeout_ms);
+    let expired: Vec<RequestId> =
+        m.sent_at.iter().filter(|(_, at)| now.saturating_sub(**at) >= timeout).map(|(id, _)| id.clone()).collect();
+    for id in expired {
+        m.sent_at.remove(&id);
+        let confirm = m.ui.modals.iter_mut().find_map(|x| match x {
+            Modal::Confirm { state, .. } if *state == ConfirmState::Requested(id.clone()) => Some(state),
+            _ => None,
+        });
+        if let Some(state) = confirm {
+            *state = ConfirmState::TimedOut;
+            m.dirty = true;
+        } else if fail_request(m, &id, Text::new(TIMED_OUT)) {
+            m.dirty = true;
+        }
+    }
+}
+
+/// Clears the pending marker that waits on `id` and shows `message` there. False when nothing waits on it.
+fn fail_request(m: &mut Model, id: &RequestId, message: Text) -> bool {
+    if let Some(f) = m.detail_requests.remove(id) {
+        m.detail_errors.insert(f, message);
+    } else if let Some(d) = m.diff.as_mut().filter(|d| d.pending.as_ref() == Some(id)) {
+        d.pending = None;
+        d.error = Some(message);
+    } else if let Some(t) = m.timeline.as_mut().filter(|t| t.pending.as_ref() == Some(id)) {
+        t.pending = None;
+        t.error = Some(message);
+    } else {
+        return false;
+    }
+    true
 }
 
 fn notice(m: &mut Model, text: impl Into<String>) {
@@ -290,15 +329,7 @@ fn server_message(m: &mut Model, msg: ServerMessage, fx: &mut Vec<Effect>) {
                 notice(m, format!("server error {code}: {message}"));
                 return;
             };
-            if let Some(f) = m.detail_requests.remove(&id) {
-                m.detail_errors.insert(f, message);
-            } else if let Some(d) = m.diff.as_mut().filter(|d| d.pending.as_ref() == Some(&id)) {
-                d.pending = None;
-                d.error = Some(message);
-            } else if let Some(t) = m.timeline.as_mut().filter(|t| t.pending.as_ref() == Some(&id)) {
-                t.pending = None;
-                t.error = Some(message);
-            } else {
+            if !fail_request(m, &id, message.clone()) {
                 notice(m, format!("server error {code}: {message}"));
             }
         }
@@ -317,6 +348,16 @@ fn apply_snapshot(m: &mut Model, s: Snapshot, fx: &mut Vec<Effect>) {
     m.domain.accounts = s.accounts;
     m.domain.touched.retain(|id, _| m.domain.prs.contains_key(id));
     m.details.clear();
+    // A reply lost to an overflow never comes: ask again for what the screen waits on or failed to get.
+    m.detail_requests.clear();
+    let retry_diff = m
+        .diff
+        .as_ref()
+        .filter(|d| d.pending.is_some() || d.error.is_some())
+        .and_then(|d| if d.files.is_empty() { Some(None) } else { d.next_cursor.clone().map(Some) });
+    if let Some(cursor) = retry_diff {
+        diff_get(m, cursor, fx);
+    }
     if let Some(wanted) = m.ui.wanted_pr.take() {
         if let Some(p) = m.domain.prs.values().find(|p| wanted.matches(p)) {
             m.ui.selected_pr = Some(p.id.clone());
@@ -494,6 +535,7 @@ fn fetch_detail(m: &mut Model, id: &FindingId, fx: &mut Vec<Effect>) {
         return;
     }
     let request_id = request(m);
+    m.detail_errors.remove(id);
     m.detail_requests.insert(request_id.clone(), id.clone());
     fx.push(Effect::Send(ClientMessage::FindingGet { request_id, finding_id: id.clone() }));
 }
@@ -509,33 +551,29 @@ fn load_diff(m: &mut Model, key: DiffKey, anchor: Option<(Text, Option<u32>)>, f
         resolve_anchor(m, fx);
         return;
     }
-    let request_id = request(m);
-    fx.push(Effect::Send(ClientMessage::DiffGet {
-        request_id: request_id.clone(),
-        pr_id: key.pr.clone(),
-        base_sha: key.base.clone(),
-        head_sha: key.head.clone(),
-        file: None,
-        cursor: None,
-        limit: Some(Limit::DEFAULT),
-    }));
     m.diff = Some(DiffView {
         key,
         files: Vec::new(),
         next_cursor: None,
         truncated: false,
-        pending: Some(request_id),
+        pending: None,
         error: None,
         selected_file: None,
         cursor: 0,
         anchor,
     });
+    diff_get(m, None, fx);
 }
 
 fn load_more_diff(m: &mut Model, fx: &mut Vec<Effect>) {
     let Some(d) = &m.diff else { return };
     let (Some(cursor), None) = (d.next_cursor.clone(), &d.pending) else { return };
-    let key = d.key.clone();
+    diff_get(m, Some(cursor), fx);
+}
+
+/// Requests one page of the open diff: the first with no `cursor`.
+fn diff_get(m: &mut Model, cursor: Option<Text>, fx: &mut Vec<Effect>) {
+    let Some(key) = m.diff.as_ref().map(|d| d.key.clone()) else { return };
     let request_id = request(m);
     fx.push(Effect::Send(ClientMessage::DiffGet {
         request_id: request_id.clone(),
@@ -543,11 +581,12 @@ fn load_more_diff(m: &mut Model, fx: &mut Vec<Effect>) {
         base_sha: key.base,
         head_sha: key.head,
         file: None,
-        cursor: Some(cursor),
+        cursor,
         limit: Some(Limit::DEFAULT),
     }));
     if let Some(d) = &mut m.diff {
         d.pending = Some(request_id);
+        d.error = None;
     }
 }
 
@@ -890,7 +929,11 @@ pub fn confirm(m: &mut Model, title: &str, prompt: String, command: Command) {
 }
 
 fn send_confirmed(m: &mut Model, fx: &mut Vec<Effect>) {
-    let Some(Modal::Confirm { command, state: ConfirmState::Asking, .. }) = m.top_modal().cloned() else { return };
+    let Some(Modal::Confirm { command, state: ConfirmState::Asking | ConfirmState::TimedOut, .. }) =
+        m.top_modal().cloned()
+    else {
+        return;
+    };
     let request_id = request(m);
     let idempotency_key = command.idempotency_key();
     fx.push(Effect::Send(ClientMessage::Command(CommandRequest {

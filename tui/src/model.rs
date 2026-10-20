@@ -206,6 +206,8 @@ pub enum ConfirmState {
     /// Accepted is not completed: a later event confirms the effect.
     Accepted(Text),
     Failed(Text),
+    /// No reply in time; `y` sends the same command again, under the same idempotency key.
+    TimedOut,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -422,6 +424,9 @@ pub struct Model {
     pub now_ms: u64,
     pub size: (u16, u16),
     pub next_request: u64,
+    /// When each request went out, until it times out; a reply does not remove it.
+    pub sent_at: BTreeMap<RequestId, u64>,
+    pub request_timeout_ms: u64,
     pub dirty: bool,
 }
 
@@ -454,6 +459,8 @@ impl Model {
             now_ms: 0,
             size: (80, 24),
             next_request: 1,
+            sent_at: BTreeMap::new(),
+            request_timeout_ms: 15_000,
             dirty: true,
         }
     }

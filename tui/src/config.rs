@@ -58,11 +58,17 @@ struct ConnectionSection {
     socket: String,
     reconnect: bool,
     heartbeat_timeout_secs: u64,
+    request_timeout_secs: u64,
 }
 
 impl Default for ConnectionSection {
     fn default() -> Self {
-        ConnectionSection { socket: "auto".into(), reconnect: true, heartbeat_timeout_secs: 30 }
+        ConnectionSection {
+            socket: "auto".into(),
+            reconnect: true,
+            heartbeat_timeout_secs: 30,
+            request_timeout_secs: 15,
+        }
     }
 }
 
@@ -92,6 +98,7 @@ pub struct Settings {
     pub source: Source,
     pub reconnect: bool,
     pub heartbeat_timeout: Duration,
+    pub request_timeout: Duration,
     pub look: Look,
     pub start: Screen,
     pub wanted_pr: Option<PrRef>,
@@ -188,6 +195,9 @@ pub fn resolve(args: Args, no_color: bool) -> Result<Settings, String> {
     if file.connection.heartbeat_timeout_secs == 0 {
         return Err("connection.heartbeat_timeout_secs must be at least 1".into());
     }
+    if file.connection.request_timeout_secs == 0 {
+        return Err("connection.request_timeout_secs must be at least 1".into());
+    }
     Ok(Settings {
         source: match args.playback {
             Some(p) => Source::Playback(p),
@@ -195,6 +205,7 @@ pub fn resolve(args: Args, no_color: bool) -> Result<Settings, String> {
         },
         reconnect: file.connection.reconnect,
         heartbeat_timeout: Duration::from_secs(file.connection.heartbeat_timeout_secs),
+        request_timeout: Duration::from_secs(file.connection.request_timeout_secs),
         look: Look { ascii: args.ascii || file.ui.ascii, color, show_activity: file.ui.show_activity },
         start,
         wanted_pr,

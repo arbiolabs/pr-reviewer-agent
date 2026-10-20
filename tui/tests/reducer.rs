@@ -430,3 +430,55 @@ fn pr_flag_opens_a_daemon_pr_whose_id_is_a_hash() {
     send(&mut m, &read("fixtures/server.snapshot.json"));
     assert_eq!(m.notice.as_ref().map(|n| n.text.as_str()), Some("acme/shop#999 is not tracked by the reviewer"));
 }
+
+fn sent(fx: &[Effect]) -> Vec<&'static str> {
+    fx.iter()
+        .map(|e| match e {
+            Effect::Send(ClientMessage::SnapshotGet { .. }) => "snapshot.get",
+            Effect::Send(ClientMessage::DiffGet { .. }) => "diff.get",
+            Effect::Send(ClientMessage::FindingGet { .. }) => "finding.get",
+            Effect::Send(ClientMessage::TimelineGet { .. }) => "timeline.get",
+            other => panic!("unexpected {other:?}"),
+        })
+        .collect()
+}
+
+#[test]
+fn a_resync_reissues_the_diff_page_and_finding_detail_it_was_waiting_for() {
+    let mut m = review_184();
+    press(&mut m, KeyCode::Char('d'));
+    let lost = m.diff.as_ref().unwrap().pending.clone().unwrap();
+    assert_eq!(sent(&update(&mut m, Msg::Net(NetEvent::Overflow))), ["snapshot.get"]);
+    let fx = send(&mut m, &read("fixtures/server.snapshot.json"));
+    let [Effect::Send(ClientMessage::DiffGet { request_id, cursor: None, .. })] = &fx[..] else { panic!("{fx:?}") };
+    assert_ne!(request_id, &lost);
+    assert_eq!(m.diff.as_ref().unwrap().pending.as_ref(), Some(request_id));
+
+    let mut m = review_184();
+    assert_eq!(sent(&press(&mut m, KeyCode::Enter)), ["finding.get"]);
+    assert_eq!(sent(&press(&mut m, KeyCode::Char('r'))), ["snapshot.get"]);
+    assert_eq!(sent(&send(&mut m, &read("fixtures/server.snapshot.json"))), ["finding.get"]);
+    assert_eq!(m.detail_requests.len(), 1);
+}
+
+#[test]
+fn an_unanswered_request_times_out_and_clears_its_pending_marker() {
+    let mut m = review_184();
+    press(&mut m, KeyCode::Enter);
+    press(&mut m, KeyCode::Char('d'));
+    update(&mut m, Msg::Tick(14_999));
+    assert!(m.diff.as_ref().unwrap().pending.is_some());
+    update(&mut m, Msg::Tick(15_000));
+    let d = m.diff.as_ref().unwrap();
+    assert_eq!(
+        (d.pending.as_ref(), d.error.as_ref().map(|e| e.as_str())),
+        (None, Some("request timed out; r to retry"))
+    );
+    let errors: Vec<_> = m.detail_errors.iter().map(|(f, e)| (f.as_str(), e.as_str())).collect();
+    assert_eq!(errors, [("f-1", "request timed out; r to retry")]);
+    assert!(m.detail_requests.is_empty());
+
+    assert_eq!(sent(&press(&mut m, KeyCode::Char('r'))), ["snapshot.get"]);
+    assert_eq!(sent(&send(&mut m, &read("fixtures/server.snapshot.json"))), ["diff.get"]);
+    assert!(m.diff.as_ref().unwrap().pending.is_some());
+}
