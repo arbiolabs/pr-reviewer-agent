@@ -80,12 +80,11 @@ fn the_inbox_order_holds_still_while_prs_change_and_selection_follows_the_id() {
 }
 
 #[test]
-#[ignore = "design prototype C: evidence prefetch, landing selection and start view change reducer output"]
 fn the_top_modal_takes_keys_and_esc_pops_one_at_a_time() {
     let mut m = review_184();
     let fx = press(&mut m, KeyCode::Enter);
     assert!(matches!(m.top_modal(), Some(Modal::Finding { .. })));
-    assert!(matches!(&fx[..], [Effect::Send(ClientMessage::FindingGet { .. })]), "{fx:?}");
+    assert_eq!(sent(&fx), ["diff.get"], "the detail came with the PR; the reader adds the diff at its anchor");
 
     press(&mut m, KeyCode::Char('?'));
     assert_eq!(m.top_modal(), Some(&Modal::Help));
@@ -185,7 +184,6 @@ fn protocol_mismatch_error_is_incompatible() {
 }
 
 #[test]
-#[ignore = "design prototype C: evidence prefetch, landing selection and start view change reducer output"]
 fn losing_the_connection_keeps_the_run_status_and_resumes_on_reconnect() {
     let mut m = live();
     let run = |m: &Model| {
@@ -201,7 +199,13 @@ fn losing_the_connection_keeps_the_run_status_and_resumes_on_reconnect() {
     let hello = update(&mut m, Msg::Net(NetEvent::Opened));
     assert!(matches!(&hello[..], [Effect::Send(ClientMessage::Hello { protocol_version: 1, .. })]));
     let fx = send(&mut m, &read("fixtures/server.welcome.json"));
-    let [Effect::Send(ClientMessage::Resume { stream_epoch, after_sequence, .. })] = &fx[..] else { panic!("{fx:?}") };
+    let [
+        Effect::Send(ClientMessage::Resume { stream_epoch, after_sequence, .. }),
+        Effect::Send(ClientMessage::FindingGet { .. }),
+    ] = &fx[..]
+    else {
+        panic!("{fx:?}")
+    };
     assert_eq!((stream_epoch.as_str(), *after_sequence), ("epoch-1", 108));
     assert_eq!(m.link, Link::Live);
 
@@ -212,15 +216,14 @@ fn losing_the_connection_keeps_the_run_status_and_resumes_on_reconnect() {
 }
 
 #[test]
-#[ignore = "design prototype C: evidence prefetch, landing selection and start view change reducer output"]
 fn finding_to_diff_pins_the_findings_revision_and_lands_on_its_line() {
     let mut m = review_184();
     let fx = press(&mut m, KeyCode::Char('d'));
-    let [Effect::Send(ClientMessage::DiffGet { head_sha, .. })] = &fx[..] else { panic!("{fx:?}") };
+    let [Effect::Send(ClientMessage::DiffGet { request_id, head_sha, .. })] = &fx[..] else { panic!("{fx:?}") };
     assert_eq!(head_sha.as_str(), "4444444444444444444444444444444444444444");
     assert_eq!(m.ui.screen, Screen::Diff);
 
-    let page = read("fixtures/server.diff.page.json").replace("req-diff", "req-3");
+    let page = read("fixtures/server.diff.page.json").replace("req-diff", request_id.as_str());
     send(&mut m, &page);
     let d = m.diff.as_ref().unwrap();
     assert_eq!(d.selected_file.as_ref().map(|p| p.as_str()), Some("src/booking.ts"));
@@ -468,21 +471,26 @@ fn sent(fx: &[Effect]) -> Vec<&'static str> {
 }
 
 #[test]
-#[ignore = "design prototype C: evidence prefetch, landing selection and start view change reducer output"]
 fn a_resync_reissues_the_diff_page_and_finding_detail_it_was_waiting_for() {
     let mut m = review_184();
     press(&mut m, KeyCode::Char('d'));
     let lost = m.diff.as_ref().unwrap().pending.clone().unwrap();
     assert_eq!(sent(&update(&mut m, Msg::Net(NetEvent::Overflow))), ["snapshot.get"]);
     let fx = send(&mut m, &read("fixtures/server.snapshot.json"));
-    let [Effect::Send(ClientMessage::DiffGet { request_id, cursor: None, .. })] = &fx[..] else { panic!("{fx:?}") };
+    let [
+        Effect::Send(ClientMessage::DiffGet { request_id, cursor: None, .. }),
+        Effect::Send(ClientMessage::FindingGet { .. }),
+    ] = &fx[..]
+    else {
+        panic!("{fx:?}")
+    };
     assert_ne!(request_id, &lost);
     assert_eq!(m.diff.as_ref().unwrap().pending.as_ref(), Some(request_id));
 
     let mut m = review_184();
-    assert_eq!(sent(&press(&mut m, KeyCode::Enter)), ["finding.get"]);
+    assert_eq!(sent(&press(&mut m, KeyCode::Enter)), ["diff.get"]);
     assert_eq!(sent(&press(&mut m, KeyCode::Char('r'))), ["snapshot.get"]);
-    assert_eq!(sent(&send(&mut m, &read("fixtures/server.snapshot.json"))), ["finding.get"]);
+    assert_eq!(sent(&send(&mut m, &read("fixtures/server.snapshot.json"))), ["diff.get", "finding.get"]);
     assert_eq!(m.detail_requests.len(), 1);
 }
 
