@@ -103,10 +103,17 @@ pub fn help_lines(c: &Ctx, body: Rect) -> Vec<Line<'static>> {
     let kw = if two { 11 } else { rows.iter().map(|r| crate::text::width(&r.1)).max().unwrap_or(0) + 2 };
     let section = |ctx: Context, name: &str| -> Vec<Line<'static>> {
         let mut out = vec![heading(c, name)];
-        for (_, keys, what) in rows.iter().filter(|r| r.0 == ctx) {
+        for (_, keys, what, capability) in rows.iter().filter(|r| r.0 == ctx) {
+            // A write key the daemon does not grant shows dimmed and says so, even without color.
+            let offered = capability
+                .is_none_or(|cap| c.m.server.as_ref().is_none_or(|s| s.capabilities.iter().any(|x| x.as_str() == cap)));
+            let (what, key_role, role) = match offered {
+                true => (what.to_string(), Role::Accent, Role::Normal),
+                false => (format!("{what} (not offered)"), Role::Muted, Role::Muted),
+            };
             out.push(Line::from(vec![
-                c.span(format!("  {}", c.pad(keys, kw)), Role::Accent),
-                c.span(c.fit(what, half.saturating_sub(kw + 3)), Role::Normal),
+                c.span(format!("  {}", c.pad(keys, kw)), key_role),
+                c.span(c.fit(&what, half.saturating_sub(kw + 3)), role),
             ]));
         }
         out.push(Line::raw(""));
@@ -177,7 +184,7 @@ pub fn help_lines(c: &Ctx, body: Rect) -> Vec<Line<'static>> {
     lines.push(heading(c, "Mouse"));
     lines.push(Line::from(c.span("  Click a pull request or a finding to select it.", Role::Normal)));
     lines.push(Line::from(c.span("  The wheel scrolls the page under it.", Role::Normal)));
-    lines.push(Line::from(c.span("  Write keys need a capability the server grants.", Role::Muted)));
+    lines.push(Line::from(c.span("  Keys marked (not offered) are off on this daemon.", Role::Muted)));
     lines
 }
 

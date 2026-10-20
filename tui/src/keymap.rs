@@ -190,8 +190,9 @@ pub fn resolve(screen: Screen, modal: Option<&Modal>, key: KeyEvent) -> Option<A
     lookup(ctx).or_else(|| lookup(C::Global))
 }
 
-/// The help page's rows by context, read from the same table so help never drifts from behavior.
-pub fn help_rows() -> Vec<(Context, String, &'static str)> {
+/// The help page's rows by context, read from the same table so help never drifts from behavior: the context, its keys,
+/// what they do, and the capability the server must grant for them to act.
+pub fn help_rows() -> Vec<(Context, String, &'static str, Option<&'static str>)> {
     let describe = |a: Action| -> Option<&'static str> {
         Some(match a {
             A::Quit => "quit; reviews keep running",
@@ -211,7 +212,10 @@ pub fn help_rows() -> Vec<(Context, String, &'static str)> {
             A::ScrollDown | A::ScrollUp => "scroll the explanation",
             A::Refresh => "refresh snapshot",
             A::Accounts => "GitHub accounts (Settings)",
-            A::Mutation(_) => "start/retry/cancel/publish",
+            A::Mutation(Mutation::Start) => "start a review",
+            A::Mutation(Mutation::Retry) => "retry the run",
+            A::Mutation(Mutation::Cancel) => "cancel the run",
+            A::Mutation(Mutation::Publish) => "publish the findings",
             A::NextFinding | A::PrevFinding => "next / previous finding",
             A::JumpTo => "jump to path:line",
             A::CycleScope => "timeline scope",
@@ -220,7 +224,7 @@ pub fn help_rows() -> Vec<(Context, String, &'static str)> {
             _ => return None,
         })
     };
-    let mut rows: Vec<(Context, String, &'static str)> = Vec::new();
+    let mut rows: Vec<(Context, String, &'static str, Option<&'static str>)> = Vec::new();
     for (ctx, code, mods, action) in TABLE {
         let Some(text) = describe(*action) else { continue };
         let key = match code {
@@ -232,10 +236,14 @@ pub fn help_rows() -> Vec<(Context, String, &'static str)> {
             K::Up | K::Down | K::Left | K::Right | K::BackTab | K::Home | K::End | K::PageUp | K::PageDown => continue,
             _ => continue,
         };
-        match rows.iter_mut().find(|(c, _, t)| c == ctx && *t == text) {
-            Some((_, keys, _)) if !keys.split(' ').any(|k| k == key) => keys.push_str(&format!(" {key}")),
+        let capability = match action {
+            A::Mutation(mu) => Some(mu.capability()),
+            _ => None,
+        };
+        match rows.iter_mut().find(|(c, _, t, _)| c == ctx && *t == text) {
+            Some((_, keys, _, _)) if !keys.split(' ').any(|k| k == key) => keys.push_str(&format!(" {key}")),
             Some(_) => {}
-            None => rows.push((*ctx, key, text)),
+            None => rows.push((*ctx, key, text, capability)),
         }
     }
     rows

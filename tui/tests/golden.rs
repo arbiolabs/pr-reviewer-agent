@@ -457,12 +457,12 @@ fn below_100_columns_the_help_page_is_one_column_of_whole_descriptions() {
     let rows = pr_review_tui::keymap::help_rows();
     for (w, h) in [(80, 24), (60, 16)] {
         let seen = help_pages(w, h).concat();
-        for (_, keys, what) in rows.iter().filter(|r| r.0 != pr_review_tui::keymap::Context::ConfirmModal) {
+        for (_, keys, what, _) in rows.iter().filter(|r| r.0 != pr_review_tui::keymap::Context::ConfirmModal) {
             // One entry per line, its keys, a gap, and the description in full.
             let whole = |l: &str| {
                 let l = l.trim();
                 l.strip_prefix(keys.as_str())
-                    .and_then(|rest| rest.strip_suffix(what))
+                    .and_then(|rest| rest.strip_suffix(" (not offered)").unwrap_or(rest).strip_suffix(what))
                     .is_some_and(|gap| !gap.is_empty() && gap.trim().is_empty())
             };
             assert!(seen.lines().any(whole), "{w}x{h}: no whole line for {keys} {what}:\n{seen}");
@@ -488,7 +488,7 @@ fn scrolling_the_help_page_to_its_end_shows_every_section_at_every_size() {
             seen.push_str(&frame);
             last = frame;
         }
-        for (_, keys, what) in rows.iter().filter(|r| matches!(r.0, C::Global | C::Review | C::Diff | C::Timeline)) {
+        for (_, keys, what, _) in rows.iter().filter(|r| matches!(r.0, C::Global | C::Review | C::Diff | C::Timeline)) {
             let row = format!("{keys:<11}{}", what.chars().take(5).collect::<String>());
             assert!(seen.contains(&row), "{w}x{h}: {row} never shows:\n{seen}");
         }
@@ -500,7 +500,7 @@ fn scrolling_the_help_page_to_its_end_shows_every_section_at_every_size() {
             "Mouse",
             "select it.",
             "The wheel scrolls the page under it.",
-            "Write keys need a capability the server grants.",
+            "Keys marked (not offered) are off on this daemon.",
         ] {
             assert!(last.contains(text), "{w}x{h}: the end of the page lacks {text}:\n{last}");
         }

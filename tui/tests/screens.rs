@@ -178,3 +178,23 @@ fn help_at_120_columns_splits_between_sections_without_cutting_text() {
     assert!(row("Timeline") < row("Everywhere") + 22, "two columns:\n{frame}");
     assert!(frame.contains("quit; reviews keep running") && !frame.contains('…'), "{frame}");
 }
+
+#[test]
+fn help_marks_write_keys_the_daemon_does_not_grant() {
+    use pr_review_tui::protocol::ServerMessage;
+    // The showcase daemon grants account.select only.
+    let mut s = showcase(2).key(crossterm::event::KeyCode::Char('?'));
+    let (frame, _) = render(&mut s.m, 120, 38);
+    for what in ["start a review", "retry the run", "cancel the run", "publish the findings"] {
+        assert!(frame.contains(&format!("{what} (not offered)")), "{what}:\n{frame}");
+    }
+    let mut granted = Sim::new(Look::default());
+    let welcome = read("fixtures/server.welcome.json")
+        .replace("\"capabilities\": []", "\"capabilities\": [\"review.start\", \"review.cancel\"]");
+    granted.server(ServerMessage::parse(&welcome).unwrap());
+    granted.server(ServerMessage::parse(&read("fixtures/server.snapshot.json")).unwrap());
+    let mut granted = granted.key(crossterm::event::KeyCode::Char('?'));
+    let (frame, _) = render(&mut granted.m, 120, 38);
+    assert!(frame.lines().any(|l| l.trim_end().ends_with("start a review")), "{frame}");
+    assert!(frame.contains("retry the run (not offered)"), "{frame}");
+}
