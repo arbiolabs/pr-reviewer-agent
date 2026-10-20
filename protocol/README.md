@@ -18,12 +18,12 @@ also arrive unsolicited (`snapshot`, `resync.required`, `error`) have an optiona
 | `diff.get` | `prId`, `baseSha`, `headSha`, `file?`, `cursor?`, `limit?` (1..500) | `diff.page` |
 | `finding.get` | `findingId` | `finding.detail` |
 | `timeline.get` | `prId?`, `runId?`, `findingId?`, `beforeSequence?`, `limit` (1..500) | `timeline.page` (newest first; pass `nextBeforeSequence` back to page) |
-| `command` | `command`, `params`, `idempotencyKey` | `command.result`. In this round the status is always `rejected` with code `CAPABILITY_DENIED`. |
+| `command` | `command`, `params`, `idempotencyKey` | `command.result`. Only `account.select` can be accepted; every other command is `rejected` with code `CAPABILITY_DENIED`. |
 
 | Server → client | Fields |
 | --- | --- |
-| `welcome` | `protocolVersion: 1`, `serverVersion`, `sessionId`, `capabilities[]` (`[]` this round), `streamEpoch`, `latestSequence` |
-| `snapshot` | `streamEpoch`, `sequence`, `prs[]`, `runs[]`, `findings[]` |
+| `welcome` | `protocolVersion: 1`, `serverVersion`, `sessionId`, `capabilities[]` (`account.select` or nothing), `streamEpoch`, `latestSequence` |
+| `snapshot` | `streamEpoch`, `sequence`, `prs[]`, `runs[]`, `findings[]`, `accounts[]?` (absent from older servers) |
 | `event` | see below |
 | `resync.required` | `reason` (display text) |
 | `diff.page` | `prId`, `baseSha`, `headSha`, `files[]`, `nextCursor?`, `truncated` |
@@ -36,12 +36,35 @@ Error codes: `UNAUTHORIZED`, `CAPABILITY_DENIED`, `INVALID_TRANSITION`, `REVISIO
 `RATE_LIMITED`, `TEMPORARILY_UNAVAILABLE`, `INTERNAL_ERROR`, `PROTOCOL_MISMATCH`, `INVALID_REQUEST`. The server answers
 a line that is not JSON, is over 1 MiB, or fails the client schema with `INVALID_REQUEST`.
 
-Entities are in `schema/v1/{pr,run,finding,finding-detail,evidence,diff-file,event}.json`. A run is one engine revision
+Entities are in `schema/v1/{pr,run,finding,finding-detail,evidence,diff-file,account,event}.json`. A run is one engine revision
 (`id` is the revision id). `phase` is the engine state: `COLLECT_CONTEXT TRIAGE ANALYZE VERIFY PREPARE_PUBLICATION
 PUBLISH RECONCILE COMPLETED FAILED SUPERSEDED`. A `Finding.line` of `null` means a file-level finding.
 
-The four command shapes (`review.start`, `review.cancel`, `review.retry`, `review.publish`) are reserved. They are the only
-closed objects in the protocol: an unknown param or field makes the command invalid.
+The command shapes are the only closed objects in the protocol: an unknown param or field makes the command invalid.
+
+| `command` | `params` | `idempotencyKey` |
+| --- | --- | --- |
+| `review.start`, `review.cancel`, `review.retry`, `review.publish` | see `schema/v1/client-message.json` | reserved: always `CAPABILITY_DENIED` |
+| `account.select` | `accountId` | `account.select:<accountId>` |
+
+## Accounts
+
+An `Account` is `{ id, host, login, state: ok | error, ghActive, selected, scopes[] }`, where `id` is `<host>/<login>`.
+The daemon detects accounts with `gh auth status` and stores the selection per data dir. GitHub reads and publishing
+use the first of:
+
+1. `GITHUB_TOKEN` in the daemon's environment, listed as the account `env/GITHUB_TOKEN`. It cannot be selected, and no
+   selection overrides it.
+2. The `selected` account. If gh no longer lists it, it is still listed, with state `error`, and GitHub calls fail
+   naming it instead of falling back to another identity.
+3. gh's active account on `github.com` (`ghActive`).
+4. No token: public repositories only.
+
+`account.select` is offered when `welcome.capabilities` contains `account.select`. The server accepts it only on a
+connection that is streaming (after `snapshot.get` or `resume`), for a `github.com` account that `gh auth status` lists
+now in state `ok`, and while no `GITHUB_TOKEN` overrides the selection. Otherwise it answers `rejected` with
+`NOT_FOUND` (no such account) or `CONFLICT`. `accepted` only means the selection was journaled. The client shows the
+new selection when the `accounts.updated` event arrives, never on `accepted`. Tokens never cross the socket.
 
 ## Events
 
@@ -55,6 +78,7 @@ A sequenced event has `streamEpoch`, `sequence` (the journal's `audit_events.seq
 | `review.phase_changed` | `prId`, `runId` | `{ from, to, event, detail }` | set that run's `phase` to `to` |
 | `finding.updated` | `prId`, `runId` | `Finding` | upsert the finding |
 | `tool.activity` | `prId`, `runId` | `{ tool, summary }` (summary at most 200 chars) | append to the activity feed |
+| `accounts.updated` | none | `{ accounts }` | replace the account list |
 | anything else, `review.publication_changed` included (reserved) | optional | any | nothing, but it still advances `lastApplied` |
 
 `heartbeat` is `{ type: "event", eventType: "heartbeat", streamEpoch, occurredAt }`. It has no sequence, is never
@@ -106,7 +130,8 @@ The fixtures write control bytes as JSON `\u` escapes.
   The script ignores what the client sends.
 - `playback/<name>.expect.json` is the client state after the whole script: `streamEpoch`, `lastSequence`,
   `resyncRequested`, `toolActivityCount` (the number of activity events applied), and `prs`, `runs` and `findings`
-  sorted by `id`. Titles in this file are already sanitized. The reference reducer in `tests/protocol.test.ts`
+  sorted by `id`, plus `accounts` (`id`, `state`, `ghActive`, `selected`, sorted by `id`) when the script's snapshot
+  carries accounts. Titles in this file are already sanitized. The reference reducer in `tests/protocol.test.ts`
   produces exactly this state.
 
 | Script | Exercises |
@@ -118,3 +143,4 @@ The fixtures write control bytes as JSON `\u` escapes.
 | `superseded` | a new head: the old run SUPERSEDED, its finding `stale`, a new run started |
 | `hostile` | ANSI, OSC 8 and 52, C1 CSI and DCS, CR overwrite, a 2,000-char title, CJK and emoji |
 | `burst` | 5,000 `tool.activity` events with no delay |
+| `accounts` | a snapshot with 2 accounts, `command.result accepted` for `account.select`, then `accounts.updated` with the new selection |

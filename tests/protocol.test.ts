@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { GENERATED_DIRS, PROTOCOL_DIR, protocolFiles } from "../src/protocol/emit.ts";
 import type { Expect } from "../src/protocol/fixtures.ts";
 import { sanitize } from "../src/protocol/sanitize.ts";
-import { ClientMessage, KNOWN_EVENT_TYPES, ServerMessage, type Finding, type Pr, type Run } from "../src/protocol/v1.ts";
+import { type Account, ClientMessage, KNOWN_EVENT_TYPES, ServerMessage, type Finding, type Pr, type Run } from "../src/protocol/v1.ts";
 
 const client = Compile(ClientMessage);
 const server = Compile(ServerMessage);
@@ -71,6 +71,7 @@ function replay(ndjson: string): Expect {
   let prs = new Map<string, Pr>();
   let runs = new Map<string, Run>();
   let findings = new Map<string, Finding>();
+  let accounts: Account[] | undefined;
   const needResync = () => {
     inSync = false;
     resyncRequested = true;
@@ -86,6 +87,7 @@ function replay(ndjson: string): Expect {
       prs = new Map(m.prs.map((p) => [p.id, p]));
       runs = new Map(m.runs.map((r) => [r.id, r]));
       findings = new Map(m.findings.map((f) => [f.id, f]));
+      accounts = m.accounts;
     } else if (m.type === "resync.required") {
       needResync();
     } else if (m.type === "event" && "sequence" in m && inSync) {
@@ -116,6 +118,9 @@ function replay(ndjson: string): Expect {
           case "tool.activity":
             toolActivityCount++;
             break;
+          case "accounts.updated":
+            accounts = e.data.accounts;
+            break;
         }
       }
     }
@@ -129,6 +134,7 @@ function replay(ndjson: string): Expect {
     prs: sorted(prs).map((p) => ({ id: p.id, headSha: p.headSha, title: sanitize(p.title) })),
     runs: sorted(runs).map((r) => ({ id: r.id, phase: r.phase, status: r.status })),
     findings: sorted(findings).map((f) => ({ id: f.id, title: sanitize(f.title), status: f.status, stale: f.stale })),
+    ...(accounts ? { accounts: [...accounts].sort((a, b) => (a.id < b.id ? -1 : 1)).map(({ id, state, ghActive, selected }) => ({ id, state, ghActive, selected })) } : {}),
   };
 }
 
