@@ -7,8 +7,8 @@ import { defaultSocketPath, startControlServer } from "./server.ts";
 import { FixtureSource } from "./source.ts";
 
 /**
- * `pr-review daemon`: serve the control socket in the foreground until SIGINT or SIGTERM. It only reads the app DB and
- * takes no data-dir lock, so it runs beside `pr-review review`, and no client action reaches a durable task.
+ * `pr-review daemon`: serve the control socket in the foreground until SIGINT or SIGTERM. It takes no data-dir lock, so
+ * it runs beside `pr-review review`; its only app DB writes are account rows, and no client action reaches a durable task.
  */
 export async function runDaemon(args: string[], dataDir: string, err: (text: string) => void): Promise<number> {
   const { values } = parseArgs({ args, options: { socket: { type: "string" }, fixture: { type: "string" }, data: { type: "string" }, heartbeat: { type: "string" } } });

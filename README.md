@@ -12,10 +12,12 @@ node bin/pr-review.mjs models                          # agent CLIs found on PAT
 node bin/pr-review.mjs review https://github.com/owner/repo/pull/123 --dry-run [--json] [--no-jev] [--model anthropic/claude-opus-5-5] [--retry]
 node bin/pr-review.mjs inspect --pr owner/repo#123      # every phase transition, the routing decision, findings and discards
 node bin/pr-review.mjs login anthropic [--api-key]      # store a credential in pi's auth file (OAuth where offered)
+node bin/pr-review.mjs accounts [--json]                # gh's GitHub accounts, and which one reviews use
+node bin/pr-review.mjs accounts use octo-work           # use this gh account (host/login or login) in this data dir
 pnpm typecheck && pnpm test
 ```
 
-- **GitHub access.** The tool reads `GITHUB_TOKEN`, then `gh auth token`. Without a token it can read public repositories only. With a token it can review private repositories: the token goes to the GitHub API, and to `git clone` and `git fetch` as a header given on that one command. It is not put in the environment, not written to the bare clone's config, and redacted from git error messages.
+- **GitHub access.** The token comes from the first of: `GITHUB_TOKEN`; the account selected with `accounts use` (stored per data dir, read with `gh auth token --hostname --user`); gh's active `github.com` account. If the selected account is gone from gh or has an auth problem, the review fails and names it; it never falls back to another identity. Only `github.com` accounts can be selected. `accounts use` does not change gh's own active account, and no command prints a token. Without a token the tool can read public repositories only. With a token it can review private repositories: the token goes to the GitHub API, and to `git clone` and `git fetch` as a header given on that one command. It is not put in the environment, not written to the bare clone's config, and redacted from git error messages.
 - **Closed and merged PRs.** `review` does not check whether the PR is open. M1 reviews closed and merged PRs on purpose, so you can review historic PRs.
 - **Models.** Credentials come from `~/.pi/agent/auth.json`, which pi shares, or from provider environment variables such as `ANTHROPIC_API_KEY`. The tool picks the model in this order: `--model`, then `PR_REVIEW_MODEL`, then `models.default` in `pr-review.config.json`. If none of these is set, a TTY shows a picker. Without a TTY, the tool takes the first available model in `models.preferred`. The model is part of the reviewer identity, so reviewing the same head with another model creates a new revision.
 - **Jev.** By default the tool uses the keyless OpenCode Zen tier. If `TYPESAFE_API_KEY` is set, it uses TypeSafe instead. `--no-jev` skips Jev and uses the fallback route.
@@ -41,8 +43,8 @@ node bin/pr-review.mjs tui [args]                                               
 ```
 
 - **Socket.** The default path is `$XDG_RUNTIME_DIR/pr-review/reviewer.sock`, else `~/Library/Application Support/pr-review/reviewer.sock` on macOS, else `~/.local/state/pr-review/reviewer.sock`. The daemon creates the directory with mode 0700 and the socket with mode 0600. It refuses a directory that is a symlink, belongs to another user, or has a looser mode. It replaces a socket file that nothing listens on, and exits if another daemon is listening.
-- **Read-only.** The daemon reads `app.sqlite` on a read-only connection and takes no data-dir lock, so it runs beside `pr-review review`. Its only write is applying migrations when it starts. It never opens `durable.sqlite`. Disconnecting or closing the TUI changes nothing in a running review.
-- **Commands.** This version has no write capabilities. The daemon answers every `command` with `CAPABILITY_DENIED`.
+- **Read-only for reviews.** The daemon reads `app.sqlite` on a read-only connection and takes no data-dir lock, so it runs beside `pr-review review`. It writes only migrations at start, the selected account, and a journal row when the selection or gh's account list changes. It never opens `durable.sqlite`. Disconnecting or closing the TUI changes nothing in a running review.
+- **Commands.** The only write capability is `account.select`, the same as `accounts use`. gh is asked again on `snapshot.get` when its last answer is over 30 seconds old, and every 60 seconds. Every other `command` gets `CAPABILITY_DENIED`.
 - **Fixtures.** `--fixture` takes any script in `protocol/playback/`. The script clock starts at the first snapshot request. Fixture strings are not sanitized, because `hostile` exists to test the client.
 
 ## Layout

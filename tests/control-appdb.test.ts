@@ -2,7 +2,7 @@ import { execFileSync } from "node:child_process";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 import { AppDbSource } from "../src/control/appdb.ts";
 import { startControlServer } from "../src/control/server.ts";
 import { AppStore } from "../src/persistence/store.ts";
@@ -10,6 +10,7 @@ import type { ServerMessage } from "../src/protocol/v1.ts";
 import { finishReview, startReview } from "../src/runtime/app.ts";
 import { syncRepo } from "../src/source/git.ts";
 import { produced, TestClient } from "./control-client.ts";
+import { FAKE_TOKEN, fakeGh, GH_STATUS } from "./fake-gh.ts";
 import { createFixture } from "./fixture.ts";
 import { open, readDiff, submitDefect } from "./helpers.ts";
 
@@ -19,7 +20,8 @@ afterEach(async () => {
 });
 
 async function daemon(dataDir: string, heartbeatMs?: number) {
-  const source = AppDbSource.open(dataDir);
+  // No gh on PATH: these tests pin exact journal sequences, and a detected account would add a row.
+  const source = AppDbSource.open(dataDir, { PATH: "" });
   const server = await startControlServer({ socketPath: join(mkdtempSync(join(tmpdir(), "ctl-")), "run", "s.sock"), source, pollMs: 20, ...(heartbeatMs ? { heartbeatMs } : {}) });
   cleanup.push(() => source.close(), () => server.close());
   return server;
@@ -281,12 +283,103 @@ it("pages a diff by nextCursor, caps it per page, and gives binary files metadat
   expect(await c.waitFor((m) => m.type === "error" && m.requestId === "gone")).toMatchObject({ code: "NOT_FOUND" });
 }, 60_000);
 
+describe("account.select", () => {
+  async function accountsDaemon(env: Record<string, string>) {
+    const dataDir = mkdtempSync(join(tmpdir(), "ctl-accounts-"));
+    const source = AppDbSource.open(dataDir, env);
+    const server = await startControlServer({ socketPath: join(mkdtempSync(join(tmpdir(), "ctl-")), "run", "s.sock"), source, pollMs: 20 });
+    cleanup.push(() => source.close(), () => server.close());
+    const c = await attach(server.path);
+    let raw = "";
+    c.socket.on("data", (chunk) => (raw += chunk));
+    const select = (accountId: string, requestId = `sel-${accountId}`) => {
+      c.send({ type: "command", requestId, command: "account.select", params: { accountId }, idempotencyKey: `account.select:${accountId}` });
+      return c.waitFor<Extract<ServerMessage, { type: "command.result" }>>((m) => m.type === "command.result" && m.requestId === requestId);
+    };
+    const dbDump = () => {
+      const store = AppStore.open(join(dataDir, "app.sqlite"));
+      const tables = (store.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[]).map((t) => t.name);
+      const dump = JSON.stringify(tables.map((t) => store.db.prepare(`SELECT * FROM "${t}"`).all()));
+      store.close();
+      return dump;
+    };
+    return { dataDir, source, c, select, raw: () => raw, dbDump };
+  }
+
+  it("rejects before streaming, then selects through the journal; the client sees the selection only in accounts.updated", async () => {
+    const gh = fakeGh();
+    const d = await accountsDaemon({ PATH: gh.dir });
+    expect(d.c.messages[0]).toMatchObject({ type: "welcome", capabilities: ["account.select"] });
+    expect(await d.select("github.com/octo-work", "early")).toMatchObject({ status: "rejected", code: "CONFLICT" });
+
+    d.c.send({ type: "snapshot.get", requestId: "s" });
+    const snap = await d.c.waitFor<Extract<ServerMessage, { type: "snapshot" }>>((m) => m.type === "snapshot");
+    // The first detection in a fresh data dir is journaled once (seq 1), so resuming clients learn the accounts too.
+    expect(snap.sequence).toBe(1);
+    expect(snap.accounts!.map((a) => [a.id, a.state, a.ghActive, a.selected])).toEqual([
+      ["github.com/diego-arbio-dev", "ok", true, false],
+      ["github.com/octo-work", "ok", false, false],
+      ["github.com/old-bot", "error", false, false],
+      ["ghe.acme.com/diego", "ok", true, false],
+    ]);
+
+    expect(await d.select("github.com/nobody")).toMatchObject({ status: "rejected", code: "NOT_FOUND" });
+    expect(await d.select("github.com/old-bot")).toMatchObject({ status: "rejected", code: "CONFLICT" });
+    expect(await d.select("ghe.acme.com/diego")).toMatchObject({ status: "rejected", code: "CONFLICT" });
+    d.c.send({ type: "command", requestId: "bad-key", command: "account.select", params: { accountId: "github.com/octo-work" }, idempotencyKey: "k" });
+    expect(await d.c.waitFor((m) => m.type === "command.result" && m.requestId === "bad-key")).toMatchObject({ status: "rejected", code: "INVALID_REQUEST" });
+
+    const from = d.c.messages.length;
+    expect(await d.select("github.com/octo-work")).toEqual({ type: "command.result", requestId: "sel-github.com/octo-work", status: "accepted", operationId: "account.select:2" });
+    const updated = await d.c.waitFor((m) => m.type === "event" && m.eventType === "accounts.updated", from);
+    expect(d.c.messages.indexOf(updated)).toBeGreaterThan(d.c.messages.findIndex((m) => m.type === "command.result" && m.status === "accepted"));
+    expect(updated).toMatchObject({ sequence: 2, prevSequence: 1 });
+    expect((updated as { data: { accounts: { id: string; selected: boolean }[] } }).data.accounts.filter((a) => a.selected).map((a) => a.id)).toEqual(["github.com/octo-work"]);
+
+    const store = AppStore.open(join(d.dataDir, "app.sqlite"));
+    expect(store.getMeta("github.account")).toBe("github.com/octo-work");
+    expect(store.db.prepare("SELECT seq, revision_id, from_state, event, to_state, detail FROM audit_events ORDER BY seq").all()).toEqual([
+      { seq: 1, revision_id: null, from_state: "-", event: "ACCOUNTS_DETECTED", to_state: "-", detail: "4 gh accounts" },
+      { seq: 2, revision_id: null, from_state: "-", event: "ACCOUNT_SELECTED", to_state: "-", detail: "github.com/octo-work" },
+    ]);
+    store.close();
+
+    // gh drops the selected account: the change is journaled, and the selection stays listed, as an error.
+    gh.set({ hosts: { "github.com": [GH_STATUS.hosts["github.com"][0]] } });
+    await d.source.refreshAccounts(0);
+    const dropped = await d.c.waitFor((m) => m.type === "event" && m.eventType === "accounts.updated" && m.sequence === 3);
+    expect((dropped as { data: { accounts: unknown[] } }).data.accounts).toEqual([
+      { id: "github.com/diego-arbio-dev", host: "github.com", login: "diego-arbio-dev", state: "ok", ghActive: true, selected: false, scopes: ["gist", "read:org", "repo", "workflow"] },
+      { id: "github.com/octo-work", host: "github.com", login: "octo-work", state: "error", ghActive: false, selected: true, scopes: [] },
+    ]);
+
+    // The daemon never asks gh for a token, so none can reach the socket or the DB.
+    expect(gh.calls().every((call) => call === "auth status --json hosts")).toBe(true);
+    expect(d.raw()).not.toContain(FAKE_TOKEN);
+    expect(d.dbDump()).not.toContain(FAKE_TOKEN);
+    expect(d.raw()).not.toContain("hosts.yml");
+  }, 30_000);
+
+  it("lists GITHUB_TOKEN as env/GITHUB_TOKEN, refuses to select over it, and never sends its value", async () => {
+    const secret = "ghp_ENVsecret987654321";
+    const d = await accountsDaemon({ PATH: fakeGh().dir, GITHUB_TOKEN: secret });
+    d.c.send({ type: "snapshot.get", requestId: "s" });
+    const snap = await d.c.waitFor<Extract<ServerMessage, { type: "snapshot" }>>((m) => m.type === "snapshot");
+    expect(snap.accounts![0]).toEqual({ id: "env/GITHUB_TOKEN", host: "env", login: "GITHUB_TOKEN", state: "ok", ghActive: false, selected: false, scopes: [] });
+    expect(await d.select("github.com/octo-work")).toMatchObject({ status: "rejected", code: "CONFLICT", message: expect.stringContaining("GITHUB_TOKEN") });
+    expect(await d.select("env/GITHUB_TOKEN")).toMatchObject({ status: "rejected", code: "NOT_FOUND" });
+    expect(d.raw()).not.toContain(secret);
+    expect(d.dbDump()).not.toContain(secret);
+  }, 30_000);
+});
+
 it("produced every server message and event type, each passing the v1 schema", () => {
   expect([...produced].sort()).toEqual(
     [
       "command.result",
       "diff.page",
       "error",
+      "event:accounts.updated",
       "event:finding.updated",
       "event:heartbeat",
       "event:pr.updated",

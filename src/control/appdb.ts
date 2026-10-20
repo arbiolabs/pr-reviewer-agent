@@ -3,14 +3,15 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { COORDINATOR_STATES, FINDING_STATES, REVIEW_STATES, type ReviewState } from "../domain/machines.ts";
 import type { CandidateFinding } from "../domain/types.ts";
+import { ACCOUNT_KEY, chooseAccount, detectGh, type Env, type GhDetection, listAccounts } from "../github/accounts.ts";
 import { AppStore, type PullRow, type RevisionRow } from "../persistence/store.ts";
 import { sanitize } from "../protocol/sanitize.ts";
-import type { Finding, FindingDetail, Pr, Run, SequencedEvent } from "../protocol/v1.ts";
+import type { Account, Finding, FindingDetail, Pr, Run, SequencedEvent } from "../protocol/v1.ts";
 import { PinnedRepo } from "../source/git.ts";
 import { type DiffPage, pageDiff, parseDiffFiles } from "./diff.ts";
 import { ControlError, type ControlSource, type DiffRequest, type Snapshot, type TimelinePage, type TimelineRequest } from "./source.ts";
 
-type JournalRow = { seq: number; prev: number; revision_id: string; from_state: string; event: string; to_state: string; detail: string | null; at: string };
+type JournalRow = { seq: number; prev: number; revision_id: string | null; from_state: string; event: string; to_state: string; detail: string | null; at: string };
 type FindingRow = { id: string; pr_id: string; fingerprint: string; status: string; current_severity: string; revision_id: string; evidence_json: string; stale: number };
 
 /** Every string that leaves this source passes here: repository, PR and model text can carry terminal escapes. */
@@ -35,29 +36,59 @@ const FINDING_SELECT = `SELECT f.id, f.pr_id, f.fingerprint, f.status, f.current
 
 const isPhase = (s: string): s is ReviewState => (REVIEW_STATES as readonly string[]).includes(s);
 const TERMINAL_EVENT = { COMPLETED: "review.completed", FAILED: "run.failed", SUPERSEDED: "run.superseded" } as const;
+const SEEN_KEY = "github.accounts_seen";
 
 /**
  * Reads the engine's app DB on its own read-only connection; WAL lets it read while the engine writes. The journal is
- * `audit_events`: every row becomes exactly one event at `sequence = seq`, so there are no holes to explain.
+ * `audit_events`: every row becomes exactly one event at `sequence = seq`, so there are no holes to explain. The only
+ * writes are account rows, through `writer`: the selection and a journal row whenever gh's accounts change.
  */
 export class AppDbSource implements ControlSource {
   private readonly db: DatabaseSync;
+  private readonly writer: AppStore;
   private readonly dataDir: string;
+  private readonly env: Env;
   private readonly streamEpoch: string;
   private diffCache: { key: string; files: ReturnType<typeof parseDiffFiles> } | undefined;
+  private gh: { at: number; detection: GhDetection } | undefined;
 
-  private constructor(dataDir: string) {
+  private constructor(dataDir: string, writer: AppStore, env: Env) {
     this.dataDir = dataDir;
+    this.writer = writer;
+    this.env = env;
     this.db = new DatabaseSync(join(dataDir, "app.sqlite"), { readOnly: true });
     this.db.exec("PRAGMA busy_timeout = 5000");
     this.streamEpoch = (this.db.prepare("SELECT value FROM meta WHERE key = 'stream_epoch'").get() as { value: string }).value;
   }
 
-  /** Creates or migrates the app DB first (the daemon's only write), so the epoch exists before any review ran. */
-  static open(dataDir: string): AppDbSource {
+  /** Creates or migrates the app DB first, so the epoch exists before any review ran. `env` is where gh and GITHUB_TOKEN are looked up. */
+  static open(dataDir: string, env: Env = process.env): AppDbSource {
     mkdirSync(dataDir, { recursive: true });
-    AppStore.open(join(dataDir, "app.sqlite")).close();
-    return new AppDbSource(dataDir);
+    return new AppDbSource(dataDir, AppStore.open(join(dataDir, "app.sqlite")), env);
+  }
+
+  /** Re-run gh detection when the cached one is older than `maxAgeMs`; a change from what this data dir last saw is journaled. */
+  async refreshAccounts(maxAgeMs: number): Promise<void> {
+    if (this.gh && Date.now() - this.gh.at < maxAgeMs) return;
+    const detection = await detectGh(this.env);
+    this.gh = { at: Date.now(), detection };
+    const seen = JSON.stringify(detection.installed ? detection.accounts : null);
+    if ((this.writer.getMeta(SEEN_KEY) ?? "null") === seen) return;
+    const n = detection.installed ? detection.accounts.length : 0;
+    this.writer.journalMeta("ACCOUNTS_DETECTED", `${n} gh account${n === 1 ? "" : "s"}`, { [SEEN_KEY]: seen });
+  }
+
+  /** Validated against a detection made now, so a client cannot select an account gh dropped since the last refresh. */
+  async selectAccount(accountId: string): Promise<string> {
+    await this.refreshAccounts(0);
+    const choice = chooseAccount(this.gh!.detection, accountId, this.env);
+    if (!choice.ok) throw new ControlError(choice.code, choice.message);
+    return `account.select:${this.writer.journalMeta("ACCOUNT_SELECTED", choice.account.id, { [ACCOUNT_KEY]: choice.account.id })}`;
+  }
+
+  private accounts(): Account[] {
+    const selected = this.db.prepare("SELECT value FROM meta WHERE key = ?").get(ACCOUNT_KEY) as { value: string } | undefined;
+    return listAccounts(this.gh?.detection ?? { installed: false }, selected?.value, this.env);
   }
 
   private read<T>(fn: () => T): T {
@@ -86,6 +117,7 @@ export class AppDbSource implements ControlSource {
         this.run(r, r.state, r.completed_at, r.state === "FAILED" ? this.failureReason(r.id) : null),
       ),
       findings: (this.db.prepare(FINDING_SELECT).all({ id: null, revision: null }) as FindingRow[]).map(toFinding),
+      accounts: this.accounts(),
     }));
   }
 
@@ -155,6 +187,7 @@ export class AppDbSource implements ControlSource {
 
   close(): void {
     this.db.close();
+    this.writer.close();
   }
 
   private revision(id: string): RevisionRow {
@@ -201,6 +234,12 @@ export class AppDbSource implements ControlSource {
   }
 
   private event(row: JournalRow): SequencedEvent {
+    if (row.revision_id === null) {
+      const head = { type: "event" as const, streamEpoch: this.streamEpoch, sequence: row.seq, prevSequence: row.prev, occurredAt: row.at };
+      // The list is the current one, not the one at row.seq: accounts.updated replaces the whole list, so a replay converges.
+      if (row.event === "ACCOUNT_SELECTED" || row.event === "ACCOUNTS_DETECTED") return { ...head, eventType: "accounts.updated", data: { accounts: this.accounts() } };
+      return { ...head, eventType: `journal.${row.event}`, data: { event: row.event, detail: row.detail } };
+    }
     const rev = this.revision(row.revision_id);
     const head = { type: "event" as const, streamEpoch: this.streamEpoch, sequence: row.seq, prevSequence: row.prev, occurredAt: row.at, prId: rev.pr_id };
     const ids = { ...head, runId: rev.id };

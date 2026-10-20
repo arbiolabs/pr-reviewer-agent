@@ -71,6 +71,7 @@ type Conn = {
 };
 
 const EVENT_BATCH = 500;
+const ACCOUNTS_MAX_AGE_MS = 30_000;
 
 const report = (error: unknown) => process.stderr.write(`pr-review daemon: ${error instanceof Error ? error.message : String(error)}\n`);
 
@@ -128,6 +129,7 @@ export async function startControlServer(options: ServerOptions): Promise<Contro
       case "hello":
         throw new ControlError("INVALID_REQUEST", "hello was already received");
       case "snapshot.get": {
+        await source.refreshAccounts?.(ACCOUNTS_MAX_AGE_MS);
         const snapshot = source.snapshot();
         send(c, { type: "snapshot", requestId, ...snapshot });
         Object.assign(c, { phase: "streaming", cursor: snapshot.sequence, epoch: snapshot.streamEpoch });
@@ -153,10 +155,21 @@ export async function startControlServer(options: ServerOptions): Promise<Contro
       case "timeline.get":
         send(c, { type: "timeline.page", requestId, ...source.timeline(message) });
         return;
-      case "command":
-        // No write capability exists in this version; the server is the gate, whatever the UI shows.
-        send(c, { type: "command.result", requestId, status: "rejected", code: "CAPABILITY_DENIED", message: `${message.command} is not available in this version` });
-        return;
+      case "command": {
+        const reject = (code: ErrorCode, text: string) => send(c, { type: "command.result", requestId, status: "rejected", code, message: text });
+        // The server is the gate, whatever the UI shows: account.select is the only write, and only on a source that has it.
+        if (message.command !== "account.select" || !source.selectAccount) return reject("CAPABILITY_DENIED", `${message.command} is not available in this version`);
+        if (c.phase !== "streaming") return reject("CONFLICT", "send snapshot.get or resume before account.select");
+        const { accountId } = message.params;
+        if (message.idempotencyKey !== `account.select:${accountId}`) return reject("INVALID_REQUEST", `idempotencyKey must be account.select:${accountId}`);
+        try {
+          send(c, { type: "command.result", requestId, status: "accepted", operationId: await source.selectAccount(accountId) });
+        } catch (error) {
+          if (error instanceof ControlError) return reject(error.code, error.message);
+          throw error;
+        }
+        return pump(c);
+      }
     }
   };
 
@@ -193,7 +206,7 @@ export async function startControlServer(options: ServerOptions): Promise<Contro
         protocolVersion: PROTOCOL_VERSION,
         serverVersion: SERVER_VERSION,
         sessionId: randomUUID(),
-        capabilities: [],
+        capabilities: source.selectAccount ? ["account.select"] : [],
         streamEpoch: source.epoch(),
         latestSequence: source.latestSequence(),
       });
@@ -253,7 +266,9 @@ export async function startControlServer(options: ServerOptions): Promise<Contro
         }
       }
     }, every);
+  await source.refreshAccounts?.(0);
   const timers = [
+    setInterval(() => source.refreshAccounts?.(0).catch(report), 60_000),
     // ponytail: one journal query per streaming client per tick; share one read per cursor if many clients attach.
     tick(options.pollMs ?? 200, pump),
     tick(options.heartbeatMs ?? 15_000, (c) => {
