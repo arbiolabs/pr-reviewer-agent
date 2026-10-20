@@ -361,6 +361,25 @@ impl Default for Look {
     }
 }
 
+/// A PR named on the command line. Daemon PR ids are hashes, so it matches on repository (any case) and number.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PrRef {
+    pub repository: String,
+    pub number: u64,
+}
+
+impl PrRef {
+    pub fn matches(&self, p: &Pr) -> bool {
+        p.number == self.number && p.repository.as_str().eq_ignore_ascii_case(&self.repository)
+    }
+}
+
+impl std::fmt::Display for PrRef {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}#{}", self.repository, self.number)
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Ui {
     pub screen: Screen,
@@ -371,7 +390,7 @@ pub struct Ui {
     pub feed_scroll: usize,
     pub pr_filter: String,
     /// From `--pr`: selected once it shows up in a snapshot.
-    pub wanted_pr: Option<PrId>,
+    pub wanted_pr: Option<PrRef>,
     /// The Accounts cursor in Settings; an ID that vanished falls back to the first account.
     pub selected_account: Option<AccountId>,
 }
@@ -407,7 +426,7 @@ pub struct Model {
 }
 
 impl Model {
-    pub fn new(endpoint: impl Into<String>, look: Look, start: Screen, wanted_pr: Option<PrId>) -> Self {
+    pub fn new(endpoint: impl Into<String>, look: Look, start: Screen, wanted_pr: Option<PrRef>) -> Self {
         Model {
             link: Link::Connecting { attempt: 1 },
             stream: StreamPos::default(),

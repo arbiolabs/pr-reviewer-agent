@@ -412,3 +412,21 @@ fn accounts_that_cannot_be_selected_say_why_and_open_no_modal() {
     update(&mut m, Msg::Net(NetEvent::Lost { reason: "x".into(), retry_in_ms: None }));
     assert_eq!(m.account_block(&a), Some("not live"));
 }
+
+#[test]
+fn pr_flag_opens_a_daemon_pr_whose_id_is_a_hash() {
+    let wanted = pr_review_tui::config::parse_pr("https://github.com/ACME/Shop/pull/185").unwrap();
+    let mut m = Model::new("test", pr_review_tui::model::Look::default(), Screen::Review, Some(wanted));
+    update(&mut m, Msg::Net(NetEvent::Opened));
+    send(&mut m, &read("fixtures/server.welcome.json"));
+    send(&mut m, &read("fixtures/server.snapshot.json").replace("acme/shop#185", "pr_9f2c41d07a"));
+    assert_eq!(m.ui.selected_pr, Some(PrId::new("pr_9f2c41d07a")));
+    assert_eq!((m.ui.screen, m.notice.as_ref().map(|n| n.text.as_str())), (Screen::Review, None));
+
+    let wanted = pr_review_tui::config::parse_pr("acme/shop#999").unwrap();
+    let mut m = Model::new("test", pr_review_tui::model::Look::default(), Screen::Review, Some(wanted));
+    update(&mut m, Msg::Net(NetEvent::Opened));
+    send(&mut m, &read("fixtures/server.welcome.json"));
+    send(&mut m, &read("fixtures/server.snapshot.json"));
+    assert_eq!(m.notice.as_ref().map(|n| n.text.as_str()), Some("acme/shop#999 is not tracked by the reviewer"));
+}

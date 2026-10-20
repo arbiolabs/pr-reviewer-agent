@@ -6,8 +6,7 @@ use std::time::Duration;
 
 use serde::Deserialize;
 
-use crate::model::{Look, Screen};
-use crate::protocol::PrId;
+use crate::model::{Look, PrRef, Screen};
 
 pub const USAGE: &str =
     "usage: pr-review-tui [--socket PATH] [--pr URL] [--ascii] [--playback FILE.ndjson] [--config FILE]
@@ -95,7 +94,7 @@ pub struct Settings {
     pub heartbeat_timeout: Duration,
     pub look: Look,
     pub start: Screen,
-    pub wanted_pr: Option<PrId>,
+    pub wanted_pr: Option<PrRef>,
     pub config_path: PathBuf,
 }
 
@@ -136,8 +135,8 @@ pub fn state_dir() -> PathBuf {
     }
 }
 
-/// `https://github.com/owner/repo/pull/184` or `owner/repo#184`, as the protocol's PR id `owner/repo#184`.
-pub fn parse_pr(s: &str) -> Result<PrId, String> {
+/// `https://github.com/owner/repo/pull/184` or `owner/repo#184`.
+pub fn parse_pr(s: &str) -> Result<PrRef, String> {
     let bad = || format!("--pr {s}: expected https://github.com/owner/repo/pull/N or owner/repo#N");
     let (repo, number) = if let Some((repo, n)) = s.split_once('#') {
         (repo.to_string(), n.to_string())
@@ -149,11 +148,11 @@ pub fn parse_pr(s: &str) -> Result<PrId, String> {
             _ => return Err(bad()),
         }
     };
-    let n: u64 = number.parse().map_err(|_| bad())?;
+    let number: u64 = number.parse().map_err(|_| bad())?;
     if repo.split('/').count() != 2 || repo.split('/').any(str::is_empty) {
         return Err(bad());
     }
-    Ok(PrId::new(&format!("{repo}#{n}")))
+    Ok(PrRef { repository: repo, number })
 }
 
 fn screen(name: &str) -> Result<Screen, String> {
@@ -221,10 +220,11 @@ mod tests {
     }
 
     #[test]
-    fn pr_urls_become_protocol_ids() {
-        assert_eq!(parse_pr("https://github.com/owner/repo/pull/184").unwrap(), PrId::new("owner/repo#184"));
-        assert_eq!(parse_pr("https://github.com/owner/repo/pull/184/files").unwrap(), PrId::new("owner/repo#184"));
-        assert_eq!(parse_pr("acme/shop#7").unwrap(), PrId::new("acme/shop#7"));
+    fn pr_urls_become_repository_and_number() {
+        let pr = |s| parse_pr(s).unwrap().to_string();
+        assert_eq!(pr("https://github.com/owner/repo/pull/184"), "owner/repo#184");
+        assert_eq!(pr("https://github.com/owner/repo/pull/184/files"), "owner/repo#184");
+        assert_eq!(pr("acme/shop#7"), "acme/shop#7");
         assert!(parse_pr("https://github.com/owner/repo/issues/1").is_err());
         assert!(parse_pr("shop#x").is_err());
     }

@@ -318,8 +318,8 @@ fn apply_snapshot(m: &mut Model, s: Snapshot, fx: &mut Vec<Effect>) {
     m.domain.touched.retain(|id, _| m.domain.prs.contains_key(id));
     m.details.clear();
     if let Some(wanted) = m.ui.wanted_pr.take() {
-        if m.domain.prs.contains_key(&wanted) {
-            m.ui.selected_pr = Some(wanted);
+        if let Some(p) = m.domain.prs.values().find(|p| wanted.matches(p)) {
+            m.ui.selected_pr = Some(p.id.clone());
             m.ui.screen = Screen::Review;
         } else {
             notice(m, format!("{wanted} is not tracked by the reviewer"));
