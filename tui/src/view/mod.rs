@@ -202,7 +202,7 @@ fn status_line(c: &Ctx, width: u16) -> Line<'static> {
                 n => format!("  +{}", n - 1),
             };
             let room = w.saturating_sub(used + crate::text::width(&more) + 2);
-            left.push(c.span(whole(activity_words(&a.kind), room), Role::Muted));
+            left.push(c.span(whole(activity_words(&a.kind, run.map(|r| r.phase)), room), Role::Muted));
             left.push(c.span(more, Role::Muted));
         }
         _ => {
@@ -222,14 +222,16 @@ fn whole(options: Vec<String>, room: usize) -> String {
     options.into_iter().find(|o| crate::text::width(o) <= room).unwrap_or_default()
 }
 
-/// What one activity says in the status line, from the most to the least detailed.
-fn activity_words(kind: &crate::model::ActivityKind) -> Vec<String> {
+/// What one activity says in the status line, from the most to the least detailed. The line already names the run's
+/// phase, so entering that phase says nothing more.
+fn activity_words(kind: &crate::model::ActivityKind, phase: Option<crate::protocol::Phase>) -> Vec<String> {
     use crate::model::ActivityKind as K;
     match kind {
         K::Tool { tool, summary } => {
             let target = summary.as_str().split(": ").next().unwrap_or("");
             vec![format!("{tool} {summary}"), format!("{tool} {target}"), tool.to_string()]
         }
+        K::Phase { to, .. } if Some(*to) == phase => vec![],
         K::Phase { to, .. } => vec![format!("entered {}", crate::theme::phase_name(*to))],
         K::Finding { title, .. } => vec![format!("found: {title}"), "new finding".into()],
         K::Run { .. } => vec!["started".into()],
@@ -355,9 +357,9 @@ mod tests {
             tool: Text::new("search_code"),
             summary: Text::new("\"returnTo\": 6 matches in 3 files"),
         };
-        assert_eq!(whole(activity_words(&kind), 80), "search_code \"returnTo\": 6 matches in 3 files");
-        assert_eq!(whole(activity_words(&kind), 30), "search_code \"returnTo\"");
-        assert_eq!(whole(activity_words(&kind), 12), "search_code");
-        assert_eq!(whole(activity_words(&kind), 5), "");
+        assert_eq!(whole(activity_words(&kind, None), 80), "search_code \"returnTo\": 6 matches in 3 files");
+        assert_eq!(whole(activity_words(&kind, None), 30), "search_code \"returnTo\"");
+        assert_eq!(whole(activity_words(&kind, None), 12), "search_code");
+        assert_eq!(whole(activity_words(&kind, None), 5), "");
     }
 }
