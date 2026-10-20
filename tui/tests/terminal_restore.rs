@@ -22,6 +22,9 @@ fn assert_restored(text: &str) {
     let enter = text.find("\u{1b}[?1049h").expect("entered the alternate screen");
     let leave = text.find("\u{1b}[?1049l").expect("left the alternate screen");
     assert!(enter < leave);
+    let mouse_on = text.find("\u{1b}[?1000h").expect("turned mouse reporting on");
+    let mouse_off = text.rfind("\u{1b}[?1000l").expect("turned mouse reporting off");
+    assert!(mouse_on < mouse_off, "mouse reporting is off again after exit");
     let after = &text[text.find("EXIT=").unwrap()..];
     let before = &text[..enter];
     for flag in [" icanon", " echo "] {
@@ -49,4 +52,18 @@ fn sigterm_sighup_and_sigint_exit_through_the_restore_path() {
         assert!(text.contains("EXIT=0"), "SIG{signal}: {text}");
         assert_restored(&text);
     }
+}
+
+#[test]
+fn mouse_false_leaves_the_terminals_own_drag_to_select_alone() {
+    let dir = std::env::temp_dir().join(format!("pr-review-tui-mouse-{}", std::process::id()));
+    std::fs::create_dir_all(&dir).unwrap();
+    let config = dir.join("config.toml");
+    std::fs::write(&config, "[ui]\nmouse = false\n").unwrap();
+    let text = pty(&format!(
+        r#"PR_REVIEW_TUI_TEST_PANIC=1 "$BIN" --playback "$SCRIPT" --config {}; echo EXIT=$?"#,
+        config.display()
+    ));
+    assert!(text.contains("\u{1b}[?1049h"), "the client drew: {text}");
+    assert!(!text.contains("\u{1b}[?1000h"), "mouse reporting stays off");
 }

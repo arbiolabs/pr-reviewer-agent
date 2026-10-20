@@ -42,18 +42,39 @@ fn pr_event(seq: u64, number: u64, title: &str) -> String {
 }
 
 #[test]
-fn selection_follows_the_id_across_a_reorder() {
+fn a_new_pr_takes_its_sorted_place_and_the_cursor_stays_on_its_pr() {
+    let mut m = live();
+    let order = |m: &Model| m.inbox().iter().map(|p| format!("{}#{}", p.repository, p.number)).collect::<Vec<_>>();
+    press(&mut m, KeyCode::Char('k'));
+    assert_eq!(m.ui.selected_pr, Some(PrId::new("acme/shop#185")));
+    // Another repository sorts by name; inside one, newer numbers come first.
+    for (seq, repo, number) in [(109, "acme/api", 7), (110, "acme/shop", 190), (111, "acme/shop", 1)] {
+        let json = pr_event(seq, number, "new").replace("acme/shop", repo);
+        send(&mut m, &json);
+        assert_eq!(m.ui.selected_pr, Some(PrId::new("acme/shop#185")), "after {repo}#{number}");
+    }
+    assert_eq!(
+        order(&m),
+        ["acme/api#7", "acme/shop#190", "acme/shop#186", "acme/shop#185", "acme/shop#184", "acme/shop#1"]
+    );
+    press(&mut m, KeyCode::Char('k'));
+    assert_eq!(m.ui.selected_pr, Some(PrId::new("acme/shop#186")));
+}
+
+#[test]
+fn the_inbox_order_holds_still_while_prs_change_and_selection_follows_the_id() {
     let mut m = live();
     let order = |m: &Model| m.inbox().iter().map(|p| p.number).collect::<Vec<_>>();
     assert_eq!(order(&m), [186, 185, 184]);
-    press(&mut m, KeyCode::Char('j'));
+    // The client lands on the PR with the most severe current finding.
+    assert_eq!(m.ui.selected_pr, Some(PrId::new("acme/shop#184")));
+    press(&mut m, KeyCode::Char('k'));
     assert_eq!(m.ui.selected_pr, Some(PrId::new("acme/shop#185")));
 
+    // Activity on #184 does not move it: the row under the cursor stays the one the user pressed toward.
     send(&mut m, &pr_event(109, 184, "Booking API v2"));
-    assert_eq!(order(&m), [184, 186, 185]);
+    assert_eq!(order(&m), [186, 185, 184]);
     assert_eq!(m.ui.selected_pr, Some(PrId::new("acme/shop#185")));
-
-    // Moving down from the re-sorted position lands on the PR now below it, not on a stale index.
     press(&mut m, KeyCode::Char('k'));
     assert_eq!(m.ui.selected_pr, Some(PrId::new("acme/shop#186")));
 }
@@ -63,7 +84,7 @@ fn the_top_modal_takes_keys_and_esc_pops_one_at_a_time() {
     let mut m = review_184();
     let fx = press(&mut m, KeyCode::Enter);
     assert!(matches!(m.top_modal(), Some(Modal::Finding { .. })));
-    assert!(matches!(&fx[..], [Effect::Send(ClientMessage::FindingGet { .. })]), "{fx:?}");
+    assert_eq!(sent(&fx), ["diff.get"], "the detail came with the PR; the reader adds the diff at its anchor");
 
     press(&mut m, KeyCode::Char('?'));
     assert_eq!(m.top_modal(), Some(&Modal::Help));
@@ -178,7 +199,13 @@ fn losing_the_connection_keeps_the_run_status_and_resumes_on_reconnect() {
     let hello = update(&mut m, Msg::Net(NetEvent::Opened));
     assert!(matches!(&hello[..], [Effect::Send(ClientMessage::Hello { protocol_version: 1, .. })]));
     let fx = send(&mut m, &read("fixtures/server.welcome.json"));
-    let [Effect::Send(ClientMessage::Resume { stream_epoch, after_sequence, .. })] = &fx[..] else { panic!("{fx:?}") };
+    let [
+        Effect::Send(ClientMessage::Resume { stream_epoch, after_sequence, .. }),
+        Effect::Send(ClientMessage::FindingGet { .. }),
+    ] = &fx[..]
+    else {
+        panic!("{fx:?}")
+    };
     assert_eq!((stream_epoch.as_str(), *after_sequence), ("epoch-1", 108));
     assert_eq!(m.link, Link::Live);
 
@@ -192,11 +219,11 @@ fn losing_the_connection_keeps_the_run_status_and_resumes_on_reconnect() {
 fn finding_to_diff_pins_the_findings_revision_and_lands_on_its_line() {
     let mut m = review_184();
     let fx = press(&mut m, KeyCode::Char('d'));
-    let [Effect::Send(ClientMessage::DiffGet { head_sha, .. })] = &fx[..] else { panic!("{fx:?}") };
+    let [Effect::Send(ClientMessage::DiffGet { request_id, head_sha, .. })] = &fx[..] else { panic!("{fx:?}") };
     assert_eq!(head_sha.as_str(), "4444444444444444444444444444444444444444");
     assert_eq!(m.ui.screen, Screen::Diff);
 
-    let page = read("fixtures/server.diff.page.json").replace("req-diff", "req-3");
+    let page = read("fixtures/server.diff.page.json").replace("req-diff", request_id.as_str());
     send(&mut m, &page);
     let d = m.diff.as_ref().unwrap();
     assert_eq!(d.selected_file.as_ref().map(|p| p.as_str()), Some("src/booking.ts"));
@@ -286,7 +313,7 @@ fn timeline_category_filter_hides_other_events() {
         let t = m.timeline.as_ref().unwrap();
         pr_review_tui::update::timeline_rows(m, t).iter().map(|(e, _)| e.sequence.get()).collect::<Vec<_>>()
     };
-    assert_eq!(shown(&m), [100, 99]);
+    assert_eq!(shown(&m), [99, 100], "oldest first");
     press(&mut m, KeyCode::Char('v'));
     assert_eq!(shown(&m), [100]);
     press(&mut m, KeyCode::Char('v'));
@@ -450,14 +477,20 @@ fn a_resync_reissues_the_diff_page_and_finding_detail_it_was_waiting_for() {
     let lost = m.diff.as_ref().unwrap().pending.clone().unwrap();
     assert_eq!(sent(&update(&mut m, Msg::Net(NetEvent::Overflow))), ["snapshot.get"]);
     let fx = send(&mut m, &read("fixtures/server.snapshot.json"));
-    let [Effect::Send(ClientMessage::DiffGet { request_id, cursor: None, .. })] = &fx[..] else { panic!("{fx:?}") };
+    let [
+        Effect::Send(ClientMessage::DiffGet { request_id, cursor: None, .. }),
+        Effect::Send(ClientMessage::FindingGet { .. }),
+    ] = &fx[..]
+    else {
+        panic!("{fx:?}")
+    };
     assert_ne!(request_id, &lost);
     assert_eq!(m.diff.as_ref().unwrap().pending.as_ref(), Some(request_id));
 
     let mut m = review_184();
-    assert_eq!(sent(&press(&mut m, KeyCode::Enter)), ["finding.get"]);
+    assert_eq!(sent(&press(&mut m, KeyCode::Enter)), ["diff.get"]);
     assert_eq!(sent(&press(&mut m, KeyCode::Char('r'))), ["snapshot.get"]);
-    assert_eq!(sent(&send(&mut m, &read("fixtures/server.snapshot.json"))), ["finding.get"]);
+    assert_eq!(sent(&send(&mut m, &read("fixtures/server.snapshot.json"))), ["diff.get", "finding.get"]);
     assert_eq!(m.detail_requests.len(), 1);
 }
 
@@ -479,8 +512,9 @@ fn an_unanswered_request_times_out_and_clears_its_pending_marker() {
     assert!(m.detail_requests.is_empty());
 
     assert_eq!(sent(&press(&mut m, KeyCode::Char('r'))), ["snapshot.get"]);
-    assert_eq!(sent(&send(&mut m, &read("fixtures/server.snapshot.json"))), ["diff.get"]);
+    assert_eq!(sent(&send(&mut m, &read("fixtures/server.snapshot.json"))), ["diff.get", "finding.get"]);
     assert!(m.diff.as_ref().unwrap().pending.is_some());
+    assert!(m.detail_errors.is_empty(), "r retries the card's evidence too");
 }
 
 #[test]
@@ -543,4 +577,209 @@ fn an_account_select_with_no_reply_times_out_and_y_sends_it_again() {
     let [Effect::Send(ClientMessage::Command(c))] = &fx[..] else { panic!("{fx:?}") };
     assert_ne!(c.request_id, first);
     assert_eq!(c.idempotency_key, "account.select:github.com/octo-work");
+}
+
+/// The showcase script played up to `events` live events past the snapshot.
+fn showcase(events: usize) -> Model {
+    let mut m = model();
+    update(&mut m, Msg::Net(NetEvent::Opened));
+    for msg in script("showcase").into_iter().take(2 + events) {
+        update(&mut m, Msg::Net(NetEvent::Message(msg)));
+    }
+    m
+}
+
+#[test]
+fn w_opens_the_review_the_status_line_names_then_steps_to_the_next_running_one() {
+    let mut m = showcase(9);
+    let number = |m: &Model| m.selected_pr().map(|p| p.number);
+    assert_eq!(number(&m), Some(1287));
+    press(&mut m, KeyCode::Char('/'));
+    press(&mut m, KeyCode::Char('x'));
+    press(&mut m, KeyCode::Enter);
+    press(&mut m, KeyCode::Char('w'));
+    assert_eq!((m.ui.screen, m.ui.focus, number(&m)), (Screen::Review, Pane::Main, Some(1291)));
+    assert_eq!(m.ui.pr_filter, "");
+    press(&mut m, KeyCode::Char('w'));
+    assert_eq!(number(&m), Some(338));
+    press(&mut m, KeyCode::Char('w'));
+    assert_eq!(number(&m), Some(1291));
+}
+
+#[test]
+fn shift_j_scrolls_the_open_card_and_moving_to_another_finding_resets_it() {
+    let mut m = showcase(0);
+    press(&mut m, KeyCode::Enter);
+    let shift = |m: &mut Model, c| update(m, Msg::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::SHIFT)));
+    shift(&mut m, 'J');
+    shift(&mut m, 'J');
+    shift(&mut m, 'K');
+    assert_eq!(m.ui.doc_scroll, 1);
+    press(&mut m, KeyCode::Char('j'));
+    assert_eq!(m.ui.doc_scroll, 0);
+    shift(&mut m, 'K');
+    assert_eq!(m.ui.doc_scroll, 0);
+}
+
+#[test]
+fn opening_a_finding_loads_its_revisions_diff_without_leaving_the_screen() {
+    let mut m = showcase(0);
+    press(&mut m, KeyCode::Enter);
+    let fx = press(&mut m, KeyCode::Enter);
+    assert!(matches!(m.top_modal(), Some(Modal::Finding { .. })));
+    assert_eq!(m.ui.screen, Screen::Review);
+    assert!(fx.iter().any(|e| matches!(e, Effect::Send(ClientMessage::DiffGet { .. }))), "{fx:?}");
+}
+
+#[test]
+fn n_walks_the_findings_stacked_on_one_diff_line_before_moving_on() {
+    let mut m = diff_loaded();
+    let second = read("fixtures/server.event.finding.updated.json")
+        .replace("\"f-1\"", "\"f-9\"")
+        .replace("fp-f-1", "fp-f-9")
+        .replace("\"high\"", "\"low\"");
+    send(&mut m, &second);
+    let at = |m: &Model| m.diff.as_ref().map(|d| (d.cursor, d.stack)).unwrap();
+    assert_eq!(at(&m), (4, 0));
+    press(&mut m, KeyCode::Char('n'));
+    assert_eq!(at(&m), (4, 1), "the second finding on line 42");
+    press(&mut m, KeyCode::Enter);
+    let Some(Modal::Finding { id, .. }) = m.top_modal() else { panic!("{:?}", m.top_modal()) };
+    assert_eq!(id.as_str(), "f-9");
+    press(&mut m, KeyCode::Esc);
+    press(&mut m, KeyCode::Char('j'));
+    assert_eq!(at(&m), (5, 0), "moving the cursor leaves the stack");
+}
+
+#[test]
+fn enter_opens_an_events_detail_inline_and_esc_folds_it_before_leaving() {
+    let mut m = review_184();
+    let fx = press(&mut m, KeyCode::Char('4'));
+    let [Effect::Send(ClientMessage::TimelineGet { request_id, .. })] = &fx[..] else { panic!("{fx:?}") };
+    send(&mut m, &read("fixtures/server.timeline.page.json").replace("req-tl", request_id.as_str()));
+    let open = |m: &Model| m.timeline.as_ref().and_then(|t| t.open);
+    assert_eq!(m.timeline.as_ref().and_then(|t| t.selected), Some(100), "lands on the newest, at the bottom");
+    press(&mut m, KeyCode::Enter);
+    assert_eq!((open(&m), m.top_modal()), (Some(100), None));
+    press(&mut m, KeyCode::Enter);
+    assert_eq!(open(&m), None, "Enter again folds a non-finding event");
+    press(&mut m, KeyCode::Char('k'));
+    press(&mut m, KeyCode::Enter);
+    assert_eq!(open(&m), Some(99));
+    press(&mut m, KeyCode::Esc);
+    assert_eq!((open(&m), m.ui.screen), (None, Screen::Timeline));
+    press(&mut m, KeyCode::Esc);
+    assert_eq!(m.ui.screen, Screen::Review);
+}
+
+/// Where `text` is drawn on a 120x38 frame of `m`.
+fn drawn_at(m: &mut Model, text: &str) -> (u16, u16) {
+    use ratatui::{Terminal, backend::TestBackend};
+    update(m, Msg::Resize(120, 38));
+    let mut term = Terminal::new(TestBackend::new(120, 38)).unwrap();
+    term.draw(|f| pr_review_tui::view::view(m, f)).unwrap();
+    let buf = term.backend().buffer().clone();
+    for y in 0..38 {
+        let row: String = (0..120).map(|x| buf[(x, y)].symbol().chars().next().unwrap_or(' ')).collect();
+        if let Some(x) = row.find(text) {
+            return (row[..x].chars().count() as u16, y);
+        }
+    }
+    panic!("{text} is not on screen");
+}
+
+fn mouse(m: &mut Model, kind: crossterm::event::MouseEventKind, (column, row): (u16, u16)) {
+    let e = crossterm::event::MouseEvent { kind, column, row, modifiers: KeyModifiers::NONE };
+    update(m, Msg::Mouse(e));
+}
+
+#[test]
+fn a_click_selects_the_pr_or_finding_under_it_and_the_wheel_scrolls_the_document() {
+    use crossterm::event::{MouseButton, MouseEventKind as K};
+    let mut m = showcase(0);
+    let at = drawn_at(&mut m, "#1291");
+    mouse(&mut m, K::Down(MouseButton::Left), at);
+    assert_eq!(m.selected_pr().map(|p| p.number), Some(1291));
+
+    let at = drawn_at(&mut m, "#1287");
+    mouse(&mut m, K::Down(MouseButton::Left), at);
+    let second = m.domain.pr_findings(&m.ui.selected_pr.clone().unwrap())[1].clone();
+    assert_ne!(m.ui.selected_finding.as_ref(), Some(&second.id));
+    let at = drawn_at(&mut m, second.title.as_str());
+    mouse(&mut m, K::Down(MouseButton::Left), at);
+    assert_eq!(m.ui.selected_finding.as_ref(), Some(&second.id));
+    assert_eq!(m.top_modal(), None);
+    let at = drawn_at(&mut m, second.title.as_str());
+    mouse(&mut m, K::Down(MouseButton::Left), at);
+    assert!(matches!(m.top_modal(), Some(Modal::Finding { id, .. }) if id == &second.id), "a second click reads it");
+
+    press(&mut m, KeyCode::Esc);
+    mouse(&mut m, K::ScrollDown, (60, 20));
+    mouse(&mut m, K::ScrollDown, (60, 20));
+    mouse(&mut m, K::ScrollUp, (60, 20));
+    assert_eq!(m.ui.doc_scroll, 3);
+}
+
+#[test]
+fn l_on_the_document_stays_put_and_tab_cycles_between_the_rail_and_the_document() {
+    let mut m = showcase(0);
+    press(&mut m, KeyCode::Enter);
+    let before = (m.ui.selected_pr.clone(), m.ui.selected_finding.clone());
+    press(&mut m, KeyCode::Char('l'));
+    assert_eq!(m.ui.focus, Pane::Main, "the document is the rightmost pane");
+    press(&mut m, KeyCode::Char('j'));
+    assert_ne!(m.ui.selected_finding, before.1, "j still moves through the findings");
+    press(&mut m, KeyCode::Tab);
+    assert_eq!(m.ui.focus, Pane::Sidebar);
+    press(&mut m, KeyCode::Tab);
+    assert_eq!(m.ui.focus, Pane::Main);
+    press(&mut m, KeyCode::BackTab);
+    assert_eq!(m.ui.focus, Pane::Sidebar);
+    assert_eq!(m.ui.selected_pr, before.0);
+}
+
+#[test]
+fn nothing_but_hello_goes_out_before_the_welcome_and_a_snapshot_reissues_what_waited() {
+    let mut m = review_184();
+    update(&mut m, Msg::Net(NetEvent::Lost { reason: "eof".into(), retry_in_ms: Some(250) }));
+    update(&mut m, Msg::Net(NetEvent::Opened));
+    assert_eq!(m.link, Link::Negotiating);
+    let mut fx = press(&mut m, KeyCode::Enter);
+    press(&mut m, KeyCode::Esc);
+    fx.extend(press(&mut m, KeyCode::Char('3')));
+    fx.extend(press(&mut m, KeyCode::Char('4')));
+    fx.extend(press(&mut m, KeyCode::Char('k')));
+    assert_eq!(sent(&fx), Vec::<&str>::new(), "the server answers anything before welcome with an error");
+    assert_eq!(m.diff.as_ref().and_then(|d| d.error.as_ref()).map(|e| e.as_str()), Some("not connected; r retries"));
+
+    let welcome = read("fixtures/server.welcome.json").replace("epoch-1", "epoch-2");
+    assert_eq!(sent(&send(&mut m, &welcome)), ["snapshot.get", "finding.get"]);
+    let fx = send(&mut m, &read("fixtures/server.snapshot.json"));
+    assert_eq!(sent(&fx), ["diff.get", "timeline.get", "finding.get"]);
+}
+
+#[test]
+fn the_diff_a_finding_prefetches_changes_nothing_on_the_review_screen() {
+    let mut m = showcase(0);
+    press(&mut m, KeyCode::Enter);
+    let fx = press(&mut m, KeyCode::Enter);
+    let [Effect::Send(ClientMessage::DiffGet { request_id, pr_id, base_sha, head_sha, .. })] = &fx[..] else {
+        panic!("{fx:?}")
+    };
+    let page = read("fixtures/server.diff.page.json")
+        .replace("req-diff", request_id.as_str())
+        .replace("acme/shop#184", pr_id.as_str())
+        .replace("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb", base_sha.as_str())
+        .replace("4444444444444444444444444444444444444444", head_sha.as_str())
+        .replace("\"nextCursor\": \"c-2\"", "\"nextCursor\": null");
+    press(&mut m, KeyCode::Esc);
+    press(&mut m, KeyCode::Char('h'));
+    send(&mut m, &page);
+    assert_eq!((m.ui.screen, m.ui.focus), (Screen::Review, Pane::Sidebar));
+    assert_eq!(m.notice, None, "the finding's file is not in this diff, and only d says so");
+
+    press(&mut m, KeyCode::Char('l'));
+    press(&mut m, KeyCode::Char('d'));
+    assert_eq!(m.ui.screen, Screen::Diff);
+    assert!(m.notice.as_ref().is_some_and(|n| n.text.ends_with("is not in this diff")), "{:?}", m.notice);
 }

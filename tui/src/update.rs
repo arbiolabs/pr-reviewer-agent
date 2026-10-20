@@ -3,7 +3,7 @@
 
 use std::collections::VecDeque;
 
-use crossterm::event::KeyEvent;
+use crossterm::event::{KeyEvent, MouseButton, MouseEvent, MouseEventKind};
 
 use crate::keymap::{self, Action, Mutation};
 use crate::model::*;
@@ -11,10 +11,13 @@ use crate::protocol::*;
 
 pub const NOTICE_MS: u64 = 4_000;
 pub const TIMED_OUT: &str = "request timed out; r to retry";
+pub const OFFLINE: &str = "not connected; r retries";
 
 #[derive(Debug)]
 pub enum Msg {
     Key(KeyEvent),
+    /// A click or a wheel turn; the input thread drops every other mouse event.
+    Mouse(MouseEvent),
     Resize(u16, u16),
     /// Milliseconds since the client started.
     Tick(u64),
@@ -102,7 +105,8 @@ pub fn update(m: &mut Model, msg: Msg) -> Vec<Effect> {
             }
             expire_requests(m);
             // Ages on the banner and the diagnostics screen tick.
-            if m.ui.screen == Screen::Settings || !m.link.accepts_events() {
+            let running = m.domain.runs.values().any(|r| r.status == RunStatus::Running);
+            if m.ui.screen == Screen::Settings || !m.link.accepts_events() || running {
                 m.dirty = true;
             }
             return fx;
@@ -113,10 +117,27 @@ pub fn update(m: &mut Model, msg: Msg) -> Vec<Effect> {
                 act(m, a, &mut fx);
             }
         }
+        Msg::Mouse(e) => mouse(m, e, &mut fx),
         Msg::Net(e) => net(m, e, &mut fx),
     }
+    prefetch(m, &mut fx);
     m.dirty = true;
     fx
+}
+
+/// The document shows every card's evidence, so the selected PR's details load as soon as it is selected.
+fn prefetch(m: &mut Model, fx: &mut Vec<Effect>) {
+    let Some(pr) = m.ui.selected_pr.clone() else { return };
+    let ids: Vec<FindingId> = m
+        .domain
+        .pr_findings(&pr)
+        .iter()
+        .filter(|f| !m.details.contains_key(&f.id) && !m.detail_errors.contains_key(&f.id))
+        .map(|f| f.id.clone())
+        .collect();
+    for id in ids {
+        fetch_detail(m, &id, fx);
+    }
 }
 
 fn request(m: &mut Model) -> RequestId {
@@ -124,6 +145,17 @@ fn request(m: &mut Model) -> RequestId {
     m.next_request += 1;
     m.sent_at.insert(id.clone(), m.now_ms);
     id
+}
+
+/// Sends every request but `hello`. The server answers anything before its welcome with an error, so until then
+/// this sends nothing and returns `None`; the caller leaves a mark the next snapshot retries.
+fn send(m: &mut Model, fx: &mut Vec<Effect>, msg: impl FnOnce(RequestId) -> ClientMessage) -> Option<RequestId> {
+    if !m.link.welcomed() {
+        return None;
+    }
+    let request_id = request(m);
+    fx.push(Effect::Send(msg(request_id.clone())));
+    Some(request_id)
 }
 
 /// Ends every request older than the timeout that is still waited on, as if the server had answered with an error.
@@ -241,9 +273,7 @@ fn snapshot_get(m: &mut Model, fx: &mut Vec<Effect>) {
     if let Some(old) = m.snapshot_request.take() {
         m.stale_snapshots.insert(old);
     }
-    let request_id = request(m);
-    m.snapshot_request = Some(request_id.clone());
-    fx.push(Effect::Send(ClientMessage::SnapshotGet { request_id }));
+    m.snapshot_request = send(m, fx, |request_id| ClientMessage::SnapshotGet { request_id });
 }
 
 fn server_message(m: &mut Model, msg: ServerMessage, fx: &mut Vec<Effect>) {
@@ -261,13 +291,11 @@ fn server_message(m: &mut Model, msg: ServerMessage, fx: &mut Vec<Effect>) {
             if !transition(m, LinkInput::Welcomed { resuming }) {
                 return;
             }
-            let request_id = request(m);
-            fx.push(Effect::Send(match (resuming, m.stream.epoch.clone()) {
-                (true, Some(stream_epoch)) => {
-                    ClientMessage::Resume { request_id, stream_epoch, after_sequence: m.stream.last_applied }
-                }
+            let (epoch, after_sequence) = (m.stream.epoch.clone(), m.stream.last_applied);
+            send(m, fx, |request_id| match (resuming, epoch) {
+                (true, Some(stream_epoch)) => ClientMessage::Resume { request_id, stream_epoch, after_sequence },
                 _ => ClientMessage::SnapshotGet { request_id },
-            }));
+            });
         }
         ServerMessage::Snapshot(s) => apply_snapshot(m, s, fx),
         ServerMessage::Event(Event::Heartbeat { .. }) => m.diag.last_heartbeat_ms = Some(m.now_ms),
@@ -366,8 +394,8 @@ fn apply_snapshot(m: &mut Model, s: Snapshot, fx: &mut Vec<Effect>) {
     if let Some(accounts) = m.domain.accounts.clone() {
         settle_account_select(m, &accounts);
     }
-    m.domain.touched.retain(|id, _| m.domain.prs.contains_key(id));
     m.details.clear();
+    m.detail_errors.clear();
     // A reply lost to an overflow never comes: ask again for what the screen waits on or failed to get.
     m.detail_requests.clear();
     let retry_diff = m
@@ -385,6 +413,16 @@ fn apply_snapshot(m: &mut Model, s: Snapshot, fx: &mut Vec<Effect>) {
         } else {
             notice(m, format!("{wanted} is not tracked by the reviewer"));
         }
+    }
+    // Land on the story that matters most: the PR with the most severe current finding.
+    if m.ui.selected_pr.is_none() {
+        let d = &m.domain;
+        m.ui.selected_pr = d
+            .prs
+            .values()
+            .filter_map(|p| d.pr_findings(&p.id).iter().filter(|f| !f.stale).map(|f| f.severity).min().map(|s| (s, p)))
+            .min_by_key(|(s, p)| (*s, std::cmp::Reverse(p.number)))
+            .map(|(_, p)| p.id.clone());
     }
     reselect(m);
     if let Some(t) = &m.timeline {
@@ -491,11 +529,8 @@ fn apply_body(m: &mut Model, e: &SequencedEvent, fx: &mut Vec<Effect>) {
         EventBody::FindingUpdated(f) => Some(f.pr_id.clone()),
         _ => e.pr_id.clone(),
     };
-    if let Some(pr) = &pr {
-        d.touched.insert(pr.clone(), seq);
-    }
     if let Some(kind) = kind {
-        d.push_activity(Activity { sequence: seq, at: e.occurred_at.clone(), pr_id: pr, kind });
+        d.push_activity(Activity { sequence: seq, at: e.occurred_at.clone(), pr_id: pr, kind, recv_ms: m.now_ms });
     }
     if let EventBody::FindingUpdated(f) = &e.body
         && matches!(m.top_modal(), Some(Modal::Finding { id, .. }) if id == &f.id)
@@ -552,19 +587,41 @@ fn timeline_matches(q: &TimelineQuery, e: &SequencedEvent) -> bool {
 }
 
 fn fetch_detail(m: &mut Model, id: &FindingId, fx: &mut Vec<Effect>) {
-    if m.detail_requests.values().any(|f| f == id) || !m.link.connected() {
+    if m.detail_requests.values().any(|f| f == id) {
         return;
     }
-    let request_id = request(m);
+    let Some(request_id) = send(m, fx, |request_id| ClientMessage::FindingGet { request_id, finding_id: id.clone() })
+    else {
+        return;
+    };
     m.detail_errors.remove(id);
-    m.detail_requests.insert(request_id.clone(), id.clone());
-    fx.push(Effect::Send(ClientMessage::FindingGet { request_id, finding_id: id.clone() }));
+    m.detail_requests.insert(request_id, id.clone());
 }
 
 // ---- diff ----
 
+/// The finding reader shows the diff at the anchor, so opening a finding loads its revision's diff in the background.
+fn prefetch_diff(m: &mut Model, id: &FindingId, fx: &mut Vec<Effect>) {
+    let Some(key) = finding_diff_key(m, id) else { return };
+    if m.diff.as_ref().is_some_and(|d| d.key == key && d.error.is_none()) {
+        return;
+    }
+    let anchor = m.domain.findings.get(id).map(|f| (f.file.clone(), f.line.map(|l| l.get())));
+    load_diff(m, key, anchor, fx);
+}
+
+/// The diff a finding was found against: its run's revision, else the PR's.
+pub fn finding_diff_key(m: &Model, id: &FindingId) -> Option<DiffKey> {
+    let f = m.domain.findings.get(id)?;
+    let (base, head) = match (m.domain.runs.get(&f.run_id), m.domain.prs.get(&f.pr_id)) {
+        (Some(r), _) => (r.base_sha.clone(), r.head_sha.clone()),
+        (None, Some(p)) => (p.base_sha.clone(), p.head_sha.clone()),
+        (None, None) => return None,
+    };
+    Some(DiffKey { pr: f.pr_id.clone(), base, head })
+}
+
 fn load_diff(m: &mut Model, key: DiffKey, anchor: Option<(Text, Option<u32>)>, fx: &mut Vec<Effect>) {
-    m.ui.screen = Screen::Diff;
     if let Some(d) = m.diff.as_mut().filter(|d| d.key == key && d.error.is_none()) {
         if anchor.is_some() {
             d.anchor = anchor;
@@ -581,6 +638,7 @@ fn load_diff(m: &mut Model, key: DiffKey, anchor: Option<(Text, Option<u32>)>, f
         error: None,
         selected_file: None,
         cursor: 0,
+        stack: 0,
         anchor,
     });
     diff_get(m, None, fx);
@@ -595,19 +653,18 @@ fn load_more_diff(m: &mut Model, fx: &mut Vec<Effect>) {
 /// Requests one page of the open diff: the first with no `cursor`.
 fn diff_get(m: &mut Model, cursor: Option<Text>, fx: &mut Vec<Effect>) {
     let Some(key) = m.diff.as_ref().map(|d| d.key.clone()) else { return };
-    let request_id = request(m);
-    fx.push(Effect::Send(ClientMessage::DiffGet {
-        request_id: request_id.clone(),
+    let pending = send(m, fx, |request_id| ClientMessage::DiffGet {
+        request_id,
         pr_id: key.pr,
         base_sha: key.base,
         head_sha: key.head,
         file: None,
         cursor,
         limit: Some(Limit::DEFAULT),
-    }));
+    });
     if let Some(d) = &mut m.diff {
-        d.pending = Some(request_id);
-        d.error = None;
+        d.error = if pending.is_none() { Some(Text::new(OFFLINE)) } else { None };
+        d.pending = pending;
     }
 }
 
@@ -635,7 +692,10 @@ fn apply_diff_page(m: &mut Model, p: DiffPage, fx: &mut Vec<Effect>) {
     resolve_anchor(m, fx);
 }
 
+/// Moves the diff cursor to the anchor once its file has loaded. Only on the Diff screen does it take focus or say
+/// the file is missing: a prefetch behind the finding reader stays silent.
 fn resolve_anchor(m: &mut Model, fx: &mut Vec<Effect>) {
+    let shown = m.ui.screen == Screen::Diff;
     let Some(d) = &mut m.diff else { return };
     let Some((path, line)) = d.anchor.clone() else { return };
     let p = path.as_str();
@@ -647,15 +707,20 @@ fn resolve_anchor(m: &mut Model, fx: &mut Vec<Effect>) {
     match found {
         Some(i) => {
             d.cursor = line.map_or(0, |l| row_for_line(&d.files[i], l));
+            d.stack = 0;
             d.selected_file = Some(d.files[i].path.clone());
             d.anchor = None;
-            m.ui.focus = Pane::Main;
+            if shown {
+                m.ui.focus = Pane::Main;
+            }
         }
         None if d.next_cursor.is_some() => load_more_diff(m, fx),
         None if d.pending.is_some() => {}
         None => {
             d.anchor = None;
-            notice(m, format!("{path} is not in this diff"));
+            if shown {
+                notice(m, format!("{path} is not in this diff"));
+            }
         }
     }
 }
@@ -678,8 +743,18 @@ pub fn diff_findings<'a>(m: &'a Model, d: &DiffView) -> Vec<&'a Finding> {
         .collect()
 }
 
-/// (file index, row) of each anchored finding in diff order.
-fn finding_stops(m: &Model, d: &DiffView) -> Vec<(usize, usize)> {
+/// The findings anchored to `row` of `file`, most severe first: they stack under that line in the diff.
+pub fn row_findings<'a>(anchored: &[&'a Finding], file: &DiffFile, row: &DiffRow) -> Vec<&'a Finding> {
+    let DiffRow::Line(l) = row else { return vec![] };
+    anchored
+        .iter()
+        .filter(|f| f.file == file.path && l.new.is_some() && f.line.map(|n| n.get()) == l.new)
+        .copied()
+        .collect()
+}
+
+/// (file index, row, place in its line's stack) of each anchored finding, in diff order.
+fn finding_stops(m: &Model, d: &DiffView) -> Vec<(usize, usize, usize)> {
     let mut stops: Vec<_> = diff_findings(m, d)
         .into_iter()
         .filter_map(|f| {
@@ -688,31 +763,35 @@ fn finding_stops(m: &Model, d: &DiffView) -> Vec<(usize, usize)> {
         })
         .collect();
     stops.sort();
-    stops.dedup();
-    stops
+    let mut out: Vec<(usize, usize, usize)> = Vec::new();
+    for (fi, row) in stops {
+        let k = out.iter().filter(|s| (s.0, s.1) == (fi, row)).count();
+        out.push((fi, row, k));
+    }
+    out
 }
 
 // ---- timeline ----
 
 fn load_timeline(m: &mut Model, scope: TimelineScope, query: TimelineQuery, fx: &mut Vec<Effect>) {
     let (category, phase) = m.timeline.as_ref().map_or((None, None), |t| (t.category, t.phase));
-    let request_id = request(m);
-    fx.push(Effect::Send(ClientMessage::TimelineGet {
-        request_id: request_id.clone(),
+    let pending = send(m, fx, |request_id| ClientMessage::TimelineGet {
+        request_id,
         pr_id: query.pr.clone(),
         run_id: query.run.clone(),
         finding_id: query.finding.clone(),
         before_sequence: None,
         limit: Limit::DEFAULT,
-    }));
+    });
     m.timeline = Some(TimelineView {
         scope,
         query,
         events: Vec::new(),
         next_before: None,
-        pending: Some(request_id),
-        error: None,
+        error: pending.is_none().then(|| Text::new(OFFLINE)),
+        pending,
         selected: None,
+        open: None,
         category,
         phase,
     });
@@ -744,16 +823,19 @@ pub fn event_phases(m: &Model, events: &[SequencedEvent]) -> Vec<Option<Phase>> 
         .collect()
 }
 
-/// The events the timeline shows after its category and phase filters, with their inferred phases.
+/// The events the timeline shows after its category and phase filters, oldest first, with their inferred phases.
 pub fn timeline_rows<'a>(m: &Model, t: &'a TimelineView) -> Vec<(&'a SequencedEvent, Option<Phase>)> {
     let phases = event_phases(m, &t.events);
-    t.events
+    let mut rows: Vec<_> = t
+        .events
         .iter()
         .zip(phases)
         .filter(|(e, p)| {
             t.category.is_none_or(|c| EventCategory::of(&e.body) == c) && t.phase.is_none_or(|want| *p == Some(want))
         })
-        .collect()
+        .collect();
+    rows.reverse();
+    rows
 }
 
 const PHASE_CYCLE: [Option<Phase>; 9] = [
@@ -802,7 +884,11 @@ fn act(m: &mut Model, a: Action, fx: &mut Vec<Effect>) {
             }
         }
         Action::Back => {
-            if m.ui.modals.pop().is_none() {
+            if let Some(t) = m.timeline.as_mut().filter(|t| m.ui.screen == Screen::Timeline && t.open.is_some())
+                && m.ui.modals.is_empty()
+            {
+                t.open = None;
+            } else if m.ui.modals.pop().is_none() {
                 m.ui.screen = match m.ui.screen {
                     Screen::Diff | Screen::Timeline => Screen::Review,
                     _ => Screen::Inbox,
@@ -824,19 +910,11 @@ fn act(m: &mut Model, a: Action, fx: &mut Vec<Effect>) {
         Action::PageDown => move_by(m, page(m), fx),
         Action::Top => move_by(m, isize::MIN / 2, fx),
         Action::Bottom => move_by(m, isize::MAX / 2, fx),
-        Action::Left => m.ui.focus = left_of(m.ui.focus),
-        Action::Right => m.ui.focus = right_of(m.ui.focus, m.ui.screen),
-        Action::FocusNext => {
-            m.ui.focus = match right_of(m.ui.focus, m.ui.screen) {
-                f if f == m.ui.focus => Pane::Sidebar,
-                f => f,
-            }
-        }
-        Action::FocusPrev => {
-            m.ui.focus = match left_of(m.ui.focus) {
-                f if f == m.ui.focus => right_of(right_of(f, m.ui.screen), m.ui.screen),
-                f => f,
-            }
+        Action::Left => m.ui.focus = Pane::Sidebar,
+        Action::Right => m.ui.focus = Pane::Main,
+        // Two panes: either way round, Tab moves to the other one.
+        Action::FocusNext | Action::FocusPrev => {
+            m.ui.focus = if m.ui.focus == Pane::Main { Pane::Sidebar } else { Pane::Main }
         }
         Action::Open => open(m, fx),
         Action::Search => {
@@ -853,14 +931,13 @@ fn act(m: &mut Model, a: Action, fx: &mut Vec<Effect>) {
             before: String::new(),
         }),
         Action::OpenDiff => open_diff(m, fx),
+        Action::Watch => watch(m),
+        Action::ScrollDown => m.ui.doc_scroll = (m.ui.doc_scroll + 1).min(crate::view::doc_scroll_limit(m)),
+        Action::ScrollUp => m.ui.doc_scroll = (m.ui.doc_scroll - 1).max(0),
         Action::OpenTimeline => {
             m.ui.modals.retain(|x| !matches!(x, Modal::Finding { .. }));
-            let scope = if m.ui.screen == Screen::Review && m.ui.focus == Pane::Main && m.ui.selected_finding.is_some()
-            {
-                TimelineScope::Finding
-            } else {
-                TimelineScope::Pr
-            };
+            // The document is the PR, so its timeline is the PR's; f narrows to the run or the finding.
+            let scope = TimelineScope::Pr;
             m.ui.screen = Screen::Timeline;
             let q = timeline_query(m, scope);
             load_timeline(m, scope, q, fx);
@@ -912,6 +989,60 @@ fn act(m: &mut Model, a: Action, fx: &mut Vec<Effect>) {
     }
 }
 
+/// Lines one wheel notch moves.
+const WHEEL: isize = 3;
+
+/// The wheel scrolls the reading column: the open reader, the document, the diff or the timeline. A click selects the
+/// PR or the finding under it; a click on the selected finding reads it.
+fn mouse(m: &mut Model, e: MouseEvent, fx: &mut Vec<Effect>) {
+    let delta = match e.kind {
+        MouseEventKind::ScrollDown => WHEEL,
+        MouseEventKind::ScrollUp => -WHEEL,
+        MouseEventKind::Down(MouseButton::Left) => {
+            click(m, e.column, e.row, fx);
+            return;
+        }
+        _ => return,
+    };
+    match (m.top_modal(), m.ui.screen) {
+        (Some(Modal::Finding { .. }), _) => move_by(m, delta, fx),
+        (Some(_), _) => {}
+        (None, Screen::Inbox | Screen::Review) => {
+            m.ui.doc_scroll = (m.ui.doc_scroll + delta as i32).clamp(0, crate::view::doc_scroll_limit(m));
+        }
+        (None, Screen::Diff) => {
+            m.ui.focus = Pane::Main;
+            move_by(m, delta, fx);
+        }
+        (None, Screen::Timeline) => move_by(m, delta, fx),
+        (None, Screen::Settings) => {}
+    }
+}
+
+fn click(m: &mut Model, x: u16, y: u16, fx: &mut Vec<Effect>) {
+    match crate::view::hit(m, x, y) {
+        Some(crate::view::Hit::Pr(id)) => {
+            if m.ui.selected_pr.as_ref() != Some(&id) {
+                m.ui.selected_pr = Some(id);
+                m.ui.selected_finding = None;
+                m.ui.doc_scroll = 0;
+                reselect(m);
+            }
+        }
+        Some(crate::view::Hit::Finding(id)) => {
+            m.ui.screen = Screen::Review;
+            m.ui.focus = Pane::Main;
+            if m.ui.selected_finding.as_ref() == Some(&id) {
+                open_finding(m, id, fx);
+            } else {
+                m.ui.selected_finding = Some(id);
+                m.ui.doc_scroll = 0;
+            }
+        }
+        None => {}
+    }
+}
+
 fn mutation(m: &mut Model, mu: Mutation) {
     let cap = mu.capability();
     let why = if !m.link.accepts_events() {
@@ -955,13 +1086,12 @@ fn send_confirmed(m: &mut Model, fx: &mut Vec<Effect>) {
     else {
         return;
     };
-    let request_id = request(m);
     let idempotency_key = command.idempotency_key();
-    fx.push(Effect::Send(ClientMessage::Command(CommandRequest {
-        request_id: request_id.clone(),
-        idempotency_key,
-        command,
-    })));
+    let Some(request_id) =
+        send(m, fx, |request_id| ClientMessage::Command(CommandRequest { request_id, idempotency_key, command }))
+    else {
+        return;
+    };
     if let Some(Modal::Confirm { state, .. }) = m.ui.modals.last_mut() {
         *state = ConfirmState::Requested(request_id);
     }
@@ -974,21 +1104,6 @@ fn edit_input(m: &mut Model, f: impl FnOnce(&mut String)) {
             m.ui.pr_filter = buffer.clone();
             reselect(m);
         }
-    }
-}
-
-fn left_of(p: Pane) -> Pane {
-    match p {
-        Pane::Feed => Pane::Main,
-        _ => Pane::Sidebar,
-    }
-}
-
-fn right_of(p: Pane, screen: Screen) -> Pane {
-    match (p, screen) {
-        (Pane::Sidebar, _) => Pane::Main,
-        (Pane::Main, Screen::Review) => Pane::Feed,
-        (other, _) => other,
     }
 }
 
@@ -1029,17 +1144,18 @@ fn move_by(m: &mut Model, delta: isize, fx: &mut Vec<Effect>) {
             if next != m.ui.selected_pr {
                 m.ui.selected_pr = next;
                 m.ui.selected_finding = None;
-                m.ui.feed_scroll = 0;
+                m.ui.doc_scroll = 0;
                 reselect(m);
             }
         }
         (Screen::Review, Pane::Main) => {
             let Some(pr) = m.ui.selected_pr.clone() else { return };
             let ids: Vec<FindingId> = m.domain.pr_findings(&pr).iter().map(|f| f.id.clone()).collect();
-            m.ui.selected_finding = step(&ids, m.ui.selected_finding.as_ref(), delta);
-        }
-        (Screen::Review, Pane::Feed) => {
-            m.ui.feed_scroll = (m.ui.feed_scroll as isize - delta).clamp(0, ACTIVITY_CAP as isize) as usize;
+            let next = step(&ids, m.ui.selected_finding.as_ref(), delta);
+            if next != m.ui.selected_finding {
+                m.ui.selected_finding = next;
+                m.ui.doc_scroll = 0;
+            }
         }
         (Screen::Diff, focus) => {
             let Some(d) = &mut m.diff else { return };
@@ -1055,6 +1171,7 @@ fn move_by(m: &mut Model, delta: isize, fx: &mut Vec<Effect>) {
                     load_more_diff(m, fx);
                 }
             } else if let Some(rows) = d.file().map(|f| file_rows(f).len()) {
+                d.stack = 0;
                 d.cursor = (d.cursor as isize + delta).clamp(0, rows.saturating_sub(1) as isize) as usize;
                 let at_end = d.cursor + 1 >= rows && d.files.last().map(|f| &f.path) == d.selected_file.as_ref();
                 if at_end {
@@ -1066,24 +1183,26 @@ fn move_by(m: &mut Model, delta: isize, fx: &mut Vec<Effect>) {
             let Some(t) = &m.timeline else { return };
             let seqs: Vec<u64> = timeline_rows(m, t).iter().map(|(e, _)| e.sequence.get()).collect();
             let next = step(&seqs, t.selected.as_ref(), delta);
-            let at_end = next.is_some() && next == seqs.last().copied();
-            let more = t.next_before.filter(|_| at_end && t.pending.is_none());
+            // Older events sit at the top: reaching it pages them in.
+            let at_top = next.is_some() && next == seqs.first().copied();
+            let more = t.next_before.filter(|_| at_top && t.pending.is_none());
             let (scope, query) = (t.scope, t.query.clone());
             if let Some(t) = &mut m.timeline {
                 t.selected = next;
             }
             if let Some(before) = more {
-                let request_id = request(m);
-                fx.push(Effect::Send(ClientMessage::TimelineGet {
-                    request_id: request_id.clone(),
+                let pending = send(m, fx, |request_id| ClientMessage::TimelineGet {
+                    request_id,
                     pr_id: query.pr,
                     run_id: query.run,
                     finding_id: query.finding,
                     before_sequence: Some(before),
                     limit: Limit::DEFAULT,
-                }));
-                if let Some(t) = &mut m.timeline {
-                    t.pending = Some(request_id);
+                });
+                if let Some(t) = &mut m.timeline
+                    && pending.is_some()
+                {
+                    t.pending = pending;
                     t.scope = scope;
                 }
             }
@@ -1116,14 +1235,15 @@ fn open(m: &mut Model, fx: &mut Vec<Effect>) {
             let Some(d) = &m.diff else { return };
             let Some(file) = d.file() else { return };
             let rows = file_rows(file);
-            let new = match rows.get(d.cursor) {
-                Some(DiffRow::Line(l)) => l.new,
-                _ => None,
+            let hit = match rows.get(d.cursor) {
+                Some(row @ DiffRow::Line(_)) => {
+                    row_findings(&diff_findings(m, d), file, row).get(d.stack).map(|f| f.id.clone())
+                }
+                _ => diff_findings(m, d)
+                    .into_iter()
+                    .find(|f| f.file == file.path && f.line.is_none())
+                    .map(|f| f.id.clone()),
             };
-            let hit = diff_findings(m, d)
-                .into_iter()
-                .find(|f| f.file == file.path && (f.line.map(|l| l.get()) == new || f.line.is_none() && d.cursor == 0))
-                .map(|f| f.id.clone());
             if let Some(id) = hit {
                 open_finding(m, id, fx);
             }
@@ -1135,9 +1255,14 @@ fn open(m: &mut Model, fx: &mut Vec<Effect>) {
                 EventBody::FindingUpdated(f) => Some(f.id.clone()),
                 _ => None,
             });
-            match finding {
-                Some(id) => open_finding(m, id, fx),
-                None => m.ui.modals.push(Modal::Event { sequence: seq }),
+            // Enter shows the detail under the row; on an open finding event it reads the finding, else it folds.
+            match (t.open == Some(seq), finding) {
+                (true, Some(id)) => open_finding(m, id, fx),
+                (open, _) => {
+                    if let Some(t) = &mut m.timeline {
+                        t.open = (!open).then_some(seq);
+                    }
+                }
             }
         }
         (Screen::Settings, _) => select_account(m),
@@ -1157,10 +1282,47 @@ fn select_account(m: &mut Model) {
     confirm(m, "account.select", prompt, Command::SelectAccount(AccountParams { account_id: a.id }));
 }
 
+/// `w`: the running review's document, one key from anywhere. Pressed again, it moves on to the next running PR.
+fn watch(m: &mut Model) {
+    let mut running: Vec<(u64, PrId)> = m
+        .domain
+        .runs
+        .values()
+        .filter(|r| r.status == RunStatus::Running)
+        .filter_map(|r| Some((m.domain.prs.get(&r.pr_id)?.number, r.pr_id.clone())))
+        .collect();
+    running.sort();
+    if running.is_empty() {
+        notice(m, "no review is running");
+        return;
+    }
+    // First the review the status line names: the running PR with the newest activity.
+    let newest = m.domain.activity.iter().rev().find_map(|a| running.iter().find(|r| a.pr_id.as_ref() == Some(&r.1)));
+    let first = newest.unwrap_or(&running[0]).1.clone();
+    let at = running.iter().position(|r| Some(&r.1) == m.ui.selected_pr.as_ref());
+    let watching = m.ui.screen == Screen::Review && m.top_modal().is_none();
+    let next = match at {
+        Some(i) if watching => running[(i + 1) % running.len()].1.clone(),
+        Some(i) => running[i].1.clone(),
+        None => first,
+    };
+    m.ui.modals.clear();
+    m.ui.pr_filter.clear();
+    m.ui.screen = Screen::Review;
+    m.ui.focus = Pane::Main;
+    if m.ui.selected_pr.as_ref() != Some(&next) {
+        m.ui.selected_pr = Some(next);
+        m.ui.selected_finding = None;
+        m.ui.doc_scroll = 0;
+    }
+    reselect(m);
+}
+
 fn open_finding(m: &mut Model, id: FindingId, fx: &mut Vec<Effect>) {
     if !m.details.contains_key(&id) {
         fetch_detail(m, &id, fx);
     }
+    prefetch_diff(m, &id, fx);
     m.ui.modals.push(Modal::Finding { id, scroll: 0 });
 }
 
@@ -1176,18 +1338,12 @@ fn open_diff(m: &mut Model, fx: &mut Vec<Effect>) {
         })
         .and_then(|id| m.domain.findings.get(&id).cloned());
     m.ui.modals.clear();
-    match finding {
-        Some(f) => {
-            let run = m.domain.runs.get(&f.run_id);
-            let pr = m.domain.prs.get(&f.pr_id);
-            let (base, head) = match (run, pr) {
-                (Some(r), _) => (r.base_sha.clone(), r.head_sha.clone()),
-                (None, Some(p)) => (p.base_sha.clone(), p.head_sha.clone()),
-                (None, None) => return,
-            };
+    match finding.and_then(|f| Some((finding_diff_key(m, &f.id)?, f))) {
+        Some((key, f)) => {
             m.ui.selected_pr = Some(f.pr_id.clone());
             m.ui.selected_finding = Some(f.id.clone());
-            load_diff(m, DiffKey { pr: f.pr_id, base, head }, Some((f.file, f.line.map(|l| l.get()))), fx);
+            m.ui.screen = Screen::Diff;
+            load_diff(m, key, Some((f.file, f.line.map(|l| l.get()))), fx);
         }
         None => goto(m, Screen::Diff, fx),
     }
@@ -1209,16 +1365,18 @@ fn next_finding(m: &mut Model, dir: isize, fx: &mut Vec<Effect>) {
             let here = (
                 d.selected_file.as_ref().and_then(|p| d.files.iter().position(|f| &f.path == p)).unwrap_or(0),
                 d.cursor,
+                d.stack,
             );
             let target = if dir > 0 {
                 stops.iter().find(|s| **s > here).or(stops.first())
             } else {
                 stops.iter().rev().find(|s| **s < here).or(stops.last())
             };
-            let &(fi, row) = target.unwrap_or(&stops[0]);
+            let &(fi, row, k) = target.unwrap_or(&stops[0]);
             if let Some(d) = &mut m.diff {
                 d.selected_file = Some(d.files[fi].path.clone());
                 d.cursor = row;
+                d.stack = k;
             }
             m.ui.focus = Pane::Main;
         }

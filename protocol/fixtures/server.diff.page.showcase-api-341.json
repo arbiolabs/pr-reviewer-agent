@@ -1,0 +1,224 @@
+{
+  "type": "diff.page",
+  "requestId": "req-diff",
+  "prId": "0c11e2592c6105aa27f93216e41c13bd",
+  "baseSha": "03bc3b8ed667e7e105384dcd714ae1353ef4b789",
+  "headSha": "10bb915bc07f2bc1a7721f21e57dadb66f3f2414",
+  "files": [
+    {
+      "path": "cmd/api/main.go",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 1,
+      "hunks": [
+        {
+          "header": "@@ -47,3 +47,3 @@ func main() {",
+          "oldStart": 47,
+          "newStart": 47,
+          "lines": [
+            {
+              "kind": "context",
+              "old": 47,
+              "new": 47,
+              "text": "\tdeps := mustDeps(cfg)"
+            },
+            {
+              "kind": "del",
+              "old": 48,
+              "text": "\thandler := routes(deps)"
+            },
+            {
+              "kind": "add",
+              "new": 48,
+              "text": "\thandler := httpx.RequestID(routes(deps))"
+            },
+            {
+              "kind": "context",
+              "old": 49,
+              "new": 49,
+              "text": "\tsrv := &http.Server{Addr: cfg.Addr, Handler: handler, ReadHeaderTimeout: 5 * time.Second}"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "internal/httpx/requestid.go",
+      "status": "added",
+      "additions": 32,
+      "deletions": 0,
+      "hunks": [
+        {
+          "header": "@@ -0,0 +1,32 @@",
+          "oldStart": 0,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "package httpx"
+            },
+            {
+              "kind": "add",
+              "new": 2,
+              "text": ""
+            },
+            {
+              "kind": "add",
+              "new": 3,
+              "text": "import ("
+            },
+            {
+              "kind": "add",
+              "new": 4,
+              "text": "\t\"context\""
+            },
+            {
+              "kind": "add",
+              "new": 5,
+              "text": "\t\"log/slog\""
+            },
+            {
+              "kind": "add",
+              "new": 6,
+              "text": "\t\"net/http\""
+            },
+            {
+              "kind": "add",
+              "new": 7,
+              "text": ""
+            },
+            {
+              "kind": "add",
+              "new": 8,
+              "text": "\t\"github.com/google/uuid\""
+            },
+            {
+              "kind": "add",
+              "new": 9,
+              "text": ")"
+            },
+            {
+              "kind": "add",
+              "new": 10,
+              "text": ""
+            },
+            {
+              "kind": "add",
+              "new": 11,
+              "text": "type ctxKey struct{}"
+            },
+            {
+              "kind": "add",
+              "new": 12,
+              "text": ""
+            },
+            {
+              "kind": "add",
+              "new": 13,
+              "text": "// RequestID reuses an inbound X-Request-ID or mints one, and attaches it to the request's logger."
+            },
+            {
+              "kind": "add",
+              "new": 14,
+              "text": "func RequestID(next http.Handler) http.Handler {"
+            },
+            {
+              "kind": "add",
+              "new": 15,
+              "text": "\treturn http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {"
+            },
+            {
+              "kind": "add",
+              "new": 16,
+              "text": "\t\tid := r.Header.Get(\"X-Request-ID\")"
+            },
+            {
+              "kind": "add",
+              "new": 17,
+              "text": "\t\tif id == \"\" || len(id) > 64 {"
+            },
+            {
+              "kind": "add",
+              "new": 18,
+              "text": "\t\t\tid = uuid.NewString()"
+            },
+            {
+              "kind": "add",
+              "new": 19,
+              "text": "\t\t}"
+            },
+            {
+              "kind": "add",
+              "new": 20,
+              "text": "\t\tw.Header().Set(\"X-Request-ID\", id)"
+            },
+            {
+              "kind": "add",
+              "new": 21,
+              "text": "\t\tlogger := slog.Default().With(\"request_id\", id)"
+            },
+            {
+              "kind": "add",
+              "new": 22,
+              "text": "\t\tnext.ServeHTTP(w, r.WithContext(context.WithValue(r.Context(), ctxKey{}, logger)))"
+            },
+            {
+              "kind": "add",
+              "new": 23,
+              "text": "\t})"
+            },
+            {
+              "kind": "add",
+              "new": 24,
+              "text": "}"
+            },
+            {
+              "kind": "add",
+              "new": 25,
+              "text": ""
+            },
+            {
+              "kind": "add",
+              "new": 26,
+              "text": "// Logger returns the request-scoped logger, or the default one outside a request."
+            },
+            {
+              "kind": "add",
+              "new": 27,
+              "text": "func Logger(ctx context.Context) *slog.Logger {"
+            },
+            {
+              "kind": "add",
+              "new": 28,
+              "text": "\tif l, ok := ctx.Value(ctxKey{}).(*slog.Logger); ok {"
+            },
+            {
+              "kind": "add",
+              "new": 29,
+              "text": "\t\treturn l"
+            },
+            {
+              "kind": "add",
+              "new": 30,
+              "text": "\t}"
+            },
+            {
+              "kind": "add",
+              "new": 31,
+              "text": "\treturn slog.Default()"
+            },
+            {
+              "kind": "add",
+              "new": 32,
+              "text": "}"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    }
+  ],
+  "truncated": false
+}

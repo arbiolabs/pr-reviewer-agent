@@ -140,9 +140,10 @@ fn views_at_every_breakpoint() {
             insta::assert_snapshot!(format!("{name}_{w}x{h}_ascii"), ascii_text);
             assert!(ascii_text.is_ascii(), "{name} {w}x{h} --ascii frame has non-ASCII glyphs");
 
-            // NO_COLOR keeps every label and only drops color.
+            // NO_COLOR keeps every label and only drops color; code spans, chips in color, get their backticks back.
             let (mono_text, term) = render(&mut n.m, w, h);
-            assert_eq!(mono_text, text, "{name} {w}x{h}: NO_COLOR changed the text");
+            let unticked = |t: &str| t.replace('`', "");
+            assert_eq!(unticked(&mono_text), unticked(&text), "{name} {w}x{h}: NO_COLOR changed the text");
             assert!(colorless(&term), "{name} {w}x{h}: NO_COLOR frame has colors");
         }
     }
@@ -178,7 +179,8 @@ fn accounts_view() {
         assert!(ascii_text.is_ascii(), "accounts {w}x{h} --ascii frame has non-ASCII glyphs");
         let (mono_text, term) = render(&mut n.m, w, h);
         // Settings names the display mode; nothing else may change.
-        assert_eq!(mono_text.replace("monochrome", "color"), text, "accounts {w}x{h}: NO_COLOR changed the text");
+        let mono_text = mono_text.replace("monochrome (NO_COLOR or theme = \"mono\")", "color");
+        assert_eq!(mono_text, text, "accounts {w}x{h}: NO_COLOR changed the text");
         assert!(colorless(&term));
     }
 }
@@ -294,7 +296,12 @@ fn special_states() {
         ),
         (
             "timeline_finding_scope",
-            mid_review(Look::default()).select("acme/shop#184").key(KeyCode::Enter).key(KeyCode::Char('t')),
+            mid_review(Look::default())
+                .select("acme/shop#184")
+                .key(KeyCode::Enter)
+                .key(KeyCode::Char('t'))
+                .key(KeyCode::Char('f'))
+                .key(KeyCode::Char('f')),
             (80, 24),
         ),
         (
@@ -374,7 +381,8 @@ fn a_connection_error_on_a_long_path_keeps_its_reason_in_view() {
         insta::assert_snapshot!(format!("state_long_path_error_settings_{w}x{h}"), settings);
         let shows = |frame: &str, prefix: &str| frame.lines().any(|l| l.contains(prefix));
         assert!(shows(&inbox, "disconnected: socket directory does not exist: /pri"), "banner, {w} cols:\n{inbox}");
-        assert!(shows(&inbox, "unavailable: socket directory does not exist: /pri"), "inbox, {w} cols:\n{inbox}");
+        assert!(shows(&inbox, "unavailable: socket directory does not exist:"), "inbox, {w} cols:\n{inbox}");
+        assert!(inbox.matches("/private/tmp/claude-501/").count() >= 2, "inbox names the path, {w} cols:\n{inbox}");
         assert!(
             shows(&settings, "disconnected: socket directory does not exist: /"),
             "settings, {w} cols:\n{settings}"
@@ -400,4 +408,176 @@ fn every_view_survives_every_size() {
         }
     }
     let _ = NetCmd::Close;
+}
+
+#[test]
+fn j_reads_the_explanation_before_the_document_moves() {
+    let mut s = Sim::new(Look::default()).play("showcase", 2).key(KeyCode::Enter);
+    let (before, _) = render(&mut s.m, 120, 38);
+    assert!(before.contains("2 more, J scrolls"), "{before}");
+    let mut s = s.key(KeyCode::Char('J')).key(KeyCode::Char('J'));
+    let (after, _) = render(&mut s.m, 120, 38);
+    assert!(after.contains("Orders: self-serve refunds"), "the PR header stays:\n{after}");
+    assert!(after.contains("2 more above, K scrolls back"), "{after}");
+    assert!(after.contains("refund another customer's order"), "the explanation's last line shows:\n{after}");
+}
+
+/// One 160x45 diff frame over 2000 lines of 50k chars each. The view windows the rows before it builds any, and
+/// cuts each line to its row budget before it expands or colors it, so the frame costs what the screen shows.
+#[test]
+fn a_huge_diff_renders_a_frame_in_bounded_time() {
+    let mut s = mid_review(Look::default()).select("acme/shop#184").key_unanswered(KeyCode::Char('3'));
+    let id = s.m.diff.as_ref().and_then(|d| d.pending.clone()).unwrap();
+    let mut page: serde_json::Value =
+        serde_json::from_str(&read("fixtures/server.diff.page.json").replace("req-diff", id.as_str())).unwrap();
+    let text = "\tconst x = \"a\" // b ".repeat(2_500);
+    assert_eq!(text.chars().count(), 50_000);
+    let lines: Vec<_> = (1..=2000).map(|n| serde_json::json!({"kind": "add", "new": n, "text": text})).collect();
+    page["files"][0]["hunks"][0]["lines"] = serde_json::Value::Array(lines);
+    s.server(serde_json::from_value(page).unwrap());
+    let mut term = Terminal::new(TestBackend::new(160, 45)).unwrap();
+    update(&mut s.m, Msg::Resize(160, 45));
+    term.draw(|f| view(&s.m, f)).unwrap();
+    let start = std::time::Instant::now();
+    term.draw(|f| view(&s.m, f)).unwrap();
+    let took = start.elapsed();
+    // About 2 ms in the test profile (opt-level 1) and 1 ms in release; it took 600 ms before the rows were windowed.
+    assert!(took < std::time::Duration::from_millis(30), "frame took {took:?}");
+}
+
+/// The text of the reverse-video cells on each row that has any: what NO_COLOR shows as selected.
+fn reversed(term: &Terminal<TestBackend>) -> Vec<String> {
+    let buf = term.backend().buffer();
+    let (w, h) = (buf.area.width, buf.area.height);
+    (0..h)
+        .map(|y| {
+            (0..w)
+                .map(|x| &buf[(x, y)])
+                .filter(|c| c.modifier.contains(ratatui::style::Modifier::REVERSED))
+                .map(|c| c.symbol())
+                .collect::<String>()
+        })
+        .filter(|row| !row.is_empty())
+        .map(|row| row.trim().to_string())
+        .collect()
+}
+
+#[test]
+fn without_color_the_diff_cursor_and_a_selected_phase_heading_show_in_reverse_video() {
+    let mono = Look { color: false, ..Look::default() };
+    let (_, mut diff) = states(mono).remove(2);
+    let (_, term) = render(&mut diff.m, 120, 38);
+    assert_eq!(
+        reversed(&term),
+        ["▌ ▲ booking.ts", "▌   src                     +2 -1", "▲        42 +     slot.held = true;"]
+    );
+
+    let mut s = Sim::new(mono).play("showcase", 12).key(KeyCode::Char('w')).key(KeyCode::Char('t'));
+    let phase = |s: &Sim| {
+        let t = s.m.timeline.as_ref().unwrap();
+        let e = t.events.iter().find(|e| Some(e.sequence.get()) == t.selected).unwrap();
+        matches!(e.body, pr_review_tui::protocol::EventBody::PhaseChanged(_))
+    };
+    for _ in 0..20 {
+        if phase(&s) {
+            break;
+        }
+        s = s.key(KeyCode::Char('k'));
+    }
+    assert!(phase(&s), "a phase change is selected");
+    let (frame, term) = render(&mut s.m, 120, 38);
+    let rows = reversed(&term);
+    assert_eq!(rows.len(), 1, "{rows:?}\n{frame}");
+    assert!(rows[0].ends_with(|c: char| c.is_ascii_digit()) && rows[0].contains("───"), "{rows:?}");
+}
+
+/// Every view, waiting on its replies and answered, at each step of the showcase playback: under `--ascii` no cell
+/// holds anything but ASCII.
+#[test]
+fn ascii_frames_stay_ascii_across_the_showcase() {
+    use KeyCode::{Char, Enter};
+    let ascii = Look { ascii: true, ..Look::default() };
+    let routes: [&[KeyCode]; 9] = [
+        &[],
+        &[Enter],
+        &[Enter, Enter],
+        &[Enter, Char('d')],
+        &[Char('w'), Char('t')],
+        &[Char('w'), Char('t'), Enter],
+        &[Char('?')],
+        &[Char('5')],
+        &[Char('A'), Char('j'), Enter, Char('y')],
+    ];
+    let msgs = script("showcase");
+    for keys in routes {
+        for answered in [true, false] {
+            let mut s = Sim::new(ascii).play("showcase", 2);
+            for &k in keys {
+                s = if answered { s.key(k) } else { s.key_unanswered(k) };
+            }
+            for (i, msg) in msgs.iter().enumerate().skip(2) {
+                s.server(msg.clone());
+                for (w, h) in [(80, 24), (120, 38)] {
+                    let (frame, _) = render(&mut s.m, w, h);
+                    let bad: String = frame.chars().filter(|c| !c.is_ascii()).collect();
+                    assert!(bad.is_empty(), "{keys:?} answered={answered} message {i} {w}x{h}: {bad:?}\n{frame}");
+                }
+            }
+        }
+    }
+}
+
+#[test]
+fn the_pr_title_stays_in_view_while_the_live_log_pushes_the_open_card_down() {
+    for (w, h) in [100u16, 120, 130, 140, 160].into_iter().flat_map(|w| (24..=50u16).map(move |h| (w, h))) {
+        for events in 30..=43 {
+            let mut s = Sim::new(Look::default()).play("showcase", 2 + events).key(KeyCode::Char('w'));
+            let (frame, _) = render(&mut s.m, w, h);
+            // The reading column's top three rows, right of the PR rail.
+            let top: Vec<String> = frame.lines().skip(2).take(3).map(|l| l.chars().skip(34).collect()).collect();
+            let title: String = s.m.selected_pr().unwrap().title.as_str().chars().take(16).collect();
+            assert!(top.iter().any(|l| l.contains(&title)), "{w}x{h} after {events}:\n{frame}");
+        }
+    }
+}
+
+#[test]
+fn the_help_page_shows_every_key_at_80x24() {
+    let mut s = mid_review(Look::default()).key(KeyCode::Char('?'));
+    let (frame, _) = render(&mut s.m, 80, 24);
+    use pr_review_tui::keymap::Context as C;
+    let rows = pr_review_tui::keymap::help_rows();
+    // The confirmation panel names its own y and n.
+    for (_, keys, what) in rows.iter().filter(|r| matches!(r.0, C::Global | C::Review | C::Diff | C::Timeline)) {
+        // A long description may end in an ellipsis; its start must show beside its keys.
+        let row = format!("{keys:<11}{}", what.chars().take(12).collect::<String>());
+        assert!(frame.contains(&row), "{row} is missing:\n{frame}");
+    }
+}
+
+#[test]
+fn j_past_the_end_stops_so_one_k_scrolls_back() {
+    let mut s = Sim::new(Look::default()).play("showcase", 2).key(KeyCode::Enter);
+    render(&mut s.m, 120, 38);
+    for _ in 0..100 {
+        s = s.key(KeyCode::Char('J'));
+    }
+    let (end, _) = render(&mut s.m, 120, 38);
+    let mut s = s.key(KeyCode::Char('J'));
+    assert_eq!(render(&mut s.m, 120, 38).0, end, "the document is at its end");
+    let mut s = s.key(KeyCode::Char('K'));
+    assert_ne!(render(&mut s.m, 120, 38).0, end, "one K moves back from the end");
+}
+
+#[test]
+fn show_activity_false_hides_the_live_log_and_the_rates() {
+    let frame = |look: Look| {
+        let mut s = Sim::new(look).play("showcase", 2 + 20).key(KeyCode::Char('w'));
+        render(&mut s.m, 120, 38).0
+    };
+    let on = frame(Look::default());
+    assert!(on.contains("Reviewing now") && on.contains("calls/s") && on.contains("/s  "), "{on}");
+    let off = frame(Look { show_activity: false, ..Look::default() });
+    assert!(!off.contains("Reviewing now") && !off.contains("/s  "), "{off}");
+    assert!(off.contains("Sign-in: send users back"), "the document still shows:\n{off}");
 }

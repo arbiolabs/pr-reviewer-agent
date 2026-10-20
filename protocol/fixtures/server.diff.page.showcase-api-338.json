@@ -1,0 +1,124 @@
+{
+  "type": "diff.page",
+  "requestId": "req-diff",
+  "prId": "93da1c66980faac69f5b91a8afad6c2e",
+  "baseSha": "3d66d5d9375681285618d472c37645d41bd7d10b",
+  "headSha": "c2711bd4932dfe7d8c2f99dfed5215eeccdbcff9",
+  "files": [
+    {
+      "path": "internal/webhooks/dispatcher.go",
+      "status": "modified",
+      "additions": 14,
+      "deletions": 2,
+      "hunks": [
+        {
+          "header": "@@ -58,5 +58,17 @@ func (d *Dispatcher) Run(ctx context.Context) error {",
+          "oldStart": 58,
+          "newStart": 58,
+          "lines": [
+            {
+              "kind": "context",
+              "old": 58,
+              "new": 58,
+              "text": "// Run starts the delivery workers and blocks until ctx is cancelled."
+            },
+            {
+              "kind": "context",
+              "old": 59,
+              "new": 59,
+              "text": "func (d *Dispatcher) Run(ctx context.Context) error {"
+            },
+            {
+              "kind": "del",
+              "old": 60,
+              "text": "\tgo d.loop(ctx)"
+            },
+            {
+              "kind": "del",
+              "old": 61,
+              "text": "\treturn nil"
+            },
+            {
+              "kind": "add",
+              "new": 60,
+              "text": "\tvar wg sync.WaitGroup"
+            },
+            {
+              "kind": "add",
+              "new": 61,
+              "text": "\tfor i := 0; i < d.workers; i++ {"
+            },
+            {
+              "kind": "add",
+              "new": 62,
+              "text": "\t\twg.Add(1)"
+            },
+            {
+              "kind": "add",
+              "new": 63,
+              "text": "\t\tgo func() {"
+            },
+            {
+              "kind": "add",
+              "new": 64,
+              "text": "\t\t\tdefer wg.Done()"
+            },
+            {
+              "kind": "add",
+              "new": 65,
+              "text": "\t\t\tfor job := range d.jobs {"
+            },
+            {
+              "kind": "add",
+              "new": 66,
+              "text": "\t\t\t\td.deliver(context.WithoutCancel(ctx), job)"
+            },
+            {
+              "kind": "add",
+              "new": 67,
+              "text": "\t\t\t}"
+            },
+            {
+              "kind": "add",
+              "new": 68,
+              "text": "\t\t}()"
+            },
+            {
+              "kind": "add",
+              "new": 69,
+              "text": "\t}"
+            },
+            {
+              "kind": "add",
+              "new": 70,
+              "text": "\t<-ctx.Done()"
+            },
+            {
+              "kind": "add",
+              "new": 71,
+              "text": "\tclose(d.jobs)"
+            },
+            {
+              "kind": "add",
+              "new": 72,
+              "text": "\twg.Wait()"
+            },
+            {
+              "kind": "add",
+              "new": 73,
+              "text": "\treturn ctx.Err()"
+            },
+            {
+              "kind": "context",
+              "old": 62,
+              "new": 74,
+              "text": "}"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    }
+  ],
+  "truncated": false
+}

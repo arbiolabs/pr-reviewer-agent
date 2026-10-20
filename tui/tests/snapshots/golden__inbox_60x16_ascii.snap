@@ -2,19 +2,19 @@
 source: tests/golden.rs
 expression: ascii_text
 ---
- PR REVIEWER * live | unix:/run/user/501/pr-review/~ ? help
-  1 Inbox   2 Review   3 Diff   4 Timeline   5 Settings
-+ > TRACKED PRS (3) ---------------------------------------+
-|  #184  Booking API                               * VERIFY|
-|> #186  Bump deps                     . no run (quiescing)|
-|  #185  Fix cache eviction                     + completed|
-|                                                          |
-|                                                          |
-|                                                          |
-|                                                          |
-|                                                          |
-|                                                          |
-|                                                          |
-|                                                          |
-+----------------------------------------------------------+
- j/k move  Enter open  / search  d diff  t timeline  r refr~
+  pr-review | - reviewing #184 verify new finding   * live
+
+
+  PULL REQUESTS                                          3
+
+  . #186 Bump deps
+    acme/shop | 6666666                        not reviewed
+
+> o #185 Fix cache eviction
+>   acme/shop | 5555555                              o1 ->0
+
+  - #184 Booking API
+    acme/shop | by octocat | verify     +-+-+---.-. . 0.2/s
+
+
+   j/k pull request  Enter read  w watch live  / search

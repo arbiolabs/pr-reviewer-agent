@@ -79,11 +79,20 @@ struct UiSection {
     start_view: String,
     show_activity: bool,
     ascii: bool,
+    background: String,
+    mouse: bool,
 }
 
 impl Default for UiSection {
     fn default() -> Self {
-        UiSection { theme: "dark".into(), start_view: "inbox".into(), show_activity: true, ascii: false }
+        UiSection {
+            theme: "dark".into(),
+            start_view: "review".into(),
+            show_activity: true,
+            ascii: false,
+            background: "theme".into(),
+            mouse: true,
+        }
     }
 }
 
@@ -103,6 +112,8 @@ pub struct Settings {
     pub start: Screen,
     pub wanted_pr: Option<PrRef>,
     pub config_path: PathBuf,
+    /// Mouse capture, which turns the terminal's own drag-to-select into a modifier-drag.
+    pub mouse: bool,
 }
 
 fn home() -> PathBuf {
@@ -185,6 +196,11 @@ pub fn resolve(args: Args, no_color: bool) -> Result<Settings, String> {
         "mono" => false,
         other => return Err(format!("ui.theme: {other:?} is not supported (dark, mono)")),
     };
+    let terminal_bg = match file.ui.background.as_str() {
+        "theme" => false,
+        "terminal" => true,
+        other => return Err(format!("ui.background: {other:?} is not supported (theme, terminal)")),
+    };
     let socket = match (args.socket, file.connection.socket.as_str()) {
         (Some(p), _) => p,
         (None, "auto") => default_socket(),
@@ -206,10 +222,11 @@ pub fn resolve(args: Args, no_color: bool) -> Result<Settings, String> {
         reconnect: file.connection.reconnect,
         heartbeat_timeout: Duration::from_secs(file.connection.heartbeat_timeout_secs),
         request_timeout: Duration::from_secs(file.connection.request_timeout_secs),
-        look: Look { ascii: args.ascii || file.ui.ascii, color, show_activity: file.ui.show_activity },
+        look: Look { ascii: args.ascii || file.ui.ascii, color, show_activity: file.ui.show_activity, terminal_bg },
         start,
         wanted_pr,
         config_path,
+        mouse: file.ui.mouse,
     })
 }
 
@@ -256,6 +273,14 @@ mod tests {
         assert_eq!((s.look.ascii, s.look.color, s.start), (true, false, Screen::Timeline));
         let a = Args { config: Some(path.clone()), socket: Some("/flag.sock".into()), ..Args::default() };
         assert_eq!(resolve(a, false).unwrap().source, Source::Socket("/flag.sock".into()));
+
+        assert!(!s.look.terminal_bg);
+        assert!(s.mouse, "mouse capture is on by default");
+        std::fs::write(&path, "[ui]\nbackground = \"terminal\"\n").unwrap();
+        assert!(resolve(Args { config: Some(path.clone()), ..Args::default() }, false).unwrap().look.terminal_bg);
+        std::fs::write(&path, "[ui]\nbackground = \"clear\"\n").unwrap();
+        let err = resolve(Args { config: Some(path.clone()), ..Args::default() }, false).unwrap_err();
+        assert!(err.contains("ui.background"), "{err}");
 
         std::fs::write(&path, "[ui]\nascci = true\n").unwrap();
         let err = resolve(Args { config: Some(path), ..Args::default() }, false).unwrap_err();

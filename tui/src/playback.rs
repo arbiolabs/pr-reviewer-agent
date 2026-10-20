@@ -65,10 +65,23 @@ pub async fn run(script: Script, tx: mpsc::Sender<Msg>, mut rx: mpsc::Receiver<N
     }
 }
 
-fn fixture(dir: &Path, name: &str, request_id: &str) -> Option<Value> {
-    let mut v: Value = serde_json::from_str(&std::fs::read_to_string(dir.join(name)).ok()?).ok()?;
-    v["requestId"] = json!(request_id);
-    Some(v)
+/// Every `<prefix>*.json` fixture, by file name, with `requestId` set to `request_id`.
+fn fixtures_named(dir: &Path, prefix: &str, request_id: &str) -> Vec<(String, Value)> {
+    let mut names: Vec<String> = std::fs::read_dir(dir)
+        .into_iter()
+        .flatten()
+        .filter_map(|e| e.ok()?.file_name().into_string().ok())
+        .filter(|n| n.starts_with(prefix) && n.ends_with(".json"))
+        .collect();
+    names.sort();
+    names
+        .into_iter()
+        .filter_map(|n| {
+            let mut v: Value = serde_json::from_str(&std::fs::read_to_string(dir.join(&n)).ok()?).ok()?;
+            v["requestId"] = json!(request_id);
+            Some((n, v))
+        })
+        .collect()
 }
 
 fn not_found(request_id: &str, what: String) -> Value {
@@ -81,22 +94,23 @@ pub fn answer(fixtures: &Path, played: &[SequencedEvent], req: &ClientMessage) -
         // The script plays the server side of the handshake and the stream.
         ClientMessage::Hello { .. } | ClientMessage::SnapshotGet { .. } | ClientMessage::Resume { .. } => return None,
         ClientMessage::DiffGet { pr_id, base_sha, head_sha, cursor, .. } => {
-            let name = if cursor.is_some() { "server.diff.page.last.json" } else { "server.diff.page.json" };
-            fixture(fixtures, name, rid)
-                .filter(|v| {
+            // `server.diff.page.last.json` is the only later page; every other diff fixture is a first page.
+            fixtures_named(fixtures, "server.diff.page", rid)
+                .into_iter()
+                .filter(|(n, _)| (n == "server.diff.page.last.json") == cursor.is_some())
+                .map(|(_, v)| v)
+                .find(|v| {
                     v["prId"] == pr_id.as_str()
                         && v["baseSha"] == base_sha.as_str()
                         && v["headSha"] == head_sha.as_str()
                 })
                 .unwrap_or_else(|| not_found(rid, format!("no diff for {pr_id} at {}", head_sha.short())))
         }
-        ClientMessage::FindingGet { finding_id, .. } => {
-            ["server.finding.detail.json", "server.finding.detail.minimal.json"]
-                .iter()
-                .filter_map(|n| fixture(fixtures, n, rid))
-                .find(|v| v["finding"]["id"] == finding_id.as_str())
-                .unwrap_or_else(|| not_found(rid, format!("no detail for {finding_id}")))
-        }
+        ClientMessage::FindingGet { finding_id, .. } => fixtures_named(fixtures, "server.finding.detail", rid)
+            .into_iter()
+            .map(|(_, v)| v)
+            .find(|v| v["finding"]["id"] == finding_id.as_str())
+            .unwrap_or_else(|| not_found(rid, format!("no detail for {finding_id}"))),
         ClientMessage::TimelineGet { pr_id, run_id, finding_id, before_sequence, limit, .. } => {
             let limit = u16::from(*limit) as usize;
             let matching: Vec<&SequencedEvent> = played

@@ -70,8 +70,9 @@ impl Link {
         matches!(self, Link::Live)
     }
 
-    pub fn connected(&self) -> bool {
-        matches!(self, Link::Negotiating | Link::Syncing | Link::Live | Link::Resyncing)
+    /// The server has answered `hello` with `welcome`, so requests other than `hello` may go out.
+    pub fn welcomed(&self) -> bool {
+        matches!(self, Link::Syncing | Link::Live | Link::Resyncing)
     }
 }
 
@@ -103,6 +104,8 @@ pub struct Activity {
     pub at: Text,
     pub pr_id: Option<PrId>,
     pub kind: ActivityKind,
+    /// Client clock when it was applied: the live rate is about what the reviewer does now, not journal time.
+    pub recv_ms: u64,
 }
 
 #[derive(Clone, Debug, Default)]
@@ -114,8 +117,6 @@ pub struct DomainCache {
     pub accounts: Option<Vec<Account>>,
     pub activity: VecDeque<Activity>,
     pub tool_activity_count: u64,
-    /// The journal sequence that last touched each PR, for "most recently changed" ordering.
-    pub touched: BTreeMap<PrId, u64>,
 }
 
 impl DomainCache {
@@ -166,7 +167,6 @@ impl Screen {
 pub enum Pane {
     Sidebar,
     Main,
-    Feed,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -181,9 +181,6 @@ pub enum Modal {
     Finding {
         id: FindingId,
         scroll: u16,
-    },
-    Event {
-        sequence: u64,
     },
     Input {
         purpose: InputPurpose,
@@ -228,6 +225,8 @@ pub struct DiffView {
     pub selected_file: Option<Text>,
     /// Row index within the selected file's rows (hunk headers and lines).
     pub cursor: usize,
+    /// Which of the findings stacked on the cursor's line `Enter` opens; `n` walks the stack before the next line.
+    pub stack: usize,
     pub anchor: Option<(Text, Option<u32>)>,
 }
 
@@ -321,6 +320,8 @@ pub struct TimelineView {
     pub pending: Option<RequestId>,
     pub error: Option<Text>,
     pub selected: Option<u64>,
+    /// The event whose detail shows inline under its row.
+    pub open: Option<u64>,
     pub category: Option<EventCategory>,
     pub phase: Option<Phase>,
 }
@@ -355,11 +356,13 @@ pub struct Look {
     pub ascii: bool,
     pub color: bool,
     pub show_activity: bool,
+    /// `[ui] background = "terminal"`: the terminal's own background shows where the theme would paint `base`.
+    pub terminal_bg: bool,
 }
 
 impl Default for Look {
     fn default() -> Self {
-        Look { ascii: false, color: true, show_activity: true }
+        Look { ascii: false, color: true, show_activity: true, terminal_bg: false }
     }
 }
 
@@ -389,7 +392,8 @@ pub struct Ui {
     pub modals: Vec<Modal>,
     pub selected_pr: Option<PrId>,
     pub selected_finding: Option<FindingId>,
-    pub feed_scroll: usize,
+    /// Lines the reader scrolled the document past where the selection puts it; reset when the selection moves.
+    pub doc_scroll: i32,
     pub pr_filter: String,
     /// From `--pr`: selected once it shows up in a snapshot.
     pub wanted_pr: Option<PrRef>,
@@ -451,7 +455,7 @@ impl Model {
                 modals: Vec::new(),
                 selected_pr: None,
                 selected_finding: None,
-                feed_scroll: 0,
+                doc_scroll: 0,
                 pr_filter: String::new(),
                 wanted_pr,
                 selected_account: None,
@@ -470,20 +474,17 @@ impl Model {
         }
     }
 
-    /// Tracked PRs matching the search filter, most recently changed first.
+    /// Tracked PRs matching the search filter, in an order that never moves under the cursor: grouped by repository
+    /// (alphabetically), newest number first. Activity shows in the row's glyph, not in its position.
     pub fn inbox(&self) -> Vec<&Pr> {
-        let needle = self.ui.pr_filter.to_lowercase();
-        let mut v: Vec<_> = self
-            .domain
-            .prs
-            .values()
-            .filter(|p| {
-                needle.is_empty()
-                    || format!("#{} {} {}", p.number, p.title, p.repository).to_lowercase().contains(&needle)
-            })
-            .collect();
-        let touched = |p: &Pr| self.domain.touched.get(&p.id).copied().unwrap_or(0);
-        v.sort_by(|a, b| (touched(b), b.number, &b.id).cmp(&(touched(a), a.number, &a.id)));
+        let mut v: Vec<_> = self.domain.prs.values().filter(|p| fuzzy(&self.ui.pr_filter, &pr_haystack(p))).collect();
+        v.sort_by(|a, b| {
+            (&a.repository, std::cmp::Reverse(a.number), &a.id).cmp(&(
+                &b.repository,
+                std::cmp::Reverse(b.number),
+                &b.id,
+            ))
+        });
         v
     }
 
@@ -547,5 +548,27 @@ impl Model {
 
     pub fn top_modal(&self) -> Option<&Modal> {
         self.ui.modals.last()
+    }
+}
+
+fn pr_haystack(p: &Pr) -> String {
+    format!("#{} {} {} {}", p.number, p.title, p.repository, p.author.as_ref().map_or("", |a| a.as_str()))
+}
+
+/// Case-insensitive subsequence match: `sgn back` finds "Sign-in: send users back".
+pub fn fuzzy(needle: &str, haystack: &str) -> bool {
+    let hay = haystack.to_lowercase();
+    let mut chars = hay.chars();
+    needle.to_lowercase().chars().filter(|c| !c.is_whitespace()).all(|n| chars.any(|h| h == n))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn fuzzy_matches_subsequences_and_rejects_out_of_order() {
+        assert!(super::fuzzy("", "anything"));
+        assert!(super::fuzzy("ordref", "#1287 Orders: self-serve refunds"));
+        assert!(super::fuzzy("1287", "#1287 Orders"));
+        assert!(!super::fuzzy("refo", "#1287 Orders: refunds"));
     }
 }

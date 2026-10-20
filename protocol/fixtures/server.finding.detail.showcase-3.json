@@ -1,0 +1,43 @@
+{
+  "type": "finding.detail",
+  "requestId": "req-finding",
+  "finding": {
+    "id": "ffadc4e5592b38cfb55eaa5e99afddd8",
+    "prId": "d2bc8e8f23f98a4b203ffeb4519ed00b",
+    "runId": "7f24f52475b0cd1755a7ef64fd8a8080",
+    "fingerprint": "03024f507f1702d34b18f583e382ec02",
+    "status": "DETECTED",
+    "evidenceCount": 2,
+    "stale": false,
+    "title": "Order history runs one item query per order",
+    "category": "performance",
+    "severity": "medium",
+    "confidence": 0.9,
+    "file": "src/server/orders/history.ts",
+    "line": 17,
+    "explanation": "orderHistory fetches a page of orders, then awaits a separate orderItem.findMany for each one, in sequence. A full page costs 22 round trips (count, page, 20 item lookups) and none of them overlap, so latency grows with the page size. Repeat customers hit a full page on every visit.",
+    "reasoningSummary": "The loop awaits inside for...of, so the queries are sequential. The Order model already has an `items` relation (prisma/schema.prisma), so the items can come back with the orders in one query.",
+    "suggestedFix": "Load the items with the orders and drop the loop:\n\nconst orders = await db.order.findMany({\n  where: { customerId },\n  orderBy: { placedAt: \"desc\" },\n  skip: (page - 1) * PAGE_SIZE,\n  take: PAGE_SIZE,\n  include: { items: { include: { product: true } } },\n});",
+    "evidence": [
+      {
+        "kind": "code_ref",
+        "path": "src/server/orders/history.ts",
+        "start": 15,
+        "end": 21,
+        "refSha": "647fb3beac66d51005ac1a2cb89fec94e7a3da76",
+        "text": "  const withItems = [];\n  for (const order of orders) {\n    const items = await db.orderItem.findMany({\n      where: { orderId: order.id },\n      include: { product: true },\n    });\n    withItems.push({ ...order, items });"
+      },
+      {
+        "kind": "tool_summary",
+        "text": "search_code \"orderHistory(\": 1 caller, GET /account/orders (src/server/routes/account.ts:61), PAGE_SIZE 20"
+      }
+    ],
+    "history": [
+      {
+        "runId": "7f24f52475b0cd1755a7ef64fd8a8080",
+        "disposition": "DETECTED",
+        "at": "2026-10-20T13:53:01Z"
+      }
+    ]
+  }
+}

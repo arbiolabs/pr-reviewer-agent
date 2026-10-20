@@ -2,41 +2,41 @@
 source: tests/golden.rs
 expression: text
 ---
- PR REVIEWER ● live · unix:/run/user/501/pr-review/reviewer.sock                                                 ? help
-  1 Inbox   2 Review   3 Diff   4 Timeline   5 Settings
-┌ › TRACKED PRS (3) ───────────────────────────────────────────────────────────┐┌ SELECTED ────────────────────────────┐
-│  PR    TITLE                 REVIEW                HEAD     FINDINGS         ││#3 修复竞态条件 🔥 👩‍💻 ｗｉｄｅ!       │
-│› #3    修复竞态条件 🔥 👩‍💻 …  · no run              3333333  none             ││acme/shop · base bbbbbbb → head 33333…│
-│  #1    red click done        ● VERIFY              1111111  ▲1               ││no review run yet                     │
-│  #2    Refactor booking Ref… · no run              2222222  none             ││                                      │
-│                                                                              ││findings: none                        │
-│                                                                              ││Enter opens the review                │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-│                                                                              ││                                      │
-└──────────────────────────────────────────────────────────────────────────────┘└──────────────────────────────────────┘
- j/k move  Enter open  / search  d diff  t timeline  r refresh  ? help  q quit
+  pr-review · • reviewing #1 verify found: safeEVIL  tail                                                       ● live
+
+
+  PULL REQUESTS                3    acme/shop  #3
+                                    修复竞态条件 🔥 👩‍💻 ｗｉｄｅ!
+▌ · #3 修复竞态条件 🔥 👩‍💻 ｗｉｄ…   bbbbbbb → 3333333
+▌   shop 3333333     not reviewed
+                                    Not reviewed yet. s starts a review.
+  · #2 Refactor booking Refactor…
+    shop 2222222     not reviewed   No findings yet
+                                    ──────────────────────────────────────────────────────────────────────────────────
+  • #1 red click done
+    shop      ●─●─●─•─○─○ ▁ 0.2/s
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   j/k pull request  Enter read  w watch live  / search  ? help  q quit          1 inbox  2 review  3 diff  4 timeline

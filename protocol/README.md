@@ -134,6 +134,9 @@ The fixtures write control bytes as JSON `\u` escapes.
   sorted by `id`, plus `accounts` (`id`, `state`, `ghActive`, `selected`, sorted by `id`) when the script's snapshot
   carries accounts. Titles in this file are already sanitized. The reference reducer in `tests/protocol.test.ts`
   produces exactly this state.
+- `--playback` answers `diff.get` with the `fixtures/server.diff.page*.json` whose `prId`, `baseSha` and `headSha` match
+  (`server.diff.page.last.json` for a request with a `cursor`), and `finding.get` with the
+  `fixtures/server.finding.detail*.json` whose finding id matches. Anything else is `NOT_FOUND`.
 
 | Script | Exercises |
 | --- | --- |
@@ -145,3 +148,4 @@ The fixtures write control bytes as JSON `\u` escapes.
 | `hostile` | ANSI, OSC 8 and 52, C1 CSI and DCS, CR overwrite, a 2,000-char title, CJK and emoji |
 | `burst` | 5,000 `tool.activity` events with no delay |
 | `accounts` | a snapshot with 2 accounts, `command.result accepted` for `account.select`, then `accounts.updated` with the new selection |
+| `showcase` | a realistic session for judging TUI designs: 5 PRs in `acme/shop` and `acme/api` (completed with 4 findings, completed clean, one review advancing live for about 18 s, superseded with a stale finding, failed), 2 accounts |

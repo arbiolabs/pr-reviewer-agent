@@ -15,7 +15,6 @@ pub enum Context {
     Settings,
     Help,
     FindingModal,
-    EventModal,
     ConfirmModal,
 }
 
@@ -58,6 +57,9 @@ pub enum Action {
     JumpTo,
     OpenDiff,
     OpenTimeline,
+    Watch,
+    ScrollDown,
+    ScrollUp,
     NextFinding,
     PrevFinding,
     Refresh,
@@ -126,6 +128,11 @@ const TABLE: &[(Context, KeyCode, KeyModifiers, Action)] = &[
     (C::Global, K::Char('R'), NONE, A::Mutation(Mutation::Retry)),
     (C::Global, K::Char('c'), NONE, A::Mutation(Mutation::Cancel)),
     (C::Global, K::Char('p'), NONE, A::Mutation(Mutation::Publish)),
+    (C::Global, K::Char('w'), NONE, A::Watch),
+    (C::Review, K::Char('J'), SHIFT, A::ScrollDown),
+    (C::Review, K::Char('J'), NONE, A::ScrollDown),
+    (C::Review, K::Char('K'), SHIFT, A::ScrollUp),
+    (C::Review, K::Char('K'), NONE, A::ScrollUp),
     (C::Review, K::Char('n'), NONE, A::NextFinding),
     (C::Review, K::Char('N'), SHIFT, A::PrevFinding),
     (C::Review, K::Char('N'), NONE, A::PrevFinding),
@@ -147,7 +154,6 @@ pub fn context(screen: Screen, modal: Option<&Modal>) -> Context {
     match modal {
         Some(Modal::Help) => C::Help,
         Some(Modal::Finding { .. }) => C::FindingModal,
-        Some(Modal::Event { .. }) => C::EventModal,
         Some(Modal::Confirm { .. }) => C::ConfirmModal,
         Some(Modal::Input { .. }) | None => match screen {
             Screen::Inbox => C::Inbox,
@@ -181,8 +187,8 @@ pub fn resolve(screen: Screen, modal: Option<&Modal>, key: KeyEvent) -> Option<A
     lookup(ctx).or_else(|| lookup(C::Global))
 }
 
-/// The help modal's rows, read from the same table so help never drifts from behavior.
-pub fn help_rows() -> Vec<(String, &'static str)> {
+/// The help page's rows by context, read from the same table so help never drifts from behavior.
+pub fn help_rows() -> Vec<(Context, String, &'static str)> {
     let describe = |a: Action| -> Option<&'static str> {
         Some(match a {
             A::Quit => "quit; reviews keep running",
@@ -194,23 +200,25 @@ pub fn help_rows() -> Vec<(String, &'static str)> {
             A::Left | A::Right => "pane left / right",
             A::FocusNext => "cycle panes",
             A::Open => "open selected",
-            A::Goto(_) => "views (see tabs)",
+            A::Goto(_) => "views; 5 is settings",
             A::Search => "search PRs",
             A::OpenDiff => "diff at the finding",
             A::OpenTimeline => "timeline for selection",
+            A::Watch => "watch the running review",
+            A::ScrollDown | A::ScrollUp => "scroll the explanation",
             A::Refresh => "refresh snapshot",
             A::Accounts => "GitHub accounts (Settings)",
             A::Mutation(_) => "start/retry/cancel/publish",
             A::NextFinding | A::PrevFinding => "next / previous finding",
-            A::JumpTo => "jump to path:line (Diff)",
+            A::JumpTo => "jump to path:line",
             A::CycleScope => "timeline scope",
             A::CycleCategory => "timeline category",
             A::CyclePhase => "timeline phase",
             _ => return None,
         })
     };
-    let mut rows: Vec<(String, &'static str)> = Vec::new();
-    for (_, code, mods, action) in TABLE {
+    let mut rows: Vec<(Context, String, &'static str)> = Vec::new();
+    for (ctx, code, mods, action) in TABLE {
         let Some(text) = describe(*action) else { continue };
         let key = match code {
             K::Char(c) if mods.contains(CTRL) => format!("C-{c}"),
@@ -221,10 +229,10 @@ pub fn help_rows() -> Vec<(String, &'static str)> {
             K::Up | K::Down | K::Left | K::Right | K::BackTab | K::Home | K::End | K::PageUp | K::PageDown => continue,
             _ => continue,
         };
-        match rows.iter_mut().find(|(_, t)| *t == text) {
-            Some((keys, _)) if !keys.split(' ').any(|k| k == key) => keys.push_str(&format!(" {key}")),
+        match rows.iter_mut().find(|(c, _, t)| c == ctx && *t == text) {
+            Some((_, keys, _)) if !keys.split(' ').any(|k| k == key) => keys.push_str(&format!(" {key}")),
             Some(_) => {}
-            None => rows.push((key, text)),
+            None => rows.push((*ctx, key, text)),
         }
     }
     rows

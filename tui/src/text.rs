@@ -64,10 +64,9 @@ pub fn pad_left(s: &str, cols: usize) -> String {
     format!("{}{out}", " ".repeat(cols.saturating_sub(w)))
 }
 
-/// Code text for a `cols`-wide row: tabs expand to four spaces so columns stay aligned. One char past the row cap is
-/// kept, so `fit` still sees the cut.
-pub fn code(s: &str, cols: usize) -> String {
-    one_line(&chars_prefix(s, cols.saturating_mul(CHARS_PER_COL) + 1).replace('\t', "    "))
+/// The most of `s` a `cols`-wide row can show, plus one char so `fit` still sees the cut.
+pub fn row_prefix(s: &str, cols: usize) -> &str {
+    chars_prefix(s, cols.saturating_mul(CHARS_PER_COL) + 1)
 }
 
 #[cfg(test)]

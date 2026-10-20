@@ -2,41 +2,41 @@
 source: tests/golden.rs
 expression: ascii_text
 ---
- PR REVIEWER * live | unix:/run/user/501/pr-review/reviewer.sock                                                 ? help
-  1 Inbox   2 Review   3 Diff   4 Timeline   5 Settings
-+ TRACKED PRS -------------------++ REVIEW ----------------------------------------------------------------------------+
-|> #184  Booking API            *||#184 Booking API                                                                    |
-|  #186  Bump deps              .||acme/shop | by octocat | base bbbbbbb -> head 4444444                               |
-|  #185  Fix cache eviction     +||* running | run rev-184-a | claude-opus-5-5 | started 13:00:00                      |
-|                                ||Collect +  Triage +  Analyze +  Verify ~  Prepare .  Publish .                      |
-|                                |+------------------------------------------------------------------------------------+
-|                                |+ > FINDINGS (1) --------------------------------------------------------------------+
-|                                ||> ^ HIGH Finding f-1                       src/booking.ts:42    detected            |
-|                                ||                                                                                    |
-|                                ||                                                                                    |
-|                                ||                                                                                    |
-|                                ||                                                                                    |
-|                                ||                                                                                    |
-|                                ||                                                                                    |
-|                                ||                                                                                    |
-|                                ||                                                                                    |
-|                                ||                                                                                    |
-|                                ||                                                                                    |
-|                                ||                                                                                    |
-|                                ||                                                                                    |
-|                                ||                                                                                    |
-|                                ||                                                                                    |
-|                                ||                                                                                    |
-|                                |+------------------------------------------------------------------------------------+
-|                                |+ RECENT ACTIVITY -------------------------------------------------------------------+
-|                                ||13:00:11 read_file src/booking.ts:1-120                                             |
-|                                ||13:00:12 finding ^ HIGH Finding f-1: detected                                       |
-|                                ||                                                                                    |
-|                                ||                                                                                    |
-|                                ||                                                                                    |
-|                                ||                                                                                    |
-|                                ||                                                                                    |
-|                                ||                                                                                    |
-|                                ||                                                                                    |
-+--------------------------------++------------------------------------------------------------------------------------+
- j/k move  Tab pane  Enter inspect  d diff  t timeline  n/N finding  ? help  q quit
+  pr-review | - reviewing #184 verify found: Finding f-1                                                        * live
+
+
+  PULL REQUESTS                3    acme/shop  #184
+                                    Booking API
+  . #186 Bump deps                  by octocat | bbbbbbb -> 4444444 | claude-opus-5-5 | run rev-184-
+    shop 6666666     not reviewed
+                                     + Collect + Triage + Analyze - Verify . Prepare . Publish          since 13:00:00
+  o #185 Fix cache eviction
+    shop 5555555           o1 ->0   1 finding   ^ 1 high                                          . none on GitHub yet
+                                    ----------------------------------------------------------------------------------
+> - #184 Booking API
+>   shop      +-+-+---.-. . 0.2/s   - Reviewing now                                                     :  0.2 calls/s
+
+                                    #184   ======== ======== ======== ======== -------- --------  verify     2 calls
+
+                                        13:00:11  read_file   src/booking.ts:1-120
+                                      - 13:00:12  finding     ^ HIGH Finding f-1
+
+                                    # ^ HIGH   correctness                                    detected | 82% confident
+                                    # Finding f-1
+                                    # src/booking.ts:42
+                                    #
+                                    # Two concurrent bookings can both observe slot.free before either sets held.
+                                    #
+                                    #   src/booking.ts  lines 40-43 @ 4444444
+                                    #    40 | if (slot.free && !slot.held) {
+                                    #
+                                    # Enter all 5 evidence, the fix and the diff    d diff at this line
+
+
+
+
+
+
+
+
+   j/k finding  Enter read  w watch live  d diff  J/K scroll  h pull requests    1 inbox  2 review  3 diff  4 timeline

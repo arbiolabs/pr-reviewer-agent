@@ -2,27 +2,27 @@
 source: tests/golden.rs
 expression: text
 ---
- PR REVIEWER ✗ incompatible · unix:/run/user/501/pr-review/reviewer.soc… ? help
-  1 Inbox   2 Review   3 Diff   4 Timeline   5 Settings
+  pr-review · 0 PRs tracked · nothing running                   ✗ incompatible
+
  ✗ protocol mismatch: unsupported protocolVersion 2; server supports [1], this …
-┌ › TRACKED PRS (0) ───────────────────────────────────────────────────────────┐
-│                                                                              │
-│  Incompatible reviewer service; see the banner.                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-└──────────────────────────────────────────────────────────────────────────────┘
- j/k move  Enter open  / search  d diff  t timeline  r refresh  ? help  q quit
+
+  PULL REQUESTS                                                              0
+
+  unavailable: unsupported protocolVersion 2
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   j/k pull request  Enter read  / search  ? help  q quit

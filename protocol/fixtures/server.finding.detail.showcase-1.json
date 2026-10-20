@@ -1,0 +1,51 @@
+{
+  "type": "finding.detail",
+  "requestId": "req-finding",
+  "finding": {
+    "id": "256b685f358390708510348a99c9481b",
+    "prId": "d2bc8e8f23f98a4b203ffeb4519ed00b",
+    "runId": "7f24f52475b0cd1755a7ef64fd8a8080",
+    "fingerprint": "3ffa5a5054fc91930f37c90628a6955b",
+    "status": "DETECTED",
+    "evidenceCount": 3,
+    "stale": false,
+    "title": "Any signed-in customer can refund any order",
+    "category": "security",
+    "severity": "critical",
+    "confidence": 0.94,
+    "file": "src/server/routes/orders.ts",
+    "line": 97,
+    "explanation": "POST /orders/:id/refund loads the order by id and refunds it without checking that the caller owns it. `requireAuth` only proves the caller is signed in. Order ids appear in receipt emails and support tickets, so anyone who learns one can refund another customer's order up to the captured amount while it still ships.",
+    "reasoningSummary": "Compared the new handler with GET /orders/:id in the same router, which returns 404 when order.customerId is not req.user.id. requireAuth (src/server/http/auth.ts) sets req.user and checks nothing else. No router-level middleware checks ownership or the support role.",
+    "suggestedFix": "Apply the same ownership check as the GET handler before refunding, and let support staff through explicitly:\n\nif (!order || (order.customerId !== req.user.id && !req.user.roles.includes(\"support\"))) {\n  return res.sendStatus(404);\n}",
+    "evidence": [
+      {
+        "kind": "code_ref",
+        "path": "src/server/routes/orders.ts",
+        "start": 91,
+        "end": 101,
+        "refSha": "647fb3beac66d51005ac1a2cb89fec94e7a3da76",
+        "text": "  router.post(\"/orders/:id/refund\", requireAuth, async (req, res) => {\n    const { amountCents, reason } = RefundBody.parse(req.body);\n    const order = await db.order.findUnique({\n      where: { id: req.params.id },\n      include: { payment: true },\n    });\n    if (!order) return res.sendStatus(404);\n    if (amountCents > order.totalCents - order.refundedCents) {\n      return res.status(422).json({ error: \"refund exceeds captured amount\" });\n    }\n    const refund = await payments.refund(order.payment.providerId, amountCents, { reason });"
+      },
+      {
+        "kind": "code_ref",
+        "path": "src/server/routes/orders.ts",
+        "start": 85,
+        "end": 88,
+        "refSha": "647fb3beac66d51005ac1a2cb89fec94e7a3da76",
+        "text": "  router.get(\"/orders/:id\", requireAuth, async (req, res) => {\n    const order = await db.order.findUnique({ where: { id: req.params.id } });\n    if (!order || order.customerId !== req.user.id) return res.sendStatus(404);\n    res.json(toOrderDto(order));"
+      },
+      {
+        "kind": "tool_summary",
+        "text": "search_code \"customerId !== req.user.id\": 4 matches; every other order route checks ownership"
+      }
+    ],
+    "history": [
+      {
+        "runId": "7f24f52475b0cd1755a7ef64fd8a8080",
+        "disposition": "DETECTED",
+        "at": "2026-10-20T13:52:50Z"
+      }
+    ]
+  }
+}

@@ -1,29 +1,28 @@
 ---
 source: tests/golden.rs
-assertion_line: 314
 expression: text
 ---
- PR REVIEWER ✗ disconnected · unix:/run/user/501/pr-review/reviewer.soc… ? help
-  1 Inbox   2 Review   3 Diff   4 Timeline   5 Settings
+  pr-review · 0 PRs tracked · nothing running                   ✗ disconnected
+
  ✗ disconnected: connection refused · retrying in 2.0s · showing last known sta…
-┌ › TRACKED PRS (0) ───────────────────────────────────────────────────────────┐
-│                                                                              │
-│  Reviewer service unavailable: connection refused                            │
-│  Is `pr-review daemon` running?                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-│                                                                              │
-└──────────────────────────────────────────────────────────────────────────────┘
- j/k move  Enter open  / search  d diff  t timeline  r refresh  ? help  q quit
+
+  PULL REQUESTS                                                              0
+
+  unavailable: connection refused
+  is `pr-review daemon` running?
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   j/k pull request  Enter read  / search  ? help  q quit
