@@ -1,0 +1,28 @@
+---
+source: tests/golden.rs
+expression: text
+---
+  pr-review · ▘ reviewing #184 publish                                  ● live
+
+
+  acme/shop #184 → publication preview
+
+  Publish this review?
+  acme/shop #184 at 4444444 · as event COMMENT · 1 inline comment
+
+  ✓ published on GitHub as review 3141
+    https://github.com/acme/shop/pull/184#pullrequestreview-3141
+    o opens it in the browser
+
+  Summary
+    ## Automated PR review
+
+    Reviewed commit: 4444444444444444444444444444444444444444
+
+    Found 1 actionable issue.
+
+    - High: Finding f-1 (src/booking.ts:42)
+
+    Review performed with isolated read-only tools. Human review is still
+    required.
+   j/k scroll  y publish  o open on GitHub  Esc close

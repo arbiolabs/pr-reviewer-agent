@@ -167,5 +167,19 @@ pub fn states(look: Look) -> Vec<(&'static str, Sim)> {
         ("review", mid_review(look).select("acme/shop#184").key(KeyCode::Enter)),
         ("diff", mid_review(look).select("acme/shop#184").key(KeyCode::Enter).key(KeyCode::Char('d'))),
         ("timeline", mid_review(look).select("acme/shop#184").key(KeyCode::Enter).key(KeyCode::Char('4'))),
+        ("parked", parked(look)),
+        ("publication", parked(look).key(KeyCode::Char('p'))),
+        ("published", {
+            let mut s = parked(look).key(KeyCode::Char('p'));
+            for msg in script("approval").into_iter().skip(7).take(3) {
+                s.server(msg);
+            }
+            s
+        }),
     ]
+}
+
+/// approval.ndjson up to the run parking: #184 is AWAITING_APPROVAL on an engine daemon, read in Review.
+pub fn parked(look: Look) -> Sim {
+    Sim::new(look).play("approval", 5).select("acme/shop#184").key(KeyCode::Enter)
 }

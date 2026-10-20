@@ -330,6 +330,17 @@ pub struct Run {
     pub failure_reason: Option<Text>,
 }
 
+impl Run {
+    /// Stored and waiting for a human to approve its publication: `RUNNING`, but nothing runs.
+    pub fn parked(&self) -> bool {
+        self.status == RunStatus::Running && self.phase == Phase::AwaitingApproval
+    }
+    /// The reviewer is working on it now.
+    pub fn active(&self) -> bool {
+        self.status == RunStatus::Running && !self.parked()
+    }
+}
+
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Finding {

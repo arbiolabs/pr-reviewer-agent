@@ -77,6 +77,8 @@ pub fn stepper(c: &Ctx, run: &Run) -> Vec<Span<'static>> {
         }
         let (glyph, role) = match cur {
             Some(k) if i < k => (done, Role::Ok),
+            // Parked before PUBLISH: waiting for the reader, so it holds still in amber instead of spinning.
+            Some(k) if i == k && run.parked() => (c.t.g().pending, Role::Pending),
             Some(k) if i == k && run.status == RunStatus::Running => (spinner(c), Role::Accent),
             _ => (todo, Role::Muted),
         };
@@ -96,6 +98,7 @@ pub fn phase_bar(c: &Ctx, run: &Run, seg: usize) -> Vec<Span<'static>> {
         }
         match cur {
             Some(k) if i < k => out.push(c.span(full.repeat(seg), Role::Ok)),
+            Some(k) if i == k && run.parked() => out.push(c.span(rail.repeat(seg), Role::Pending)),
             Some(k) if i == k && run.status == RunStatus::Running => {
                 let hot = (c.m.now_ms / 250) as usize % seg.max(1);
                 for j in 0..seg {

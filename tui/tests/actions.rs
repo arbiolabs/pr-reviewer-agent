@@ -280,3 +280,87 @@ fn p_on_a_run_that_is_not_parked_opens_nothing() {
         "review.publish unavailable for #184: no review is awaiting approval on it"
     );
 }
+
+fn parked_frame(look: pr_review_tui::model::Look) -> (String, ratatui::Terminal<ratatui::backend::TestBackend>) {
+    let mut m = parked();
+    m.look = look;
+    m.ui.screen = pr_review_tui::model::Screen::Review;
+    render(&mut m, 120, 38)
+}
+
+#[test]
+fn awaiting_approval_is_its_own_amber_state_in_the_stepper_the_rail_and_the_status_line() {
+    use pr_review_tui::model::Look;
+    use pr_review_tui::theme::{Palette, rgb};
+    let (f, term) = parked_frame(Look::default());
+    let top = f.lines().next().unwrap();
+    assert!(top.contains("◐ #184 waiting for you · p previews"), "{top}");
+    assert!(!top.contains("reviewing") && !top.contains("nothing running"), "{top}");
+    assert!(f.contains("● Prepare ◐ Publish"), "{f}");
+    assert!(f.contains("◐ waiting for you"), "{f}");
+    assert!(f.lines().any(|l| l.starts_with("▌   shop") && l.contains("◐ awaiting you")), "the rail row: {f}");
+    assert!(f.contains("◐ Ready to publish"), "{f}");
+    assert!(!f.contains("failed") && !f.contains("✓ done"), "neither an error nor done: {f}");
+    // Amber: the status line's glyph is drawn in the palette's warn color.
+    let buf = term.backend().buffer();
+    let x = (0..120).find(|&x| buf[(x, 0)].symbol() == "◐").unwrap();
+    assert_eq!(buf[(x, 0)].fg, rgb(Palette::Dark.hex("warn")));
+
+    let (f, _) = parked_frame(Look { color: false, ..Look::default() });
+    assert!(f.lines().next().unwrap().contains("◐ #184 waiting for you"), "NO_COLOR keeps the glyph and words: {f}");
+    assert!(f.contains("awaiting you"), "{f}");
+
+    let (f, _) = parked_frame(Look { ascii: true, ..Look::default() });
+    assert!(f.lines().next().unwrap().contains("~ #184 waiting for you | p previews"), "{f}");
+    assert!(f.contains("~ awaiting you"), "{f}");
+    assert!(f.contains("+ Prepare ~ Publish"), "{f}");
+    assert!(f.is_ascii(), "{f}");
+}
+
+#[test]
+fn w_steps_through_running_reviews_then_the_parked_ones() {
+    let mut m = parked();
+    // #185 starts running: w goes there first, then to the parked #184.
+    let started =
+        run_json("rev-185-b", "acme/shop#185", "5555555555555555555555555555555555555555", "ANALYZE", "RUNNING");
+    send(&mut m, &event(14, "acme/shop#185", "rev-185-b", "run.started", &started));
+    m.ui.selected_pr = Some(pr_review_tui::protocol::PrId::new("acme/shop#186"));
+    let selected = |m: &Model| m.ui.selected_pr.as_ref().unwrap().to_string();
+    press(&mut m, KeyCode::Char('w'));
+    assert_eq!(selected(&m), "acme/shop#185");
+    press(&mut m, KeyCode::Char('w'));
+    assert_eq!(selected(&m), "acme/shop#184");
+    press(&mut m, KeyCode::Char('w'));
+    assert_eq!(selected(&m), "acme/shop#185");
+}
+
+#[test]
+fn a_running_review_with_no_activity_yet_is_not_nothing_running() {
+    let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#185");
+    let (f, _) = render(&mut m, 120, 38);
+    let top = f.lines().next().unwrap();
+    assert!(top.contains("reviewing #184 verify"), "{top}");
+    assert!(!top.contains("nothing running"), "{top}");
+}
+
+#[test]
+fn publication_events_show_in_the_timeline_and_a_pr_update_between_runs_is_under_pr() {
+    let mut s = Sim::new(pr_review_tui::model::Look::default()).play("approval", 13);
+    s.m.ui.selected_pr = Some(pr_review_tui::protocol::PrId::new("acme/shop#184"));
+    let pr = r#"{"id":"acme/shop#184","repository":"acme/shop","number":184,"title":"Booking API","headSha":"4444444444444444444444444444444444444444","baseSha":"bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb","lifecycle":"ACTIVE","author":"octocat"}"#;
+    s.server(
+        ServerMessage::parse(&event(19, "acme/shop#184", "", "pr.updated", pr).replace(r#""runId":"","#, "")).unwrap(),
+    );
+    let mut s = s.key(KeyCode::Char('4'));
+    let (f, _) = render(&mut s.m, 120, 50);
+    let at = |needle: &str| f.lines().position(|l| l.contains(needle)).unwrap_or_else(|| panic!("{needle}:\n{f}"));
+    assert!(
+        at("publication   published  https://github.com/acme/shop/pull/184#pullrequestreview-3141") > at("PUBLISH ─"),
+        "{f}"
+    );
+    assert!(at("publication   publishing") > at("PUBLISH ─"), "{f}");
+    assert!(f.contains("publication   awaiting your approval"), "{f}");
+    let update = at("PR #184 updated");
+    assert!(f.lines().nth(update - 1).unwrap().trim_start().starts_with("PR ─"), "{f}");
+    assert!(!f.lines().skip(update.saturating_sub(2)).any(|l| l.contains("BEFORE THE RUN")), "{f}");
+}

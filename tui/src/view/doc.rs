@@ -245,7 +245,7 @@ pub fn document(c: &Ctx, pr: &Pr, w: usize, height: usize) -> Doc {
     lines.push(Line::raw(""));
 
     let findings = c.m.domain.pr_findings(&pr.id);
-    let running = run.is_some_and(|r| r.status == RunStatus::Running);
+    let running = run.is_some_and(|r| r.active());
     lines.push(summary_line(c, pr, &findings, w));
     lines.push(Line::from(c.span(rule(c, w), Role::Muted)));
     if !compact {
@@ -268,6 +268,15 @@ pub fn document(c: &Ctx, pr: &Pr, w: usize, height: usize) -> Doc {
     if running && c.m.look.show_activity {
         let log = if findings.is_empty() { height.saturating_sub(lines.len() + 6).max(5) } else { 4 };
         live(c, pr, w, log, &mut lines);
+    }
+    if run.is_some_and(|r| r.parked()) {
+        lines.push(Line::from(vec![
+            c.span(format!("{} Ready to publish", g.pending), Role::Pending),
+            c.span(format!(" {} ", g.sep), Role::Muted),
+            c.span("p", Role::Accent),
+            c.span(" previews", Role::Muted),
+        ]));
+        lines.push(Line::raw(""));
     }
     if findings.is_empty() && run.is_some_and(|r| r.status == RunStatus::Completed) {
         lines.push(Line::from(c.span(format!("{} No actionable issues found in the reviewed scope.", g.ok), Role::Ok)));
@@ -374,11 +383,14 @@ fn phase_line(c: &Ctx, run: Option<&Run>, w: usize) -> Line<'static> {
         let (glyph, role) = match () {
             _ if cur == 7 => (todo, Role::Muted),
             _ if i < cur => (done, Role::Ok),
+            _ if i == cur && run.parked() => (g.pending, Role::Pending),
             _ if i == cur && run.status == RunStatus::Running => (spinner(c), Role::Accent),
             _ if i == cur => (g.pending, Role::Pending),
             _ => (todo, Role::Muted),
         };
-        let label_role = if i == cur && cur < 6 {
+        let label_role = if i == cur && run.parked() {
+            Role::Pending
+        } else if i == cur && cur < 6 {
             Role::Focus
         } else if i < cur {
             Role::Normal
@@ -396,6 +408,7 @@ fn phase_line(c: &Ctx, run: Option<&Run>, w: usize) -> Line<'static> {
             let took = took.map_or(String::new(), |s| format!(" in {}m {:02}s", s / 60, s % 60));
             (format!("{} done{took}", g.ok), Role::Ok)
         }
+        RunStatus::Running if run.parked() => (format!("{} waiting for you", g.pending), Role::Pending),
         RunStatus::Running => (format!("since {}", time_of(run.started_at.as_str())), Role::Muted),
         RunStatus::Failed => (format!("{} failed", g.fail), Role::Fail),
         RunStatus::Superseded => (format!("{} superseded", g.idle), Role::Muted),

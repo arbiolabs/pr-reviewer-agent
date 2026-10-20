@@ -214,10 +214,18 @@ fn status_line(c: &Ctx, width: u16) -> Line<'static> {
     let (link, link_role) = link_status(c);
     let right = vec![c.span(format!("{link}  "), link_role)];
     let mut left = vec![c.span("  pr-review", Role::Title), c.span(format!(" {} ", g.sep), Role::Muted)];
-    let running: Vec<_> =
-        c.m.domain.runs.values().filter(|r| r.status == crate::protocol::RunStatus::Running).collect();
-    let newest = c.m.domain.activity.iter().rev().find(|a| running.iter().any(|r| a.pr_id.as_ref() == Some(&r.pr_id)));
-    match (running.first(), newest) {
+    let mut active: Vec<_> = c.m.domain.runs.values().filter(|r| r.active()).collect();
+    active.sort_by_key(|r| c.m.domain.prs.get(&r.pr_id).map(|p| p.number));
+    let parked: Vec<_> = c.m.domain.runs.values().filter(|r| r.parked()).collect();
+    let newest = c.m.domain.activity.iter().rev().find(|a| active.iter().any(|r| a.pr_id.as_ref() == Some(&r.pr_id)));
+    // The review the line names: the one with the newest activity, else the first running one.
+    let named = newest.and_then(|a| active.iter().find(|r| a.pr_id.as_ref() == Some(&r.pr_id))).or(active.first());
+    let waiting = |n: usize| match n {
+        0 => String::new(),
+        n if w >= 100 => format!("  {} {n} awaiting you", g.pending),
+        n => format!("  {}{n}", g.pending),
+    };
+    match named {
         // Off the stream, the cache is a photo: say how old it is rather than what it claims is running.
         _ if c.m.link != Link::Live => {
             let text = match (c.m.diag.last_snapshot_ms, &c.m.link) {
@@ -227,25 +235,37 @@ fn status_line(c: &Ctx, width: u16) -> Line<'static> {
             };
             left.push(c.span(text, Role::Muted));
         }
-        (Some(_), Some(a)) => {
-            let pr = a.pr_id.as_ref().and_then(|id| c.m.domain.prs.get(id));
-            let run = pr.and_then(|p| c.m.domain.latest_run(&p.id));
+        Some(r) => {
+            let pr = c.m.domain.prs.get(&r.pr_id);
             left.push(c.span(format!("{} ", doc::spinner(c)), Role::Accent));
-            if let (Some(p), Some(r)) = (pr, run) {
+            if let Some(p) = pr {
                 left.push(c.span(format!("reviewing #{} ", p.number), Role::Normal));
-                left.push(c.span(format!("{} ", doc::phase_label(r.phase)), Role::Accent));
             }
-            let used: usize = left.iter().chain(&right).map(|s| crate::text::width(&s.content)).sum();
-            let more = match running.len() {
+            left.push(c.span(format!("{} ", doc::phase_label(r.phase)), Role::Accent));
+            let more = match active.len() {
                 1 => String::new(),
                 n if w >= 100 => format!("  +{} more running", n - 1),
                 n => format!("  +{}", n - 1),
             };
-            let room = w.saturating_sub(used + crate::text::width(&more) + 2);
-            left.push(c.span(whole(activity_words(&a.kind, run.map(|r| r.phase)), room), Role::Muted));
+            let parked_note = waiting(parked.len());
+            let used: usize = left.iter().chain(&right).map(|s| crate::text::width(&s.content)).sum();
+            let room = w.saturating_sub(used + crate::text::width(&more) + crate::text::width(&parked_note) + 2);
+            let words = newest
+                .filter(|a| a.pr_id.as_ref() == Some(&r.pr_id))
+                .map_or(vec![], |a| activity_words(&a.kind, Some(r.phase)));
+            left.push(c.span(whole(words, room), Role::Muted));
             left.push(c.span(more, Role::Muted));
+            left.push(c.span(parked_note, Role::Pending));
         }
-        _ => {
+        // Nothing runs, but a review waits for the reader: amber, the one state that asks for them.
+        None if !parked.is_empty() => {
+            let mut numbers: Vec<u64> =
+                parked.iter().filter_map(|r| c.m.domain.prs.get(&r.pr_id).map(|p| p.number)).collect();
+            numbers.sort();
+            let list = numbers.iter().map(|n| format!("#{n}")).collect::<Vec<_>>().join(" ");
+            left.push(c.span(format!("{} {list} waiting for you {} p previews", g.pending, g.sep), Role::Pending));
+        }
+        None => {
             let n = c.m.domain.prs.len();
             let prs = if n == 1 { "PR" } else { "PRs" };
             left.push(c.span(format!("{n} {prs} tracked {} nothing running", g.sep), Role::Muted))
@@ -361,9 +381,13 @@ fn footer_line(c: &Ctx, width: u16) -> Line<'static> {
     };
     let running = c.m.domain.runs.values().any(|r| r.status == crate::protocol::RunStatus::Running);
     let watch = running && c.m.top_modal().is_none();
+    let parked = c.m.selected_pr().and_then(|p| c.m.domain.latest_run(&p.id)).is_some_and(|r| r.parked());
     let mut hints: Vec<&str> = hints.split("  ").collect();
     if watch {
         hints.insert(2.min(hints.len()), "w watch live");
+    }
+    if parked && c.m.top_modal().is_none() {
+        hints.insert(1.min(hints.len()), "p preview & publish");
     }
     // Too wide: drop the least important hint, then the next, keeping the rest in order.
     let line = |hints: &[&str]| format!("   {}", hints.join("  "));
@@ -381,6 +405,7 @@ fn rank(hint: &str) -> u8 {
         "h" | "l" | "y" | "n/Esc" => 3,
         "q" | "n/N" | "/" | ":" | "d" => 2,
         "t" | "w" | "f" | "1-5" => 1,
+        "p" => 3,
         _ => 0,
     }
 }

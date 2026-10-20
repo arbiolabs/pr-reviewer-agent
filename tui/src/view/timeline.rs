@@ -133,10 +133,12 @@ fn detail_block(c: &Ctx, e: &SequencedEvent, phase: Option<Phase>, w: usize) -> 
     lines
 }
 
-/// `ANALYZE ───── 14:30:04`: where a phase starts. A phase change is its own heading, so it is never a row too.
-fn heading(c: &Ctx, phase: Option<Phase>, at: &str, w: usize, selected: bool) -> Line<'static> {
+/// `ANALYZE ───── 14:30:04`: where a phase starts. A phase change is its own heading, so it is never a row too. Events
+/// outside any run sit under BEFORE THE RUN until a run has shown, and under a neutral PR heading after that.
+fn heading(c: &Ctx, phase: Option<Phase>, after_a_run: bool, at: &str, w: usize, selected: bool) -> Line<'static> {
     let st = c.t.bg(if selected { Bg::Select } else { Bg::Base });
-    let name = phase.map_or("BEFORE THE RUN", phase_name).replace('_', " ");
+    let outside = if after_a_run { "PR" } else { "BEFORE THE RUN" };
+    let name = phase.map_or(outside, phase_name).replace('_', " ");
     let time = format!(" {}", time_of(at));
     let rule = (if c.t.ascii { "-" } else { "─" }).repeat(w.saturating_sub(width(&name) + width(&time) + 2));
     Line::from(filled(
@@ -164,6 +166,16 @@ fn event_line(c: &Ctx, e: &SequencedEvent, w: usize, selected: bool) -> Line<'st
         EventBody::FindingUpdated(f) => {
             let (gl, sev, r) = c.t.severity(f.severity);
             (gl, r, c.pad(sev, 13), format!("{}  {}", f.title, finding_status(f.status).0), r)
+        }
+        EventBody::PublicationChanged(p) => {
+            let (word, role) = crate::theme::publication_status(p.status);
+            let gl = match p.status {
+                crate::protocol::PublicationStatus::Published => g.ok,
+                crate::protocol::PublicationStatus::Failed => g.fail,
+                _ => g.pending,
+            };
+            let url = p.url.as_ref().map_or(String::new(), |u| format!("  {u}"));
+            (gl, role, c.pad("publication", 13), format!("{word}{url}"), role)
         }
         EventBody::Run(change, r) => {
             let (gl, word, role) = c.t.run_status(r.status);
@@ -274,6 +286,7 @@ fn page(c: &Ctx, t: &crate::model::TimelineView, col: Rect) -> (Vec<Line<'static
     let mut at = 0;
     let mut last: Option<Option<Phase>> = None;
     let mut after_heading = false;
+    let mut after_a_run = false;
     for (e, phase) in &rows {
         let seq = e.sequence.get();
         let selected = t.selected == Some(seq);
@@ -288,14 +301,15 @@ fn page(c: &Ctx, t: &crate::model::TimelineView, col: Rect) -> (Vec<Line<'static
                 body.push(Line::raw(""));
             }
             if !change {
-                body.push(heading(c, *phase, e.occurred_at.as_str(), w, false));
+                body.push(heading(c, *phase, after_a_run, e.occurred_at.as_str(), w, false));
             }
         }
+        after_a_run |= phase.is_some();
         last = Some(*phase);
         after_heading = change && t.open != Some(e.sequence.get());
         owners.resize(body.len(), None);
         body.push(if change {
-            heading(c, *phase, e.occurred_at.as_str(), w, selected)
+            heading(c, *phase, after_a_run, e.occurred_at.as_str(), w, selected)
         } else {
             event_line(c, e, w, selected)
         });
