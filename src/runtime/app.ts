@@ -57,7 +57,8 @@ export async function openApp(options: AppOptions): Promise<App> {
  */
 export async function lockDataDir(dir: string): Promise<() => Promise<void>> {
   try {
-    return await lockfile.lock(dir, { stale: 5000, update: 1000, retries: { retries: 12, minTimeout: 500, maxTimeout: 500 } });
+    // Inside the dir, not proper-lockfile's default sibling `<dir>.lock`: a volume's parent (say `/`) is often read-only.
+    return await lockfile.lock(dir, { lockfilePath: join(dir, "lock"), stale: 5000, update: 1000, retries: { retries: 12, minTimeout: 500, maxTimeout: 500 } });
   } catch (error) {
     if ((error as { code?: unknown }).code === "ELOCKED") throw new Error(`another pr-review is running on ${dir}`);
     throw error;

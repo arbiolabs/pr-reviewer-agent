@@ -70,10 +70,10 @@ export const DEFAULT_CONFIG: Config = {
   },
 };
 
-/** Overlay `pr-review.config.json` onto the defaults; every key must exist in the defaults with the same JSON type. */
+/** Overlay `pr-review.config.json` (or `PR_REVIEW_CONFIG`) onto the defaults; every key must exist in the defaults with the same JSON type. */
 export const CONFIG_FILE = "pr-review.config.json";
 
-export function loadConfig(path = CONFIG_FILE): Config {
+export function loadConfig(path = process.env.PR_REVIEW_CONFIG || CONFIG_FILE): Config {
   if (!existsSync(path)) return DEFAULT_CONFIG;
   return mergeChecked(DEFAULT_CONFIG, JSON.parse(readFileSync(path, "utf8")), path) as Config;
 }
