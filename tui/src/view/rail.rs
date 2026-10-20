@@ -168,8 +168,12 @@ fn pr_rows(c: &Ctx, pr: &Pr, w: usize, selected: bool, rh: usize) -> Vec<Line<'s
         Some(r) if r.status == RunStatus::Running => {
             let rate = per_sec(c, Some(&pr.id));
             let mut s: Vec<Span<'static>> = stepper(c, r).into_iter().map(|s| s.patch_style(row_bg)).collect();
-            s.push(Span::styled(format!(" {}", rate_cell(c, rate)), on(Role::Accent)));
-            s.push(Span::styled(format!("{rate:>4.1}/s "), on(Role::Muted)));
+            if c.m.look.show_activity {
+                s.push(Span::styled(format!(" {}", rate_cell(c, rate)), on(Role::Accent)));
+                s.push(Span::styled(format!("{rate:>4.1}/s "), on(Role::Muted)));
+            } else {
+                s.push(Span::styled(" ", row_bg));
+            }
             s
         }
         Some(r) if r.status == RunStatus::Failed => vec![Span::styled(format!("{} failed ", g.fail), on(Role::Fail))],

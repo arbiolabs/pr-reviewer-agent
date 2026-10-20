@@ -261,7 +261,7 @@ pub fn document(c: &Ctx, pr: &Pr, w: usize, height: usize) -> Doc {
         lines.push(Line::from(c.span("  R retries the run once the cause is fixed.", Role::Muted)));
         lines.push(Line::raw(""));
     }
-    if running {
+    if running && c.m.look.show_activity {
         let log = if findings.is_empty() { height.saturating_sub(lines.len() + 6).max(5) } else { 4 };
         live(c, pr, w, log, &mut lines);
     }

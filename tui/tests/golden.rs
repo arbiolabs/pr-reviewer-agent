@@ -568,3 +568,16 @@ fn j_past_the_end_stops_so_one_k_scrolls_back() {
     let mut s = s.key(KeyCode::Char('K'));
     assert_ne!(render(&mut s.m, 120, 38).0, end, "one K moves back from the end");
 }
+
+#[test]
+fn show_activity_false_hides_the_live_log_and_the_rates() {
+    let frame = |look: Look| {
+        let mut s = Sim::new(look).play("showcase", 2 + 20).key(KeyCode::Char('w'));
+        render(&mut s.m, 120, 38).0
+    };
+    let on = frame(Look::default());
+    assert!(on.contains("Reviewing now") && on.contains("calls/s") && on.contains("/s  "), "{on}");
+    let off = frame(Look { show_activity: false, ..Look::default() });
+    assert!(!off.contains("Reviewing now") && !off.contains("/s  "), "{off}");
+    assert!(off.contains("Sign-in: send users back"), "the document still shows:\n{off}");
+}

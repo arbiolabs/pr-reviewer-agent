@@ -119,6 +119,7 @@ background = "theme"    # or "terminal"
 ascii = false           # true is the same as --ascii
 start_view = "review"   # inbox, review, diff, timeline, or settings
 mouse = true            # false leaves drag-to-select to the terminal
+show_activity = true    # false hides the "Reviewing now" log and the tool-call rates
 ```
 
 With `background = "theme"`, the default, the client paints its own dark background on every cell. The contrast test checks every text color against these painted surfaces, so the contrast holds in any terminal.
