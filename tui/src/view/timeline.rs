@@ -188,12 +188,24 @@ fn event_line(c: &Ctx, e: &SequencedEvent, w: usize, selected: bool) -> Line<'st
 
 pub fn timeline(c: &Ctx, f: &mut Frame, area: Rect) {
     let col = super::doc::column(area);
-    let w = col.width as usize;
     let Some(t) = &c.m.timeline else {
         let text = "No timeline loaded. Select a PR and press t.";
         f.render_widget(Paragraph::new(vec![Line::raw(""), Line::from(c.span(text, Role::Muted))]), col);
         return;
     };
+    f.render_widget(Paragraph::new(page(c, t, col).0), col);
+}
+
+/// The event whose row, heading or open detail is at screen row `y` of a timeline drawn in `area`.
+pub fn hit(c: &Ctx, area: Rect, y: u16) -> Option<u64> {
+    let col = super::doc::column(area);
+    let (_, owners) = page(c, c.m.timeline.as_ref()?, col);
+    *owners.get(y.checked_sub(col.y)? as usize)?
+}
+
+/// The lines the timeline shows in `col`, and the event each one belongs to.
+fn page(c: &Ctx, t: &crate::model::TimelineView, col: Rect) -> (Vec<Line<'static>>, Vec<Option<u64>>) {
+    let w = col.width as usize;
     let g = c.t.g();
     let pr = t.query.pr.as_ref().and_then(|id| c.m.domain.prs.get(id));
     let scope = match t.scope {
@@ -248,6 +260,7 @@ pub fn timeline(c: &Ctx, f: &mut Frame, area: Rect) {
         head.push(Line::from(c.span(text, Role::Muted)));
     }
     let mut body: Vec<Line<'static>> = Vec::new();
+    let mut owners: Vec<Option<u64>> = Vec::new();
     if t.next_before.is_some() {
         body.push(Line::from(c.span("older events load as you reach the top", Role::Muted)));
     }
@@ -255,7 +268,9 @@ pub fn timeline(c: &Ctx, f: &mut Frame, area: Rect) {
     let mut last: Option<Option<Phase>> = None;
     let mut after_heading = false;
     for (e, phase) in &rows {
-        let selected = t.selected == Some(e.sequence.get());
+        let seq = e.sequence.get();
+        let selected = t.selected == Some(seq);
+        owners.resize(body.len(), None);
         if selected {
             at = body.len();
         }
@@ -271,6 +286,7 @@ pub fn timeline(c: &Ctx, f: &mut Frame, area: Rect) {
         }
         last = Some(*phase);
         after_heading = change && t.open != Some(e.sequence.get());
+        owners.resize(body.len(), None);
         body.push(if change {
             heading(c, *phase, e.occurred_at.as_str(), w, selected)
         } else {
@@ -279,11 +295,15 @@ pub fn timeline(c: &Ctx, f: &mut Frame, area: Rect) {
         if t.open == Some(e.sequence.get()) {
             body.extend(detail_block(c, e, *phase, w));
         }
+        owners.resize(body.len(), Some(seq));
     }
+    owners.resize(body.len(), None);
     let h = (col.height as usize).saturating_sub(head.len());
     // Keep the open detail in view under its row when it fits.
     let focus = if t.open.is_some() && t.open == t.selected { at + h / 3 } else { at };
     let range = window(body.len(), Some(focus.min(body.len().saturating_sub(1))), h);
+    let mut owned = vec![None; head.len()];
+    owned.extend(owners.drain(range.clone()));
     head.extend(body.drain(range));
-    f.render_widget(Paragraph::new(head), col);
+    (head, owned)
 }

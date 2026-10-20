@@ -182,7 +182,8 @@ pub fn help_lines(c: &Ctx, body: Rect) -> Vec<Line<'static>> {
     ]));
     lines.push(Line::raw(""));
     lines.push(heading(c, "Mouse"));
-    lines.push(Line::from(c.span("  Click a pull request or a finding to select it.", Role::Normal)));
+    lines.push(Line::from(c.span("  Click a PR, finding, file, line or event to select it.", Role::Normal)));
+    lines.push(Line::from(c.span("  Click it again to open it. Click a view in the footer.", Role::Normal)));
     lines.push(Line::from(c.span("  The wheel scrolls the page under it.", Role::Normal)));
     lines.push(Line::from(c.span("  Keys marked (not offered) are off on this daemon.", Role::Muted)));
     lines

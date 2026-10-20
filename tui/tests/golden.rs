@@ -498,7 +498,8 @@ fn scrolling_the_help_page_to_its_end_shows_every_section_at_every_size() {
             "failed",
             "findings published on GitHub",
             "Mouse",
-            "select it.",
+            "line or event to select it.",
+            "Click a view in the footer.",
             "The wheel scrolls the page under it.",
             "Keys marked (not offered) are off on this daemon.",
         ] {

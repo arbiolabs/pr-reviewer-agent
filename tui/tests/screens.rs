@@ -176,7 +176,8 @@ fn help_at_120_columns_splits_between_sections_without_cutting_text() {
     let (frame, _) = render(&mut s.m, 120, 38);
     let row = |h: &str| frame.lines().position(|l| l.contains(h)).unwrap_or_else(|| panic!("{h}:\n{frame}"));
     assert!(row("Timeline") < row("Everywhere") + 22, "two columns:\n{frame}");
-    assert!(frame.contains("quit; reviews keep running") && !frame.contains('…'), "{frame}");
+    assert!(frame.contains("quit; reviews keep running"), "{frame}");
+    assert!(frame.lines().all(|l| !l.contains('…') || l.contains("more below, j scrolls")), "{frame}");
 }
 
 #[test]
@@ -349,4 +350,53 @@ fn slash_on_diff_searches_its_text_and_n_walks_the_matches() {
         s.m.top_modal(),
         Some(pr_review_tui::model::Modal::Input { purpose: pr_review_tui::model::InputPurpose::JumpTo, .. })
     ));
+}
+
+fn click(s: &mut Sim, column: u16, row: u16) {
+    use crossterm::event::{KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
+    let kind = MouseEventKind::Down(MouseButton::Left);
+    s.apply(pr_review_tui::update::Msg::Mouse(MouseEvent { kind, column, row, modifiers: KeyModifiers::NONE }));
+}
+
+/// The screen cell where `text` starts in `frame`.
+fn cell_of(frame: &str, text: &str) -> (u16, u16) {
+    frame
+        .lines()
+        .enumerate()
+        .find_map(|(y, l)| l.find(text).map(|i| (l[..i].chars().count() as u16, y as u16)))
+        .unwrap_or_else(|| panic!("{text:?} is not on screen:\n{frame}"))
+}
+
+#[test]
+fn clicks_select_diff_files_and_lines_timeline_events_and_footer_views() {
+    use crossterm::event::KeyCode;
+    let mut s = showcase(2).key(KeyCode::Enter).key(KeyCode::Char('d'));
+    let (frame, _) = render(&mut s.m, 120, 38);
+    let (x, y) = cell_of(&frame, "reserve.ts");
+    click(&mut s, x, y);
+    assert_eq!(s.m.diff.as_ref().unwrap().selected_file.as_ref().unwrap().as_str(), "src/server/inventory/reserve.ts");
+
+    let (frame, _) = render(&mut s.m, 120, 38);
+    let before = s.m.diff.as_ref().unwrap().cursor;
+    let line = frame.lines().skip(8).find(|l| l.contains(" + ")).unwrap();
+    let (x, y) = cell_of(&frame, line.trim());
+    click(&mut s, x + 20, y);
+    assert_ne!(s.m.diff.as_ref().unwrap().cursor, before, "a click on a patch line moves the cursor there");
+
+    let mut s = s.key(KeyCode::Char('t'));
+    let (frame, _) = render(&mut s.m, 120, 38);
+    let (x, y) = cell_of(&frame, "review started");
+    click(&mut s, x, y);
+    let t = s.m.timeline.as_ref().unwrap();
+    use pr_review_tui::protocol::{EventBody, RunChange};
+    let started = t.events.iter().find(|e| matches!(e.body, EventBody::Run(RunChange::Started, _))).unwrap();
+    let started = Some(started.sequence.get());
+    assert_eq!(t.selected, started);
+    click(&mut s, x, y);
+    assert_eq!(s.m.timeline.as_ref().unwrap().open, started, "a second click opens the event");
+
+    let (frame, _) = render(&mut s.m, 120, 38);
+    let (x, y) = cell_of(&frame, "5 settings");
+    click(&mut s, x + 3, y);
+    assert_eq!(s.m.ui.screen, pr_review_tui::model::Screen::Settings);
 }

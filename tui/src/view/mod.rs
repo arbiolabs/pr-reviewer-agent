@@ -76,6 +76,14 @@ pub(crate) fn window(len: usize, selected: Option<usize>, height: usize) -> std:
 pub enum Hit {
     Pr(crate::protocol::PrId),
     Finding(crate::protocol::FindingId),
+    /// A file in the Diff screen's list, by path.
+    DiffFile(crate::protocol::Text),
+    /// A row of the selected file's patch: a hunk header, a line, or a finding written under it.
+    DiffRow(usize),
+    /// A timeline event's row, heading or open detail, by sequence.
+    Event(u64),
+    /// A view in the footer's list.
+    View(Screen),
 }
 
 fn ctx(m: &Model, width: u16) -> Ctx<'_> {
@@ -106,11 +114,33 @@ pub fn hit(m: &Model, x: u16, y: u16) -> Option<Hit> {
     if area.width < MIN_W || area.height < MIN_H || m.top_modal().is_some() {
         return None;
     }
-    let body = regions(&c, area)[3];
-    if !matches!(m.ui.screen, Screen::Inbox | Screen::Review) || y < body.y || y >= body.y + body.height {
+    let [.., body, footer] = regions(&c, area);
+    if y == footer.y {
+        return view_at(&c, footer, x).map(Hit::View);
+    }
+    if y < body.y || y >= body.y + body.height {
         return None;
     }
-    doc::hit(&c, body, x, y)
+    match m.ui.screen {
+        Screen::Inbox | Screen::Review => doc::hit(&c, body, x, y),
+        Screen::Diff => diff::hit(&c, body, x, y),
+        Screen::Timeline => timeline::hit(&c, body, y).map(Hit::Event),
+        Screen::Settings => None,
+    }
+}
+
+/// The view whose number or name in the footer's list covers column `x`.
+fn view_at(c: &Ctx, footer: Rect, x: u16) -> Option<Screen> {
+    let vw = views_w(c) as u16;
+    let mut at = (footer.x + footer.width.saturating_sub(vw)) as usize;
+    for (i, pair) in views_line(c).spans.chunks(2).enumerate() {
+        let w: usize = pair.iter().map(|s| crate::text::width(&s.content)).sum();
+        if vw > 0 && (at..at + w).contains(&(x as usize)) {
+            return Screen::ALL.get(i).copied();
+        }
+        at += w;
+    }
+    None
 }
 
 /// The largest useful help scroll at the current size.

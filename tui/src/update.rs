@@ -1070,6 +1070,37 @@ fn click(m: &mut Model, x: u16, y: u16, fx: &mut Vec<Effect>) {
                 m.ui.doc_scroll = 0;
             }
         }
+        Some(crate::view::Hit::DiffFile(path)) => {
+            if let Some(d) = &mut m.diff
+                && d.selected_file.as_ref() != Some(&path)
+            {
+                d.selected_file = Some(path);
+                d.cursor = 0;
+                d.stack = 0;
+            }
+        }
+        // A click puts the cursor on the row; a click on the cursor's row opens what Enter would.
+        Some(crate::view::Hit::DiffRow(row)) => {
+            m.ui.focus = Pane::Main;
+            if let Some(d) = &mut m.diff {
+                if d.cursor == row {
+                    open(m, fx);
+                } else {
+                    d.cursor = row;
+                    d.stack = 0;
+                }
+            }
+        }
+        Some(crate::view::Hit::Event(seq)) => {
+            if let Some(t) = &mut m.timeline {
+                if t.selected == Some(seq) {
+                    open(m, fx);
+                } else {
+                    t.selected = Some(seq);
+                }
+            }
+        }
+        Some(crate::view::Hit::View(s)) => goto(m, s, fx),
         None => {}
     }
 }
