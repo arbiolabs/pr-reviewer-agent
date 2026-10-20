@@ -1,7 +1,15 @@
 import { readdirSync, readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { transition } from "../domain/machine.ts";
-import { REVIEW_MACHINE, type ReviewEvent, type ReviewState, TERMINAL_REVIEW_STATES } from "../domain/machines.ts";
+import {
+  OUTBOX_MACHINE,
+  type OutboxEvent,
+  type OutboxStatus,
+  REVIEW_MACHINE,
+  type ReviewEvent,
+  type ReviewState,
+  TERMINAL_REVIEW_STATES,
+} from "../domain/machines.ts";
 import { type CandidateFinding, type ChangedFile, type Disposition, type PullInfo, stableId } from "../domain/types.ts";
 
 const MIGRATIONS_DIR = new URL("../../migrations/", import.meta.url);
@@ -60,6 +68,19 @@ export type FindingView = {
   candidate: CandidateFinding;
 };
 
+export type OutboxRow = {
+  id: string;
+  revision_id: string;
+  idempotency_key: string;
+  payload_hash: string;
+  payload_json: string;
+  status: OutboxStatus;
+  github_review_id: number | null;
+  attempt_count: number;
+  last_error: string | null;
+  updated_at: string;
+};
+
 export type AuditEvent = { seq: number; from_state: string; event: string; to_state: string; detail: string | null; at: string };
 
 const now = () => new Date().toISOString();
@@ -90,7 +111,9 @@ export class AppStore {
     this.db.close();
   }
 
+  /** One transaction; nested calls join the outer one. */
   tx<T>(fn: () => T): T {
+    if (this.db.isTransaction) return fn();
     this.db.exec("BEGIN IMMEDIATE");
     try {
       const result = fn();
@@ -165,7 +188,7 @@ export class AppStore {
       if (current === result.state) return current;
       if (current !== from) throw new Error(`revision ${revisionId} is ${current}, expected ${from} for ${event}`);
       writes?.();
-      this.recordTransition(revisionId, from, event, result.state, detail);
+      if (!this.recordTransition(revisionId, from, event, result.state, detail)) throw new Error(`${event} refused in ${from}: a review write may have reached GitHub`);
       return result.state;
     });
   }
@@ -175,13 +198,14 @@ export class AppStore {
     return this.tx(() => {
       const current = this.revision(revisionId)!.state;
       const result = transition(REVIEW_MACHINE, current, event);
-      if (!result.ok) return undefined;
-      this.recordTransition(revisionId, current, event, result.state, detail);
+      if (!result.ok || !this.recordTransition(revisionId, current, event, result.state, detail)) return undefined;
       return result.state;
     });
   }
 
-  private recordTransition(revisionId: string, from: ReviewState, event: ReviewEvent, to: ReviewState, detail: string | null): void {
+  /** False when the publication guard refuses the transition; the caller's transaction then writes nothing. */
+  private recordTransition(revisionId: string, from: ReviewState, event: ReviewEvent, to: ReviewState, detail: string | null): boolean {
+    if (!this.guardPublication(revisionId, from, event)) return false;
     const at = now();
     this.db
       .prepare("UPDATE review_revisions SET state = ?, completed_at = ? WHERE id = ?")
@@ -189,6 +213,82 @@ export class AppStore {
     this.db
       .prepare("INSERT INTO audit_events (revision_id, from_state, event, to_state, detail, at) VALUES (?, ?, ?, ?, ?, ?)")
       .run(revisionId, from, event, to, detail, at);
+    return true;
+  }
+
+  /**
+   * §4.4 guards between a revision and its outbox. A superseded PUBLISH is only legal while nothing was sent, and then
+   * the outbox is abandoned with it. A revision that fails while a POST is in flight leaves the outbox to reconciliation.
+   * A manual retry reopens an outbox GitHub definitely rejected.
+   */
+  private guardPublication(revisionId: string, from: ReviewState, event: ReviewEvent): boolean {
+    const outbox = this.outboxForRevision(revisionId);
+    if (!outbox) return true;
+    if (from === "PUBLISH" && event === "NEWER_HEAD") {
+      if (outbox.status !== "pending") return false;
+      this.advanceOutbox(outbox.id, "ABANDON", "superseded");
+    }
+    if (event === "TERMINAL_ERROR" && outbox.status === "sending") this.advanceOutbox(outbox.id, "UNCERTAIN", "revision failed while the POST was in flight");
+    if (event === "MANUAL_RETRY" && outbox.status === "failed") this.advanceOutbox(outbox.id, "MANUAL_RETRY", "manual retry of the revision");
+    return true;
+  }
+
+  /** Insert the canonical payload once per idempotency key; a rerun gets the row that won. */
+  ensureOutbox(row: { revisionId: string; idempotencyKey: string; payloadHash: string; payloadJson: string }): OutboxRow {
+    this.db
+      .prepare(
+        `INSERT INTO publication_outbox (id, revision_id, idempotency_key, payload_hash, payload_json, status, updated_at)
+         VALUES (?, ?, ?, ?, ?, 'pending', ?) ON CONFLICT (idempotency_key) DO NOTHING`,
+      )
+      .run(stableId("outbox", row.idempotencyKey), row.revisionId, row.idempotencyKey, row.payloadHash, row.payloadJson, now());
+    return this.db.prepare("SELECT * FROM publication_outbox WHERE idempotency_key = ?").get(row.idempotencyKey) as OutboxRow;
+  }
+
+  outbox(id: string): OutboxRow | undefined {
+    return this.db.prepare("SELECT * FROM publication_outbox WHERE id = ?").get(id) as OutboxRow | undefined;
+  }
+
+  outboxForRevision(revisionId: string): OutboxRow | undefined {
+    return this.db.prepare("SELECT * FROM publication_outbox WHERE revision_id = ? ORDER BY updated_at DESC LIMIT 1").get(revisionId) as OutboxRow | undefined;
+  }
+
+  /** Outboxes where a write may have reached GitHub: recovery reconciles these before anything posts again (§11). */
+  uncertainOutboxes(): OutboxRow[] {
+    return this.db.prepare("SELECT * FROM publication_outbox WHERE status IN ('sending', 'needs_reconciliation') ORDER BY updated_at").all() as OutboxRow[];
+  }
+
+  /** Apply an outbox event in its own audited transaction (or the caller's). `SEND` counts the attempt in the same write. */
+  advanceOutbox(id: string, event: OutboxEvent, detail: string | null = null, githubReviewId?: number): OutboxStatus {
+    return this.tx(() => {
+      const current = this.outbox(id)!.status;
+      const result = transition(OUTBOX_MACHINE, current, event);
+      if (!result.ok) throw new Error(`outbox ${id}: ${result.reason}`);
+      const at = now();
+      this.db
+        .prepare(
+          `UPDATE publication_outbox SET status = ?, updated_at = ?, attempt_count = attempt_count + ?,
+             github_review_id = coalesce(?, github_review_id), last_error = ? WHERE id = ?`,
+        )
+        .run(result.state, at, event === "SEND" ? 1 : 0, githubReviewId ?? null, detail, id);
+      this.db
+        .prepare("INSERT INTO outbox_events (outbox_id, from_status, event, to_status, detail, at) VALUES (?, ?, ?, ?, ?, ?)")
+        .run(id, current, event, result.state, detail, at);
+      return result.state;
+    });
+  }
+
+  outboxEvents(id: string): { from_status: string; event: string; to_status: string; detail: string | null }[] {
+    return this.db.prepare("SELECT from_status, event, to_status, detail FROM outbox_events WHERE outbox_id = ? ORDER BY seq").all(id) as never;
+  }
+
+  /** The revision's verified findings are now on GitHub (§4.3 DETECTED → PUBLISHED). */
+  markFindingsPublished(revisionId: string): void {
+    this.db
+      .prepare(
+        `UPDATE findings SET status = 'PUBLISHED', updated_at = ? WHERE status = 'DETECTED'
+         AND id IN (SELECT finding_id FROM finding_observations WHERE revision_id = ?)`,
+      )
+      .run(now(), revisionId);
   }
 
   retryCount(revisionId: string): number {

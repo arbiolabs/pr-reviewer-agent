@@ -31,26 +31,47 @@ export const REVIEW_EVENTS = [
 ] as const;
 export type ReviewEvent = (typeof REVIEW_EVENTS)[number];
 
-// PUBLISH and RECONCILE have no NEWER_HEAD or TERMINAL_ERROR edge: once a write may have reached GitHub,
-// the only way out is reconciliation (§2 invariants 6 and 10, fail closed on publication uncertainty).
+// Whether a write may have reached GitHub is the outbox's status, not the revision's: the store refuses PUBLISH's
+// NEWER_HEAD unless the outbox is still pending, and any TERMINAL_ERROR moves a `sending` outbox to
+// needs_reconciliation (§2 invariants 6 and 10). FAILED + REVIEW_RECONCILED is a later reconcile finding the review.
 export const REVIEW_MACHINE: Table<ReviewState, ReviewEvent> = {
   COLLECT_CONTEXT: { CONTEXT_PERSISTED: "TRIAGE", NEWER_HEAD: "SUPERSEDED", TERMINAL_ERROR: "FAILED" },
   TRIAGE: { ROUTING_PERSISTED: "ANALYZE", NEWER_HEAD: "SUPERSEDED", TERMINAL_ERROR: "FAILED" },
   ANALYZE: { CANDIDATES_PERSISTED: "VERIFY", NEWER_HEAD: "SUPERSEDED", TERMINAL_ERROR: "FAILED" },
   VERIFY: { CANDIDATES_DISPOSED: "PREPARE_PUBLICATION", NEWER_HEAD: "SUPERSEDED", TERMINAL_ERROR: "FAILED" },
   PREPARE_PUBLICATION: { HEAD_VERIFIED: "PUBLISH", NEWER_HEAD: "SUPERSEDED", TERMINAL_ERROR: "FAILED" },
-  // ponytail: if the dry run's final NO_PUBLICATION_RECORDED write fails every retry, the revision is wedged in PUBLISH
-  // (no TERMINAL_ERROR edge, and its finished task is found again on rerun); M2's publication state adds the way out.
-  PUBLISH: { REVIEW_RECONCILED: "COMPLETED", NO_PUBLICATION_RECORDED: "COMPLETED", WRITE_UNCERTAIN: "RECONCILE" },
+  PUBLISH: {
+    REVIEW_RECONCILED: "COMPLETED",
+    NO_PUBLICATION_RECORDED: "COMPLETED",
+    WRITE_UNCERTAIN: "RECONCILE",
+    NEWER_HEAD: "SUPERSEDED",
+    TERMINAL_ERROR: "FAILED",
+  },
   RECONCILE: { REVIEW_RECONCILED: "COMPLETED", CONFIRMED_NOT_POSTED: "PUBLISH", TERMINAL_ERROR: "FAILED" },
   COMPLETED: {},
-  // §4.1 manual override: only an explicit `--retry` leaves FAILED. COMPLETED and SUPERSEDED stay final.
-  FAILED: { MANUAL_RETRY: "COLLECT_CONTEXT" },
+  // §4.1 manual override: only an explicit retry leaves FAILED for new work. COMPLETED and SUPERSEDED stay final.
+  FAILED: { MANUAL_RETRY: "COLLECT_CONTEXT", REVIEW_RECONCILED: "COMPLETED" },
   SUPERSEDED: {},
 };
 
 /** Terminal for automatic progress; FAILED can still be reopened by the audited MANUAL_RETRY override. */
 export const TERMINAL_REVIEW_STATES: readonly ReviewState[] = ["COMPLETED", "FAILED", "SUPERSEDED"];
+
+// §9.3 publication outbox. `sending` is committed before the POST, so a crash leaves proof that a write may have
+// happened; from there only reconciliation, never a second POST, decides. MANUAL_RETRY reopens a definite failure.
+export const OUTBOX_STATES = ["pending", "sending", "published", "needs_reconciliation", "failed"] as const;
+export type OutboxStatus = (typeof OUTBOX_STATES)[number];
+
+export const OUTBOX_EVENTS = ["SEND", "SENT", "UNCERTAIN", "REJECTED", "ABANDON", "FOUND", "ABSENT", "UNDECIDED", "MANUAL_RETRY"] as const;
+export type OutboxEvent = (typeof OUTBOX_EVENTS)[number];
+
+export const OUTBOX_MACHINE: Table<OutboxStatus, OutboxEvent> = {
+  pending: { SEND: "sending", ABANDON: "failed" },
+  sending: { SENT: "published", UNCERTAIN: "needs_reconciliation", REJECTED: "failed" },
+  needs_reconciliation: { FOUND: "published", ABSENT: "pending", UNDECIDED: "needs_reconciliation" },
+  published: {},
+  failed: { MANUAL_RETRY: "pending" },
+};
 
 // §4.1 PR coordinator machine. DEBOUNCE_ELAPSED is not in the spec's event list; QUIESCING needs a way back.
 export const COORDINATOR_STATES = ["ACTIVE", "QUIESCING", "CLOSED", "MERGED"] as const;
