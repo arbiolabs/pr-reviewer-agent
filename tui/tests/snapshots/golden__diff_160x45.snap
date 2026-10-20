@@ -2,7 +2,7 @@
 source: tests/golden.rs
 expression: text
 ---
-  pr-review · ⠋ reviewing #184 verify found: Finding f-1                                                                                                ● live
+  pr-review · ◐ reviewing #184 verify found: Finding f-1                                                                                                ● live
 
                                         src/booking.ts   +2 -1
   FILES  4                              acme/shop #184 · bbbbbbb → 4444444   TRUNCATED   finding 1 of 1

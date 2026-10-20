@@ -2,7 +2,7 @@
 source: tests/golden.rs
 expression: text
 ---
-  pr-review · ⠋ reviewing #184 verify found: Finding f-1                ● live
+  pr-review · ◐ reviewing #184 verify found: Finding f-1                ● live
 
 
   acme/shop  #184  timeline
