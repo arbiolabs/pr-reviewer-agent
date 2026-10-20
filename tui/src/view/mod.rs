@@ -328,14 +328,24 @@ fn footer_line(c: &Ctx, width: u16) -> Line<'static> {
     if watch {
         hints.insert(2.min(hints.len()), "w watch live");
     }
-    let mut out = String::from(" ");
-    for hint in hints {
-        if crate::text::width(&out) + crate::text::width(hint) + 2 <= w {
-            out.push_str("  ");
-            out.push_str(hint);
-        }
+    // Too wide: drop the least important hint, then the next, keeping the rest in order.
+    let line = |hints: &[&str]| format!("   {}", hints.join("  "));
+    while hints.len() > 1 && crate::text::width(&line(&hints)) > w {
+        let least = (0..hints.len()).min_by_key(|&i| (rank(hints[i]), std::cmp::Reverse(i))).unwrap_or(0);
+        hints.remove(least);
     }
-    Line::from(c.span(out, Role::Muted))
+    Line::from(c.span(c.fit(&line(&hints), w), Role::Muted))
+}
+
+/// How much a footer hint matters, by its key: moving, opening, going back and help outlast the shortcuts.
+fn rank(hint: &str) -> u8 {
+    match hint.split(' ').next().unwrap_or("") {
+        "j/k" | "Enter" | "Esc" | "?" => 4,
+        "h" | "l" | "y" | "n/Esc" => 3,
+        "q" | "n/N" | "/" | ":" | "d" => 2,
+        "t" | "w" | "f" | "1-5" => 1,
+        _ => 0,
+    }
 }
 
 fn minimal(c: &Ctx, f: &mut Frame, area: Rect) {

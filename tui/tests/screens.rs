@@ -132,3 +132,20 @@ fn the_footer_lists_settings_among_the_views_when_it_fits() {
     let footer = frame.lines().last().unwrap();
     assert!(footer.ends_with("4 timeline  5 settings"), "{footer}");
 }
+
+#[test]
+fn at_80_columns_the_footer_drops_minor_hints_before_navigation() {
+    use crossterm::event::KeyCode;
+    let mut review = showcase(2).key(KeyCode::Enter);
+    let (frame, _) = render(&mut review.m, 80, 24);
+    let footer = frame.lines().last().unwrap();
+    for hint in ["j/k finding", "Enter read", "h pull requests", "? help"] {
+        assert!(footer.contains(hint), "{hint}: {footer}");
+    }
+    let mut diff = review.key(KeyCode::Char('d'));
+    let (frame, _) = render(&mut diff.m, 80, 24);
+    let footer = frame.lines().last().unwrap();
+    for hint in ["j/k line", "h files", "Esc back", "? help"] {
+        assert!(footer.contains(hint), "{hint}: {footer}");
+    }
+}

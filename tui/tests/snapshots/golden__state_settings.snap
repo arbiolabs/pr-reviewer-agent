@@ -25,4 +25,4 @@ expression: text
     glyphs                unicode
     color                 on
     background            painted (theme)
-   j/k account  Enter select account  w watch live  r refresh  1-5 views
+   j/k account  Enter select account  w watch live  1-5 views  ? help  q quit
