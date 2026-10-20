@@ -22,9 +22,9 @@ const TICK: Duration = Duration::from_millis(125);
 
 fn main() -> ExitCode {
     let args = match config::parse_args(std::env::args().skip(1)) {
-        Ok(Some(a)) => a,
-        Ok(None) => {
-            println!("{}", config::USAGE);
+        Ok(config::Cli::Run(a)) => a,
+        Ok(config::Cli::Print(text)) => {
+            println!("{text}");
             return ExitCode::SUCCESS;
         }
         Err(e) => {

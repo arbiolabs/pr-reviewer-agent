@@ -11,6 +11,7 @@ use crate::theme::Palette;
 
 pub const USAGE: &str =
     "usage: pr-review-tui [--socket PATH] [--pr URL] [--ascii] [--theme NAME] [--playback FILE.ndjson] [--config FILE]
+       pr-review-tui --version
 
   --socket PATH       reviewer control socket (default: config, then the platform runtime dir)
   --pr URL            open this PR, e.g. https://github.com/owner/repo/pull/184 or owner/repo#184
@@ -18,6 +19,7 @@ pub const USAGE: &str =
   --theme NAME        auto, dark, light or mono (default: config, then auto, which asks the terminal)
   --playback FILE     play a scripted server session (protocol/playback/*.ndjson) instead of connecting
   --config FILE       config file (default: <config dir>/pr-review/config.toml)
+  --version           print the version and exit
 
 NO_COLOR set to anything non-empty turns colors off. q quits the client; reviews keep running in the daemon.";
 
@@ -31,7 +33,14 @@ pub struct Args {
     pub config: Option<PathBuf>,
 }
 
-pub fn parse_args(mut it: impl Iterator<Item = String>) -> Result<Option<Args>, String> {
+/// What the command line asks for: run the client, or print `--help` or `--version` text and exit.
+#[derive(Debug, PartialEq)]
+pub enum Cli {
+    Run(Args),
+    Print(String),
+}
+
+pub fn parse_args(mut it: impl Iterator<Item = String>) -> Result<Cli, String> {
     let mut a = Args::default();
     while let Some(flag) = it.next() {
         let mut value = |name: &str| it.next().ok_or(format!("{name} needs a value"));
@@ -42,11 +51,12 @@ pub fn parse_args(mut it: impl Iterator<Item = String>) -> Result<Option<Args>, 
             "--playback" => a.playback = Some(value("--playback")?.into()),
             "--config" => a.config = Some(value("--config")?.into()),
             "--ascii" => a.ascii = true,
-            "-h" | "--help" => return Ok(None),
+            "-h" | "--help" => return Ok(Cli::Print(USAGE.into())),
+            "-V" | "--version" => return Ok(Cli::Print(format!("pr-review-tui {}", env!("CARGO_PKG_VERSION")))),
             other => return Err(format!("unknown argument {other}")),
         }
     }
-    Ok(Some(a))
+    Ok(Cli::Run(a))
 }
 
 #[derive(Debug, Default, Deserialize)]
@@ -252,15 +262,15 @@ pub fn resolve(args: Args, no_color: bool, detect: impl FnOnce() -> Palette) -> 
 mod tests {
     use super::*;
 
-    fn args(v: &[&str]) -> Result<Option<Args>, String> {
+    fn args(v: &[&str]) -> Result<Cli, String> {
         parse_args(v.iter().map(|s| s.to_string()))
     }
 
     #[test]
     fn flags_parse_and_unknown_ones_are_rejected() {
-        let a = args(&["--socket", "/s.sock", "--ascii", "--pr", "o/r#1"]).unwrap().unwrap();
+        let Cli::Run(a) = args(&["--socket", "/s.sock", "--ascii", "--pr", "o/r#1"]).unwrap() else { panic!() };
         assert_eq!((a.socket, a.ascii, a.pr.as_deref()), (Some(PathBuf::from("/s.sock")), true, Some("o/r#1")));
-        assert_eq!(args(&["--help"]).unwrap(), None);
+        assert_eq!(args(&["--help"]).unwrap(), Cli::Print(USAGE.into()));
         assert_eq!(args(&["--sockt"]).unwrap_err(), "unknown argument --sockt");
         assert_eq!(args(&["--socket"]).unwrap_err(), "--socket needs a value");
     }
@@ -331,6 +341,7 @@ mod tests {
         assert_eq!(err, "--theme: \"sepia\" is not supported (auto, dark, light, mono)");
         let err = look("[ui]\ntheme = \"sepia\"\n", None, false, Palette::Dark).unwrap_err();
         assert!(err.starts_with("ui.theme:"), "{err}");
-        assert_eq!(args(&["--theme", "light"]).unwrap().unwrap().theme.as_deref(), Some("light"));
+        let Ok(Cli::Run(a)) = args(&["--theme", "light"]) else { panic!() };
+        assert_eq!(a.theme.as_deref(), Some("light"));
     }
 }
