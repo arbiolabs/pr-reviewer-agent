@@ -1,4 +1,4 @@
-//! CLI flags, `config.toml` (TUI_SPEC.md section 14) and default paths. Flags override the file. Everything is
+//! CLI flags, `config.toml` (docs/TUI_SPEC.md section 14) and default paths. Flags override the file. Everything is
 //! validated here, before the terminal enters raw mode.
 
 use std::path::{Path, PathBuf};

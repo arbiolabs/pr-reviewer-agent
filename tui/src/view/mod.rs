@@ -1,4 +1,4 @@
-//! `view(&Model, &mut Frame)`: a pure function of the model. Layout follows TUI_SPEC.md section 4: wide at 110+
+//! `view(&Model, &mut Frame)`: a pure function of the model. Layout follows docs/TUI_SPEC.md section 4: wide at 110+
 //! columns, medium at 80-109, narrow at 60-79, and a minimal mode below 60x16.
 
 mod diff;
