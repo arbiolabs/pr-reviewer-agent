@@ -167,7 +167,6 @@ impl Screen {
 pub enum Pane {
     Sidebar,
     Main,
-    Feed,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -393,7 +392,6 @@ pub struct Ui {
     pub modals: Vec<Modal>,
     pub selected_pr: Option<PrId>,
     pub selected_finding: Option<FindingId>,
-    pub feed_scroll: usize,
     /// Lines the reader scrolled the document past where the selection puts it; reset when the selection moves.
     pub doc_scroll: i32,
     pub pr_filter: String,
@@ -457,7 +455,6 @@ impl Model {
                 modals: Vec::new(),
                 selected_pr: None,
                 selected_finding: None,
-                feed_scroll: 0,
                 doc_scroll: 0,
                 pr_filter: String::new(),
                 wanted_pr,

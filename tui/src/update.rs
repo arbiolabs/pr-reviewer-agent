@@ -897,19 +897,11 @@ fn act(m: &mut Model, a: Action, fx: &mut Vec<Effect>) {
         Action::PageDown => move_by(m, page(m), fx),
         Action::Top => move_by(m, isize::MIN / 2, fx),
         Action::Bottom => move_by(m, isize::MAX / 2, fx),
-        Action::Left => m.ui.focus = left_of(m.ui.focus),
-        Action::Right => m.ui.focus = right_of(m.ui.focus, m.ui.screen),
-        Action::FocusNext => {
-            m.ui.focus = match right_of(m.ui.focus, m.ui.screen) {
-                f if f == m.ui.focus => Pane::Sidebar,
-                f => f,
-            }
-        }
-        Action::FocusPrev => {
-            m.ui.focus = match left_of(m.ui.focus) {
-                f if f == m.ui.focus => right_of(right_of(f, m.ui.screen), m.ui.screen),
-                f => f,
-            }
+        Action::Left => m.ui.focus = Pane::Sidebar,
+        Action::Right => m.ui.focus = Pane::Main,
+        // Two panes: either way round, Tab moves to the other one.
+        Action::FocusNext | Action::FocusPrev => {
+            m.ui.focus = if m.ui.focus == Pane::Main { Pane::Sidebar } else { Pane::Main }
         }
         Action::Open => open(m, fx),
         Action::Search => {
@@ -1020,7 +1012,6 @@ fn click(m: &mut Model, x: u16, y: u16, fx: &mut Vec<Effect>) {
             if m.ui.selected_pr.as_ref() != Some(&id) {
                 m.ui.selected_pr = Some(id);
                 m.ui.selected_finding = None;
-                m.ui.feed_scroll = 0;
                 m.ui.doc_scroll = 0;
                 reselect(m);
             }
@@ -1104,21 +1095,6 @@ fn edit_input(m: &mut Model, f: impl FnOnce(&mut String)) {
     }
 }
 
-fn left_of(p: Pane) -> Pane {
-    match p {
-        Pane::Feed => Pane::Main,
-        _ => Pane::Sidebar,
-    }
-}
-
-fn right_of(p: Pane, screen: Screen) -> Pane {
-    match (p, screen) {
-        (Pane::Sidebar, _) => Pane::Main,
-        (Pane::Main, Screen::Review) => Pane::Feed,
-        (other, _) => other,
-    }
-}
-
 fn goto(m: &mut Model, s: Screen, fx: &mut Vec<Effect>) {
     m.ui.modals.clear();
     m.ui.screen = s;
@@ -1156,7 +1132,6 @@ fn move_by(m: &mut Model, delta: isize, fx: &mut Vec<Effect>) {
             if next != m.ui.selected_pr {
                 m.ui.selected_pr = next;
                 m.ui.selected_finding = None;
-                m.ui.feed_scroll = 0;
                 m.ui.doc_scroll = 0;
                 reselect(m);
             }
@@ -1169,9 +1144,6 @@ fn move_by(m: &mut Model, delta: isize, fx: &mut Vec<Effect>) {
                 m.ui.selected_finding = next;
                 m.ui.doc_scroll = 0;
             }
-        }
-        (Screen::Review, Pane::Feed) => {
-            m.ui.feed_scroll = (m.ui.feed_scroll as isize - delta).clamp(0, ACTIVITY_CAP as isize) as usize;
         }
         (Screen::Diff, focus) => {
             let Some(d) = &mut m.diff else { return };

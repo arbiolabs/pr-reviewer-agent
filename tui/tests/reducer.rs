@@ -718,3 +718,21 @@ fn a_click_selects_the_pr_or_finding_under_it_and_the_wheel_scrolls_the_document
     mouse(&mut m, K::ScrollUp, (60, 20));
     assert_eq!(m.ui.doc_scroll, 3);
 }
+
+#[test]
+fn l_on_the_document_stays_put_and_tab_cycles_between_the_rail_and_the_document() {
+    let mut m = showcase(0);
+    press(&mut m, KeyCode::Enter);
+    let before = (m.ui.selected_pr.clone(), m.ui.selected_finding.clone());
+    press(&mut m, KeyCode::Char('l'));
+    assert_eq!(m.ui.focus, Pane::Main, "the document is the rightmost pane");
+    press(&mut m, KeyCode::Char('j'));
+    assert_ne!(m.ui.selected_finding, before.1, "j still moves through the findings");
+    press(&mut m, KeyCode::Tab);
+    assert_eq!(m.ui.focus, Pane::Sidebar);
+    press(&mut m, KeyCode::Tab);
+    assert_eq!(m.ui.focus, Pane::Main);
+    press(&mut m, KeyCode::BackTab);
+    assert_eq!(m.ui.focus, Pane::Sidebar);
+    assert_eq!(m.ui.selected_pr, before.0);
+}
