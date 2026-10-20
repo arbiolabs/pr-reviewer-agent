@@ -200,7 +200,7 @@ pub fn help_rows() -> Vec<(Context, String, &'static str)> {
             A::Left | A::Right => "pane left / right",
             A::FocusNext => "cycle panes",
             A::Open => "open selected",
-            A::Goto(_) => "inbox, review, diff, timeline, settings",
+            A::Goto(_) => "views; 5 is settings",
             A::Search => "search PRs",
             A::OpenDiff => "diff at the finding",
             A::OpenTimeline => "timeline for selection",
