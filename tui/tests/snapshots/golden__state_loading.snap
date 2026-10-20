@@ -2,7 +2,7 @@
 source: tests/golden.rs
 expression: text
 ---
-  pr-review · 0 PRs tracked · nothing running                    ◐ negotiating
+  pr-review · waiting for the first snapshot                     ◐ negotiating
 
 
   PULL REQUESTS                                                              0

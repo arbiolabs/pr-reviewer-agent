@@ -2,7 +2,7 @@
 source: tests/golden.rs
 expression: text
 ---
-  pr-review · ⠋ reviewing #184 verify found: Finding f-1                                                ✗ disconnected
+  pr-review · last known state, 0s old                                                                  ✗ disconnected
 
  ✗ disconnected: no message for 30s (heartbeat timeout) · retrying in 1.0s · showing last known state · writes disabled
 

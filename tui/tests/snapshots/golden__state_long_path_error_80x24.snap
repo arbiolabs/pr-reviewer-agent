@@ -2,7 +2,7 @@
 source: tests/golden.rs
 expression: inbox
 ---
-  pr-review · 0 PRs tracked · nothing running                   ✗ disconnected
+  pr-review · not connected                                     ✗ disconnected
 
  ✗ disconnected: socket directory does not exist: /private/tmp/claude-501/xxxxx…
 

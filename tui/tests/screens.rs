@@ -39,3 +39,30 @@ fn the_spinner_never_looks_like_the_separator_or_a_done_dot() {
         assert!(!frames.contains(&dot), "the spinner shows {dot:?}: {frames:?}");
     }
 }
+
+fn lose(s: &mut Sim, retry_in_ms: Option<u64>) {
+    let reason = "connection refused".into();
+    s.apply(pr_review_tui::update::Msg::Net(pr_review_tui::update::NetEvent::Lost { reason, retry_in_ms }));
+}
+
+#[test]
+fn disconnected_the_status_line_says_so_instead_of_counting_prs() {
+    let mut never = Sim::new(Look::default());
+    lose(&mut never, Some(7_000));
+    let (frame, _) = render(&mut never.m, 120, 38);
+    let top = first_line(&frame);
+    assert!(top.contains("not connected"), "{top}");
+    assert!(!top.contains("tracked") && !top.contains("nothing running"), "{top}");
+
+    let mut seen = showcase(2);
+    s_tick(&mut seen, 12_000);
+    lose(&mut seen, Some(7_000));
+    let (frame, _) = render(&mut seen.m, 120, 38);
+    let top = first_line(&frame);
+    assert!(top.contains("last known state, 12s old"), "{top}");
+    assert!(!top.contains("reviewing"), "a stale snapshot does not claim a review is running: {top}");
+}
+
+fn s_tick(s: &mut Sim, now: u64) {
+    s.apply(pr_review_tui::update::Msg::Tick(now));
+}

@@ -2,7 +2,7 @@
 source: tests/golden.rs
 expression: text
 ---
-  pr-review · 0 PRs tracked · nothing running                   ✗ incompatible
+  pr-review · not connected                                     ✗ incompatible
 
  ✗ protocol mismatch: unsupported protocolVersion 2; server supports [1], this …
 

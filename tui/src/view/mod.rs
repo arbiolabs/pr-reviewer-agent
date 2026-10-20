@@ -187,6 +187,15 @@ fn status_line(c: &Ctx, width: u16) -> Line<'static> {
         c.m.domain.runs.values().filter(|r| r.status == crate::protocol::RunStatus::Running).collect();
     let newest = c.m.domain.activity.iter().rev().find(|a| running.iter().any(|r| a.pr_id.as_ref() == Some(&r.pr_id)));
     match (running.first(), newest) {
+        // Off the stream, the cache is a photo: say how old it is rather than what it claims is running.
+        _ if c.m.link != Link::Live => {
+            let text = match (c.m.diag.last_snapshot_ms, &c.m.link) {
+                (Some(at), _) => format!("last known state, {}s old", c.m.now_ms.saturating_sub(at) / 1000),
+                (None, Link::Negotiating | Link::Syncing) => "waiting for the first snapshot".into(),
+                (None, _) => "not connected".into(),
+            };
+            left.push(c.span(text, Role::Muted));
+        }
         (Some(_), Some(a)) => {
             let pr = a.pr_id.as_ref().and_then(|id| c.m.domain.prs.get(id));
             let run = pr.and_then(|p| c.m.domain.latest_run(&p.id));

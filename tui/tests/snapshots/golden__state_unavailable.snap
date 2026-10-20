@@ -2,7 +2,7 @@
 source: tests/golden.rs
 expression: text
 ---
-  pr-review · 0 PRs tracked · nothing running                   ✗ disconnected
+  pr-review · not connected                                     ✗ disconnected
 
  ✗ disconnected: connection refused · retrying in 2.0s · showing last known sta…
 
