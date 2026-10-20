@@ -2,6 +2,7 @@ import { readdirSync, readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { transition } from "../domain/machine.ts";
 import {
+  type CoordinatorState,
   OUTBOX_MACHINE,
   type OutboxEvent,
   type OutboxStatus,
@@ -33,7 +34,8 @@ export type PullRow = {
   installation_id: number;
   repository_id: number;
   number: number;
-  status: string;
+  status: CoordinatorState;
+  review_due_at: number | null;
   latest_base_sha: string;
   latest_head_sha: string;
   repo_full_name: string;
@@ -126,6 +128,7 @@ export class AppStore {
     }
   }
 
+  /** Insert or refresh a PR. `status` is the coordinator machine's state: set from GitHub on insert, then the coordinator's. */
   upsertPull(pr: PullInfo): string {
     const id = stableId("pr", pr.installationId, pr.repositoryId, pr.number);
     const status = pr.merged ? "MERGED" : pr.state === "closed" ? "CLOSED" : "ACTIVE";
@@ -133,7 +136,7 @@ export class AppStore {
       .prepare(
         `INSERT INTO pull_requests (id, installation_id, repository_id, number, status, latest_base_sha, latest_head_sha, updated_at, repo_full_name)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-         ON CONFLICT (id) DO UPDATE SET status = excluded.status, latest_base_sha = excluded.latest_base_sha,
+         ON CONFLICT (id) DO UPDATE SET latest_base_sha = excluded.latest_base_sha,
            latest_head_sha = excluded.latest_head_sha, updated_at = excluded.updated_at, repo_full_name = excluded.repo_full_name`,
       )
       .run(id, pr.installationId, pr.repositoryId, pr.number, status, pr.baseSha, pr.headSha, now(), pr.fullName);
@@ -468,5 +471,40 @@ export class AppStore {
 
   markWebhookProcessed(deliveryId: string, outcome: string): void {
     this.db.prepare("UPDATE webhook_events SET processed_at = ?, outcome = ? WHERE delivery_id = ?").run(now(), outcome, deliveryId);
+  }
+
+  setPullSchedule(prId: string, status: CoordinatorState, reviewDueAt: number | null): void {
+    this.db.prepare("UPDATE pull_requests SET status = ?, review_due_at = ?, updated_at = ? WHERE id = ?").run(status, reviewDueAt, now(), prId);
+  }
+
+  duePulls(nowMs: number): PullRow[] {
+    return this.db.prepare("SELECT * FROM pull_requests WHERE review_due_at IS NOT NULL AND review_due_at <= ? ORDER BY review_due_at").all(nowMs) as PullRow[];
+  }
+
+  /** Revisions with no terminal state yet, for supersede requests and startup recovery. */
+  unfinishedRevisions(prId?: string): RevisionRow[] {
+    const terminal = TERMINAL_REVIEW_STATES.map((s) => `'${s}'`).join(", ");
+    const sql = `SELECT * FROM review_revisions WHERE state NOT IN (${terminal})${prId ? " AND pr_id = ?" : ""} ORDER BY created_at`;
+    return (prId ? this.db.prepare(sql).all(prId) : this.db.prepare(sql).all()) as RevisionRow[];
+  }
+
+  requestSupersede(revisionId: string): void {
+    this.db.prepare("UPDATE review_revisions SET superseded_requested_at = ? WHERE id = ? AND superseded_requested_at IS NULL").run(now(), revisionId);
+  }
+
+  /** §11: one owner per PR. A lease past `expires_at` (its owner crashed) can be taken over. */
+  acquireLease(prId: string, owner: string, nowMs: number, ttlMs: number): boolean {
+    const info = this.db
+      .prepare(
+        `INSERT INTO leases (pr_id, owner, expires_at) VALUES (?, ?, ?)
+         ON CONFLICT (pr_id) DO UPDATE SET owner = excluded.owner, expires_at = excluded.expires_at
+         WHERE leases.owner = excluded.owner OR leases.expires_at <= ?`,
+      )
+      .run(prId, owner, nowMs + ttlMs, nowMs);
+    return info.changes === 1;
+  }
+
+  releaseLease(prId: string, owner: string): void {
+    this.db.prepare("DELETE FROM leases WHERE pr_id = ? AND owner = ?").run(prId, owner);
   }
 }
