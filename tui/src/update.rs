@@ -102,7 +102,8 @@ pub fn update(m: &mut Model, msg: Msg) -> Vec<Effect> {
             }
             expire_requests(m);
             // Ages on the banner and the diagnostics screen tick.
-            if m.ui.screen == Screen::Settings || !m.link.accepts_events() {
+            let running = m.domain.runs.values().any(|r| r.status == RunStatus::Running);
+            if m.ui.screen == Screen::Settings || !m.link.accepts_events() || running {
                 m.dirty = true;
             }
             return fx;
@@ -115,8 +116,24 @@ pub fn update(m: &mut Model, msg: Msg) -> Vec<Effect> {
         }
         Msg::Net(e) => net(m, e, &mut fx),
     }
+    prefetch(m, &mut fx);
     m.dirty = true;
     fx
+}
+
+/// The document shows every card's evidence, so the selected PR's details load as soon as it is selected.
+fn prefetch(m: &mut Model, fx: &mut Vec<Effect>) {
+    let Some(pr) = m.ui.selected_pr.clone() else { return };
+    let ids: Vec<FindingId> = m
+        .domain
+        .pr_findings(&pr)
+        .iter()
+        .filter(|f| !m.details.contains_key(&f.id) && !m.detail_errors.contains_key(&f.id))
+        .map(|f| f.id.clone())
+        .collect();
+    for id in ids {
+        fetch_detail(m, &id, fx);
+    }
 }
 
 fn request(m: &mut Model) -> RequestId {
@@ -385,6 +402,16 @@ fn apply_snapshot(m: &mut Model, s: Snapshot, fx: &mut Vec<Effect>) {
         } else {
             notice(m, format!("{wanted} is not tracked by the reviewer"));
         }
+    }
+    // Land on the story that matters most: the PR with the most severe current finding.
+    if m.ui.selected_pr.is_none() {
+        let d = &m.domain;
+        m.ui.selected_pr = d
+            .prs
+            .values()
+            .filter_map(|p| d.pr_findings(&p.id).iter().filter(|f| !f.stale).map(|f| f.severity).min().map(|s| (s, p)))
+            .min_by_key(|(s, p)| (*s, std::cmp::Reverse(p.number)))
+            .map(|(_, p)| p.id.clone());
     }
     reselect(m);
     if let Some(t) = &m.timeline {

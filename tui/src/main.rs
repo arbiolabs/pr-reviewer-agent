@@ -18,7 +18,7 @@ use tokio::sync::mpsc;
 use tokio::time::MissedTickBehavior;
 
 const FRAME: Duration = Duration::from_millis(16);
-const TICK: Duration = Duration::from_millis(250);
+const TICK: Duration = Duration::from_millis(125);
 
 fn main() -> ExitCode {
     let args = match config::parse_args(std::env::args().skip(1)) {

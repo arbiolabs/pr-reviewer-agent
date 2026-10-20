@@ -83,7 +83,7 @@ struct UiSection {
 
 impl Default for UiSection {
     fn default() -> Self {
-        UiSection { theme: "dark".into(), start_view: "inbox".into(), show_activity: true, ascii: false }
+        UiSection { theme: "dark".into(), start_view: "review".into(), show_activity: true, ascii: false }
     }
 }
 

@@ -1,7 +1,9 @@
 //! `view(&Model, &mut Frame)`: a pure function of the model. Layout follows docs/TUI_SPEC.md section 4: wide at 110+
 //! columns, medium at 80-109, narrow at 60-79, and a minimal mode below 60x16.
 
+mod code;
 mod diff;
+mod doc;
 mod lists;
 mod modals;
 mod timeline;
@@ -89,6 +91,7 @@ pub fn view(m: &Model, f: &mut Frame) {
         minimal(&c, f, area);
         return;
     }
+    f.render_widget(Paragraph::new("").style(t.bg(crate::theme::Bg::Base)), area);
     let banner = banner(&c, area.width);
     let [title, tabs, banner_area, body, footer] = Layout::vertical([
         Constraint::Length(1),
@@ -98,19 +101,21 @@ pub fn view(m: &Model, f: &mut Frame) {
         Constraint::Length(1),
     ])
     .areas(area);
-    f.render_widget(Paragraph::new(title_line(&c, title.width)), title);
-    f.render_widget(Paragraph::new(tab_line(&c)), tabs);
+    f.render_widget(Paragraph::new(status_line(&c, title.width)), title);
+    let _ = tabs;
     if let Some(b) = banner {
         f.render_widget(Paragraph::new(b), banner_area);
     }
     match m.ui.screen {
-        Screen::Inbox => lists::inbox(&c, f, body),
-        Screen::Review => lists::review(&c, f, body),
+        Screen::Inbox | Screen::Review => doc::screen(&c, f, body),
         Screen::Diff => diff::diff(&c, f, body),
         Screen::Timeline => timeline::timeline(&c, f, body),
         Screen::Settings => modals::settings(&c, f, body),
     }
-    f.render_widget(Paragraph::new(footer_line(&c, footer.width)), footer);
+    f.render_widget(Paragraph::new(footer_line(&c, footer.width.saturating_sub(views_w(&c) as u16))), footer);
+    let vw = views_w(&c) as u16;
+    let vr = Rect { x: footer.x + footer.width.saturating_sub(vw), width: vw.min(footer.width), ..footer };
+    f.render_widget(Paragraph::new(views_line(&c)), vr);
     for modal in &m.ui.modals {
         modals::modal(&c, f, body, modal);
     }
@@ -140,6 +145,7 @@ fn identity_badge(c: &Ctx) -> Option<(String, Role)> {
     })
 }
 
+#[allow(dead_code)]
 fn title_line(c: &Ctx, width: u16) -> Line<'static> {
     let (status, role) = link_status(c);
     let left = " PR REVIEWER ";
@@ -162,6 +168,61 @@ fn title_line(c: &Ctx, width: u16) -> Line<'static> {
     ])
 }
 
+/// The quiet live line at the top: what the reviewer is doing right now, across every PR.
+fn status_line(c: &Ctx, width: u16) -> Line<'static> {
+    let w = width as usize;
+    let g = c.t.g();
+    let (link, link_role) = link_status(c);
+    let right = vec![c.span(format!("{link}  "), link_role)];
+    let mut left = vec![c.span("  pr-review", Role::Title), c.span(format!(" {} ", g.sep), Role::Muted)];
+    let running: Vec<_> = c.m.domain.runs.values().filter(|r| r.status == crate::protocol::RunStatus::Running).collect();
+    let newest = c.m.domain.activity.iter().rev().find(|a| {
+        running.iter().any(|r| a.pr_id.as_ref() == Some(&r.pr_id))
+    });
+    match (running.first(), newest) {
+        (Some(_), Some(a)) => {
+            let pr = a.pr_id.as_ref().and_then(|id| c.m.domain.prs.get(id));
+            let run = pr.and_then(|p| c.m.domain.latest_run(&p.id));
+            left.push(c.span(format!("{} ", doc::spinner(c)), Role::Accent));
+            if let (Some(p), Some(r)) = (pr, run) {
+                left.push(c.span(format!("reviewing #{} ", p.number), Role::Normal));
+                left.push(c.span(format!("{} ", lists::phase_label(r.phase)), Role::Accent));
+            }
+            let what = match &a.kind {
+                crate::model::ActivityKind::Tool { tool, summary } => format!("{tool} {summary}"),
+                crate::model::ActivityKind::Phase { to, .. } => format!("entered {}", crate::theme::phase_name(*to)),
+                crate::model::ActivityKind::Finding { title, .. } => format!("found: {title}"),
+                crate::model::ActivityKind::Run { .. } => "started".into(),
+            };
+            let more = if running.len() > 1 { format!("  +{} more running", running.len() - 1) } else { String::new() };
+            let used: usize = left.iter().chain(&right).map(|s| crate::text::width(&s.content)).sum();
+            let room = w.saturating_sub(used + crate::text::width(&more) + 2);
+            left.push(c.span(c.fit(&what, room), Role::Muted));
+            left.push(c.span(more, Role::Muted));
+        }
+        _ => left.push(c.span(format!("{} PRs tracked {} nothing running", c.m.domain.prs.len(), g.sep), Role::Muted)),
+    }
+    let used: usize = left.iter().chain(&right).map(|s| crate::text::width(&s.content)).sum();
+    left.push(Span::raw(" ".repeat(w.saturating_sub(used))));
+    left.extend(right);
+    Line::from(left)
+}
+
+fn views_line(c: &Ctx) -> Line<'static> {
+    let mut spans = Vec::new();
+    for (i, s) in Screen::ALL.iter().take(4).enumerate() {
+        let on = *s == c.m.ui.screen || (*s == Screen::Review && c.m.ui.screen == Screen::Inbox && false);
+        spans.push(c.span(format!("{}", i + 1), Role::Muted));
+        spans.push(c.span(format!(" {}  ", s.label().to_lowercase()), if on { Role::Focus } else { Role::Muted }));
+    }
+    Line::from(spans)
+}
+
+fn views_w(c: &Ctx) -> usize {
+    if c.width == Width::Narrow { 0 } else { views_line(c).spans.iter().map(|s| crate::text::width(&s.content)).sum() }
+}
+
+#[allow(dead_code)]
 fn tab_line(c: &Ctx) -> Line<'static> {
     let mut spans = vec![Span::raw(" ")];
     for (i, s) in Screen::ALL.iter().enumerate() {
@@ -218,13 +279,13 @@ fn footer_line(c: &Ctx, width: u16) -> Line<'static> {
         (Some(Modal::Finding { .. }), _) => "j/k scroll  d diff at anchor  t timeline  Esc close",
         (Some(Modal::Event { .. }), _) => "Esc close",
         (Some(Modal::Confirm { .. }), _) => "y confirm  n/Esc cancel",
-        (_, Screen::Inbox) => "j/k move  Enter open  / search  d diff  t timeline  r refresh  ? help  q quit",
-        (_, Screen::Review) => "j/k move  Tab pane  Enter inspect  d diff  t timeline  n/N finding  ? help  q quit",
+        (_, Screen::Inbox) => "j/k pull request  Enter read  / search  ? help  q quit",
+        (_, Screen::Review) => "j/k finding  Enter read  d diff  t timeline  h pull requests  ? help  q quit",
         (_, Screen::Diff) => "j/k line  h/l pane  n/N finding  : jump  Enter finding  Esc back  ? help  q quit",
         (_, Screen::Timeline) => "j/k move  Enter detail  f scope  v category  P phase  Esc back  ? help  q quit",
         (_, Screen::Settings) => "j/k account  Enter select account  r refresh  1-4 views  ? help  q quit",
     };
-    Line::from(c.span(c.fit(&format!(" {hints}"), w), Role::Muted))
+    Line::from(c.span(c.fit(&format!("  {hints}"), w), Role::Muted))
 }
 
 fn minimal(c: &Ctx, f: &mut Frame, area: Rect) {

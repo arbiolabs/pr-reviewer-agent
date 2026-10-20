@@ -1,4 +1,5 @@
 //! Inbox and Review.
+#![allow(dead_code)]
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
@@ -10,6 +11,22 @@ use crate::model::{Activity, ActivityKind, Link, Pane};
 use crate::protocol::{Finding, Lifecycle, Phase, Pr, Run, RunChange, RunStatus, Severity};
 use crate::text::width;
 use crate::theme::{Role, finding_status, phase_name};
+
+pub fn phase_label(p: Phase) -> &'static str {
+    match p {
+        Phase::CollectContext => "collect",
+        Phase::Triage => "triage",
+        Phase::Analyze => "analyze",
+        Phase::Verify => "verify",
+        Phase::PreparePublication => "prepare",
+        Phase::Publish => "publish",
+        Phase::Reconcile => "reconcile",
+        Phase::Completed => "done",
+        Phase::Failed => "failed",
+        Phase::Superseded => "superseded",
+        Phase::Unknown => "?",
+    }
+}
 
 pub fn time_of(at: &str) -> &str {
     at.get(11..19).unwrap_or(at)

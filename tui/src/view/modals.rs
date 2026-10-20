@@ -70,7 +70,7 @@ pub fn modal(c: &Ctx, f: &mut Frame, body: Rect, modal: &Modal) {
             let area = centered(body, if two { 80 } else { 44 }, lines.len() as u16 + 2);
             draw(c, f, area, "HELP", lines, 0);
         }
-        Modal::Finding { id, scroll } => draw(c, f, big, "FINDING", finding_lines(c, id), *scroll),
+        Modal::Finding { id, scroll } => super::doc::finding_page(c, f, body, id, *scroll),
         Modal::Event { sequence } => {
             let Some(t) = &c.m.timeline else { return };
             let phases = event_phases(c.m, &t.events);
@@ -89,6 +89,7 @@ fn draw(c: &Ctx, f: &mut Frame, area: Rect, title: &str, lines: Vec<Line<'static
     f.render_widget(Paragraph::new(lines).block(block).wrap(Wrap { trim: false }).scroll((scroll, 0)), area);
 }
 
+#[allow(dead_code)]
 fn finding_lines(c: &Ctx, id: &FindingId) -> Vec<Line<'static>> {
     let g = c.t.g();
     let sep = format!(" {} ", g.sep);
