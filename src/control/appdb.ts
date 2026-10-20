@@ -89,8 +89,8 @@ export class AppDbSource implements ControlSource {
   private readonly blobs = new Map<string, string>();
   private gh: { at: number; detection: GhDetection } | undefined;
   readonly mode: "engine" | "read-only" = "read-only";
-  /** Why this daemon is read-only, for the CAPABILITY_DENIED message. */
-  private readonly readOnlyReason: string;
+  /** Why this daemon is read-only, for `welcome` and the CAPABILITY_DENIED message; engine sources have none. */
+  readonly readOnlyReason: string | undefined;
 
   protected constructor(dataDir: string, writer: AppStore, env: Env, readOnlyReason = "the daemon is read-only") {
     this.dataDir = dataDir;

@@ -475,6 +475,9 @@ pub enum ServerMessage {
         /// `None` from a daemon that predates engine mode.
         #[serde(default)]
         mode: Option<DaemonMode>,
+        /// Why a read-only daemon is read-only, for display; `None` in engine mode and from older daemons.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        read_only_reason: Option<Text>,
         stream_epoch: Epoch,
         latest_sequence: u64,
     },

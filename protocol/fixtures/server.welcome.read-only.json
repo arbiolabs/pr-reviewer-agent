@@ -8,6 +8,7 @@
     "account.select"
   ],
   "mode": "read-only",
+  "readOnlyReason": "another pr-review is running on /srv/pr-review/.data",
   "streamEpoch": "epoch-1",
   "latestSequence": 108
 }

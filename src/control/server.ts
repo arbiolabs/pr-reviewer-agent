@@ -221,6 +221,7 @@ export async function startControlServer(options: ServerOptions): Promise<Contro
         sessionId: randomUUID(),
         capabilities: [...(source.selectAccount ? ["account.select"] : []), ...(source.capabilities?.() ?? [])],
         ...(source.mode ? { mode: source.mode } : {}),
+        ...(source.readOnlyReason ? { readOnlyReason: source.readOnlyReason } : {}),
         streamEpoch: source.epoch(),
         latestSequence: source.latestSequence(),
       });

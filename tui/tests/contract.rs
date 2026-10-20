@@ -156,8 +156,9 @@ fn m3_messages_parse_into_their_standalone_types() {
         ("server.welcome.engine", Some(DaemonMode::Engine), 5),
         ("server.welcome.read-only", Some(DaemonMode::ReadOnly), 1),
     ] {
-        let ServerMessage::Welcome { mode: m, capabilities, .. } = ServerMessage::parse(&read(name)).unwrap() else { panic!() };
+        let ServerMessage::Welcome { mode: m, capabilities, read_only_reason, .. } = ServerMessage::parse(&read(name)).unwrap() else { panic!() };
         assert_eq!((m, capabilities.len()), (mode, granted), "{name}");
+        assert_eq!(read_only_reason.is_some(), mode == Some(DaemonMode::ReadOnly), "{name}");
     }
 }
 

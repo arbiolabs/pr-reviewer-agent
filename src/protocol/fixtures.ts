@@ -74,7 +74,7 @@ const findingUpdated = (s: Seq, f: Finding) => ev(s, "finding.updated", f, { prI
 const runEvent = (s: Seq, type: "run.started" | "review.completed" | "run.superseded" | "run.failed", r: Run) =>
   ev(s, type, r, { prId: r.prId, runId: r.id });
 
-const welcome = (latestSequence: number, epoch = EPOCH, capabilities: string[] = [], mode?: "engine" | "read-only"): ServerMessage => ({
+const welcome = (latestSequence: number, epoch = EPOCH, capabilities: string[] = [], mode?: "engine" | "read-only", readOnlyReason?: string): ServerMessage => ({
   type: "welcome",
   requestId: "req-hello",
   protocolVersion: 1,
@@ -82,6 +82,7 @@ const welcome = (latestSequence: number, epoch = EPOCH, capabilities: string[] =
   sessionId: "session-1",
   capabilities,
   ...(mode ? { mode } : {}),
+  ...(readOnlyReason ? { readOnlyReason } : {}),
   streamEpoch: epoch,
   latestSequence,
 });
@@ -811,7 +812,7 @@ export const fixtures: Record<string, ClientMessage | ServerMessage | Record<str
 
   "server.welcome": welcome(108),
   "server.welcome.engine": welcome(108, EPOCH, ["account.select", ...REVIEW_COMMANDS], "engine"),
-  "server.welcome.read-only": welcome(108, EPOCH, ["account.select"], "read-only"),
+  "server.welcome.read-only": welcome(108, EPOCH, ["account.select"], "read-only", "another pr-review is running on /srv/pr-review/.data"),
   "server.publication.preview": preview,
   "server.snapshot": snapshot(108, [pr1, pr2, pr3], [run1, run2], [f1, f2]),
   "server.snapshot.accounts": snapshot(108, [pr1], [run1], [f1], EPOCH, [

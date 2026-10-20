@@ -23,7 +23,7 @@ also arrive unsolicited (`snapshot`, `resync.required`, `error`) have an optiona
 
 | Server → client | Fields |
 | --- | --- |
-| `welcome` | `protocolVersion: 1`, `serverVersion`, `sessionId`, `capabilities[]`, `mode?` (`engine` or `read-only`; absent from older servers), `streamEpoch`, `latestSequence` |
+| `welcome` | `protocolVersion: 1`, `serverVersion`, `sessionId`, `capabilities[]`, `mode?` (`engine` or `read-only`; absent from older servers), `readOnlyReason?` (display text, present in `read-only` mode), `streamEpoch`, `latestSequence` |
 | `snapshot` | `streamEpoch`, `sequence`, `prs[]`, `runs[]`, `findings[]`, `accounts[]?` (absent from older servers) |
 | `event` | see below |
 | `resync.required` | `reason` (display text) |

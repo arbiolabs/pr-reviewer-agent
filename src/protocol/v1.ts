@@ -316,6 +316,7 @@ export const ServerMessage = Type.Union([
     sessionId: Id,
     capabilities: Type.Array(Type.String()),
     mode: Type.Optional(oneOf(DAEMON_MODES)),
+    readOnlyReason: Type.Optional(Type.String({ description: "why a read-only daemon is read-only (commands off, another pr-review holds the data dir, or the engine failed to open), for display" })),
     streamEpoch: Id,
     latestSequence: Seq,
   }),

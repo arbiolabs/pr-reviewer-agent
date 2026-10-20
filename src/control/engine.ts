@@ -29,6 +29,7 @@ const CANCEL_REASON = "cancelled from the TUI";
  */
 export class EngineSource extends AppDbSource {
   override readonly mode = "engine" as const;
+  override readonly readOnlyReason = undefined;
   private readonly app: App;
   private readonly options: EngineOptions;
   private readonly running = new Set<Promise<unknown>>();
@@ -39,10 +40,19 @@ export class EngineSource extends AppDbSource {
     this.options = options;
   }
 
-  /** Host `app` (already holding the data-dir lock) and run its §11 startup recovery. */
+  /**
+   * Host `app` (already holding the data-dir lock) and run its §11 startup recovery. On a recovery failure the app is
+   * closed first, so the daemon's read-only fallback leaves no lock held and no task running.
+   */
   static async host(dataDir: string, app: App, options: EngineOptions): Promise<EngineSource> {
     const source = new EngineSource(dataDir, app, options);
-    await recover(app, options.github, (work) => source.track(work));
+    try {
+      await recover(app, options.github, (work) => source.track(work));
+    } catch (error) {
+      source.db.close();
+      await app.close();
+      throw error;
+    }
     return source;
   }
 

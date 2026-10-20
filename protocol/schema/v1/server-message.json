@@ -46,6 +46,10 @@
             "read-only"
           ]
         },
+        "readOnlyReason": {
+          "type": "string",
+          "description": "why a read-only daemon is read-only (commands off, another pr-review holds the data dir, or the engine failed to open), for display"
+        },
         "streamEpoch": {
           "type": "string",
           "minLength": 1

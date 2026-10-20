@@ -40,7 +40,7 @@ const newClient = () => new GitHubClient({ auth: { kind: "token", token: "ghp_te
 type Hosted = { app: App; source: EngineSource; dataDir: string; client: GitHubClient };
 
 /** An App on the fake GitHub, hosted by an EngineSource (not yet served). */
-async function host(options: { config?: Config; responses?: FauxResponseStep[]; allowCommands?: boolean; dataDir?: string; client?: GitHubClient } = {}): Promise<Hosted> {
+async function host(options: { config?: Config; responses?: FauxResponseStep[]; allowCommands?: boolean; dataDir?: string; client?: GitHubClient; github?: (installationId: number) => GitHubClient } = {}): Promise<Hosted> {
   const config = options.config ?? approvalConfig;
   const client = options.client ?? newClient();
   const pulls = new GitHubPullSource(() => client);
@@ -57,9 +57,20 @@ async function host(options: { config?: Config; responses?: FauxResponseStep[]; 
     lockWaitMs: 0,
   });
   // No gh on PATH: journal sequences are pinned, and a detected account would add a row.
-  const source = await EngineSource.host(dataDir, app, { config, pulls, github: () => client, allowCommands: options.allowCommands ?? true, env: { PATH: "" } });
+  const source = await EngineSource.host(dataDir, app, { config, pulls, github: options.github ?? (() => client), allowCommands: options.allowCommands ?? true, env: { PATH: "" } });
   cleanup.push(() => source.close());
   return { app, source, dataDir, client };
+}
+
+/** A data dir whose startup recovery needs a GitHub client: a failed revision with an outbox GitHub may have received. */
+function seedUncertainOutbox(dataDir: string): void {
+  const store = AppStore.open(join(dataDir, "app.sqlite"));
+  const prId = store.upsertPull(fixture.pull);
+  const rev = store.ensureRevision({ prId, baseSha: fixture.pull.baseSha, headSha: fixture.headSha, policyVersion: "1+publish", reviewerVersion: "m1+faux/reviewer" });
+  for (const event of ["CONTEXT_PERSISTED", "ROUTING_PERSISTED", "CANDIDATES_PERSISTED", "CANDIDATES_DISPOSED", "HEAD_VERIFIED"] as const) store.advanceFromCurrent(rev.id, event);
+  store.advanceOutbox(store.ensureOutbox({ revisionId: rev.id, idempotencyKey: `${rev.id}:1`, payloadHash: "p", payloadJson: "{}" }).id, "SEND");
+  store.advanceFromCurrent(rev.id, "TERMINAL_ERROR", "daemon stopped mid-POST");
+  store.close();
 }
 
 async function serve(source: ControlSource) {
@@ -140,6 +151,49 @@ it("is read-only while another pr-review holds the data dir, and grants only acc
   );
   // The holder is still the engine: its own welcome grants the commands.
   expect((await serve(holder.source)).welcome).toMatchObject({ mode: "engine", capabilities: ["account.select", "review.start", "review.retry", "review.cancel", "review.publish"] });
+}, 30_000);
+
+it("falls back to read-only with the reason when recovery fails, holding no lock and running no task", async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "engine-"));
+  seedUncertainOutbox(dataDir);
+  const notes: string[] = [];
+  const source = await openSource(
+    dataDir,
+    true,
+    {
+      openEngine: async (dir) =>
+        (
+          await host({
+            dataDir: dir,
+            github: (installationId) => {
+              throw new Error(`this PR was recorded without a GitHub App installation (${installationId}); use token auth for it`);
+            },
+          })
+        ).source,
+    },
+    (t) => notes.push(t),
+  );
+  cleanup.push(() => source.close());
+  const why = "this PR was recorded without a GitHub App installation (0); use token auth for it";
+  expect([source.mode, notes]).toEqual(["read-only", [`pr-review daemon: read-only mode (${why})\n`]]);
+  const { c, welcome } = await serve(source);
+  expect(welcome).toMatchObject({ mode: "read-only", readOnlyReason: why, capabilities: ["account.select"] });
+  c.send({ type: "snapshot.get", requestId: "s" });
+  await c.waitFor((m) => m.type === "snapshot");
+  expect(await command(c, { command: "review.retry", params: { runId: "r" } })).toEqual(rejected("CAPABILITY_DENIED", `review.retry is not available: ${why}`));
+  // The failed engine released the data dir: a CLI review can open it at once, and finds nothing running.
+  const cli = await openApp({
+    dataDir,
+    config: approvalConfig,
+    pulls: new GitHubPullSource(newClient),
+    engine: { skipped: "test" },
+    models: fauxModels([]),
+    model: { provider: "faux", modelId: "reviewer" },
+    reviewerVersion: "m1+faux/reviewer",
+    lockWaitMs: 0,
+  });
+  cleanup.push(() => cli.close());
+  expect(await taskStatuses(cli)).toEqual([]);
 }, 30_000);
 
 it("grants no command by default, the three review commands when enabled, and review.publish only in approval mode", async () => {

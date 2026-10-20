@@ -37,6 +37,8 @@ export interface ControlSource {
   selectAccount?(accountId: string): Promise<string>;
   /** `welcome.mode`: engine sources host the review engine; read-only ones only read its database. */
   mode?: "engine" | "read-only";
+  /** `welcome.readOnlyReason`: why a read-only source is read-only, as display text. */
+  readOnlyReason?: string;
   /** The review commands this source grants now; `command` runs one of them (its key already checked and replayed). */
   capabilities?(): string[];
   /** Why a review command is not granted, as the CAPABILITY_DENIED message. */
