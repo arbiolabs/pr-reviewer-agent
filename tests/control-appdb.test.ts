@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import { AppDbSource } from "../src/control/appdb.ts";
 import { startControlServer } from "../src/control/server.ts";
 import { AppStore } from "../src/persistence/store.ts";
+import type { CandidateFinding } from "../src/domain/types.ts";
 import type { ServerMessage } from "../src/protocol/v1.ts";
 import { finishReview, startReview } from "../src/runtime/app.ts";
 import { syncRepo } from "../src/source/git.ts";
@@ -113,7 +114,7 @@ it("streams a real review to a client attached from the start, with no gaps", as
     finding: {
       id: finding!.id,
       reasoningSummary: "Compared the new route registration with its guarded sibling.",
-      evidence: [{ kind: "code_ref", path: "src/routes/orders.ts", start: 4, end: 5, refSha: fixture.headSha, text: "src/routes/orders.ts:4-5" }],
+      evidence: [{ kind: "code_ref", path: "src/routes/orders.ts", start: 4, end: 5, refSha: fixture.headSha, text: '  app.get("/orders", requireAdmin, listOrders);\n  app.delete("/orders/:id", deleteOrder);' }],
       history: [{ runId: revision.id, disposition: "DETECTED" }],
     },
   });
@@ -282,6 +283,97 @@ it("pages a diff by nextCursor, caps it per page, and gives binary files metadat
   c.send({ type: "diff.get", requestId: "gone", prId, baseSha, headSha: "0".repeat(40) });
   expect(await c.waitFor((m) => m.type === "error" && m.requestId === "gone")).toMatchObject({ code: "NOT_FOUND" });
 }, 60_000);
+
+it("sends the cited lines as evidence text, capped, sanitized, and never fetched", async () => {
+  const fixture = createFixture();
+  const git = (dir: string, ...args: string[]) => execFileSync("git", ["-C", dir, "-c", "user.name=F", "-c", "user.email=f@x", ...args], { encoding: "utf8" }).trim();
+  const lines = [
+    ...Array.from({ length: 100 }, (_, i) => `line ${i + 1}`),
+    ...Array.from({ length: 100 }, (_, i) => `long ${i + 101} ${"x".repeat(500)}`),
+    'const s = "\u001b[31mred\u001b[0m\u0007\u009b2J";',
+  ];
+  writeFileSync(join(fixture.repoDir, "app.ts"), lines.join("\n") + "\n");
+  git(fixture.repoDir, "add", ".");
+  git(fixture.repoDir, "commit", "-q", "-m", "app");
+  const sha = git(fixture.repoDir, "rev-parse", "HEAD");
+  git(fixture.repoDir, "config", "uploadpack.allowFilter", "true");
+
+  const dataDir = mkdtempSync(join(tmpdir(), "ctl-evidence-"));
+  const server = await daemon(dataDir);
+  const store = AppStore.open(join(dataDir, "app.sqlite"));
+  cleanup.push(() => store.close());
+  // A local-path clone ignores --filter, so it has every blob. A file:// one honours blob:none and has none.
+  await syncRepo(join(dataDir, "repos"), "acme/shop", fixture.repoDir, 1);
+  const lazy = await syncRepo(join(dataDir, "repos"), "acme/lazy", `file://${fixture.repoDir}`, 1);
+  const ref = (start: number, end: number, path = "app.ts") => ({ path, start, end, refSha: sha });
+  const save = (repositoryId: number, fullName: string, codeEvidence: CandidateFinding["codeEvidence"]) => {
+    const prId = store.upsertPull({ ...fixture.pull, repositoryId, fullName, baseSha: sha, headSha: sha });
+    const revision = store.ensureRevision({ prId, baseSha: sha, headSha: sha, policyVersion: "1", reviewerVersion: "m1+faux/reviewer" });
+    const candidate: CandidateFinding = {
+      id: "c1",
+      category: "security",
+      severity: "high",
+      title: "t",
+      explanation: "e",
+      file: "app.ts",
+      newLine: 3,
+      codeEvidence,
+      reasoningSummary: "r",
+      confidence: 0.9,
+      evidenceKind: "confirmed_by_static_trace",
+    };
+    store.writeVerification(revision, [], [{ findingId: `f-${fullName}`, fingerprint: fullName, candidate }]);
+    return `f-${fullName}`;
+  };
+  const shop = save(1, "acme/shop", [ref(3, 7), ref(1, 100), ref(101, 200), ref(201, 201), ref(3, 7, "gone.ts")]);
+  const offline = save(2, "acme/lazy", [ref(3, 7)]);
+
+  const c = await attach(server.path);
+  const detail = async (findingId: string) => {
+    c.send({ type: "finding.get", requestId: findingId, findingId });
+    const m = await c.waitFor<Extract<ServerMessage, { type: "finding.detail" }>>((m) => m.type === "finding.detail" && m.requestId === findingId);
+    return m.finding.evidence.map((e) => e.text);
+  };
+  const [five, short, long, hostile, gone] = await detail(shop);
+  expect(five).toBe("line 3\nline 4\nline 5\nline 6\nline 7");
+  expect(short!.split("\n")).toEqual([...lines.slice(0, 40), "… 60 more lines"]);
+  const kept = long!.split("\n").slice(0, -1);
+  expect(kept).toEqual(lines.slice(100, 100 + kept.length));
+  expect(Buffer.byteLength(kept.join("\n"))).toBeLessThanOrEqual(8 * 1024);
+  expect(long!.split("\n").at(-1)).toBe(`… ${100 - kept.length} more lines`);
+  expect(hostile).toBe('const s = "red";');
+  expect(gone).toBe("gone.ts:3-7 (code unavailable offline)");
+
+  expect(await detail(offline)).toEqual(["app.ts:3-7 (code unavailable offline)"]);
+  // The origin was reachable all along: the fallback is the daemon refusing to fetch, and the blob is still absent.
+  const blob = git(fixture.repoDir, "rev-parse", `${sha}:app.ts`);
+  expect(() => execFileSync("git", ["-C", lazy, "cat-file", "-e", blob], { env: { ...process.env, GIT_NO_LAZY_FETCH: "1" }, stdio: "ignore" })).toThrow();
+}, 30_000);
+
+it("answers a diff whose blobs the clone lacks with TEMPORARILY_UNAVAILABLE instead of fetching them", async () => {
+  const fixture = createFixture();
+  const git = (dir: string, ...args: string[]) => execFileSync("git", ["-C", dir, "-c", "user.name=F", "-c", "user.email=f@x", ...args], { encoding: "utf8" }).trim();
+  const baseSha = git(fixture.repoDir, "rev-parse", "HEAD");
+  writeFileSync(join(fixture.repoDir, "app.ts"), "export const changed = true;\n");
+  git(fixture.repoDir, "add", ".");
+  git(fixture.repoDir, "commit", "-q", "-m", "change");
+  const headSha = git(fixture.repoDir, "rev-parse", "HEAD");
+  git(fixture.repoDir, "config", "uploadpack.allowFilter", "true");
+
+  const dataDir = mkdtempSync(join(tmpdir(), "ctl-lazydiff-"));
+  const server = await daemon(dataDir);
+  const store = AppStore.open(join(dataDir, "app.sqlite"));
+  cleanup.push(() => store.close());
+  const lazy = await syncRepo(join(dataDir, "repos"), "acme/lazy", `file://${fixture.repoDir}`, 1);
+  const prId = store.upsertPull({ ...fixture.pull, repositoryId: 2, fullName: "acme/lazy", baseSha, headSha });
+  store.ensureRevision({ prId, baseSha, headSha, policyVersion: "1", reviewerVersion: "m1+faux/reviewer" });
+
+  const c = await attach(server.path);
+  c.send({ type: "diff.get", requestId: "lazy", prId, baseSha, headSha });
+  expect(await c.waitFor((m) => m.type === "error" && m.requestId === "lazy")).toMatchObject({ code: "TEMPORARILY_UNAVAILABLE" });
+  const blob = git(fixture.repoDir, "rev-parse", `${headSha}:app.ts`);
+  expect(() => execFileSync("git", ["-C", lazy, "cat-file", "-e", blob], { env: { ...process.env, GIT_NO_LAZY_FETCH: "1" }, stdio: "ignore" })).toThrow();
+}, 30_000);
 
 describe("account.select", () => {
   async function accountsDaemon(env: Record<string, string>) {

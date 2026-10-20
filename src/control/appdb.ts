@@ -7,12 +7,12 @@ import { ACCOUNT_KEY, chooseAccount, detectGh, type Env, type GhDetection, listA
 import { AppStore, type PullRow, type RevisionRow } from "../persistence/store.ts";
 import { sanitize } from "../protocol/sanitize.ts";
 import type { Account, Finding, FindingDetail, Pr, Run, SequencedEvent } from "../protocol/v1.ts";
-import { PinnedRepo } from "../source/git.ts";
+import { isMissingObject, offlineReadsSupported, PinnedRepo } from "../source/git.ts";
 import { type DiffPage, pageDiff, parseDiffFiles } from "./diff.ts";
 import { ControlError, type ControlSource, type DiffRequest, type Snapshot, type TimelinePage, type TimelineRequest } from "./source.ts";
 
 type JournalRow = { seq: number; prev: number; revision_id: string | null; from_state: string; event: string; to_state: string; detail: string | null; at: string };
-type FindingRow = { id: string; pr_id: string; fingerprint: string; status: string; current_severity: string; revision_id: string; evidence_json: string; stale: number };
+type FindingRow = { id: string; pr_id: string; repo_full_name: string; fingerprint: string; status: string; current_severity: string; revision_id: string; evidence_json: string; stale: number };
 
 /** Every string that leaves this source passes here: repository, PR and model text can carry terminal escapes. */
 function clean<T>(value: T): T {
@@ -26,7 +26,7 @@ const JOURNAL_SELECT = `SELECT a.seq, a.revision_id, a.from_state, a.event, a.to
   coalesce((SELECT max(b.seq) FROM audit_events b WHERE b.seq < a.seq), 0) AS prev FROM audit_events a`;
 
 // One finding at one observation: the given revision's, or the latest when revision is null.
-const FINDING_SELECT = `SELECT f.id, f.pr_id, f.fingerprint, f.status, f.current_severity, o.revision_id, o.evidence_json,
+const FINDING_SELECT = `SELECT f.id, f.pr_id, p.repo_full_name, f.fingerprint, f.status, f.current_severity, o.revision_id, o.evidence_json,
   r.head_sha != p.latest_head_sha AS stale
   FROM findings f JOIN finding_observations o ON o.finding_id = f.id
   JOIN review_revisions r ON r.id = o.revision_id JOIN pull_requests p ON p.id = f.pr_id
@@ -37,6 +37,40 @@ const FINDING_SELECT = `SELECT f.id, f.pr_id, f.fingerprint, f.status, f.current
 const isPhase = (s: string): s is ReviewState => (REVIEW_STATES as readonly string[]).includes(s);
 const TERMINAL_EVENT = { COMPLETED: "review.completed", FAILED: "run.failed", SUPERSEDED: "run.superseded" } as const;
 const SEEN_KEY = "github.accounts_seen";
+const EXCERPT_LINES = 40;
+const EXCERPT_BYTES = 8 * 1024;
+const BLOB_CACHE_ENTRIES = 64;
+const NEEDS_GIT = "git 2.45 or newer is needed to read code without fetching";
+
+/** The longest prefix of `text` within `max` UTF-8 bytes, never splitting a code point. */
+function cutToBytes(text: string, max: number): string {
+  let bytes = 0;
+  let out = "";
+  for (const ch of text) {
+    bytes += Buffer.byteLength(ch);
+    if (bytes > max) break;
+    out += ch;
+  }
+  return out;
+}
+
+/** Lines `start..end` of `content`, capped at EXCERPT_LINES and EXCERPT_BYTES with a closing `… N more lines`; `undefined` past the end. */
+export function excerpt(content: string, start: number, end: number): string | undefined {
+  const lines = (content.endsWith("\n") ? content.slice(0, -1) : content).split("\n").slice(start - 1, end);
+  if (lines.length === 0) return undefined;
+  const kept: string[] = [];
+  let bytes = 0;
+  for (const line of lines.slice(0, EXCERPT_LINES)) {
+    bytes += Buffer.byteLength(line) + 1;
+    if (bytes > EXCERPT_BYTES) {
+      if (kept.length === 0) kept.push(`${cutToBytes(line, EXCERPT_BYTES)} … line truncated`);
+      break;
+    }
+    kept.push(line);
+  }
+  const more = lines.length - kept.length;
+  return [...kept, ...(more > 0 ? [`… ${more} more line${more === 1 ? "" : "s"}`] : [])].join("\n");
+}
 
 /**
  * Reads the engine's app DB on its own read-only connection; WAL lets it read while the engine writes. The journal is
@@ -50,6 +84,8 @@ export class AppDbSource implements ControlSource {
   private readonly env: Env;
   private readonly streamEpoch: string;
   private diffCache: { key: string; files: ReturnType<typeof parseDiffFiles> } | undefined;
+  /** File contents by repo, sha and path, least recently used first. Misses are not cached: a later sync may add the blob. */
+  private readonly blobs = new Map<string, string>();
   private gh: { at: number; detection: GhDetection } | undefined;
 
   private constructor(dataDir: string, writer: AppStore, env: Env) {
@@ -148,20 +184,19 @@ export class AppDbSource implements ControlSource {
     });
   }
 
-  finding(findingId: string): FindingDetail {
-    return this.read(() => {
+  async finding(findingId: string): Promise<FindingDetail> {
+    const { repo, refs, detail } = this.read(() => {
       const row = this.db.prepare(FINDING_SELECT).get({ id: findingId, revision: null }) as FindingRow | undefined;
       if (!row) throw new ControlError("NOT_FOUND", `no finding ${findingId}`);
       const candidate = JSON.parse(row.evidence_json) as CandidateFinding;
       const history = this.db
         .prepare("SELECT revision_id, disposition, created_at FROM finding_observations WHERE finding_id = ? ORDER BY created_at")
         .all(findingId) as { revision_id: string; disposition: string; created_at: string }[];
-      return {
+      const finding: Omit<FindingDetail, "evidence"> = {
         ...toFinding(row),
         explanation: candidate.explanation,
         reasoningSummary: candidate.reasoningSummary,
         ...(candidate.suggestedFix ? { suggestedFix: candidate.suggestedFix } : {}),
-        evidence: candidate.codeEvidence.map((e) => ({ kind: "code_ref" as const, path: e.path, start: e.start, end: e.end, refSha: e.refSha, text: `${e.path}:${e.start}-${e.end}` })),
         // An observation records VERIFIED; until publication tracks more, a verified observation is a DETECTED finding.
         history: history.map((h) => ({
           runId: h.revision_id,
@@ -169,7 +204,34 @@ export class AppDbSource implements ControlSource {
           at: h.created_at,
         })),
       };
+      return { repo: row.repo_full_name, refs: candidate.codeEvidence, detail: finding };
     });
+    const evidence: FindingDetail["evidence"] = [];
+    const canRead = await offlineReadsSupported();
+    for (const { path, start, end, refSha } of refs) {
+      const code = canRead ? await this.excerptAt(repo, refSha, path, start, end) : undefined;
+      const why = canRead ? "code unavailable offline" : NEEDS_GIT;
+      evidence.push({ kind: "code_ref", path, start, end, refSha, text: code ?? `${path}:${start}-${end} (${why})` });
+    }
+    return clean({ ...detail, evidence });
+  }
+
+  /**
+   * The cited lines, read from the local bare repo only: the daemon never fetches. Any failure reads as unavailable.
+   * The cache holds excerpts, not files, so each entry stays under EXCERPT_BYTES.
+   */
+  private async excerptAt(repo: string, sha: string, path: string, start: number, end: number): Promise<string | undefined> {
+    const key = `${repo}\0${sha}\0${path}\0${start}\0${end}`;
+    let text = this.blobs.get(key);
+    if (text === undefined) {
+      const content = await new PinnedRepo(join(this.dataDir, "repos", `${repo}.git`), sha, sha).show(sha, path, { offline: true }).catch(() => undefined);
+      text = content === undefined ? undefined : excerpt(content, start, end);
+      if (text === undefined) return undefined;
+    }
+    this.blobs.delete(key);
+    this.blobs.set(key, text);
+    if (this.blobs.size > BLOB_CACHE_ENTRIES) this.blobs.delete(this.blobs.keys().next().value!);
+    return text;
   }
 
   async diff(request: DiffRequest): Promise<DiffPage> {
@@ -179,8 +241,13 @@ export class AppDbSource implements ControlSource {
     if (!found) throw new ControlError("NOT_FOUND", `no review of ${request.prId} at ${request.baseSha}...${request.headSha}`);
     const key = `${request.prId}\0${request.baseSha}\0${request.headSha}`;
     if (this.diffCache?.key !== key) {
+      if (!(await offlineReadsSupported())) throw new ControlError("TEMPORARILY_UNAVAILABLE", `diff unavailable: ${NEEDS_GIT}`);
       const repo = new PinnedRepo(join(this.dataDir, "repos", `${found.repo_full_name}.git`), request.baseSha, request.headSha);
-      this.diffCache = { key, files: parseDiffFiles(await repo.diff()) };
+      const text = await repo.diff(undefined, { offline: true }).catch((error: unknown) => {
+        if (!isMissingObject(error)) throw error;
+        throw new ControlError("TEMPORARILY_UNAVAILABLE", `the diff of ${request.baseSha.slice(0, 7)}...${request.headSha.slice(0, 7)} is not in the local clone; the daemon never fetches`);
+      });
+      this.diffCache = { key, files: parseDiffFiles(text) };
     }
     return clean(pageDiff(this.diffCache.files, request));
   }
