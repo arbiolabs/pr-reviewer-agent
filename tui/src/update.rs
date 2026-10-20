@@ -33,6 +33,8 @@ pub enum NetEvent {
     Overflow,
     LineTooLong,
     Garbled(String),
+    /// The network task will never dial this endpoint.
+    Unusable(String),
     Lost {
         reason: String,
         retry_in_ms: Option<u64>,
@@ -160,6 +162,10 @@ fn net(m: &mut Model, e: NetEvent, fx: &mut Vec<Effect>) {
         NetEvent::LineTooLong => {
             m.diag.error(m.now_ms, "server sent a line over 1 MiB");
             resync(m, "oversized line", fx);
+        }
+        NetEvent::Unusable(reason) => {
+            m.diag.error(m.now_ms, &reason);
+            transition(m, LinkInput::Unusable { message: Text::new(&reason) });
         }
         NetEvent::Garbled(err) => m.diag.error(m.now_ms, format!("unreadable server message: {err}")),
         NetEvent::Lost { reason, retry_in_ms } => {

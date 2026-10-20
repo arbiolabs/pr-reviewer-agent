@@ -23,6 +23,7 @@ fn empty_inbox(c: &Ctx) -> (String, Role) {
                 (format!("Reviewer service unavailable: {reason}. Is `pr-review daemon` running?"), Role::Fail)
             }
             Link::Incompatible { .. } => ("Incompatible reviewer service; see the banner.".into(), Role::Fail),
+            Link::Unusable { .. } => ("Cannot connect to the reviewer service; see the banner.".into(), Role::Fail),
             _ if m.diag.last_snapshot_ms.is_none() => ("Loading snapshot...".into(), Role::Pending),
             _ => ("No tracked PRs yet. The reviewer lists PRs here once it tracks them.".into(), Role::Muted),
         }

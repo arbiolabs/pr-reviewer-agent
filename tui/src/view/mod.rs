@@ -126,6 +126,7 @@ fn link_status(c: &Ctx) -> (String, Role) {
         Link::Connecting { attempt } => (format!("{} connecting (attempt {attempt})", g.pending), Role::Pending),
         Link::Disconnected { .. } => (format!("{} disconnected", g.fail), Role::Fail),
         Link::Incompatible { .. } => (format!("{} incompatible", g.fail), Role::Fail),
+        Link::Unusable { .. } => (format!("{} cannot connect", g.fail), Role::Fail),
     }
 }
 
@@ -187,6 +188,7 @@ fn banner(c: &Ctx, width: u16) -> Option<Line<'static>> {
             " {} protocol mismatch: {message}; server supports {supported:?}, this client speaks [1]. Upgrade the client or daemon.",
             g.fail
         ),
+        Link::Unusable { message } => format!(" {} {message}", g.fail),
         Link::Resyncing => format!(" {} resyncing: fetching an authoritative snapshot; live events paused", g.pending),
         _ => return None,
     };

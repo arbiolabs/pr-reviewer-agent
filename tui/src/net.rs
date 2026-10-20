@@ -20,6 +20,8 @@ pub const QUEUE: usize = 1024;
 const BACKOFF_MIN: Duration = Duration::from_millis(250);
 const BACKOFF_MAX: Duration = Duration::from_secs(10);
 const FLUSH_EVERY: Duration = Duration::from_millis(16);
+/// sun_path holds 104 bytes on macOS and 108 on Linux, the terminating NUL included. A longer path never connects.
+pub const SOCKET_PATH_MAX: usize = if cfg!(target_os = "macos") { 103 } else { 107 };
 
 #[derive(Debug)]
 pub enum NetCmd {
@@ -41,6 +43,12 @@ enum End {
 
 /// Runs until the app goes away or sends `NetCmd::Close`.
 pub async fn run(cfg: NetConfig, tx: mpsc::Sender<Msg>, mut rx: mpsc::Receiver<NetCmd>) {
+    if let Err(reason) = check_socket_path(&cfg.socket) {
+        if tx.send(Msg::Net(NetEvent::Unusable(reason))).await.is_ok() {
+            while !matches!(rx.recv().await, None | Some(NetCmd::Close)) {}
+        }
+        return;
+    }
     let mut attempt = 0u32;
     loop {
         attempt += 1;
@@ -87,6 +95,17 @@ pub fn backoff(attempt: u32) -> Duration {
     let d = BACKOFF_MIN.saturating_mul(1 << attempt.saturating_sub(1).min(16)).min(BACKOFF_MAX);
     let jitter = RandomState::new().hash_one(attempt) % (d.as_millis() as u64 / 2 + 1);
     d / 2 + Duration::from_millis(jitter)
+}
+
+pub fn check_socket_path(socket: &Path) -> Result<(), String> {
+    let len = socket.as_os_str().len();
+    if len <= SOCKET_PATH_MAX {
+        return Ok(());
+    }
+    Err(format!(
+        "socket path is {len} bytes (max {SOCKET_PATH_MAX} on {}); use a shorter --socket",
+        std::env::consts::OS
+    ))
 }
 
 /// Refuses a socket whose directory another user could tamper with.
@@ -366,6 +385,20 @@ mod tests {
         assert_eq!(r.next_line().await.unwrap(), Some(Line::TooLong));
         assert_eq!(r.next_line().await.unwrap(), Some(Line::Text("{\"ok\":1}".into())));
         assert_eq!(r.next_line().await.unwrap(), None);
+    }
+
+    #[test]
+    fn a_socket_path_one_byte_over_the_limit_is_refused() {
+        let at = |bytes: usize| PathBuf::from(format!("/{}", "s".repeat(bytes - 1)));
+        assert_eq!(check_socket_path(&at(SOCKET_PATH_MAX)), Ok(()));
+        let over = SOCKET_PATH_MAX + 1;
+        assert_eq!(
+            check_socket_path(&at(over)),
+            Err(format!(
+                "socket path is {over} bytes (max {SOCKET_PATH_MAX} on {}); use a shorter --socket",
+                std::env::consts::OS
+            ))
+        );
     }
 
     #[test]

@@ -215,3 +215,16 @@ async fn a_socket_in_a_shared_directory_is_refused() {
     let Link::Disconnected { reason, .. } = &c.model.link else { unreachable!() };
     assert!(reason.as_str().ends_with("has mode 755; the reviewer socket directory must be 0700"), "{reason}");
 }
+
+#[tokio::test]
+async fn a_socket_path_longer_than_sun_path_is_refused_without_dialing() {
+    let sock = PathBuf::from(format!("/tmp/{}/reviewer.sock", "d".repeat(110)));
+    let mut c = client(sock);
+    c.until("unusable", |m| matches!(m.link, Link::Unusable { .. })).await;
+    let Link::Unusable { message } = &c.model.link else { unreachable!() };
+    let limit = net::SOCKET_PATH_MAX;
+    assert!(message.as_str().starts_with(&format!("socket path is 129 bytes (max {limit} on ")), "{message}");
+    assert!(message.as_str().ends_with("use a shorter --socket"), "{message}");
+    tokio::time::sleep(Duration::from_millis(400)).await;
+    assert!(c.msgs.try_recv().is_err(), "the network task kept going after refusing the path");
+}

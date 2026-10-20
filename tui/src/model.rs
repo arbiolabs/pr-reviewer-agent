@@ -28,6 +28,10 @@ pub enum Link {
         supported: Vec<u32>,
         message: Text,
     },
+    /// The endpoint can never work, such as a socket path longer than the kernel accepts. Terminal: no dialing.
+    Unusable {
+        message: Text,
+    },
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -36,6 +40,7 @@ pub enum LinkInput {
     Opened,
     Welcomed { resuming: bool },
     Mismatch { supported: Vec<u32>, message: Text },
+    Unusable { message: Text },
     SnapshotApplied,
     StreamBroken,
     Lost { reason: Text, retry_in_ms: Option<u64> },
@@ -47,7 +52,8 @@ impl Link {
         use Link::*;
         use LinkInput as I;
         match (self, input) {
-            (Incompatible { .. }, _) => None,
+            (Incompatible { .. } | Unusable { .. }, _) => None,
+            (_, I::Unusable { message }) => Some(Unusable { message }),
             (_, I::Lost { reason, retry_in_ms }) => Some(Disconnected { reason, retry_in_ms }),
             (Disconnected { .. } | Connecting { .. }, I::Dialing { attempt }) => Some(Connecting { attempt }),
             (Disconnected { .. } | Connecting { .. }, I::Opened) => Some(Negotiating),
