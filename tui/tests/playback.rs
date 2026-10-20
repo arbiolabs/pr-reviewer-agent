@@ -39,11 +39,27 @@ fn every_script_reaches_its_expected_state() {
         .filter_map(|e| e.unwrap().file_name().to_str()?.strip_suffix(".ndjson").map(String::from))
         .collect();
     names.sort();
-    assert_eq!(names, ["burst", "duplicate", "epoch-change", "gap", "hostile", "normal", "superseded"]);
+    assert_eq!(names, ["accounts", "burst", "duplicate", "epoch-change", "gap", "hostile", "normal", "superseded"]);
     for name in names {
         let (m, _) = replay(&name);
         assert_eq!(summary(&m), expect(&name), "{name}");
     }
+}
+
+#[test]
+fn accounts_shows_the_new_selection_only_once_the_event_arrives() {
+    let mut m = model();
+    update(&mut m, Msg::Net(NetEvent::Opened));
+    let msgs = script("accounts");
+    let selected = |m: &pr_review_tui::model::Model| {
+        m.domain.accounts.as_ref().unwrap().iter().filter(|a| a.selected).map(|a| a.id.to_string()).collect::<Vec<_>>()
+    };
+    for msg in &msgs[..3] {
+        update(&mut m, Msg::Net(NetEvent::Message(msg.clone())));
+    }
+    assert_eq!(selected(&m), Vec::<String>::new(), "accepted alone must not change the selection");
+    update(&mut m, Msg::Net(NetEvent::Message(msgs[3].clone())));
+    assert_eq!(selected(&m), ["github.com/octo-work"]);
 }
 
 #[test]

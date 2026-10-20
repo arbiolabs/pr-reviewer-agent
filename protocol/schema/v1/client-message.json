@@ -367,6 +367,48 @@
             }
           },
           "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "requestId",
+            "command",
+            "params",
+            "idempotencyKey"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "command"
+            },
+            "requestId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "command": {
+              "type": "string",
+              "const": "account.select"
+            },
+            "params": {
+              "type": "object",
+              "required": [
+                "accountId"
+              ],
+              "properties": {
+                "accountId": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "additionalProperties": false
+            },
+            "idempotencyKey": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
         }
       ]
     }

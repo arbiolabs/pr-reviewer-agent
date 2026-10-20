@@ -59,12 +59,29 @@ macro_rules! id {
     )*};
 }
 
-id!(PrId, RunId, FindingId, Epoch, Sha, RequestId);
+id!(PrId, RunId, FindingId, Epoch, Sha, RequestId, AccountId);
+
+fn prefix(s: &str, chars: usize) -> &str {
+    s.char_indices().nth(chars).map_or(s, |(i, _)| &s[..i])
+}
 
 impl Sha {
     pub fn short(&self) -> &str {
-        let s = self.as_str();
-        s.char_indices().nth(7).map_or(s, |(i, _)| &s[..i])
+        prefix(self.as_str(), 7)
+    }
+}
+
+impl RunId {
+    /// Revision ids are long hashes; eight characters tell runs of one PR apart.
+    pub fn short(&self) -> &str {
+        prefix(self.as_str(), 8)
+    }
+}
+
+impl AccountId {
+    /// `env/GITHUB_TOKEN`: the daemon's environment token, which overrides any selection and cannot be selected.
+    pub fn is_env(&self) -> bool {
+        self.as_str().starts_with("env/")
     }
 }
 
@@ -199,6 +216,35 @@ pub enum ErrorCode {
     Unknown,
 }
 
+impl fmt::Display for ErrorCode {
+    /// The wire spelling (`CONFLICT`), which is what the daemon's docs and logs use.
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let wire = serde_json::to_value(self).ok();
+        f.write_str(wire.as_ref().and_then(|v| v.as_str()).unwrap_or("UNKNOWN"))
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AccountState {
+    Ok,
+    Error,
+    #[serde(other)]
+    Unknown,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Account {
+    pub id: AccountId,
+    pub host: Text,
+    pub login: Text,
+    pub state: AccountState,
+    pub gh_active: bool,
+    pub selected: bool,
+    pub scopes: Vec<Text>,
+}
+
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Pr {
@@ -315,6 +361,8 @@ pub struct Snapshot {
     pub prs: Vec<Pr>,
     pub runs: Vec<Run>,
     pub findings: Vec<Finding>,
+    /// `None` from a daemon that predates accounts; `Some(vec![])` when it found none.
+    pub accounts: Option<Vec<Account>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize)]
@@ -425,6 +473,7 @@ pub enum EventBody {
     PhaseChanged(PhaseChange),
     FindingUpdated(Finding),
     ToolActivity(ToolActivity),
+    AccountsUpdated(Vec<Account>),
     /// An event type this client does not know. It carries nothing, but still advances `lastApplied`.
     Other(Text),
 }
@@ -456,6 +505,11 @@ struct RawEvent {
     event_type: String,
     #[serde(default)]
     data: serde_json::Value,
+}
+
+#[derive(Deserialize)]
+struct RawAccounts {
+    accounts: Vec<Account>,
 }
 
 #[derive(Deserialize)]
@@ -511,6 +565,10 @@ impl TryFrom<RawEvent> for SequencedEvent {
                 let a: ToolActivity = from_value(data("tool.activity")?)?;
                 let summary: String = a.summary.as_str().chars().take(MAX_ACTIVITY_SUMMARY_CHARS).collect();
                 EventBody::ToolActivity(ToolActivity { tool: a.tool, summary: Text(summary) })
+            }
+            "accounts.updated" => {
+                let a: RawAccounts = from_value(data("accounts.updated")?)?;
+                EventBody::AccountsUpdated(a.accounts)
             }
             other => EventBody::Other(Text::new(other)),
         };
@@ -589,7 +647,7 @@ pub enum ClientMessage {
         before_sequence: Option<u64>,
         limit: Limit,
     },
-    /// Reserved this round: the client never sends one, because the server grants no write capability.
+    /// Sent only from the confirmation modal, and only for a capability the server granted.
     #[serde(rename = "command")]
     Command(CommandRequest),
 }
@@ -623,15 +681,18 @@ pub enum Command {
     Cancel(RunParams),
     Retry(RunParams),
     Publish(PublishParams),
+    SelectAccount(AccountParams),
 }
 
 impl Command {
+    /// Also the capability the server must grant before the client sends it.
     pub fn name(&self) -> &'static str {
         match self {
             Command::Start(_) => "review.start",
             Command::Cancel(_) => "review.cancel",
             Command::Retry(_) => "review.retry",
             Command::Publish(_) => "review.publish",
+            Command::SelectAccount(_) => "account.select",
         }
     }
 
@@ -642,6 +703,7 @@ impl Command {
             Command::Cancel(p) => format!("review.cancel:{}", p.run_id),
             Command::Retry(p) => format!("review.retry:{}", p.run_id),
             Command::Publish(p) => format!("review.publish:{}:{}", p.run_id, p.preview_id),
+            Command::SelectAccount(p) => format!("account.select:{}", p.account_id),
         }
     }
 }
@@ -667,6 +729,12 @@ pub struct PublishParams {
     pub expected_head_sha: Sha,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AccountParams {
+    pub account_id: AccountId,
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct RawCommand {
@@ -684,6 +752,7 @@ impl TryFrom<RawCommand> for CommandRequest {
             "review.cancel" => Command::Cancel(from_value(raw.params)?),
             "review.retry" => Command::Retry(from_value(raw.params)?),
             "review.publish" => Command::Publish(from_value(raw.params)?),
+            "account.select" => Command::SelectAccount(from_value(raw.params)?),
             other => return Err(format!("unknown command {other}")),
         };
         Ok(CommandRequest { request_id: raw.request_id, idempotency_key: raw.idempotency_key, command })
@@ -698,6 +767,7 @@ impl From<CommandRequest> for RawCommand {
             Command::Cancel(p) => ("review.cancel", to(serde_json::to_value(p))),
             Command::Retry(p) => ("review.retry", to(serde_json::to_value(p))),
             Command::Publish(p) => ("review.publish", to(serde_json::to_value(p))),
+            Command::SelectAccount(p) => ("account.select", to(serde_json::to_value(p))),
         };
         RawCommand { request_id: c.request_id, command: command.into(), params, idempotency_key: c.idempotency_key }
     }

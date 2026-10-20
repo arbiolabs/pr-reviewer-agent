@@ -45,6 +45,10 @@ pub fn summary(c: &Ctx, e: &SequencedEvent) -> (String, Role) {
             (format!("{} {glyph} {sev} {}: {}", f.id, f.title, finding_status(f.status).0), role)
         }
         EventBody::ToolActivity(a) => (format!("{} {}", a.tool, a.summary), Role::Normal),
+        EventBody::AccountsUpdated(accounts) => {
+            let selected = accounts.iter().find(|a| a.selected).map_or("none".into(), |a| a.id.to_string());
+            (format!("GitHub accounts updated: {} listed, selected {selected}", accounts.len()), Role::Normal)
+        }
         EventBody::Other(kind) => (format!("{kind} (not shown by this client version)"), Role::Muted),
     }
 }

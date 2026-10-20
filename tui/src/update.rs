@@ -308,6 +308,7 @@ fn apply_snapshot(m: &mut Model, s: Snapshot, fx: &mut Vec<Effect>) {
     m.domain.prs = s.prs.into_iter().map(|p| (p.id.clone(), p)).collect();
     m.domain.runs = s.runs.into_iter().map(|r| (r.id.clone(), r)).collect();
     m.domain.findings = s.findings.into_iter().map(|f| (f.id.clone(), f)).collect();
+    m.domain.accounts = s.accounts;
     m.domain.touched.retain(|id, _| m.domain.prs.contains_key(id));
     m.details.clear();
     if let Some(wanted) = m.ui.wanted_pr.take() {
@@ -409,6 +410,10 @@ fn apply_body(m: &mut Model, e: &SequencedEvent, fx: &mut Vec<Effect>) {
         EventBody::ToolActivity(a) => {
             d.tool_activity_count += 1;
             Some(ActivityKind::Tool { tool: a.tool.clone(), summary: a.summary.clone() })
+        }
+        EventBody::AccountsUpdated(accounts) => {
+            d.accounts = Some(accounts.clone());
+            None
         }
         EventBody::Other(_) => None,
     };

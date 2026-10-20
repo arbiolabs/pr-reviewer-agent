@@ -56,11 +56,13 @@ fn invalid_fixtures_are_rejected_or_handled_as_their_why_says() {
         "server.event.missing-prev-sequence",
         "server.event.sequence-zero",
         "server.finding.line-zero",
+        "server.snapshot.account-bad-shape",
     ];
     for name in rejected_server {
         assert!(ServerMessage::parse(&invalid(name)).is_err(), "{name} parsed");
     }
     let rejected_client = [
+        "client.command.account-select.no-account-id",
         "client.command.extra-field",
         "client.command.unknown-command",
         "client.command.unknown-param",
@@ -114,6 +116,36 @@ fn unknown_fields_and_event_types_are_ignored() {
     let e = sequenced(ServerMessage::parse(&body).unwrap());
     assert_eq!((e.sequence.get(), e.prev_sequence), (109, 108));
     assert_eq!(e.body, EventBody::Other(Text::new("review.publication_changed")));
+}
+
+#[test]
+fn accounts_parse_from_snapshot_and_event_and_are_optional_in_old_snapshots() {
+    let body = fs::read_to_string(protocol_dir().join("fixtures/server.snapshot.accounts.json")).unwrap();
+    let ServerMessage::Snapshot(s) = ServerMessage::parse(&body).unwrap() else { panic!() };
+    let ids: Vec<_> = s.accounts.unwrap().iter().map(|a| (a.id.to_string(), a.state, a.gh_active)).collect();
+    assert_eq!(
+        ids,
+        [
+            ("env/GITHUB_TOKEN".to_string(), AccountState::Ok, false),
+            ("github.com/diego-arbio-dev".to_string(), AccountState::Ok, true),
+            ("github.com/octo-work".to_string(), AccountState::Ok, false),
+            ("github.com/old-bot".to_string(), AccountState::Error, false),
+        ]
+    );
+
+    let body = fs::read_to_string(protocol_dir().join("fixtures/server.snapshot.json")).unwrap();
+    let ServerMessage::Snapshot(s) = ServerMessage::parse(&body).unwrap() else { panic!() };
+    assert_eq!(s.accounts, None);
+
+    let body = fs::read_to_string(protocol_dir().join("fixtures/server.event.accounts-updated.json")).unwrap();
+    let e = sequenced(ServerMessage::parse(&body).unwrap());
+    let EventBody::AccountsUpdated(a) = e.body else { panic!("{:?}", e.body) };
+    let selected: Vec<_> = a.iter().filter(|a| a.selected).map(|a| a.id.as_str()).collect();
+    assert_eq!(selected, ["github.com/octo-work"]);
+
+    let body = fs::read_to_string(protocol_dir().join("fixtures/client.command.account-select.json")).unwrap();
+    let ClientMessage::Command(c) = serde_json::from_str(&body).unwrap() else { panic!() };
+    assert_eq!(c.idempotency_key, c.command.idempotency_key());
 }
 
 #[test]

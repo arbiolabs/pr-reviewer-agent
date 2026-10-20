@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "pr-review/protocol/v1/account.json",
+  "type": "object",
+  "required": [
+    "id",
+    "host",
+    "login",
+    "state",
+    "ghActive",
+    "selected",
+    "scopes"
+  ],
+  "properties": {
+    "id": {
+      "type": "string",
+      "minLength": 1
+    },
+    "host": {
+      "type": "string"
+    },
+    "login": {
+      "type": "string"
+    },
+    "state": {
+      "anyOf": [
+        {
+          "type": "string",
+          "const": "ok"
+        },
+        {
+          "type": "string",
+          "const": "error"
+        }
+      ]
+    },
+    "ghActive": {
+      "type": "boolean",
+      "description": "gh's own active account for this host"
+    },
+    "selected": {
+      "type": "boolean",
+      "description": "the account this data dir uses for GitHub reads and publishing"
+    },
+    "scopes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    }
+  }
+}

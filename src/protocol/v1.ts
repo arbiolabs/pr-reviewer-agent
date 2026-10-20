@@ -127,6 +127,22 @@ export const DiffFile = Type.Object({
 });
 export type DiffFile = Static<typeof DiffFile>;
 
+/**
+ * A GitHub identity the daemon can see. `id` is `<host>/<login>`. `env/GITHUB_TOKEN` is the daemon's environment token,
+ * which overrides every gh account and cannot be selected. A selected account gh no longer lists is still listed, with
+ * state error, so the client can show why GitHub reads fail.
+ */
+export const Account = Type.Object({
+  id: Id,
+  host: Type.String(),
+  login: Type.String(),
+  state: Type.Union([Type.Literal("ok"), Type.Literal("error")]),
+  ghActive: Type.Boolean({ description: "gh's own active account for this host" }),
+  selected: Type.Boolean({ description: "the account this data dir uses for GitHub reads and publishing" }),
+  scopes: Type.Array(Type.String()),
+});
+export type Account = Static<typeof Account>;
+
 // ---------- events ----------
 
 const sequenced = {
@@ -149,6 +165,7 @@ export const KNOWN_EVENT_TYPES = [
   "review.completed",
   "run.superseded",
   "run.failed",
+  "accounts.updated",
   "heartbeat",
 ] as const;
 
@@ -167,6 +184,7 @@ export const KnownEvent = Type.Union([
   event("review.completed", Run, { prId: Id, runId: Id }),
   event("run.superseded", Run, { prId: Id, runId: Id }),
   event("run.failed", Run, { prId: Id, runId: Id }),
+  event("accounts.updated", Type.Object({ accounts: Type.Array(Account) }), {}),
 ]);
 
 // Never durable, never sequenced: carries no sequence, so it cannot advance or break the gap check.
@@ -214,6 +232,7 @@ export const Command = Type.Union([
   command("review.cancel", { runId: Id }),
   command("review.retry", { runId: Id }),
   command("review.publish", { runId: Id, previewId: Id, expectedHeadSha: Sha }),
+  command("account.select", { accountId: Id }),
 ]);
 export type Command = Static<typeof Command>;
 
@@ -268,6 +287,7 @@ export const ServerMessage = Type.Union([
     prs: Type.Array(Pr),
     runs: Type.Array(Run),
     findings: Type.Array(Finding),
+    accounts: Type.Optional(Type.Array(Account, { description: "absent from servers that predate account selection" })),
   }),
   Event,
   Type.Object({ type: Type.Literal("resync.required"), requestId: OptionalRequestId, reason: Type.String() }),
@@ -296,4 +316,4 @@ export const ServerMessage = Type.Union([
 ]);
 export type ServerMessage = Static<typeof ServerMessage>;
 
-export const ENTITIES = { pr: Pr, run: Run, finding: Finding, "finding-detail": FindingDetail, evidence: Evidence, "diff-file": DiffFile, event: Event } as const;
+export const ENTITIES = { pr: Pr, run: Run, finding: Finding, "finding-detail": FindingDetail, evidence: Evidence, "diff-file": DiffFile, account: Account, event: Event } as const;

@@ -104,6 +104,8 @@ pub struct DomainCache {
     pub prs: BTreeMap<PrId, Pr>,
     pub runs: BTreeMap<RunId, Run>,
     pub findings: BTreeMap<FindingId, Finding>,
+    /// In the daemon's order. `None` until a snapshot from a daemon that reports accounts.
+    pub accounts: Option<Vec<Account>>,
     pub activity: VecDeque<Activity>,
     pub tool_activity_count: u64,
     /// The journal sequence that last touched each PR, for "most recently changed" ordering.
@@ -262,17 +264,19 @@ pub enum EventCategory {
     Phase,
     Finding,
     Tool,
+    Account,
     Other,
 }
 
 impl EventCategory {
-    pub const CYCLE: [Option<EventCategory>; 7] = [
+    pub const CYCLE: [Option<EventCategory>; 8] = [
         None,
         Some(EventCategory::Phase),
         Some(EventCategory::Tool),
         Some(EventCategory::Finding),
         Some(EventCategory::Run),
         Some(EventCategory::Pr),
+        Some(EventCategory::Account),
         Some(EventCategory::Other),
     ];
     pub fn of(body: &EventBody) -> EventCategory {
@@ -282,6 +286,7 @@ impl EventCategory {
             EventBody::PhaseChanged(_) => EventCategory::Phase,
             EventBody::FindingUpdated(_) => EventCategory::Finding,
             EventBody::ToolActivity(_) => EventCategory::Tool,
+            EventBody::AccountsUpdated(_) => EventCategory::Account,
             EventBody::Other(_) => EventCategory::Other,
         }
     }
@@ -292,6 +297,7 @@ impl EventCategory {
             EventCategory::Phase => "phase",
             EventCategory::Finding => "finding",
             EventCategory::Tool => "tool",
+            EventCategory::Account => "account",
             EventCategory::Other => "other",
         }
     }
