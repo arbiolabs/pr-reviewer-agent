@@ -1,10 +1,10 @@
 import type { Config } from "../config/config.ts";
 import { transition } from "../domain/machine.ts";
 import { CANDIDATE_MACHINE, type CandidateEvent, type CandidateState } from "../domain/machines.ts";
-import { type CandidateFinding, type Disposition, SEVERITIES, sha256, stableId } from "../domain/types.ts";
+import { type CandidateFinding, type CodeEvidence, type Disposition, type ResolutionClaim, type ResolutionVerdict, SEVERITIES, sha256, stableId } from "../domain/types.ts";
 import type { FileDiff } from "../source/diff.ts";
 import { assertSafePath } from "../source/git.ts";
-import { evidenceTexts, findOwnEvidence, linkPriors, type ObservedLocation, type PriorFinding, type Report, splitLines } from "./track.ts";
+import { currentFile, evidenceTexts, findOwnEvidence, linkPriors, normalize, type ObservedLocation, type PriorFinding, type Report, splitLines } from "./track.ts";
 
 export type VerifyContext = {
   prId: string;
@@ -32,12 +32,27 @@ export function fingerprint(candidate: Pick<CandidateFinding, "category" | "file
 }
 
 const lineCount = (text: string) => (text === "" ? 0 : text.split("\n").length - (text.endsWith("\n") ? 1 : 0));
+const where = (e: CodeEvidence) => `${e.path}:${e.start}-${e.end}@${e.refSha.slice(0, 12)}`;
+
+/** The first reason one evidence range cannot be read from pinned data at one of the `allowed` SHAs, or `undefined`. */
+async function rangeProblem(evidence: CodeEvidence, ctx: VerifyContext, allowed: string[], outside: string): Promise<string | undefined> {
+  try {
+    assertSafePath(evidence.path);
+  } catch (error) {
+    return (error as Error).message;
+  }
+  if (!allowed.includes(evidence.refSha)) return `evidence ${where(evidence)} ${outside}`;
+  const text = await ctx.read(evidence.refSha, evidence.path);
+  if (text === undefined) return `evidence ${where(evidence)} does not exist`;
+  const lines = lineCount(text);
+  if (evidence.start < 1 || evidence.end < evidence.start || evidence.end > lines) return `evidence ${where(evidence)} is outside 1-${lines}`;
+  return undefined;
+}
 
 /** The first structural reason a candidate cannot be anchored and reproduced from pinned data, or `undefined`. */
 async function structuralProblem(candidate: CandidateFinding, ctx: VerifyContext): Promise<string | undefined> {
   try {
     assertSafePath(candidate.file);
-    for (const evidence of candidate.codeEvidence) assertSafePath(evidence.path);
   } catch (error) {
     return (error as Error).message;
   }
@@ -47,14 +62,51 @@ async function structuralProblem(candidate: CandidateFinding, ctx: VerifyContext
   if (!file.headLines.has(candidate.newLine)) return `${candidate.file}:${candidate.newLine} is outside every hunk of the head-side diff`;
   if (candidate.codeEvidence.length === 0) return "no code evidence";
   for (const evidence of candidate.codeEvidence) {
-    const where = `${evidence.path}:${evidence.start}-${evidence.end}@${evidence.refSha.slice(0, 12)}`;
-    if (evidence.refSha !== ctx.baseSha && evidence.refSha !== ctx.headSha) return `evidence ${where} cites a SHA outside this revision`;
-    const text = await ctx.read(evidence.refSha, evidence.path);
-    if (text === undefined) return `evidence ${where} does not exist`;
-    const lines = lineCount(text);
-    if (evidence.start < 1 || evidence.end < evidence.start || evidence.end > lines) return `evidence ${where} is outside 1-${lines}`;
+    const problem = await rangeProblem(evidence, ctx, [ctx.baseSha, ctx.headSha], "cites a SHA outside this revision");
+    if (problem !== undefined) return problem;
   }
   return undefined;
+}
+
+/**
+ * Why a resolution claim fails, or `undefined` when code supports it. A claim must name an open finding whose cited
+ * code changed or whose file is gone at this head (a changed line alone never resolves, but unchanged code never does
+ * either), which no candidate of this revision reports again. Its evidence must be confirmed_by_static_trace, exist
+ * at the head SHA, include a range in the finding's file at this head (or, when that file is gone, in a file this
+ * pull request changes), and cite no range that is the finding's own code unchanged. `reported` maps each open
+ * finding a candidate reported again to that candidate.
+ */
+async function refusal(claim: ResolutionClaim, ctx: VerifyContext, reported: Map<string, string>, seen: Set<string>): Promise<string | undefined> {
+  const f = ctx.prior.find((p) => p.findingId === claim.findingId);
+  if (!f) return `no open finding ${claim.findingId}`;
+  if (seen.has(claim.findingId)) return "duplicate of an earlier claim";
+  const by = reported.get(claim.findingId);
+  if (by !== undefined) return `candidate ${by} reports it again`;
+  if (f.located.kind === "same") return `its cited code is unchanged at ${f.located.location.file}:${f.located.location.newLine ?? "?"}`;
+  if (claim.evidenceKind !== "confirmed_by_static_trace") return `evidence is ${claim.evidenceKind}`;
+  if (claim.codeEvidence.length === 0) return "no code evidence";
+  for (const evidence of claim.codeEvidence) {
+    const problem = await rangeProblem(evidence, ctx, [ctx.headSha], "cites a SHA other than the head");
+    if (problem !== undefined) return problem;
+    const text = normalize(splitLines(await ctx.read(ctx.headSha, evidence.path))!.slice(evidence.start - 1, evidence.end));
+    if (f.location.evidence.some((old) => old.text === text)) return `evidence ${where(evidence)} is the finding's code unchanged`;
+  }
+  const file = currentFile(f);
+  const inScope = (path: string) => (file === undefined ? ctx.files.has(path) : path === file);
+  if (!claim.codeEvidence.some((e) => inScope(e.path))) return file === undefined ? "no evidence in a file this pull request changes" : `no evidence in ${file}`;
+  return undefined;
+}
+
+/** One verdict per claim, in order; only an ACCEPTED one moves its finding to RESOLVED (spec §4.3). */
+export async function checkResolutions(claims: ResolutionClaim[], ctx: VerifyContext, reported: Map<string, string>): Promise<ResolutionVerdict[]> {
+  const verdicts: ResolutionVerdict[] = [];
+  const seen = new Set<string>();
+  for (const claim of claims) {
+    const reason = await refusal(claim, ctx, reported, seen);
+    seen.add(claim.findingId);
+    verdicts.push({ findingId: claim.findingId, state: reason === undefined ? "ACCEPTED" : "REFUSED", reason: reason ?? null });
+  }
+  return verdicts;
 }
 
 function thresholdProblem(candidate: CandidateFinding, thresholds: VerifyContext["thresholds"]): string | undefined {
@@ -78,8 +130,13 @@ const step = (path: CandidateState[], event: CandidateEvent): CandidateState[] =
  * takes that finding's ID, and any other gets a new one. Two candidates that get the same new ID are one defect
  * reported twice, so the second is a duplicate. Two that read as the same open finding are not: the second is new.
  * `unverified` names the open findings a candidate reported again (`priorFindingId`) without a verified link to it.
+ * The resolution claims are checked last, because a finding any candidate reports again cannot be resolved.
  */
-export async function verifyCandidates(candidates: CandidateFinding[], ctx: VerifyContext): Promise<{ dispositions: Disposition[]; verified: VerifiedFinding[]; unverified: string[] }> {
+export async function verifyCandidates(
+  candidates: CandidateFinding[],
+  ctx: VerifyContext,
+  resolutions: ResolutionClaim[] = [],
+): Promise<{ dispositions: Disposition[]; verified: VerifiedFinding[]; unverified: string[]; verdicts: ResolutionVerdict[] }> {
   const dispositions: Disposition[] = [];
   const passed: (Report & { index: number; path: CandidateState[] })[] = [];
   const named = (candidate: CandidateFinding) => ctx.prior.find((f) => f.findingId === candidate.priorFindingId);
@@ -125,5 +182,10 @@ export async function verifyCandidates(candidates: CandidateFinding[], ctx: Veri
     verified.push({ findingId, fingerprint: print, candidate, location });
   }
   const unverified = candidates.filter((c, i) => named(c) && dispositions[i]!.findingId !== c.priorFindingId).map((c) => c.priorFindingId!);
-  return { dispositions, verified, unverified };
+  // Every open finding a candidate reports again, by a verified link or by name: the model says it is still there.
+  const reported = new Map<string, string>();
+  for (const [i, c] of candidates.entries()) {
+    for (const id of [dispositions[i]!.findingId, c.priorFindingId]) if (id && ctx.prior.some((p) => p.findingId === id) && !reported.has(id)) reported.set(id, c.id);
+  }
+  return { dispositions, verified, unverified, verdicts: await checkResolutions(resolutions, ctx, reported) };
 }

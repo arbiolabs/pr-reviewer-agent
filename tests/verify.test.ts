@@ -3,9 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, expect, it } from "vitest";
 import { DEFAULT_CONFIG } from "../src/config/config.ts";
-import { type CandidateFinding, stableId } from "../src/domain/types.ts";
+import { type CandidateFinding, type ResolutionClaim, stableId } from "../src/domain/types.ts";
 import { evidenceTexts, type ObservedLocation, type PriorFinding } from "../src/reasoning/track.ts";
-import { fingerprint, type VerifyContext, verifyCandidates } from "../src/reasoning/verify.ts";
+import { checkResolutions, fingerprint, type VerifyContext, verifyCandidates } from "../src/reasoning/verify.ts";
 import { parseDiff } from "../src/source/diff.ts";
 import { PinnedRepo, syncRepo } from "../src/source/git.ts";
 import { createFixture, DEFECT, type Fixture } from "./fixture.ts";
@@ -135,4 +135,55 @@ it("links a candidate that names a doubted finding by the finding's text found i
     ["VERIFIED", stableId("finding", "pr-1", "rev-1", fingerprint(stranger))],
   ]);
   expect(failed.unverified).toEqual(["f-doubted"]);
+});
+
+const AUTH = "src/auth/require-admin.ts";
+/** A finding seen on an older head, whose cited code (lines 3-5 of the fixture head) this head is said to have changed. */
+const doubted = (located: PriorFinding["located"], status: PriorFinding["status"] = "PUBLISHED"): PriorFinding => ({
+  findingId: "f-doubted",
+  status,
+  candidate: candidate({}),
+  location: { file: DEFECT.file, newLine: DEFECT.line, headSha: "older", evidence: [{ path: DEFECT.file, start: 3, end: 5, text: 'export function registerOrderRoutes(app: App) {\napp.get("/orders", requireAdmin, listOrders);\napp.delete("/orders/:id", deleteOrder);' }] },
+  located,
+});
+const claim = (over: Partial<ResolutionClaim> = {}): ResolutionClaim => ({
+  findingId: "f-doubted",
+  codeEvidence: [{ path: DEFECT.file, start: 5, end: 5, refSha: fixture.headSha }],
+  reason: "the route now has the guard",
+  evidenceKind: "confirmed_by_static_trace",
+  ...over,
+});
+const verdict = async (c: ResolutionClaim, prior = doubted({ kind: "changed", file: DEFECT.file }), reported = new Map<string, string>()) => (await checkResolutions([c], { ...ctx, prior: [prior] }, reported))[0];
+
+it("accepts a resolution claim only on a doubted finding, with head-side evidence in its file that is not the finding's code unchanged", async () => {
+  expect(await verdict(claim())).toEqual({ findingId: "f-doubted", state: "ACCEPTED", reason: null });
+  expect(await verdict(claim(), doubted({ kind: "changed", file: DEFECT.file }, "UNCERTAIN"))).toMatchObject({ state: "ACCEPTED" });
+  const sha = fixture.headSha.slice(0, 12);
+  const cases: [string, ResolutionClaim, PriorFinding?][] = [
+    [`evidence src/routes/orders.ts:5-5@${fixture.baseSha.slice(0, 12)} cites a SHA other than the head`, claim({ codeEvidence: [{ path: DEFECT.file, start: 5, end: 5, refSha: fixture.baseSha }] })],
+    [`evidence src/routes/orders.ts:3-5@${sha} is the finding's code unchanged`, claim({ codeEvidence: [{ path: DEFECT.file, start: 3, end: 5, refSha: fixture.headSha }] })],
+    [`no evidence in ${DEFECT.file}`, claim({ codeEvidence: [{ path: AUTH, start: 1, end: 2, refSha: fixture.headSha }] })],
+    [`its cited code is unchanged at ${DEFECT.file}:5`, claim(), doubted({ kind: "same", location: { file: DEFECT.file, newLine: 5, headSha: fixture.headSha, evidence: [] } })],
+    ["no open finding f-nobody", claim({ findingId: "f-nobody" })],
+    ["evidence is suspected", claim({ evidenceKind: "suspected" })],
+    ["no code evidence", claim({ codeEvidence: [] })],
+    [`evidence src/routes/orders.ts:4-40@${sha} is outside 1-6`, claim({ codeEvidence: [{ path: DEFECT.file, start: 4, end: 40, refSha: fixture.headSha }] })],
+    ["path traversal rejected: ../../etc/passwd", claim({ codeEvidence: [{ path: "../../etc/passwd", start: 1, end: 1, refSha: fixture.headSha }] })],
+  ];
+  for (const [reason, c, prior] of cases) expect((await verdict(c, prior))?.reason, reason).toBe(reason);
+  // A finding whose file is gone is resolved by evidence in a file this pull request changes, not anywhere.
+  expect(await verdict(claim(), doubted({ kind: "file_gone" }, "OUTDATED"))).toMatchObject({ state: "ACCEPTED" });
+  expect((await verdict(claim({ codeEvidence: [{ path: AUTH, start: 1, end: 2, refSha: fixture.headSha }] }), doubted({ kind: "file_gone" })))?.reason).toBe("no evidence in a file this pull request changes");
+  expect((await checkResolutions([claim(), claim()], { ...ctx, prior: [doubted({ kind: "changed", file: DEFECT.file })] }, new Map())).map((v) => v.reason)).toEqual([null, "duplicate of an earlier claim"]);
+});
+
+it("refuses a resolution claim when a candidate of the same revision reports the finding again, verified or not", async () => {
+  const prior = doubted({ kind: "changed", file: DEFECT.file });
+  // c1 is the finding's own title and lines: it links by rule 3 without naming the finding.
+  const relinked = await verifyCandidates([candidate({})], { ...ctx, prior: [prior] }, [claim()]);
+  expect(relinked.dispositions[0]!.findingId).toBe("f-doubted");
+  expect(relinked.verdicts).toEqual([{ findingId: "f-doubted", state: "REFUSED", reason: "candidate c1 reports it again" }]);
+  const named = await verifyCandidates([candidate({ id: "c2", title: "Deleting an order never checks who owns it", priorFindingId: "f-doubted", evidenceKind: "suspected" })], { ...ctx, prior: [prior] }, [claim()]);
+  expect([named.dispositions[0]!.state, named.unverified, named.verdicts[0]!.reason]).toEqual(["DISCARDED", ["f-doubted"], "candidate c2 reports it again"]);
+  expect((await verifyCandidates([], { ...ctx, prior: [prior] }, [claim()])).verdicts[0]).toMatchObject({ state: "ACCEPTED" });
 });

@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 import { main } from "../src/cli/main.ts";
-import type { Disposition } from "../src/domain/types.ts";
+import type { Disposition, ResolutionVerdict } from "../src/domain/types.ts";
 import { GitHubClient } from "../src/github/client.ts";
 import { FakeGitHub } from "../tests/fake-github.ts";
 import { FakePullSource } from "../tests/fixture.ts";
@@ -14,7 +14,7 @@ const CASES_DIR = new URL("./cases/", import.meta.url).pathname;
 
 /** A case with `commits` is a multi-commit case, and its labels are `TrackedLabel`s. */
 type CaseSpec = { title: string; body: string; labels: Label[]; commits?: Commit[] };
-type Review = { state: string; error: string | null; seconds: number; findings: TrackedFinding[]; discarded: Disposition[]; outboxStatus: string | null };
+type Review = { state: string; error: string | null; seconds: number; findings: TrackedFinding[]; discarded: Disposition[]; resolutions: ResolutionVerdict[]; outboxStatus: string | null };
 type CaseResult = {
   id: string;
   state: string;
@@ -76,10 +76,10 @@ async function review(id: string, model: string, pulls: FakePullSource, github?:
     err: (t) => (stderr += t),
   });
   const seconds = Math.round((Date.now() - started) / 1000);
-  const report = stdout ? (JSON.parse(stdout) as { state: string; findings: TrackedFinding[]; discarded: Disposition[]; outboxStatus: string | null }) : undefined;
+  const report = stdout ? (JSON.parse(stdout) as { state: string; findings: TrackedFinding[]; discarded: Disposition[]; resolutions: ResolutionVerdict[]; outboxStatus: string | null }) : undefined;
   const state = report?.state ?? "ERROR";
   const error = state === "COMPLETED" ? null : (stderr.trim().split("\n").at(-1) ?? `exit ${code}`);
-  return { state, error, seconds, findings: report?.findings ?? [], discarded: report?.discarded ?? [], outboxStatus: report?.outboxStatus ?? null };
+  return { state, error, seconds, findings: report?.findings ?? [], discarded: report?.discarded ?? [], resolutions: report?.resolutions ?? [], outboxStatus: report?.outboxStatus ?? null };
 }
 
 async function runCase(id: string, model: string): Promise<CaseResult> {
@@ -206,6 +206,8 @@ function print(runs: RunResult[], model: string) {
       for (const [n, s] of t.steps.entries()) {
         const at = `  run ${i + 1} ${t.id} step ${n}:`;
         for (const f of s.findings) console.log(`${at} ${f.findingId.slice(0, 8)} ${s.statuses[f.findingId]} ${f.severity} ${f.file}:${f.newLine} ${f.title}`);
+        for (const d of s.discarded) console.log(`${at} verifier discarded ${d.candidateId}: ${d.reason}`);
+        for (const v of s.resolutions) console.log(`${at} resolution of ${v.findingId.slice(0, 8)} ${v.state.toLowerCase()}${v.reason ? `: ${v.reason}` : ""}`);
         if (s.error) console.log(`${at} ERROR ${s.error}`);
       }
     }

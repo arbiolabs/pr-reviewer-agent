@@ -229,19 +229,24 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
     const set = store.candidateSet(revision.id)!;
     const ws = await deps.workspace(revision.id);
     const prior = await priorFindings(revision, ws);
-    const { dispositions, verified, unverified } = await verifyCandidates(set.candidates, {
-      prId: revision.pr_id,
-      revisionId: revision.id,
-      baseSha: revision.base_sha,
-      headSha: revision.head_sha,
-      files: ws.files,
-      read: (sha, path) => ws.repo.show(sha, path),
-      thresholds: config.verification,
-      prior,
-    });
-    const observations = observe(prior, verified, { verdicts: [], unverified });
-    const detail = `${verified.length} verified, ${dispositions.length - verified.length} discarded, ${prior.length} carried`;
-    store.advance(revision.id, "VERIFY", "CANDIDATES_DISPOSED", detail, () => store.writeVerification(revision, dispositions, verified, observations));
+    const { dispositions, verified, unverified, verdicts } = await verifyCandidates(
+      set.candidates,
+      {
+        prId: revision.pr_id,
+        revisionId: revision.id,
+        baseSha: revision.base_sha,
+        headSha: revision.head_sha,
+        files: ws.files,
+        read: (sha, path) => ws.repo.show(sha, path),
+        thresholds: config.verification,
+        prior,
+      },
+      set.resolutions,
+    );
+    const observations = observe(prior, verified, { verdicts, unverified });
+    const resolved = observations.filter((o) => o.path.at(-1) === "RESOLVED").length;
+    const detail = `${verified.length} verified, ${dispositions.length - verified.length} discarded, ${prior.length} carried, ${resolved} resolved`;
+    store.advance(revision.id, "VERIFY", "CANDIDATES_DISPOSED", detail, () => store.writeVerification(revision, dispositions, verified, observations, verdicts));
     return { phase: "prepare", revisionId: revision.id, verifiedSetId: set.id };
   };
 
@@ -249,8 +254,8 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
     const findings = store.findingsForRevision(revision.id);
     const snapshot = store.snapshot(revision.id)!;
     const { payload, hash, inlineFindingIds } = buildPayload({ revisionId: revision.id, headSha: revision.head_sha, findings, limitations: snapshot.limitations, files: parseDiff(snapshot.diff) });
-    // silent_no_findings posts only a review that says something new: a new finding, or a first comment on a carried one.
-    const news = inlineFindingIds.length > 0 || findings.some((f) => !f.carried);
+    // silent_no_findings posts only a review that says something new: a new finding, a first comment on a carried one, or a newly resolved one.
+    const news = inlineFindingIds.length > 0 || findings.some((f) => !f.carried || f.status === "RESOLVED");
     const publish = input.publish === true && !(config.review.publish_mode === "silent_no_findings" && !news);
     // Approval mode stores the payload the same way, then parks the revision for a human instead of posting.
     const approval = publish && config.review.publish_mode === "approval";

@@ -1,4 +1,4 @@
-import { type Disposition, SEVERITIES } from "../domain/types.ts";
+import { type Disposition, type ResolutionVerdict, SEVERITIES } from "../domain/types.ts";
 import type { AppStore, AuditEvent, FindingView, OutboxRow, RevisionRow } from "../persistence/store.ts";
 
 export type ReviewReport = {
@@ -10,6 +10,7 @@ export type ReviewReport = {
   limitations: string[];
   findings: FindingView[];
   dispositions: Disposition[];
+  resolutions: ResolutionVerdict[];
   audit: AuditEvent[];
   outbox: OutboxRow | undefined;
 };
@@ -29,6 +30,7 @@ export function loadReport(store: AppStore, revisionId: string): ReviewReport {
       .findingsForRevision(revisionId)
       .sort((a, b) => SEVERITIES.indexOf(a.candidate.severity) - SEVERITIES.indexOf(b.candidate.severity)),
     dispositions: store.candidateSet(revisionId)?.dispositions ?? [],
+    resolutions: store.candidateSet(revisionId)?.verdicts ?? [],
     audit: store.auditEvents(revisionId),
     outbox: store.outboxForRevision(revisionId),
   };
@@ -43,11 +45,16 @@ export function renderMarkdown(report: ReviewReport): string {
   return renderSummary(report.revision.head_sha, report.findings, report.limitations, incomplete);
 }
 
-/** The body section a carried finding is listed under, by the state this revision observed it in; any other state goes last. */
+/**
+ * The body section a carried finding is listed under, by the state this revision observed it in; any other state goes
+ * last. "Looks resolved" is the only word on resolution: the bot never resolves or replies in a GitHub thread.
+ */
 const CARRIED_SECTIONS: [heading: string, states: string[]][] = [
   ["Still present from an earlier commit:", ["STILL_PRESENT"]],
+  ["Looks resolved since the last review:", ["RESOLVED"]],
   ["Possibly fixed, the cited code changed:", ["POTENTIALLY_RESOLVED"]],
   ["Outdated, the cited file is gone:", ["OUTDATED"]],
+  ["Uncertain, reported again without verifiable evidence:", ["UNCERTAIN"]],
   ["Carried from an earlier commit:", []],
 ];
 
@@ -94,6 +101,7 @@ export function renderJson(report: ReviewReport) {
     limitations: report.limitations,
     findings: report.findings.map((f) => ({ findingId: f.findingId, fingerprint: f.fingerprint, status: f.status, ...f.candidate })),
     discarded: report.dispositions.filter((d) => d.state === "DISCARDED"),
+    resolutions: report.resolutions,
     published: report.outbox?.status === "published",
     githubReviewId: report.outbox?.github_review_id ?? null,
     outboxStatus: report.outbox?.status ?? null,
