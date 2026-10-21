@@ -223,7 +223,7 @@ fn a_start_on_a_running_head_attaches_to_its_review_and_on_a_parked_one_is_refus
     assert!(commands(&press(&mut m, KeyCode::Char('s'))).is_empty());
     assert_eq!(refusal(&m), "#184 at 4444444 is waiting for your approval");
     let f = frame(&mut m);
-    assert!(f.contains("review.start not sent"), "the client refused it, not the daemon: {f}");
+    assert!(f.contains("daemon command review.start · not sent"), "the client refused it, not the daemon: {f}");
     assert!(!f.contains("CONFLICT"), "{f}");
     assert!(commands(&press(&mut m, KeyCode::Char('y'))).is_empty(), "y has nothing to confirm");
     press(&mut m, KeyCode::Esc);

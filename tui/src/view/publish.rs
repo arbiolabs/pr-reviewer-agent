@@ -236,11 +236,11 @@ fn state(c: &Ctx, w: usize, run_id: &RunId, p: &PublicationPreview, publish: &Co
 }
 
 /// `daemon command review.start`, and once the daemon refused it, its code: `· CONFLICT`. A command the client never
-/// sent says so.
+/// sent says so the same way: `· not sent`.
 pub fn command_detail(c: &Ctx, command: &str, state: &ConfirmState) -> String {
     match state {
         ConfirmState::Refused { code: Some(code), .. } => format!("daemon command {command} {} {code}", c.t.g().sep),
-        ConfirmState::Refused { code: None, .. } => format!("daemon command {command} not sent"),
+        ConfirmState::Refused { code: None, .. } => format!("daemon command {command} {} not sent", c.t.g().sep),
         _ => format!("daemon command {command}"),
     }
 }
