@@ -43,7 +43,7 @@ pub fn lines(
         }
         Preview::Ready(p) => p,
     };
-    out.push(Line::from(c.span("Publish this review?", Role::Title)));
+    out.push(Line::from(c.span(heading(c, run_id, publish), Role::Title)));
     let n = p.comments.len();
     let target = format!(
         "{place} at {} {} as event {} {} {n} inline comment{}",
@@ -154,6 +154,20 @@ fn body(c: &Ctx, text: &str, w: usize, raw: bool) -> Vec<Line<'static>> {
         out.extend(markdown(c, line, w.saturating_sub(2), raw).into_iter().filter(|l| !l.is_empty()).map(indent));
     }
     out
+}
+
+/// The page's question while `y` can still publish, then what became of the answer.
+fn heading(c: &Ctx, run_id: &RunId, publish: &ConfirmState) -> String {
+    let status = c.m.domain.publications.get(run_id).map(|p| p.status);
+    match (status, publish) {
+        (Some(PublicationStatus::Published), _) => "Published on GitHub".into(),
+        (Some(PublicationStatus::Failed), _) | (_, ConfirmState::Refused { .. }) => "Publication failed".into(),
+        (Some(PublicationStatus::Uncertain | PublicationStatus::Unknown), _) => "Publication uncertain".into(),
+        (Some(PublicationStatus::Publishing), _) | (_, ConfirmState::Requested(_) | ConfirmState::Accepted { .. }) => {
+            format!("Publishing{}", c.t.g().ellipsis)
+        }
+        _ => "Publish this review?".into(),
+    }
 }
 
 /// What `y` does now, or did: the key while it would publish, why it would not, then the request and the
