@@ -273,7 +273,7 @@ fn states() -> Vec<(String, Model)> {
             if name == "burst" && i % 1000 != 0 && i + 1 != n {
                 continue;
             }
-            for keys in ["", "\n", "d", "t", "5"] {
+            for keys in ["", "\n", "d", "t", "3", "4", "5"] {
                 out.push((format!("{name}[{}] {keys:?}", i + 1), sim_keys(&s, keys).m));
             }
         }

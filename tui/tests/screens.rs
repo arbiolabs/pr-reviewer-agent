@@ -738,3 +738,19 @@ fn an_unreviewed_pr_says_so_in_one_sentence_and_offers_the_start_it_names() {
     assert!(!frame.contains("No findings"), "{frame}");
     assert!(frame.lines().last().unwrap().contains("s start review"), "{frame}");
 }
+
+#[test]
+fn a_failed_run_with_no_diff_says_so_in_a_sentence_and_settings_keeps_the_daemons_words() {
+    use crossterm::event::KeyCode;
+    let mut s = showcase(2);
+    s.m.ui.screen = pr_review_tui::model::Screen::Review;
+    s.m.ui.selected_pr = s.m.domain.prs.values().find(|p| p.number == 345).map(|p| p.id.clone());
+    s.m.ui.selected_finding = None;
+    let mut s = s.key(KeyCode::Char('d'));
+    let (frame, _) = render(&mut s.m, 120, 38);
+    assert!(frame.contains("No diff for this run. The review failed before it read the diff."), "{frame}");
+    assert!(!frame.contains("diff unavailable"), "{frame}");
+    let mut s = s.key(KeyCode::Char('5'));
+    let (frame, _) = render(&mut s.m, 120, 38);
+    assert!(frame.contains("NOT_FOUND: no diff for"), "{frame}");
+}

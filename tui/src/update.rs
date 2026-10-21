@@ -300,6 +300,21 @@ fn fail_request(m: &mut Model, id: &RequestId, message: Text) -> bool {
     true
 }
 
+/// The sentence for a diff the daemon would not serve; its own words go to Settings' errors.
+fn diff_error(m: &Model, key: &DiffKey, code: ErrorCode) -> String {
+    let failed = m.domain.runs.values().any(|r| {
+        r.pr_id == key.pr && r.base_sha == key.base && r.head_sha == key.head && r.status == RunStatus::Failed
+    });
+    match code {
+        ErrorCode::NotFound | ErrorCode::TemporarilyUnavailable if failed => {
+            "No diff for this run. The review failed before it read the diff.".into()
+        }
+        ErrorCode::NotFound => "The daemon has no diff for this revision.".into(),
+        ErrorCode::TemporarilyUnavailable => "The daemon can't read this diff now. Settings lists why.".into(),
+        _ => "The diff did not load. Settings lists the error.".into(),
+    }
+}
+
 /// What the reader is looking at: the screen and the panels over it.
 fn view_of(m: &Model) -> (Screen, usize) {
     (m.ui.screen, m.ui.modals.len())
@@ -526,7 +541,11 @@ fn server_message(m: &mut Model, msg: ServerMessage, fx: &mut Vec<Effect>) {
                 notice(m, format!("Server error {code}: {message}"));
                 return;
             };
-            if !fail_request(m, &id, message.clone()) {
+            let shown = match &m.diff {
+                Some(d) if d.pending.as_ref() == Some(&id) => Text::new(&diff_error(m, &d.key, code)),
+                _ => message.clone(),
+            };
+            if !fail_request(m, &id, shown) {
                 notice(m, format!("Server error {code}: {message}"));
             }
         }

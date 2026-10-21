@@ -45,19 +45,21 @@ pub fn diff(c: &Ctx, f: &mut Frame, area: Rect) {
     }
 }
 
-/// The sentence in place of a diff with no files: a PR never reviewed has none to show, and the daemon answers its
-/// diff with NOT_FOUND.
+/// The sentence in place of a diff with no files: a PR never reviewed has none to show, a diff that did not load says
+/// why, and an empty one says so.
 fn nothing_to_show(c: &Ctx, d: &DiffView) -> Option<String> {
     if !d.files.is_empty() || d.pending.is_some() {
         return None;
     }
     let pr = c.m.domain.prs.get(&d.key.pr)?;
-    match c.m.domain.latest_run(&pr.id) {
-        None => Some(format!("No review of #{} yet, so there is no diff to show. s starts one.", pr.number)),
-        Some(_) if d.error.is_none() => {
+    match (c.m.domain.latest_run(&pr.id), &d.error) {
+        (None, _) => Some(format!("No review of #{} yet, so there is no diff to show.", pr.number)),
+        // The daemon's errors arrive worded as sentences (`update::diff_error`); the client's own are fragments.
+        (_, Some(e)) if e.as_str().starts_with(char::is_uppercase) => Some(e.to_string()),
+        (_, Some(e)) => Some(format!("Diff unavailable: {e}")),
+        (_, None) => {
             Some(format!("#{} changes no files between {} and {}.", pr.number, d.key.base.short(), d.key.head.short()))
         }
-        Some(_) => None,
     }
 }
 
@@ -118,8 +120,8 @@ fn header(c: &Ctx, d: &DiffView, anchored: &[&Finding], w: usize) -> Vec<Line<'s
     }
     if d.pending.is_some() {
         second.push(c.span(format!("   loading{}", g.ellipsis), Role::Pending));
-    } else if let Some(e) = &d.error {
-        // Cut to the room left, never dropped: it is the only word on why the pane is empty.
+    } else if let Some(e) = d.error.as_ref().filter(|_| !d.files.is_empty()) {
+        // A later page failed: the files shown are not all of them. With none shown, the pane says why.
         let room = w.saturating_sub(super::doc::spans_w(&second));
         second.push(c.span(c.fit(&format!("   diff unavailable: {e}"), room), Role::Fail));
     } else if let Some(q) = &d.search {
