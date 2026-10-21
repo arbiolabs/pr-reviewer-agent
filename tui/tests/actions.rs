@@ -754,3 +754,26 @@ fn the_publication_page_is_a_preview_only_while_y_can_publish() {
     send(&mut m, &event(seq, "acme/shop#184", "rev-184-a", "review.publication_changed", published));
     assert_eq!(crumb(&mut m), "acme/shop #184 → publication", "published");
 }
+
+#[test]
+fn a_toast_is_a_sentence_and_one_still_under_way_ends_in_an_ellipsis() {
+    let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#186");
+    press(&mut m, KeyCode::Char('r'));
+    assert_eq!(m.notice.as_ref().unwrap().text, "Refreshing the snapshot…");
+    let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#186");
+    m.look.ascii = true;
+    press(&mut m, KeyCode::Char('r'));
+    assert_eq!(m.notice.as_ref().unwrap().text, "Refreshing the snapshot~", "the ASCII ellipsis");
+
+    // Every literal toast the reducer raises starts with a capital, so none reads as a fragment beside the others.
+    let source = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/update.rs")).unwrap();
+    let fragments: Vec<&str> = source
+        .lines()
+        .filter(|l| {
+            let Some(at) = l.find("notice(m, ") else { return false };
+            let rest = l[at + 10..].trim_start_matches("format!(");
+            rest.strip_prefix('"').and_then(|r| r.chars().next()).is_some_and(|c| c.is_ascii_lowercase())
+        })
+        .collect();
+    assert_eq!(fragments, Vec::<&str>::new());
+}

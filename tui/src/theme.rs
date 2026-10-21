@@ -166,6 +166,10 @@ pub struct Glyphs {
     pub sev_low: &'static str,
 }
 
+pub fn glyphs(ascii: bool) -> &'static Glyphs {
+    if ascii { &ASCII } else { &UNICODE }
+}
+
 const UNICODE: Glyphs = Glyphs {
     ok: "✓",
     pending: "◔",
@@ -265,7 +269,7 @@ impl Theme {
     }
 
     pub fn g(&self) -> &'static Glyphs {
-        if self.ascii { &ASCII } else { &UNICODE }
+        glyphs(self.ascii)
     }
 
     pub fn severity(&self, s: Severity) -> (&'static str, &'static str, Role) {

@@ -35,7 +35,7 @@ pub fn empty_rail(c: &Ctx, total: usize) -> Vec<(String, Role)> {
             return vec![(format!("  unavailable: {message}"), Role::Fail)];
         }
         Link::Connecting { .. } | Link::Negotiating | Link::Syncing => {
-            return vec![("  loading the snapshot".into(), Role::Muted)];
+            return vec![(format!("  loading the snapshot{}", c.t.g().ellipsis), Role::Muted)];
         }
         Link::Live | Link::Resyncing => return vec![("  nothing tracked yet".into(), Role::Muted)],
     };

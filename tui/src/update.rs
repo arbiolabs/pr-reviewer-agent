@@ -494,11 +494,11 @@ fn server_message(m: &mut Model, msg: ServerMessage, fx: &mut Vec<Effect>) {
             }
             m.diag.error(m.now_ms, format!("{code}: {message}"));
             let Some(id) = request_id else {
-                notice(m, format!("server error {code}: {message}"));
+                notice(m, format!("Server error {code}: {message}"));
                 return;
             };
             if !fail_request(m, &id, message.clone()) {
-                notice(m, format!("server error {code}: {message}"));
+                notice(m, format!("Server error {code}: {message}"));
             }
         }
     }
@@ -1177,9 +1177,9 @@ fn act(m: &mut Model, a: Action, fx: &mut Vec<Effect>) {
         Action::Refresh => {
             if matches!(m.link, Link::Live | Link::Stalled { .. }) {
                 resync(m, "manual refresh", fx);
-                notice(m, "refreshing snapshot");
+                notice(m, format!("Refreshing the snapshot{}", crate::theme::glyphs(m.look.ascii).ellipsis));
             } else {
-                notice(m, "not connected; the client reconnects on its own");
+                notice(m, "Not connected; the client reconnects on its own");
             }
         }
         Action::Up => move_by(m, -1, fx),
@@ -1239,7 +1239,7 @@ fn act(m: &mut Model, a: Action, fx: &mut Vec<Effect>) {
         Action::Accounts => {
             goto(m, Screen::Settings, fx);
             if m.domain.accounts.is_none() {
-                notice(m, "this daemon reports no GitHub accounts");
+                notice(m, "This daemon reports no GitHub accounts");
             }
         }
         Action::CycleScope => {
@@ -1736,7 +1736,7 @@ fn open(m: &mut Model, fx: &mut Vec<Effect>) {
 
 fn select_account(m: &mut Model) {
     let Some(a) = m.cursor_account().cloned() else {
-        notice(m, "no GitHub accounts to select");
+        notice(m, "No GitHub accounts to select");
         return;
     };
     if let Some(why) = m.account_block(&a) {
@@ -1762,7 +1762,7 @@ fn watch(m: &mut Model) {
     let parked = running.first().is_some_and(|r| !r.0);
     let running: Vec<(u64, PrId)> = running.into_iter().map(|(_, n, id)| (n, id)).collect();
     if running.is_empty() {
-        notice(m, "no review is running");
+        notice(m, "No review is running");
         return;
     }
     // With nothing parked, first the review the status line names: the running PR with the newest activity.
@@ -1848,7 +1848,7 @@ fn next_finding(m: &mut Model, dir: isize, fx: &mut Vec<Effect>) {
             let Some(d) = &m.diff else { return };
             let stops = finding_stops(m, d);
             if stops.is_empty() {
-                notice(m, "no findings anchored to this revision");
+                notice(m, "No findings anchored to this revision");
                 return;
             }
             let here = (
@@ -1908,7 +1908,7 @@ fn walk_matches(m: &mut Model, dir: isize, here: bool) {
         stops.iter().rev().find(|s| **s < at).or(stops.last())
     };
     let Some(&(fi, row)) = target else {
-        notice(m, format!("no line in this diff contains \"{q}\""));
+        notice(m, format!("No line in this diff contains \"{q}\""));
         return;
     };
     d.selected_file = Some(d.files[fi].path.clone());
