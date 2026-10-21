@@ -533,3 +533,16 @@ fn w_goes_first_to_the_review_waiting_for_you_then_to_the_running_ones() {
     let s = s.key(KeyCode::Char('w'));
     assert_eq!(number(&s), 338, "then the running one");
 }
+
+#[test]
+fn a_rail_search_with_no_match_says_so_once() {
+    use crossterm::event::KeyCode;
+    let mut s = showcase(2).key(KeyCode::Char('/'));
+    for ch in "zzzz".chars() {
+        s = s.key(KeyCode::Char(ch));
+    }
+    for (w, h) in [(80, 24), (120, 38)] {
+        let (frame, _) = render(&mut s.m, w, h);
+        assert_eq!(frame.matches("no PR matches").count(), 1, "{w}x{h}:\n{frame}");
+    }
+}
