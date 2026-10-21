@@ -46,12 +46,28 @@ Sleep 10s
 Type "t"
 Sleep 6s
 
-# Esc goes back to #1291's review; p opens the exact review the approval would post.
+# Esc goes back to #1291's review; p opens the exact review the approval would post, styled the way GitHub shows it.
 Escape
 Sleep 1.5s
 Type "p"
-Sleep 4s
+Sleep 3.5s
+
+# m shows the same payload as the raw markdown that will be posted, and back.
+Type "m"
+Sleep 2.5s
+Type "m"
+Sleep 1s
 
 # y approves this preview: publishing, then published with the review on GitHub.
 Type "y"
-Sleep 5s
+Sleep 4.5s
+
+# An action: c on #338's running review asks first, and y cancels it.
+Escape
+Sleep 1s
+Type "hk"
+Sleep 1.5s
+Type "c"
+Sleep 2.5s
+Type "y"
+Sleep 3s
