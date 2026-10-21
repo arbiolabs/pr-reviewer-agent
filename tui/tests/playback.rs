@@ -353,7 +353,7 @@ fn the_showcases_started_retried_and_running_runs_reach_an_end_and_a_reviewed_he
         }
     };
     let refused = |m: &pr_review_tui::model::Model| match m.top_modal() {
-        Some(Modal::Confirm { state: ConfirmState::Refused { code: ErrorCode::Conflict, message }, .. }) => {
+        Some(Modal::Confirm { state: ConfirmState::Refused { code: Some(ErrorCode::Conflict), message }, .. }) => {
             message.to_string()
         }
         other => panic!("{other:?}"),

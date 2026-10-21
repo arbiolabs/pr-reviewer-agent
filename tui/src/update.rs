@@ -251,7 +251,7 @@ fn settle_replayed_start(m: &mut Model) {
     }
     let message = Text::new(&start_refusal(m, &run));
     if let Modal::Confirm { state, .. } = &mut m.ui.modals[i] {
-        *state = ConfirmState::Refused { code: ErrorCode::Conflict, message };
+        *state = ConfirmState::Refused { code: Some(ErrorCode::Conflict), message };
     }
 }
 
@@ -514,7 +514,7 @@ fn server_message(m: &mut Model, msg: ServerMessage, fx: &mut Vec<Effect>) {
                     CommandOutcome::Accepted { operation_id } => {
                         ConfirmState::Accepted { operation: operation_id, at_ms: now }
                     }
-                    CommandOutcome::Rejected { code, message } => ConfirmState::Refused { code, message },
+                    CommandOutcome::Rejected { code, message } => ConfirmState::Refused { code: Some(code), message },
                 };
                 settle_replayed_start(m);
                 return;
@@ -1771,7 +1771,7 @@ fn refuse(m: &mut Model, mu: Mutation) {
         m.ui.modals.push(Modal::Confirm {
             prompt: format!("Start a review of #{} at {}?", p.number, p.head_sha.short()),
             command: Command::Start(StartParams { pr_id: p.id, expected_head_sha: p.head_sha }),
-            state: ConfirmState::Refused { code: ErrorCode::Conflict, message },
+            state: ConfirmState::Refused { code: None, message },
         });
         return;
     }

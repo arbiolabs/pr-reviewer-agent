@@ -257,9 +257,10 @@ pub enum ConfirmState {
         operation: Text,
         at_ms: u64,
     },
-    /// The daemon refused it: `message` is its sentence, `code` the detail beside the command name.
+    /// Refused: `message` is the sentence, and `code` the daemon's error code beside the command name, or `None` when
+    /// the client refused it before sending, knowing the daemon would.
     Refused {
-        code: ErrorCode,
+        code: Option<ErrorCode>,
         message: Text,
     },
     /// No reply in time; `y` sends the same command again, under the same idempotency key.
