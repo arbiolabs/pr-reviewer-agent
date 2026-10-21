@@ -348,9 +348,9 @@ pub fn settings(c: &Ctx, f: &mut Frame, area: Rect) {
         row(
             "activity",
             format!(
-                "{} feed entries kept (cap 2000); {} tool events applied",
-                m.domain.activity.len(),
-                m.domain.tool_activity_count
+                "{} kept (cap 2000); {} applied",
+                crate::text::count(m.domain.activity.len() as u64, "feed entry", "feed entries"),
+                crate::text::count(m.domain.tool_activity_count, "tool event", "tool events")
             ),
             Role::Normal,
         ),

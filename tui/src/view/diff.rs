@@ -123,7 +123,7 @@ fn header(c: &Ctx, d: &DiffView, anchored: &[&Finding], w: usize) -> Vec<Line<'s
         let here = d.selected_file.as_ref().and_then(|p| d.files.iter().position(|f| &f.path == p));
         let pos = match matches.iter().position(|m| Some(m.0) == here && m.1 == d.cursor) {
             Some(i) => format!("match {} of {} for \"{q}\"", i + 1, matches.len()),
-            None => format!("{} matches for \"{q}\"", matches.len()),
+            None => format!("{} for \"{q}\"", crate::text::count(matches.len() as u64, "match", "matches")),
         };
         second.push(c.span(format!("   {pos}"), Role::Accent));
     } else {

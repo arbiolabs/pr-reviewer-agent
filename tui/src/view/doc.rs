@@ -474,7 +474,12 @@ fn live(c: &Ctx, pr: &Pr, w: usize, log: usize, lines: &mut Vec<Line<'static>>) 
         let calls = c.m.domain.activity.iter().filter(|a| a.pr_id.as_ref() == Some(&p.id)).count();
         let this = p.id == pr.id;
         let label = format!("{:<7}", format!("#{}", p.number));
-        let tail = format!("  {:<8} {:>3} calls", super::doc::phase_label(r.phase), calls);
+        let tail = format!(
+            "  {:<8} {:>3} {:<5}",
+            super::doc::phase_label(r.phase),
+            calls,
+            if calls == 1 { "call" } else { "calls" }
+        );
         let seg = w.saturating_sub(width(&label) + width(&tail) + 6) / 6;
         let mut s = vec![c.span(label, if this { Role::Title } else { Role::Muted })];
         s.extend(phase_bar(c, r, seg.clamp(2, 10)));

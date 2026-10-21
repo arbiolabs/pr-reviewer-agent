@@ -803,6 +803,24 @@ fn no_ascii_spinner_frame_reads_as_the_separator_or_a_status_glyph() {
 }
 
 #[test]
+fn every_count_in_settings_agrees_with_its_noun() {
+    let mut m = Sim::new(pr_review_tui::model::Look::default()).play("showcase", 40).m;
+    assert!(m.domain.activity.len() >= 2, "the showcase feeds the activity log");
+    m.ui.screen = pr_review_tui::model::Screen::Settings;
+    let all = m.domain.activity.clone();
+    for (n, want) in [
+        (0, "0 feed entries kept (cap 2000); 0 tool events applied"),
+        (1, "1 feed entry kept (cap 2000); 1 tool event applied"),
+        (2, "2 feed entries kept (cap 2000); 2 tool events applied"),
+    ] {
+        m.domain.activity = all.iter().take(n).cloned().collect();
+        m.domain.tool_activity_count = n as u64;
+        let (f, _) = render(&mut m, 120, 38);
+        assert!(f.contains(want), "{n}: {f}");
+    }
+}
+
+#[test]
 fn a_link_state_still_under_way_ends_in_an_ellipsis() {
     let mut m = model();
     update(&mut m, Msg::Net(NetEvent::Opened));

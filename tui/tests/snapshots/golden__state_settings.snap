@@ -21,7 +21,7 @@ expression: text
     epoch, last sequence  epoch-1, 12
     snapshot, heartbeat   0.0s ago, 0.0s ago
     resyncs / reconnects  0 / 0
-    activity              2 feed entries kept (cap 2000); 1 tool events appli…
+    activity              2 feed entries kept (cap 2000); 1 tool event applied
   Display
     glyphs                unicode
     color                 on
