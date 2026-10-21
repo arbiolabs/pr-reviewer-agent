@@ -146,7 +146,7 @@ fn y_and_write_shortcuts_never_send_anything() {
         assert_eq!(press(&mut m, KeyCode::Char('y')), []);
         assert_eq!(press(&mut m, KeyCode::Char('s')), []);
     }
-    assert_eq!(m.notice.as_ref().map(|n| n.text.as_str()), Some("Can't start a review: the daemon does not grant it"));
+    assert_eq!(m.notice.as_ref().map(|n| n.text.as_str()), Some("Can't start: the daemon does not grant it"));
 }
 
 #[test]

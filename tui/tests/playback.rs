@@ -374,7 +374,7 @@ fn the_showcases_started_retried_and_running_runs_reach_an_end_and_a_reviewed_he
     keys(&mut m, 1296, "sy");
     assert_eq!(m.top_modal(), None);
     let why = m.notice.as_ref().unwrap().text.clone();
-    assert!(why.starts_with("#1296 at ") && why.ends_with(" is already reviewed"), "{why:?}");
+    assert!(why.starts_with("Can't start: #1296 at ") && why.ends_with(" is already reviewed"), "{why:?}");
     for number in [1287, 341] {
         keys(&mut m, number, "sy");
         let why = refused(&m);

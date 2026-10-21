@@ -243,7 +243,7 @@ fn settle_replayed_start(m: &mut Model) {
     };
     let run = operation.as_str().strip_prefix("review.start:").map(RunId::new);
     if let Some(why) = in_review(m, &p.pr_id, &p.expected_head_sha) {
-        notice(m, why);
+        notice(m, format!("Can't start: {why}"));
         return;
     }
     // The daemon's words for a head whose review ended.
@@ -253,7 +253,7 @@ fn settle_replayed_start(m: &mut Model) {
         _ => "is already reviewed",
     };
     let pr = m.domain.prs.get(&p.pr_id).map_or(p.pr_id.to_string(), |x| format!("#{}", x.number));
-    notice(m, format!("{pr} at {} {why}", p.expected_head_sha.short()));
+    notice(m, format!("Can't start: {pr} at {} {why}", p.expected_head_sha.short()));
 }
 
 /// Where a head's live review stands, as the daemon refuses a start for it: `#184 at 4444444 is already being reviewed`.
@@ -1393,7 +1393,7 @@ pub fn write_block(m: &Model, capability: &str) -> Option<&'static str> {
 fn mutation(m: &mut Model, mu: Mutation, fx: &mut Vec<Effect>) {
     let cap = mu.capability();
     let verb = match mu {
-        Mutation::Start => "start a review",
+        Mutation::Start => "start",
         Mutation::Retry => "retry",
         Mutation::Cancel => "cancel",
         Mutation::Publish => "publish",

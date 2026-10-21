@@ -158,7 +158,7 @@ fn a_start_the_daemon_replays_for_a_run_that_already_ended_says_the_head_is_revi
         r#"{"type":"command.result","requestId":"RID","status":"accepted","operationId":"review.start:rev-185-a"}"#;
     send(&mut m, &replayed.replace("RID", rid.as_str()));
     assert_eq!(m.top_modal(), None, "nothing will happen, so nothing waits");
-    assert_eq!(m.notice.as_ref().unwrap().text, "#185 at 5555555 is already reviewed");
+    assert_eq!(m.notice.as_ref().unwrap().text, "Can't start: #185 at 5555555 is already reviewed");
 }
 
 #[test]
@@ -166,13 +166,13 @@ fn a_start_on_a_head_under_review_is_refused_before_sending_and_closes_if_the_da
     let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#184");
     assert!(commands(&press(&mut m, KeyCode::Char('s'))).is_empty());
     assert_eq!(m.top_modal(), None, "no question to answer");
-    assert_eq!(m.notice.as_ref().unwrap().text, "Can't start a review: #184 at 4444444 is already being reviewed");
+    assert_eq!(m.notice.as_ref().unwrap().text, "Can't start: #184 at 4444444 is already being reviewed");
 
     let parked = r#"{"from":"VERIFY","to":"AWAITING_APPROVAL","event":"PREVIEW_STORED","detail":null}"#;
     send(&mut m, &event(109, "acme/shop#184", "rev-184-a", "review.phase_changed", parked));
     press(&mut m, KeyCode::Char('s'));
     assert_eq!(m.top_modal(), None);
-    assert_eq!(m.notice.as_ref().unwrap().text, "Can't start a review: #184 at 4444444 is waiting for your approval");
+    assert_eq!(m.notice.as_ref().unwrap().text, "Can't start: #184 at 4444444 is waiting for your approval");
 
     // The run reached the client only after the question was answered: the daemon replays the start that made it.
     for (phase, why) in
@@ -188,7 +188,7 @@ fn a_start_on_a_head_under_review_is_refused_before_sending_and_closes_if_the_da
             r#"{"type":"command.result","requestId":"RID","status":"accepted","operationId":"review.start:rev-186-a"}"#;
         send(&mut m, &replayed.replace("RID", rid.as_str()));
         assert_eq!(m.top_modal(), None, "{phase}: no event will close it");
-        assert_eq!(m.notice.as_ref().unwrap().text, format!("#186 at 6666666 {why}"));
+        assert_eq!(m.notice.as_ref().unwrap().text, format!("Can't start: #186 at 6666666 {why}"));
     }
 }
 
@@ -233,7 +233,7 @@ fn a_read_only_daemon_says_why_the_action_keys_do_nothing() {
     let mut m = engine("fixtures/server.welcome.read-only.json", "acme/shop#186");
     assert!(commands(&press(&mut m, KeyCode::Char('s'))).is_empty());
     assert_eq!(m.top_modal(), None);
-    assert_eq!(m.notice.as_ref().unwrap().text, "Can't start a review: daemon is read-only");
+    assert_eq!(m.notice.as_ref().unwrap().text, "Can't start: daemon is read-only");
 
     let off = read("fixtures/server.welcome.read-only.json").replace(
         "another pr-review is running on /srv/pr-review/.data",
