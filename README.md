@@ -232,4 +232,4 @@ The Rust terminal client is in `tui/`. Migrations are in `migrations/`. Commits 
 - Verification is static. pr-review runs no tests against PR code, and no second model double-checks a finding.
 - Each commit gets a fresh review. Tracking a finding across commits, marking it resolved, and replying in review threads are not built yet.
 - The daemon accepts start, retry, cancel, and publish commands only when enabled, which is also when it takes the data directory itself.
-- The [benchmark](bench/README.md) measures precision and recall on 12 small labeled PRs that we wrote ourselves, matched to findings by line. It shows how a change moves the numbers, but it does not predict precision and recall on real PRs.
+- The [benchmark](bench/README.md) measures precision and recall on 12 small labeled PRs that we wrote ourselves, matched to findings by line. It shows how a change moves the numbers, but it does not predict precision and recall on real PRs. Eight more cases push later commits and score how findings are tracked across them.

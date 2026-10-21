@@ -1,0 +1,31 @@
+{
+  "title": "Let admins refund an order",
+  "body": "Adds POST /orders/:id/refund so support can refund a paid order in full without editing the database.",
+  "labels": [
+    {
+      "id": "refund-auth",
+      "file": "src/routes/orders.ts",
+      "line_range": [18, 31],
+      "severity_at_least": "high",
+      "category": "security",
+      "note": "POST /orders/:id/refund is registered with requireUser only. Cancel, the other admin action, also has requireAdmin, so any signed-in member can refund any paid order in full."
+    }
+  ],
+  "commits": [
+    {
+      "dir": "commit2",
+      "delete": [],
+      "expect": [{ "label": "refund-auth", "status": "open" }],
+      "labels": [
+        {
+          "id": "reopen-auth",
+          "file": "src/routes/support.ts",
+          "line_range": [6, 15],
+          "severity_at_least": "high",
+          "category": "security",
+          "note": "POST /support/orders/:id/reopen is registered with requireUser only, so any signed-in member can mark any cancelled order paid again. It is the same missing requireAdmin as the refund route, in a new file."
+        }
+      ]
+    }
+  ]
+}
