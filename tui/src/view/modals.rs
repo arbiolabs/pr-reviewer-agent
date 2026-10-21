@@ -289,7 +289,8 @@ pub fn settings(c: &Ctx, f: &mut Frame, area: Rect) {
             s.capabilities.iter().map(|c| c.to_string()).collect::<Vec<_>>().join(", ")
         }
     });
-    let mut lines = vec![Line::raw("")];
+    // Below 20 rows the spacer row goes to the settings.
+    let mut lines = vec![Line::raw(""); usize::from(m.size.1 >= 20)];
     lines.push(Line::from(c.span("Settings", Role::Title)));
     let state = if m.link.welcomed() { "connected" } else { "not connected" };
     let socket = format!("socket {} {} {state}", m.diag.endpoint, c.t.g().sep);

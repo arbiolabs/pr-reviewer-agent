@@ -21,8 +21,10 @@ use crate::theme::{Bg, Role};
 pub fn rail_w(width: u16) -> u16 {
     (34 + width.saturating_sub(140) * 14 / 60).min(48)
 }
-/// Rows above the first PR: blank, heading, filter or blank.
-pub const RAIL_HEAD: u16 = 3;
+/// Rows above the first PR: blank, heading, filter or blank. Below 20 rows the blank goes to the list.
+pub fn rail_head(c: &Ctx) -> u16 {
+    if c.m.size.1 < 20 { 2 } else { 3 }
+}
 
 /// What an empty rail says: no snapshot yet, no reviewer to ask, nothing tracked, or nothing matching the filter.
 pub fn empty_rail(c: &Ctx, total: usize) -> Vec<(String, Role)> {
@@ -49,7 +51,7 @@ pub fn empty_rail(c: &Ctx, total: usize) -> Vec<(String, Role)> {
 
 /// Rows each PR takes; the spacer row goes when the list would not fit.
 pub fn row_h(c: &Ctx, height: u16) -> u16 {
-    if c.m.inbox().len() as u16 * 3 + RAIL_HEAD <= height { 3 } else { 2 }
+    if c.m.inbox().len() as u16 * 3 + rail_head(c) <= height { 3 } else { 2 }
 }
 
 pub fn rail(c: &Ctx, f: &mut Frame, area: Rect, focused: bool) {
@@ -61,18 +63,16 @@ pub fn rail(c: &Ctx, f: &mut Frame, area: Rect, focused: bool) {
     let head_role = if focused { Role::Accent } else { Role::Muted };
     let typing = matches!(c.m.top_modal(), Some(Modal::Input { purpose: InputPurpose::Search, .. }));
     let count = if prs.len() == total { format!("{total}  ") } else { format!("{} of {total}  ", prs.len()) };
-    let mut lines = vec![
-        Line::from(filled(vec![], w, bg)),
-        Line::from(filled(
-            split_row(
-                vec![Span::raw("  "), Span::styled("PULL REQUESTS", c.s(head_role).patch(bg))],
-                vec![Span::styled(count, c.s(Role::Muted).patch(bg))],
-                w,
-            ),
+    let mut lines = vec![Line::from(filled(vec![], w, bg)); rail_head(c) as usize - 2];
+    lines.extend([Line::from(filled(
+        split_row(
+            vec![Span::raw("  "), Span::styled("PULL REQUESTS", c.s(head_role).patch(bg))],
+            vec![Span::styled(count, c.s(Role::Muted).patch(bg))],
             w,
-            bg,
-        )),
-    ];
+        ),
+        w,
+        bg,
+    ))]);
     let filter = &c.m.ui.pr_filter;
     lines.push(Line::from(if filter.is_empty() && !typing {
         filled(vec![], w, bg)
@@ -122,7 +122,7 @@ pub fn rail(c: &Ctx, f: &mut Frame, area: Rect, focused: bool) {
 fn visible(c: &Ctx, prs: &[&Pr], height: u16) -> (std::ops::Range<usize>, usize) {
     let rh = row_h(c, height) as usize;
     let sel = c.m.ui.selected_pr.as_ref().and_then(|id| prs.iter().position(|p| &p.id == id));
-    let fits = (height as usize).saturating_sub(RAIL_HEAD as usize) / rh;
+    let fits = (height as usize).saturating_sub(rail_head(c) as usize) / rh;
     (window(prs.len(), sel, fits), rh)
 }
 
@@ -130,7 +130,7 @@ fn visible(c: &Ctx, prs: &[&Pr], height: u16) -> (std::ops::Range<usize>, usize)
 pub fn pr_at(c: &Ctx, area: Rect, y: u16) -> Option<crate::protocol::PrId> {
     let prs = c.m.inbox();
     let (range, rh) = visible(c, &prs, area.height);
-    let k = (y.checked_sub(area.y + RAIL_HEAD)? as usize) / rh;
+    let k = (y.checked_sub(area.y + rail_head(c))? as usize) / rh;
     let i = range.start + k;
     (i < range.end).then(|| prs[i].id.clone())
 }

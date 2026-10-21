@@ -248,7 +248,9 @@ fn page(c: &Ctx, t: &crate::model::TimelineView, col: Rect) -> (Vec<Line<'static
     let total = timeline_shown(c.m, t).iter().filter(|(e, _)| !is_heading(e)).count();
     let filtered = t.category.is_some() || t.phase.is_some() || !t.text.is_empty();
     let count = if filtered { format!("{} of {total}", timeline_stops(c.m, t).len()) } else { total.to_string() };
-    let mut head = vec![Line::raw("")];
+    // Below 20 rows the spacer rows go to the events.
+    let roomy = c.m.size.1 >= 20;
+    let mut head = vec![Line::raw(""); usize::from(roomy)];
     head.push(Line::from(match pr {
         Some(p) => vec![
             c.span(p.repository.to_string(), Role::Muted),
@@ -279,7 +281,9 @@ fn page(c: &Ctx, t: &crate::model::TimelineView, col: Rect) -> (Vec<Line<'static
         parts.remove(i);
     }
     head.push(Line::from(c.span(c.fit(&joined(&parts), w), Role::Muted)));
-    head.push(Line::raw(""));
+    if roomy {
+        head.push(Line::raw(""));
+    }
     if let Some(e) = &t.error {
         head.push(Line::from(c.span(c.fit(&format!("timeline unavailable: {e}"), w), Role::Fail)));
     } else if rows.is_empty() {

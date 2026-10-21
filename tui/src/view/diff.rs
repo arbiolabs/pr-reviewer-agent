@@ -39,9 +39,9 @@ pub fn diff(c: &Ctx, f: &mut Frame, area: Rect) {
         tree(c, f, r, d, &anchored, tree_focus);
     }
     if let Some(b) = body {
-        let head = Rect { height: 3.min(b.height), ..b };
+        let head = Rect { height: 2.min(b.height), ..b };
         f.render_widget(Paragraph::new(header(c, d, &anchored, b.width as usize)), head);
-        hunks(c, f, listing(b), d, &anchored);
+        hunks(c, f, listing(c, b), d, &anchored);
     }
 }
 
@@ -79,8 +79,10 @@ fn layout(c: &Ctx, area: Rect) -> (Option<Rect>, Option<Rect>) {
 }
 
 /// The patch listing under the three header rows.
-fn listing(b: Rect) -> Rect {
-    Rect { y: b.y + 3, height: b.height.saturating_sub(3), ..b }
+/// The patch under the two header rows, and under a spacer row from 20 rows up.
+fn listing(c: &Ctx, b: Rect) -> Rect {
+    let head = 2 + u16::from(c.m.size.1 >= 20);
+    Rect { y: b.y + head, height: b.height.saturating_sub(head), ..b }
 }
 
 /// What a click at (`x`, `y`) on the Diff screen in `area` lands on: a file in the list or a row of the patch.
@@ -92,7 +94,7 @@ pub fn hit(c: &Ctx, area: Rect, x: u16, y: u16) -> Option<super::Hit> {
         let i = range.start + (y.checked_sub(r.y + TREE_HEAD)? as usize) / rh;
         return (i < range.end).then(|| super::Hit::DiffFile(d.files[i].path.clone()));
     }
-    let rest = listing(body?);
+    let rest = listing(c, body?);
     let (_, owners) = listing_lines(c, rest, d, &diff_findings(c.m, d))?;
     owners.get(y.checked_sub(rest.y)? as usize).copied().flatten().map(super::Hit::DiffRow)
 }
@@ -141,7 +143,7 @@ fn header(c: &Ctx, d: &DiffView, anchored: &[&Finding], w: usize) -> Vec<Line<'s
     while second.len() > 1 && super::doc::spans_w(&second) > w {
         second.pop();
     }
-    vec![Line::from(first), Line::from(second), Line::raw("")]
+    vec![Line::from(first), Line::from(second)]
 }
 
 fn on_cursor(d: &DiffView, f: &Finding) -> bool {

@@ -786,14 +786,44 @@ fn settings_lists_a_disconnect_that_repeats_on_every_retry_once_with_its_count()
 fn below_twenty_rows_no_row_is_spent_on_the_spacer_and_the_rail_points_up_and_down() {
     for ascii in [false, true] {
         let mut s = Sim::new(Look { ascii, ..Look::default() }).play("showcase", usize::MAX);
+        // Seven PRs, one more than the 60x16 rail holds.
+        let mut extra = s.m.domain.prs.values().next().unwrap().clone();
+        (extra.id, extra.number) = (pr_review_tui::protocol::PrId::new("acme/shop#9"), 9);
+        s.m.domain.prs.insert(extra.id.clone(), extra);
         let last = s.m.inbox().last().map(|p| p.id.clone());
         s.m.ui.selected_pr = last;
         let (frame, _) = render(&mut s.m, 60, 16);
         let rows: Vec<&str> = frame.lines().collect();
-        assert!(!rows[1].trim().is_empty() || !rows[2].trim().is_empty(), "one blank row at most:\n{frame}");
+        assert!(rows[1..15].iter().all(|r| !r.trim().is_empty()), "no blank row:\n{frame}");
         let up = if ascii { "^ 1 more above" } else { "↑ 1 more above" };
         assert!(frame.contains(up), "{frame}");
         let (frame, _) = render(&mut s.m, 80, 24);
         assert!(frame.lines().nth(1).unwrap().trim().is_empty(), "the spacer stays at 24 rows:\n{frame}");
+    }
+}
+
+/// At 60x16 the rows under the title and over the footer carry content in every view, and a rail that hides PRs
+/// keeps no blank row.
+#[test]
+fn at_60x16_no_view_pads_with_blank_rows_while_its_content_is_cut() {
+    use crossterm::event::KeyCode;
+    let all = showcase(usize::MAX / 2);
+    let views = [
+        ("inbox", all.clone()),
+        ("review", all.clone().key(KeyCode::Enter)),
+        ("diff", all.clone().key(KeyCode::Enter).key(KeyCode::Char('d'))),
+        ("timeline", all.clone().key(KeyCode::Enter).key(KeyCode::Char('t'))),
+        ("settings", all.clone().key(KeyCode::Char('5'))),
+    ];
+    for (name, mut s) in views {
+        let (frame, _) = render(&mut s.m, 60, 16);
+        let rows: Vec<&str> = frame.lines().collect();
+        for y in [1, 14] {
+            assert!(!rows[y].trim().is_empty(), "{name}: row {y} is blank:\n{frame}");
+        }
+        if frame.contains("more above") || frame.contains("more below") {
+            let blank = rows[1..15].iter().position(|r| r.trim().is_empty());
+            assert_eq!(blank, None, "{name} hides PRs but keeps a blank row:\n{frame}");
+        }
     }
 }
