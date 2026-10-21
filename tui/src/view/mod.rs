@@ -454,7 +454,7 @@ fn rank(hint: &str) -> u8 {
 fn minimal(c: &Ctx, f: &mut Frame, area: Rect) {
     let (status, role) = link_status(c);
     let lines = vec![
-        Line::from(vec![c.span("PR REVIEWER ", Role::Title), c.span(status, role)]),
+        Line::from(vec![c.span("pr-review ", Role::Title), c.span(status, role)]),
         Line::from(c.span(format!("Terminal is {}x{}.", area.width, area.height), Role::Normal)),
         Line::from(c.span(format!("Resize to at least {MIN_W}x{MIN_H}."), Role::Pending)),
         Line::from(c.span("q quit  ? help", Role::Muted)),
