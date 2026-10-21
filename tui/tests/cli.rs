@@ -58,3 +58,9 @@ async fn a_playback_line_after_a_command_waits_for_that_command_and_the_command_
         assert!(matches!(next, Some(Msg::Net(NetEvent::Message(ServerMessage::Event(_))))), "{next:?}");
     }
 }
+
+#[test]
+fn the_readme_does_not_say_the_action_screens_are_missing() {
+    let readme = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/../README.md")).unwrap();
+    assert!(!readme.contains("screens for these actions are not built yet"), "README.md contradicts the client");
+}

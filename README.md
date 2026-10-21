@@ -142,5 +142,5 @@ The Rust terminal client is in `tui/`. Migrations are in `migrations/`. Commits 
 
 - Verification is static. pr-review runs no tests against PR code, and no second model double-checks a finding.
 - Each commit gets a fresh review. Tracking a finding across commits, marking it resolved, and replying in review threads are not built yet.
-- The daemon accepts start, retry, cancel, and publish commands only when enabled, which is also when it takes the data directory itself. The terminal client's screens for these actions are not built yet.
+- The daemon accepts start, retry, cancel, and publish commands only when enabled, which is also when it takes the data directory itself.
 - There is no labeled benchmark yet, so precision and recall are not measured.
