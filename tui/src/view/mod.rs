@@ -152,7 +152,7 @@ pub fn page_scroll_limit(m: &Model) -> u16 {
     let c = ctx(m, area.width);
     let body = regions(&c, area)[3];
     let len = m.top_modal().and_then(|x| modals::page_lines(&c, body, x)).map_or(0, |l| l.len());
-    modals::help_limit(len, body.height as usize) as u16
+    modals::page_limit(len, body.height as usize) as u16
 }
 
 /// The largest useful `doc_scroll` at the current size, so J past the end does not pile up presses K must undo.

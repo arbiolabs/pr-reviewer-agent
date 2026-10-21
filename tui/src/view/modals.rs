@@ -18,12 +18,8 @@ pub fn modal(c: &Ctx, f: &mut Frame, body: Rect, modal: &Modal) {
     match modal {
         Modal::Input { .. } => {}
         Modal::Confirm { title, prompt, command, state } => confirm(c, f, body, title, prompt, command.name(), state),
-        Modal::Help { scroll } => help(c, f, body, *scroll),
-        Modal::Finding { scroll, .. } | Modal::Publication { scroll, .. } => {
-            let lines = page_lines(c, body, modal).unwrap_or_default();
-            let (len, h) = (lines.len(), body.height as usize);
-            let start = (*scroll as usize).min(help_limit(len, h));
-            page(c, f, body, lines.into_iter().skip(start).collect());
+        Modal::Help { scroll } | Modal::Finding { scroll, .. } | Modal::Publication { scroll, .. } => {
+            scrolled(c, f, body, page_lines(c, body, modal).unwrap_or_default(), *scroll)
         }
     }
 }
@@ -88,16 +84,15 @@ fn confirm(c: &Ctx, f: &mut Frame, body: Rect, title: &str, prompt: &str, comman
 }
 
 /// The largest scroll of a `len`-line page in `height` rows. An overflowing page keeps its last row for the cue.
-pub fn help_limit(len: usize, height: usize) -> usize {
+pub fn page_limit(len: usize, height: usize) -> usize {
     if len <= height { 0 } else { len - height.saturating_sub(1) }
 }
 
-/// The help page, scrolled, with a "more below" cue on its last row while it overflows.
-fn help(c: &Ctx, f: &mut Frame, body: Rect, scroll: u16) {
-    let mut lines = help_lines(c, body);
+/// A page, scrolled, with a "more below" cue on its last row while it overflows.
+fn scrolled(c: &Ctx, f: &mut Frame, body: Rect, mut lines: Vec<Line<'static>>, scroll: u16) {
     let (len, h) = (lines.len(), body.height as usize);
     if len > h {
-        let start = (scroll as usize).min(help_limit(len, h));
+        let start = (scroll as usize).min(page_limit(len, h));
         let end = (start + h - 1).min(len);
         lines = lines.drain(start..end).collect();
         let below = len - end;

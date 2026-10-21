@@ -38,5 +38,5 @@ expression: ascii_text
         40     const slot = await lock(id);
         41 -   if (slot.free) {
         41 +   if (slot.free && !slot.held) {
-     >  42 +     slot.held = true;
+      ~ 6 more below, j scrolls
    j/k scroll  o open on GitHub  Esc close                           1 inbox  2 review  3 diff  4 timeline  5 settings

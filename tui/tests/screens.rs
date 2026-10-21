@@ -502,3 +502,19 @@ fn g_page_down_and_the_wheel_keep_the_reader_and_the_preview_on_screen() {
         }
     }
 }
+
+#[test]
+fn the_reader_and_the_preview_say_how_much_is_below_until_the_end() {
+    use crossterm::event::KeyCode;
+    let reader = || showcase(2).key(KeyCode::Enter).key(KeyCode::Enter);
+    let preview = || parked(Look::default()).key(KeyCode::Char('p'));
+    for (name, open) in [("reader", &reader as &dyn Fn() -> Sim), ("preview", &preview)] {
+        let mut s = open();
+        let (top, _) = render(&mut s.m, 80, 24);
+        let cue = top.lines().find(|l| l.contains("more below, j scrolls"));
+        assert!(cue.is_some_and(|l| l.contains('…')), "{name}: no cue on an overflowing page:\n{top}");
+        let mut end = s.key(KeyCode::Char('G'));
+        let (end, _) = render(&mut end.m, 80, 24);
+        assert!(!end.contains("more below"), "{name}: a cue at the end:\n{end}");
+    }
+}
