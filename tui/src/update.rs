@@ -1017,10 +1017,9 @@ pub fn event_text(e: &SequencedEvent) -> String {
 pub fn timeline_shown<'a>(m: &Model, t: &'a TimelineView) -> Vec<(&'a SequencedEvent, Option<Phase>)> {
     let mut rows: Vec<_> = t.events.iter().zip(event_phases(m, &t.events)).collect();
     rows.reverse();
-    let change = |e: &SequencedEvent| matches!(e.body, EventBody::PhaseChanged(_));
     let passed: Vec<bool> = rows
         .windows(2)
-        .map(|w| change(w[0].0) && change(w[1].0) && w[0].0.run_id == w[1].0.run_id)
+        .map(|w| is_heading(w[0].0) && is_heading(w[1].0) && w[0].0.run_id == w[1].0.run_id)
         .chain([false])
         .collect();
     rows.into_iter().zip(passed).filter(|(_, skip)| !skip).map(|(row, _)| row).collect()
@@ -1037,6 +1036,15 @@ pub fn timeline_rows<'a>(m: &Model, t: &'a TimelineView) -> Vec<(&'a SequencedEv
                 && (text.is_empty() || event_text(e).to_lowercase().contains(&text))
         })
         .collect()
+}
+
+/// The sequences the cursor stops on: the rows the filters keep, without the phase changes drawn as headings.
+pub fn timeline_stops(m: &Model, t: &TimelineView) -> Vec<u64> {
+    timeline_rows(m, t).iter().filter(|(e, _)| !is_heading(e)).map(|(e, _)| e.sequence.get()).collect()
+}
+
+pub fn is_heading(e: &SequencedEvent) -> bool {
+    matches!(e.body, EventBody::PhaseChanged(_))
 }
 
 const PHASE_CYCLE: [Option<Phase>; 9] = [
@@ -1542,7 +1550,7 @@ fn move_by(m: &mut Model, delta: isize, fx: &mut Vec<Effect>) {
         }
         (Screen::Timeline, _) => {
             let Some(t) = &m.timeline else { return };
-            let seqs: Vec<u64> = timeline_rows(m, t).iter().map(|(e, _)| e.sequence.get()).collect();
+            let seqs = timeline_stops(m, t);
             let next = step(&seqs, t.selected.as_ref(), delta);
             // Older events sit at the top: reaching it pages them in.
             let at_top = next.is_some() && next == seqs.first().copied();

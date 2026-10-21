@@ -1020,7 +1020,13 @@ fn the_timeline_counts_the_events_it_shows_and_a_filter_counts_against_them() {
         let (frame, _) = common::render(m, 120, 38);
         frame.lines().find_map(|l| l.trim().split_once(", oldest first")).unwrap().0.to_string()
     };
-    assert_eq!(count(&mut m), "2 events", "no filter: the heading VERIFY and the tool call");
+    assert_eq!(count(&mut m), "1 event", "no filter: the tool call; VERIFY is a heading");
+    for _ in 0..3 {
+        press(&mut m, KeyCode::Char('k'));
+        assert_eq!(m.timeline.as_ref().unwrap().selected, Some(14), "the cursor never lands on the heading");
+    }
     press(&mut m, KeyCode::Char('v'));
-    assert_eq!(count(&mut m), "1 of 2 events", "tool calls");
+    assert_eq!(count(&mut m), "1 of 1 event", "tool calls");
+    press(&mut m, KeyCode::Char('P'));
+    assert_eq!(count(&mut m), "0 of 1 event", "tool calls in COLLECT_CONTEXT");
 }

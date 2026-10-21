@@ -363,7 +363,7 @@ fn reversed(term: &Terminal<TestBackend>) -> Vec<String> {
 }
 
 #[test]
-fn without_color_the_diff_cursor_and_a_selected_phase_heading_show_in_reverse_video() {
+fn without_color_the_diff_and_timeline_cursors_show_in_reverse_video() {
     let mono = Look { color: false, ..Look::default() };
     let (_, mut diff) = states(mono).remove(2);
     let (_, term) = render(&mut diff.m, 120, 38);
@@ -372,23 +372,12 @@ fn without_color_the_diff_cursor_and_a_selected_phase_heading_show_in_reverse_vi
         ["▌ ▲ booking.ts", "▌   src                     +2 -1", "▲        42 +     slot.held = true;"]
     );
 
-    let mut s = Sim::new(mono).play("showcase", 12).key(KeyCode::Char('w')).key(KeyCode::Char('t'));
-    let phase = |s: &Sim| {
-        let t = s.m.timeline.as_ref().unwrap();
-        let e = t.events.iter().find(|e| Some(e.sequence.get()) == t.selected).unwrap();
-        matches!(e.body, pr_review_tui::protocol::EventBody::PhaseChanged(_))
-    };
-    for _ in 0..20 {
-        if phase(&s) {
-            break;
-        }
-        s = s.key(KeyCode::Char('k'));
-    }
-    assert!(phase(&s), "a phase change is selected");
+    let mut s =
+        Sim::new(mono).play("showcase", 12).key(KeyCode::Char('w')).key(KeyCode::Char('t')).key(KeyCode::Char('k'));
     let (frame, term) = render(&mut s.m, 120, 38);
     let rows = reversed(&term);
     assert_eq!(rows.len(), 1, "{rows:?}\n{frame}");
-    assert!(rows[0].ends_with(|c: char| c.is_ascii_digit()) && rows[0].contains("───"), "{rows:?}");
+    assert!(rows[0].starts_with('▌') && !rows[0].contains("───"), "the cursor is on a row, never a heading: {rows:?}");
 }
 
 /// Every view, waiting on its replies and answered, at each step of the showcase playback: under `--ascii` no cell

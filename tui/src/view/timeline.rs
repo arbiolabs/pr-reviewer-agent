@@ -12,7 +12,7 @@ use crate::model::TimelineScope;
 use crate::protocol::{EventBody, Phase, RunChange, SequencedEvent};
 use crate::text::width;
 use crate::theme::{Bg, Role, finding_status, phase_name};
-use crate::update::{timeline_rows, timeline_shown};
+use crate::update::{is_heading, timeline_rows, timeline_shown, timeline_stops};
 
 pub fn actor(e: &SequencedEvent) -> &'static str {
     match e.body {
@@ -245,9 +245,9 @@ fn page(c: &Ctx, t: &crate::model::TimelineView, col: Rect) -> (Vec<Line<'static
         },
     };
     let rows = timeline_rows(c.m, t);
-    let total = timeline_shown(c.m, t).len();
+    let total = timeline_shown(c.m, t).iter().filter(|(e, _)| !is_heading(e)).count();
     let filtered = t.category.is_some() || t.phase.is_some() || !t.text.is_empty();
-    let count = if filtered { format!("{} of {total}", rows.len()) } else { total.to_string() };
+    let count = if filtered { format!("{} of {total}", timeline_stops(c.m, t).len()) } else { total.to_string() };
     let mut head = vec![Line::raw("")];
     head.push(Line::from(match pr {
         Some(p) => vec![
@@ -303,7 +303,7 @@ fn page(c: &Ctx, t: &crate::model::TimelineView, col: Rect) -> (Vec<Line<'static
         if selected {
             at = body.len();
         }
-        let change = matches!(e.body, EventBody::PhaseChanged(_));
+        let change = is_heading(e);
         if change || last.is_some_and(|p| p != *phase) || (last.is_none() && phase.is_some()) {
             // An empty phase's heading sits right under the one before it.
             if !body.is_empty() && !after_heading {
@@ -325,7 +325,7 @@ fn page(c: &Ctx, t: &crate::model::TimelineView, col: Rect) -> (Vec<Line<'static
         if t.open == Some(e.sequence.get()) {
             body.extend(detail_block(c, e, *phase, w));
         }
-        owners.resize(body.len(), Some(seq));
+        owners.resize(body.len(), (!change).then_some(seq));
     }
     owners.resize(body.len(), None);
     let h = (col.height as usize).saturating_sub(head.len());
