@@ -15,7 +15,7 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
-use crate::model::{InputPurpose, Link, Modal, Model, Pane, Screen};
+use crate::model::{ConfirmState, InputPurpose, Link, Modal, Model, Pane, Screen};
 use crate::text::{fit, pad};
 use crate::theme::{Role, Theme};
 
@@ -389,7 +389,10 @@ fn footer_line(c: &Ctx, width: u16) -> Line<'static> {
     let hints = match (c.m.top_modal(), c.m.ui.screen) {
         (Some(Modal::Help { .. }), _) => "j/k scroll  Esc close  q quit",
         (Some(Modal::Finding { .. }), _) => "j/k scroll  n/N finding  d diff at anchor  t timeline  Esc close",
-        (Some(Modal::Confirm { .. }), _) => "y confirm  n/Esc cancel",
+        (Some(Modal::Confirm { state: ConfirmState::Asking | ConfirmState::TimedOut, .. }), _) => {
+            "y confirm  n/Esc cancel"
+        }
+        (Some(Modal::Confirm { .. }), _) => "Esc closes",
         (Some(Modal::Publication { raw: false, .. }), _) => {
             "j/k scroll  y publish  m raw markdown  o open on GitHub  Esc close"
         }

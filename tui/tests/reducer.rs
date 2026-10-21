@@ -405,6 +405,24 @@ fn a_rejected_account_select_shows_the_code_and_message_in_the_modal() {
 }
 
 #[test]
+fn a_confirm_panel_offers_y_only_while_y_can_send() {
+    let footer = |m: &mut Model| {
+        render(m, 120, 38).0.lines().last().unwrap_or_default().trim().split("    ").next().unwrap().to_string()
+    };
+    let mut m = accounts_live();
+    press(&mut m, KeyCode::Char('A'));
+    press(&mut m, KeyCode::Enter);
+    assert_eq!(footer(&mut m), "y confirm  n/Esc cancel");
+    let fx = press(&mut m, KeyCode::Char('y'));
+    assert_eq!(footer(&mut m), "Esc closes", "requested");
+    let [Effect::Send(ClientMessage::Command(c))] = &fx[..] else { panic!("{fx:?}") };
+    let rejected =
+        r#"{"type":"command.result","requestId":"RID","status":"rejected","code":"NOT_FOUND","message":"no"}"#;
+    send(&mut m, &rejected.replace("RID", c.request_id.as_str()));
+    assert_eq!(footer(&mut m), "Esc closes", "refused");
+}
+
+#[test]
 fn accounts_that_cannot_be_selected_say_why_and_open_no_modal() {
     let mut m = model();
     update(&mut m, Msg::Net(NetEvent::Opened));
