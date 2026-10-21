@@ -72,6 +72,11 @@ fn the_background_query_reads_the_reply_and_hands_on_only_what_was_typed() {
     assert!(took < Duration::from_millis(60), "took {took:?}");
     assert_eq!(typed, [KeyCode::Char('j'), KeyCode::Char('k')], "no [ or A from the arrow key");
 
+    // Alt+Up is ESC ESC [ A: the second ESC starts the arrow's sequence, which drops whole too.
+    detect_on_pty(b"j\x1b\x1b[Ak\x1b]11;rgb:ffff/ffff/ffff\x07\x1b[?62;22c", Duration::ZERO, b"");
+    let typed: Vec<KeyCode> = typed_before_start().into_iter().map(|k| k.code).collect();
+    assert_eq!(typed, [KeyCode::Char('j'), KeyCode::Char('k')], "no [ or A from Alt+Up");
+
     // The deadline falls inside the reply: its tail reaches the key reader without the opening Alt+].
     let (palette, _) = detect_on_pty(b"\x1b]11;rgb:ffff/ff", Duration::from_millis(150), b"ff/ffff\x07\x1b[?62;22c");
     assert_eq!(palette, Palette::Dark);

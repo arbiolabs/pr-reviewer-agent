@@ -110,7 +110,8 @@ pub fn typed_before_start() -> Vec<crossterm::event::KeyEvent> {
             plain.push(b);
             continue;
         }
-        match bytes.next() {
+        // A second ESC (Alt+arrow is `ESC ESC [ A`) stays queued and starts the sequence again.
+        match bytes.next_if(|&b| b != 0x1b) {
             // CSI: parameter and intermediate bytes, then one final byte.
             Some(b'[') => {
                 while bytes.next_if(|b| (0x20..0x40).contains(b)).is_some() {}
