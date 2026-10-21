@@ -1013,21 +1013,11 @@ pub fn event_text(e: &SequencedEvent) -> String {
 }
 
 /// The events the timeline shows after its category, phase and text filters, oldest first, with their inferred phases.
-pub fn timeline_rows<'a>(m: &Model, t: &'a TimelineView) -> Vec<(&'a SequencedEvent, Option<Phase>)> {
-    let phases = event_phases(m, &t.events);
-    let text = t.text.to_lowercase();
-    let mut rows: Vec<_> = t
-        .events
-        .iter()
-        .zip(phases)
-        .filter(|(e, p)| {
-            t.category.is_none_or(|c| EventCategory::of(&e.body) == c)
-                && t.phase.is_none_or(|want| *p == Some(want))
-                && (text.is_empty() || event_text(e).to_lowercase().contains(&text))
-        })
-        .collect();
+/// The rows the timeline shows with no filter, oldest first. A phase the run passed straight through (a retry
+/// resuming from a checkpoint) has no rows, so its change is no row either.
+pub fn timeline_shown<'a>(m: &Model, t: &'a TimelineView) -> Vec<(&'a SequencedEvent, Option<Phase>)> {
+    let mut rows: Vec<_> = t.events.iter().zip(event_phases(m, &t.events)).collect();
     rows.reverse();
-    // A phase the run passed straight through (a retry resuming from a checkpoint) has no rows: no heading either.
     let change = |e: &SequencedEvent| matches!(e.body, EventBody::PhaseChanged(_));
     let passed: Vec<bool> = rows
         .windows(2)
@@ -1035,6 +1025,19 @@ pub fn timeline_rows<'a>(m: &Model, t: &'a TimelineView) -> Vec<(&'a SequencedEv
         .chain([false])
         .collect();
     rows.into_iter().zip(passed).filter(|(_, skip)| !skip).map(|(row, _)| row).collect()
+}
+
+/// The shown rows the filters keep.
+pub fn timeline_rows<'a>(m: &Model, t: &'a TimelineView) -> Vec<(&'a SequencedEvent, Option<Phase>)> {
+    let text = t.text.to_lowercase();
+    timeline_shown(m, t)
+        .into_iter()
+        .filter(|(e, p)| {
+            t.category.is_none_or(|c| EventCategory::of(&e.body) == c)
+                && t.phase.is_none_or(|want| *p == Some(want))
+                && (text.is_empty() || event_text(e).to_lowercase().contains(&text))
+        })
+        .collect()
 }
 
 const PHASE_CYCLE: [Option<Phase>; 9] = [

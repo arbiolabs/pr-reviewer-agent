@@ -937,8 +937,9 @@ fn a_pr_updated_event_retitles_the_pr_in_the_rail_and_the_header() {
     assert_eq!(frame.matches("Booking API v2").count(), 2, "{frame}");
 }
 
-#[test]
-fn a_phase_with_no_rows_gets_no_heading_in_the_timeline() {
+/// #184's timeline after a retry resumed from a checkpoint: three phase changes in a row, then the first thing that
+/// happens.
+fn checkpoint_timeline() -> Model {
     let mut m = review_184();
     let fx = press(&mut m, KeyCode::Char('4'));
     let rid = fx
@@ -957,7 +958,6 @@ fn a_phase_with_no_rows_gets_no_heading_in_the_timeline() {
     let phase = |seq, from: &str, to: &str| {
         ev(seq, "review.phase_changed", &format!(r#"{{"from":"{from}","to":"{to}","event":"E","detail":null}}"#))
     };
-    // A retry resumed from a checkpoint: three phase changes in a row, then the first thing that happens.
     let events = [
         ev(14, "tool.activity", r#"{"tool":"read_diff","summary":"src/booking.ts"}"#),
         phase(13, "ANALYZE", "VERIFY"),
@@ -966,6 +966,12 @@ fn a_phase_with_no_rows_gets_no_heading_in_the_timeline() {
     ];
     let page = format!(r#"{{"type":"timeline.page","requestId":"{rid}","events":[{}]}}"#, events.join(","));
     send(&mut m, &page);
+    m
+}
+
+#[test]
+fn a_phase_with_no_rows_gets_no_heading_in_the_timeline() {
+    let mut m = checkpoint_timeline();
     let (frame, _) = common::render(&mut m, 120, 38);
     let headings: Vec<&str> = frame
         .lines()
@@ -973,4 +979,18 @@ fn a_phase_with_no_rows_gets_no_heading_in_the_timeline() {
         .map(|l| l.trim_start_matches(['▌', ' ']).split(' ').next().unwrap())
         .collect();
     assert_eq!(headings, ["VERIFY"], "{frame}");
+}
+
+#[test]
+fn the_timeline_counts_the_events_it_shows_and_a_filter_counts_against_them() {
+    let mut m = checkpoint_timeline();
+    let count = |m: &mut Model| {
+        let (frame, _) = common::render(m, 120, 38);
+        frame.lines().find_map(|l| l.trim().split_once(", oldest first")).unwrap().0.to_string()
+    };
+    assert_eq!(count(&mut m), "2 events", "no filter: the heading VERIFY and the tool call");
+    press(&mut m, KeyCode::Char('v'));
+    assert_eq!(count(&mut m), "1 of 2 events", "phase changes");
+    press(&mut m, KeyCode::Char('v'));
+    assert_eq!(count(&mut m), "1 of 2 events", "tool calls");
 }

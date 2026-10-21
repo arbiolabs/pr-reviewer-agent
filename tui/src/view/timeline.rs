@@ -12,7 +12,7 @@ use crate::model::TimelineScope;
 use crate::protocol::{EventBody, Phase, RunChange, SequencedEvent};
 use crate::text::width;
 use crate::theme::{Bg, Role, finding_status, phase_name};
-use crate::update::timeline_rows;
+use crate::update::{timeline_rows, timeline_shown};
 
 pub fn actor(e: &SequencedEvent) -> &'static str {
     match e.body {
@@ -245,6 +245,9 @@ fn page(c: &Ctx, t: &crate::model::TimelineView, col: Rect) -> (Vec<Line<'static
         },
     };
     let rows = timeline_rows(c.m, t);
+    let total = timeline_shown(c.m, t).len();
+    let filtered = t.category.is_some() || t.phase.is_some() || !t.text.is_empty();
+    let count = if filtered { format!("{} of {total}", rows.len()) } else { total.to_string() };
     let mut head = vec![Line::raw("")];
     head.push(Line::from(match pr {
         Some(p) => vec![
@@ -260,10 +263,8 @@ fn page(c: &Ctx, t: &crate::model::TimelineView, col: Rect) -> (Vec<Line<'static
     head.push(Line::from(c.span(
         c.fit(
             &format!(
-                "{} of {} {}, oldest first {} {scope} (f) {} {} (v) {} phase {} (P){}",
-                rows.len(),
-                t.events.len(),
-                if t.events.len() == 1 { "event" } else { "events" },
+                "{count} {}, oldest first {} {scope} (f) {} {} (v) {} phase {} (P){}",
+                if total == 1 { "event" } else { "events" },
                 g.sep,
                 g.sep,
                 t.category.map_or("all kinds", |x| x.label()),
@@ -279,8 +280,7 @@ fn page(c: &Ctx, t: &crate::model::TimelineView, col: Rect) -> (Vec<Line<'static
     if let Some(e) = &t.error {
         head.push(Line::from(c.span(c.fit(&format!("timeline unavailable: {e}"), w), Role::Fail)));
     } else if rows.is_empty() {
-        let filtered = t.scope != TimelineScope::Pr || t.category.is_some() || t.phase.is_some() || !t.text.is_empty();
-        let text = match (t.pending.is_some(), filtered) {
+        let text = match (t.pending.is_some(), filtered || t.scope != TimelineScope::Pr) {
             (true, _) => format!("loading{}", g.ellipsis),
             (false, true) => "no events match the filters (f v P /)".into(),
             (false, false) => "no events recorded yet".into(),

@@ -7,7 +7,7 @@ expression: ascii_text
 
     acme/shop  #184  timeline
     Booking API
-    2 of 2 events, oldest first | the whole PR (f) | all kinds (v) | phase any (P)
+    2 events, oldest first | the whole PR (f) | all kinds (v) | phase any (P)
 
     VERIFY ----------------------------------------------------------------------------------------------- 13:00:11
       13:00:11    read_file     src/booking.ts:1-120
