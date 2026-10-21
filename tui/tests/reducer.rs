@@ -936,3 +936,41 @@ fn a_pr_updated_event_retitles_the_pr_in_the_rail_and_the_header() {
     let (frame, _) = common::render(&mut m, 120, 38);
     assert_eq!(frame.matches("Booking API v2").count(), 2, "{frame}");
 }
+
+#[test]
+fn a_phase_with_no_rows_gets_no_heading_in_the_timeline() {
+    let mut m = review_184();
+    let fx = press(&mut m, KeyCode::Char('4'));
+    let rid = fx
+        .iter()
+        .find_map(|e| match e {
+            Effect::Send(ClientMessage::TimelineGet { request_id, .. }) => Some(request_id.as_str().to_string()),
+            _ => None,
+        })
+        .unwrap();
+    let ev = |seq: u64, kind: &str, data: &str| {
+        format!(
+            r#"{{"type":"event","streamEpoch":"epoch-1","sequence":{seq},"prevSequence":{},"occurredAt":"2026-10-20T13:01:{seq}Z","prId":"acme/shop#184","runId":"rev-184-a","eventType":"{kind}","data":{data}}}"#,
+            seq - 1
+        )
+    };
+    let phase = |seq, from: &str, to: &str| {
+        ev(seq, "review.phase_changed", &format!(r#"{{"from":"{from}","to":"{to}","event":"E","detail":null}}"#))
+    };
+    // A retry resumed from a checkpoint: three phase changes in a row, then the first thing that happens.
+    let events = [
+        ev(14, "tool.activity", r#"{"tool":"read_diff","summary":"src/booking.ts"}"#),
+        phase(13, "ANALYZE", "VERIFY"),
+        phase(12, "TRIAGE", "ANALYZE"),
+        phase(11, "COLLECT_CONTEXT", "TRIAGE"),
+    ];
+    let page = format!(r#"{{"type":"timeline.page","requestId":"{rid}","events":[{}]}}"#, events.join(","));
+    send(&mut m, &page);
+    let (frame, _) = common::render(&mut m, 120, 38);
+    let headings: Vec<&str> = frame
+        .lines()
+        .filter(|l| l.contains("────"))
+        .map(|l| l.trim_start_matches(['▌', ' ']).split(' ').next().unwrap())
+        .collect();
+    assert_eq!(headings, ["VERIFY"], "{frame}");
+}

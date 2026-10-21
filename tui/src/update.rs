@@ -1027,7 +1027,14 @@ pub fn timeline_rows<'a>(m: &Model, t: &'a TimelineView) -> Vec<(&'a SequencedEv
         })
         .collect();
     rows.reverse();
-    rows
+    // A phase the run passed straight through (a retry resuming from a checkpoint) has no rows: no heading either.
+    let change = |e: &SequencedEvent| matches!(e.body, EventBody::PhaseChanged(_));
+    let passed: Vec<bool> = rows
+        .windows(2)
+        .map(|w| change(w[0].0) && change(w[1].0) && w[0].0.run_id == w[1].0.run_id)
+        .chain([false])
+        .collect();
+    rows.into_iter().zip(passed).filter(|(_, skip)| !skip).map(|(row, _)| row).collect()
 }
 
 const PHASE_CYCLE: [Option<Phase>; 9] = [
