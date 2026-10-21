@@ -272,18 +272,21 @@ function ownEvidence(f: PriorFinding): EvidenceText[] {
 
 /**
  * Whether a candidate that names the finding (`priorFindingId`) reports it where code can see it: the anchor is
- * within LINK_DISTANCE of the finding's anchor at this head, or a cited range overlaps the finding's evidence at this
- * head. That evidence is the located ranges when the code was found, else the finding's own text found in the
- * candidate's file (`priorHits`), plus the ranges last seen when the candidate reports the finding's file. The
- * finding's file, when it still exists, must be the candidate's: a report elsewhere is a new finding.
+ * within LINK_DISTANCE of the finding's anchor at this head, or of its own text found in the candidate's file
+ * (`priorHits`), and a cited range overlaps the finding's evidence at this head. That evidence is the located ranges
+ * when the code was found, else `priorHits` plus the ranges last seen when the candidate reports the finding's file.
+ * The name alone is never trusted: a nearby report that cites none of the finding's lines is a new defect, and so is
+ * one on its lines from far away. The finding's file, when it still exists, must be the candidate's.
  */
 function namedLink(candidate: CandidateFinding, cited: EvidenceText[], f: PriorFinding, priorHits: EvidenceText[]): boolean {
   const file = currentFile(f);
   if (file !== undefined && file !== candidate.file) return false;
+  if (candidate.newLine === null) return false;
   const evidence = file === undefined ? priorHits : [...ownEvidence(f), ...priorHits];
   const lastLine = f.located.kind === "same" ? f.located.location.newLine : file === undefined ? null : f.location.newLine;
-  const nearAnchor = candidate.newLine !== null && lastLine !== null && Math.abs(candidate.newLine - lastLine) <= LINK_DISTANCE;
-  return nearAnchor || overlaps(cited, evidence);
+  const line = candidate.newLine;
+  const nearAnchor = (lastLine !== null && Math.abs(line - lastLine) <= LINK_DISTANCE) || priorHits.some((h) => h.start - LINK_DISTANCE <= line && line <= h.end + LINK_DISTANCE);
+  return nearAnchor && overlaps(cited, evidence);
 }
 
 /**

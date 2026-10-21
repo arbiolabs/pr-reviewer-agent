@@ -274,13 +274,18 @@ it("finds the longest run in time that grows with the file, not with its square"
   expect(performance.now() - started).toBeLessThan(400);
 });
 
-it("links a candidate that names its prior finding only where code sees the report: near the finding's anchor or on its lines at this head", () => {
+it("links a candidate that names its prior finding only where code sees the report: near the finding's anchor and on its lines at this head", () => {
   const named = { priorFindingId: "f-1", title: "Anyone can refund" };
-  // The code was rewritten in place: the anchor drifted past LINK_DISTANCE, but the citation overlaps the lines last seen.
   const changed = prior({ kind: "changed", file: FILE });
-  expect(linkOne(reported({ ...named, newLine: 15 }, [{ path: FILE, start: 10, end: 15, text: "rewritten" }]), [changed])).toBe("f-1");
-  expect(linkOne(reported({ ...named, newLine: 15 }, [{ path: FILE, start: 14, end: 15, text: "rewritten" }]), [changed])).toBe(undefined);
-  expect(linkOne(reported({ ...named, newLine: 13 }, [{ path: FILE, start: 14, end: 15, text: "rewritten" }]), [changed])).toBe("f-1");
+  // The code was rewritten in place: the anchor is near the last one and the citation overlaps the lines last seen.
+  expect(linkOne(reported({ ...named, newLine: 13 }, [{ path: FILE, start: 10, end: 15, text: "rewritten" }]), [changed])).toBe("f-1");
+  // The anchor drifted past LINK_DISTANCE: it links only when the finding's own code is found near the new anchor.
+  const drifted = reported({ ...named, newLine: 15 }, [{ path: FILE, start: 10, end: 15, text: "rewritten" }]);
+  expect(linkOne(drifted, [changed])).toBe(undefined);
+  expect(linkOne({ ...drifted, priorHits: [{ path: FILE, start: 12, end: 14, text: "found" }] }, [changed])).toBe("f-1");
+  expect(linkOne({ ...drifted, priorHits: [{ path: FILE, start: 2, end: 4, text: "found" }] }, [changed])).toBe(undefined);
+  // Near the anchor but citing none of the finding's lines: a new defect next to it, whatever the model named.
+  expect(linkOne(reported({ ...named, newLine: 13 }, [{ path: FILE, start: 14, end: 15, text: "rewritten" }]), [changed])).toBe(undefined);
   expect(linkOne(reported({ ...named, newLine: 300 }), [changed])).toBe(undefined);
   expect(linkOne(reported({ ...named, newLine: 15, category: "correctness" }, [{ path: FILE, start: 10, end: 15, text: "x" }]), [changed])).toBe(undefined);
   expect(linkOne(reported({ ...named, newLine: 15, file: "x.ts" }, [{ path: "x.ts", start: 10, end: 15, text: "x" }]), [changed])).toBe(undefined);
@@ -291,8 +296,9 @@ it("links a candidate that names its prior finding only where code sees the repo
   expect(linkOne(moved(15, 18), [gone])).toBe("f-1");
   expect(linkOne(moved(18, 20), [gone])).toBe(undefined);
   expect(linkOne(moved(15, 18, []), [gone])).toBe(undefined);
-  // Naming a finding whose code is found in place still needs the report at that place.
-  expect(linkOne(reported({ ...named, newLine: 13 }, cites(13, 14)), [prior(same())])).toBe("f-1");
+  // Naming a finding whose code is found in place still needs the report at that place, on its lines.
+  expect(linkOne(reported({ ...named, newLine: 13 }, cites(12, 14)), [prior(same())])).toBe("f-1");
+  expect(linkOne(reported({ ...named, newLine: 13 }, cites(13, 14)), [prior(same())])).toBe(undefined);
   expect(linkOne(reported({ ...named, newLine: 40 }, cites(40, 41)), [prior(same())])).toBe(undefined);
   expect(linkOne(reported({ priorFindingId: "f-9", title: "Anyone can refund", newLine: 13 }, cites(13, 14)), [prior(same())])).toBe(undefined);
 });
