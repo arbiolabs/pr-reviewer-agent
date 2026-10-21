@@ -1,0 +1,42 @@
+---
+source: tests/golden.rs
+expression: text
+---
+  pr-review · 0 PRs tracked · nothing running                                                                   ● live
+
+
+  PULL REQUESTS                0    nothing tracked yet
+                                    ✗ missing model: no models available
+  nothing tracked yet               run `pr-review login anthropic`, or set ANTHROPIC_API_KEY
+                                    Run `pr-review setup` to check and fix these.
+                                    Write keys: commands are off (run pr-review setup, then --allow-commands).
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   ? help  q quit                                                    1 inbox  2 review  3 diff  4 timeline  5 settings

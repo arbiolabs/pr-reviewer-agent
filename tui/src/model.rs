@@ -101,18 +101,30 @@ pub struct ServerInfo {
     /// `None` from a daemon that predates engine mode.
     pub mode: Option<DaemonMode>,
     pub read_only_reason: Option<Text>,
+    /// `None` from a daemon that predates the checks.
+    pub checks: Option<Vec<SetupCheck>>,
 }
 
 impl ServerInfo {
     /// Why a review command is not offered, for the `(not offered)` notes; `None` when the daemon gave no reason.
     pub fn commands_off(&self) -> Option<&'static str> {
         match (self.mode, &self.read_only_reason) {
+            // With a check missing, --allow-commands alone only gets a read-only daemon whose engine failed to open.
             (Some(DaemonMode::ReadOnly), Some(r)) if r.as_str().contains("--allow-commands") => {
-                Some("commands are off (start the daemon with --allow-commands)")
+                Some(if self.missing().next().is_some() {
+                    "commands are off (run pr-review setup, then --allow-commands)"
+                } else {
+                    "commands are off (start the daemon with --allow-commands)"
+                })
             }
             (Some(DaemonMode::ReadOnly), _) => Some("daemon is read-only"),
             _ => None,
         }
+    }
+
+    /// The checks that keep reviews from running.
+    pub fn missing(&self) -> impl Iterator<Item = &SetupCheck> {
+        self.checks.iter().flatten().filter(|c| c.status == CheckStatus::Missing)
     }
 }
 

@@ -1,0 +1,28 @@
+---
+source: tests/golden.rs
+expression: text
+---
+  pr-review · 0 PRs tracked · nothing running                           ● live
+
+
+  Settings
+  socket unix:/run/user/501/pr-review/reviewer.sock · connected
+  Setup
+    ✓ ok       git        /usr/bin/git
+    ✓ ok       config     defaults, no pr-review.config.json
+    ✗ missing  model      no models available
+                          run `pr-review login anthropic`, or set
+                          ANTHROPIC_API_KEY
+    ◔ warn     github     no token, public repositories only
+                          run `gh auth login`, or set GITHUB_TOKEN
+    ◔ warn     jev        OpenCode Zen free tier for public repositories;
+                          private repositories skip Jev
+                          set TYPESAFE_API_KEY to use TypeSafe; without it,
+                          serve and daemon --allow-commands skip Jev for
+                          every repository
+  GitHub accounts
+    publishes as          nobody: run gh auth login
+    accounts              none: run gh auth login, or set GITHUB_TOKEN
+  Connection
+    state                 ● live
+   r refresh  Esc back  ? help  q quit                                1 2 3 4 5

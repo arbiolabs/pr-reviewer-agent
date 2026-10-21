@@ -296,6 +296,32 @@ pub fn settings(c: &Ctx, f: &mut Frame, area: Rect) {
     let socket = format!("socket {} {} {state}", m.diag.endpoint, c.t.g().sep);
     lines.push(Line::from(c.span(c.fit(&socket, w), Role::Muted)));
     gap(&mut lines);
+    lines.push(heading(c, "Setup"));
+    match server.map(|s| &s.checks) {
+        None => lines.push(row("checks", "waiting for the daemon".into(), Role::Muted)),
+        Some(None) => lines.push(row("checks", "not reported by this daemon version".into(), Role::Muted)),
+        Some(Some(checks)) => {
+            // The fix is what the reader came for, so detail and fix wrap under the value column instead of cutting.
+            let room = w.saturating_sub(24).max(1);
+            for check in checks {
+                let (status, role) = super::check_status(c, check.status);
+                let mut key = vec![
+                    c.span(format!("  {}", c.pad(&status, 11)), role),
+                    c.span(c.pad(check.id.as_str(), 11), Role::Normal),
+                ];
+                let text = std::iter::once((check.detail.as_str(), Role::Normal))
+                    .chain(check.fix.as_ref().map(|f| (f.as_str(), Role::Muted)));
+                for (t, role) in text {
+                    for row in super::code::wrap_spans(vec![c.span(t.to_string(), role)], room) {
+                        let mut spans = std::mem::replace(&mut key, vec![Span::raw(" ".repeat(24))]);
+                        spans.extend(row);
+                        lines.push(Line::from(spans));
+                    }
+                }
+            }
+        }
+    }
+    gap(&mut lines);
     lines.push(heading(c, "GitHub accounts"));
     let (who, who_role) = identity(c);
     lines.push(row("publishes as", who, who_role));

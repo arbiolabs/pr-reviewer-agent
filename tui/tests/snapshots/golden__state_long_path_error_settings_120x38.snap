@@ -9,6 +9,9 @@ expression: settings
     Settings
     socket unix:/private/tmp/claude-501/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/pr-r…
 
+    Setup
+      checks                waiting for the daemon
+
     GitHub accounts
       publishes as          not reported by this daemon
       accounts              waiting for a snapshot
@@ -33,9 +36,6 @@ expression: settings
 
     Recent errors
       0.0s ago              disconnected: socket directory does not exist: /private/tmp/claude-501/xxxxxxxxxxxxxxxx…
-
-
-
 
 
 

@@ -8,6 +8,8 @@ expression: settings
 
   Settings
   socket unix:/private/tmp/claude-501/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…
+  Setup
+    checks                waiting for the daemon
   GitHub accounts
     publishes as          not reported by this daemon
     accounts              waiting for a snapshot
@@ -23,6 +25,4 @@ expression: settings
     resyncs / reconnects  0 / 0
     activity              0 feed entries (cap 2000); 0 tool events applied
   Display
-    glyphs                unicode
-    color                 on
    Esc back  ? help  q quit  1 inbox  2 review  3 diff  4 timeline  5 settings

@@ -258,6 +258,26 @@ pub enum DaemonMode {
     Unknown,
 }
 
+/// `missing`: reviews cannot run; `warn`: they run with a limitation.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CheckStatus {
+    Ok,
+    Warn,
+    Missing,
+    #[serde(other)]
+    Unknown,
+}
+
+/// One of `welcome.checks`: what `pr-review setup --check` reports for the daemon's environment. Display only.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct SetupCheck {
+    pub id: Text,
+    pub status: CheckStatus,
+    pub detail: Text,
+    pub fix: Option<Text>,
+}
+
 /// A run's publication as `review.publication_changed` and `publication.preview` report it. Only `Published` means
 /// the review is on GitHub; `command.result accepted` never does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -503,6 +523,9 @@ pub enum ServerMessage {
         /// Why a read-only daemon is read-only, for display; `None` in engine mode and from older daemons.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         read_only_reason: Option<Text>,
+        /// `None` from a daemon that predates the checks, and from a fixture server.
+        #[serde(default)]
+        checks: Option<Vec<SetupCheck>>,
         stream_epoch: Epoch,
         latest_sequence: u64,
     },

@@ -7,6 +7,8 @@ expression: ascii_text
 
   Settings
   socket unix:/run/user/501/pr-review/reviewer.sock | connected
+  Setup
+    checks                not reported by this daemon version
   GitHub accounts
     publishes as          diego-arbio-dev on github.com
     diego-arbio-dev  github.com  + ok      gh active
@@ -23,6 +25,4 @@ expression: ascii_text
     snapshot, heartbeat   0.0s ago, never
     resyncs / reconnects  0 / 0
     activity              0 feed entries (cap 2000); 0 tool events applied
-  Display
-    glyphs                ascii
    j/k account  Enter select  w watch  r refresh  Esc back  ? help  q quit
