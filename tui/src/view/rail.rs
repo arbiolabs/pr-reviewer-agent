@@ -8,7 +8,7 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
-use super::doc::{current, filled, spinner, split_row};
+use super::doc::{current, filled, spans_w, spinner, split_row};
 use super::live::{per_sec, rate_cell, stepper};
 use super::{Ctx, window};
 use crate::model::{InputPurpose, Link, Modal};
@@ -192,11 +192,13 @@ fn pr_rows(c: &Ctx, pr: &Pr, w: usize, selected: bool, rh: usize) -> Vec<Line<'s
         Some(_) if findings.is_empty() => vec![Span::styled(format!("{} clean ", g.ok), on(Role::Ok))],
         Some(_) => counts(c, &findings, row_bg),
     };
-    let sha_room = w.saturating_sub(width(&repo) + 6 + right.iter().map(|s| width(&s.content)).sum::<usize>());
     let mut left = left;
-    if sha_room >= 9 && run.is_none_or(|r| r.status != RunStatus::Running) {
-        let sep = if w >= 60 { format!("{} ", g.sep) } else { String::new() };
-        left.push(Span::styled(format!("{sep}{}", pr.head_sha.short()), on(Role::Muted)));
+    let sep = if w >= 60 { format!("{} ", g.sep) } else { String::new() };
+    let sha = format!("{sep}{}", pr.head_sha.short());
+    // The cells the row's glyphs really take, so `->0` in ASCII counts one wider than `→0`; two spaces before the counts.
+    let fits = spans_w(&left) + width(&sha) + 2 + spans_w(&right) <= w;
+    if fits && run.is_none_or(|r| r.status != RunStatus::Running) {
+        left.push(Span::styled(sha, on(Role::Muted)));
     }
     let mut out = vec![
         Line::from(filled(first, w, row_bg)).style(row_bg),

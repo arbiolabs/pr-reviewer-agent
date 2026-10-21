@@ -681,3 +681,13 @@ fn a_two_word_category_reads_as_two_words() {
     let (frame, _) = render(&mut s.m, 120, 38);
     assert!(frame.contains("data integrity"), "the open timeline row:\n{frame}");
 }
+
+#[test]
+fn the_ascii_rail_keeps_the_head_sha_of_a_pr_with_findings_as_the_unicode_rail_does() {
+    for ascii in [false, true] {
+        let mut s = Sim::new(Look { ascii, ..Look::default() }).play("showcase", usize::MAX);
+        let (frame, _) = render(&mut s.m, 120, 38);
+        let row = frame.lines().find(|l| l.contains("1 ^1") || l.contains("1 ▲1")).unwrap();
+        assert!(row.contains("647fb3b"), "ascii {ascii}: {row}");
+    }
+}
