@@ -4,6 +4,8 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-10-21
+
 ### Added
 
 - **Benchmark.** `pnpm bench -- --model provider/id` runs the dry-run review over 12 labeled cases in `bench/cases/` (8 with one seeded bug, 4 known-clean) and prints precision, recall, the verifier's discards, and one row per case. `--runs N` repeats the set to show variance, `--json` writes a results file, and `pnpm bench:compare` compares two of them. It calls a real model, so it never runs in CI (#22).
@@ -69,7 +71,8 @@ This is the first release.
   - the PR is still open.
 - Command idempotency keys are bound to each run attempt, so a replayed command never has a second effect.
 
-[Unreleased]: https://github.com/diego-arbio-dev/pr-reviewer/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/diego-arbio-dev/pr-reviewer/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/diego-arbio-dev/pr-reviewer/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/diego-arbio-dev/pr-reviewer/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/diego-arbio-dev/pr-reviewer/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/diego-arbio-dev/pr-reviewer/releases/tag/v1.0.0
