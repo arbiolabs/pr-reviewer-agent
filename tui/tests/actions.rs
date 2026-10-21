@@ -1065,3 +1065,19 @@ fn a_diff_that_fails_says_why_however_long_the_reason() {
     assert!(f.contains("The diff did not load. Settings lists the error."), "{f}");
     assert!(m.diag.errors.back().is_some_and(|e| e.1.ends_with(&long)), "Settings keeps the daemon's words");
 }
+
+/// Under a daemon that grants no review.publish, the parked run's ready line names why p is off instead of offering it.
+#[test]
+fn a_parked_run_under_a_daemon_without_publish_does_not_offer_p() {
+    let mut m = model();
+    update(&mut m, Msg::Net(NetEvent::Opened));
+    for line in read("playback/approval.ndjson").lines().take(5) {
+        let v: serde_json::Value = serde_json::from_str(&line.replace(r#","review.publish""#, "")).unwrap();
+        send(&mut m, &v["message"].to_string());
+    }
+    m.ui.selected_pr = Some(pr_review_tui::protocol::PrId::new("acme/shop#184"));
+    m.ui.screen = Screen::Review;
+    let f = frame(&mut m);
+    assert!(f.contains("Ready to publish · publishing is off: the daemon does not grant it"), "{f}");
+    assert!(!f.contains("p previews"), "{f}");
+}

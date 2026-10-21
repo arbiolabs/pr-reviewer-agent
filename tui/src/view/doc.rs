@@ -302,12 +302,15 @@ pub fn document(c: &Ctx, pr: &Pr, w: usize, height: usize) -> Doc {
     if run.is_some_and(|r| r.parked()) {
         ready = Some(lines.len());
         let on = c.m.on_ready_line() && c.m.ui.screen == Screen::Review && c.m.ui.focus != Pane::Sidebar;
-        lines.push(Line::from(vec![
+        let mut ready_line = vec![
             c.span(format!("{} Ready to publish", g.pending), if on { Role::Selected } else { Role::Pending }),
             c.span(format!(" {} ", g.sep), Role::Muted),
-            c.span("p", Role::Accent),
-            c.span(" previews", Role::Muted),
-        ]));
+        ];
+        match crate::update::write_block(c.m, "review.publish") {
+            Some(why) => ready_line.push(c.span(format!("publishing is off: {why}"), Role::Muted)),
+            None => ready_line.extend([c.span("p", Role::Accent), c.span(" previews", Role::Muted)]),
+        }
+        lines.push(Line::from(ready_line));
         lines.push(Line::raw(""));
     }
     if findings.is_empty() && run.is_some_and(|r| r.status == RunStatus::Completed) {
