@@ -18,7 +18,11 @@ use crate::update::{diff_findings, row_findings};
 
 pub fn diff(c: &Ctx, f: &mut Frame, area: Rect) {
     let Some(d) = &c.m.diff else {
-        let text = if c.m.selected_pr().is_some() { "Press 3 to load the diff." } else { "No PR selected." };
+        let text = match super::never_loaded(c) {
+            Some(why) => why,
+            None if c.m.selected_pr().is_some() => "Press 3 to load the diff.",
+            None => "No PR selected.",
+        };
         f.render_widget(
             Paragraph::new(vec![Line::raw(""), Line::from(c.span(format!("  {text}"), Role::Muted))]),
             area,

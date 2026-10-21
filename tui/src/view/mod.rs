@@ -72,6 +72,13 @@ pub(crate) fn window(len: usize, selected: Option<usize>, height: usize) -> std:
     start..start + height
 }
 
+/// What an empty view says while the link is down and no snapshot ever arrived, so there is no PR to pick.
+pub(crate) fn never_loaded(c: &Ctx) -> Option<&'static str> {
+    let down = matches!(c.m.link, Link::Disconnected { .. } | Link::Unusable { .. } | Link::Incompatible { .. });
+    (down && c.m.diag.last_snapshot_ms.is_none())
+        .then_some("Not connected to a daemon, so there is nothing to show yet.")
+}
+
 /// What a click lands on.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Hit {

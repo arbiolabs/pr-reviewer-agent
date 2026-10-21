@@ -827,3 +827,20 @@ fn at_60x16_no_view_pads_with_blank_rows_while_its_content_is_cut() {
         }
     }
 }
+
+/// With no daemon and nothing ever loaded, the Diff and Timeline say why they are empty instead of asking for a PR.
+#[test]
+fn with_no_daemon_and_nothing_loaded_every_view_names_the_missing_connection() {
+    use crossterm::event::KeyCode;
+    let mut none = Sim::new(Look::default());
+    none.apply(pr_review_tui::update::Msg::Net(pr_review_tui::update::NetEvent::Lost {
+        reason: "connection refused".into(),
+        retry_in_ms: Some(1000),
+    }));
+    for key in ['3', '4'] {
+        let mut s = none.clone().key(KeyCode::Char(key));
+        let (frame, _) = render(&mut s.m, 120, 38);
+        assert!(frame.contains("Not connected to a daemon, so there is nothing to show yet."), "{key}:\n{frame}");
+        assert!(!frame.contains("Select a PR") && !frame.contains("No PR selected"), "{key}:\n{frame}");
+    }
+}

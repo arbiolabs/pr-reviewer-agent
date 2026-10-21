@@ -217,7 +217,7 @@ fn event_line(c: &Ctx, e: &SequencedEvent, w: usize, selected: bool) -> Line<'st
 pub fn timeline(c: &Ctx, f: &mut Frame, area: Rect) {
     let col = super::doc::reading(area);
     let Some(t) = &c.m.timeline else {
-        let text = "No timeline loaded. Select a PR and press t.";
+        let text = super::never_loaded(c).unwrap_or("No timeline loaded. Select a PR and press t.");
         f.render_widget(Paragraph::new(vec![Line::raw(""), Line::from(c.span(text, Role::Muted))]), col);
         return;
     };
