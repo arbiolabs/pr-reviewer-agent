@@ -43,17 +43,35 @@ export function renderMarkdown(report: ReviewReport): string {
   return renderSummary(report.revision.head_sha, report.findings, report.limitations, incomplete);
 }
 
+/** The body section a carried finding is listed under, by the state this revision observed it in; any other state goes last. */
+const CARRIED_SECTIONS: [heading: string, states: string[]][] = [
+  ["Still present from an earlier commit:", ["STILL_PRESENT"]],
+  ["Possibly fixed, the cited code changed:", ["POTENTIALLY_RESOLVED"]],
+  ["Outdated, the cited file is gone:", ["OUTDATED"]],
+  ["Carried from an earlier commit:", []],
+];
+
 /** The §12 body for a head; `incomplete` replaces the findings line for a run that did not finish. */
 export function renderSummary(headSha: string, findings: FindingView[], limitations: string[], incomplete?: string): string {
   const lines = ["## Automated PR review", "", `Reviewed commit: \`${headSha}\``, ""];
+  const fresh = findings.filter((f) => !f.carried);
+  const carried = findings.filter((f) => f.carried);
+  const where = (f: FindingView) => (f.anchored ? `${f.candidate.file}:${f.candidate.newLine}` : f.candidate.file);
   if (incomplete !== undefined) {
     lines.push(incomplete);
-  } else if (findings.length === 0) {
-    lines.push("No actionable issues found in the reviewed scope.");
+  } else if (fresh.length === 0) {
+    lines.push(`No ${carried.length === 0 ? "" : "new "}actionable issues found in the reviewed scope.`);
   } else {
-    const n = findings.length;
+    const n = fresh.length;
     lines.push(`Found ${n} actionable ${n === 1 ? "issue" : "issues"}.`, "");
-    for (const { candidate: c } of findings) lines.push(`- ${capitalize(c.severity)}: ${c.title} (\`${c.file}:${c.newLine}\`)`);
+    for (const { candidate: c } of fresh) lines.push(`- ${capitalize(c.severity)}: ${c.title} (\`${c.file}:${c.newLine}\`)`);
+  }
+  const sectioned = new Set(CARRIED_SECTIONS.flatMap(([, states]) => states));
+  for (const [heading, states] of CARRIED_SECTIONS) {
+    const group = carried.filter((f) => (states.length === 0 ? !sectioned.has(f.status) : states.includes(f.status)));
+    if (group.length === 0) continue;
+    lines.push("", heading, "");
+    for (const f of group) lines.push(`- ${capitalize(f.candidate.severity)}: ${f.candidate.title} (\`${where(f)}\`, first reported on \`${f.firstHeadSha.slice(0, 7)}\`)`);
   }
   for (const limitation of limitations) lines.push("", `Scope limited: ${limitation}.`);
   lines.push("", "Review performed with isolated read-only tools. Human review is still required.");

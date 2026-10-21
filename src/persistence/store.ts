@@ -3,6 +3,7 @@ import { DatabaseSync } from "node:sqlite";
 import { transition } from "../domain/machine.ts";
 import {
   type CoordinatorState,
+  type FindingState,
   OUTBOX_MACHINE,
   type OutboxEvent,
   type OutboxStatus,
@@ -15,6 +16,7 @@ import {
 } from "../domain/machines.ts";
 import { type CandidateFinding, type ChangedFile, type Disposition, type PullInfo, stableId } from "../domain/types.ts";
 import { sanitize } from "../protocol/sanitize.ts";
+import type { Observation, ObservedLocation } from "../reasoning/track.ts";
 
 const MIGRATIONS_DIR = new URL("../../migrations/", import.meta.url);
 
@@ -77,12 +79,31 @@ export type DecisionRecord = {
   reasons: string[];
 };
 
+/** A finding as one revision observed it. `candidate` is the evidence as of that observation, relocated when the code moved. */
 export type FindingView = {
   findingId: string;
   fingerprint: string;
   status: string;
   severity: string;
   candidate: CandidateFinding;
+  /** First reported by an earlier revision. */
+  carried: boolean;
+  firstHeadSha: string;
+  /** An inline comment is on GitHub, or in an outbox that may still reach it; such a finding is never commented again. */
+  posted: boolean;
+  /** `candidate.file` and `newLine` are valid at this revision's head, not carried from an older one. */
+  anchored: boolean;
+};
+
+/** An open finding at its latest observation before `excludeRevisionId`, with the head that observation was made on. */
+export type OpenFinding = {
+  findingId: string;
+  fingerprint: string;
+  status: FindingState;
+  candidate: CandidateFinding;
+  /** Rows written before migration 055 have no `headSha` and no `evidence`. */
+  location: ObservedLocation | Pick<ObservedLocation, "file" | "newLine">;
+  observedAt: string;
 };
 
 export type OutboxRow = {
@@ -96,6 +117,8 @@ export type OutboxRow = {
   attempt_count: number;
   last_error: string | null;
   updated_at: string;
+  /** The findings the payload comments on; NULL on a `p1` outbox, whose payload commented on every finding of its revision. */
+  inline_finding_ids_json: string | null;
 };
 
 export type OutboxEventRow = { from_status: OutboxStatus; event: OutboxEvent; to_status: OutboxStatus; detail: string | null };
@@ -290,13 +313,13 @@ export class AppStore {
    * Insert the canonical payload once per idempotency key; a rerun gets the row that won. Called inside the transition
    * out of PREPARE_PUBLICATION, which journals the publication status once the revision is in its new state.
    */
-  ensureOutbox(row: { revisionId: string; idempotencyKey: string; payloadHash: string; payloadJson: string }): OutboxRow {
+  ensureOutbox(row: { revisionId: string; idempotencyKey: string; payloadHash: string; payloadJson: string; inlineFindingIds: string[] }): OutboxRow {
     this.db
       .prepare(
-        `INSERT INTO publication_outbox (id, revision_id, idempotency_key, payload_hash, payload_json, status, updated_at)
-         VALUES (?, ?, ?, ?, ?, 'pending', ?) ON CONFLICT (idempotency_key) DO NOTHING`,
+        `INSERT INTO publication_outbox (id, revision_id, idempotency_key, payload_hash, payload_json, status, updated_at, inline_finding_ids_json)
+         VALUES (?, ?, ?, ?, ?, 'pending', ?, ?) ON CONFLICT (idempotency_key) DO NOTHING`,
       )
-      .run(stableId("outbox", row.idempotencyKey), row.revisionId, row.idempotencyKey, row.payloadHash, row.payloadJson, now());
+      .run(stableId("outbox", row.idempotencyKey), row.revisionId, row.idempotencyKey, row.payloadHash, row.payloadJson, now(), JSON.stringify(row.inlineFindingIds));
     return this.db.prepare("SELECT * FROM publication_outbox WHERE idempotency_key = ?").get(row.idempotencyKey) as OutboxRow;
   }
 
@@ -339,14 +362,23 @@ export class AppStore {
     return this.db.prepare("SELECT from_status, event, to_status, detail FROM outbox_events WHERE outbox_id = ? ORDER BY seq").all(id) as OutboxEventRow[];
   }
 
-  /** The revision's verified findings are now on GitHub (§4.3 DETECTED → PUBLISHED). */
-  markFindingsPublished(revisionId: string): void {
+  /**
+   * A published outbox's review is on GitHub: it becomes the review of record for the findings its payload commented
+   * on (first comment wins), and the revision's findings still DETECTED are PUBLISHED (§4.3). A finding past DETECTED
+   * keeps its tracked state; the review column, not the status, says it was posted.
+   */
+  markFindingsPublished(outboxId: string): void {
+    const outbox = this.outbox(outboxId)!;
+    const inline: string[] = outbox.inline_finding_ids_json
+      ? JSON.parse(outbox.inline_finding_ids_json)
+      : (this.db.prepare("SELECT finding_id FROM finding_observations WHERE revision_id = ?").all(outbox.revision_id) as { finding_id: string }[]).map((r) => r.finding_id);
+    for (const id of inline) this.db.prepare("UPDATE findings SET github_review_id = ? WHERE id = ? AND github_review_id IS NULL").run(outbox.github_review_id, id);
     this.db
       .prepare(
         `UPDATE findings SET status = 'PUBLISHED', updated_at = ? WHERE status = 'DETECTED'
          AND id IN (SELECT finding_id FROM finding_observations WHERE revision_id = ?)`,
       )
-      .run(now(), revisionId);
+      .run(now(), outbox.revision_id);
   }
 
   retryCount(revisionId: string): number {
@@ -495,12 +527,13 @@ export class AppStore {
     return (this.db.prepare("SELECT count(*) AS n FROM candidate_sets WHERE revision_id = ?").get(revisionId) as { n: number }).n;
   }
 
-  /** Writes for VERIFY → PREPARE_PUBLICATION; call inside `advance()` so they commit with the transition. */
-  writeVerification(
-    revision: RevisionRow,
-    dispositions: Disposition[],
-    verified: { findingId: string; fingerprint: string; candidate: CandidateFinding }[],
-  ): void {
+  /**
+   * Writes for VERIFY → PREPARE_PUBLICATION; call inside `advance()` so they commit with the transition. `verified`
+   * upserts the finding rows (a re-report keeps its ID and refreshes the severity); `observations` writes one row per
+   * finding this revision saw, with the state it ended in, and moves the finding there. The observation goes in before
+   * the status changes, so the journal trigger charges the change to this revision.
+   */
+  writeVerification(revision: RevisionRow, dispositions: Disposition[], verified: { findingId: string; fingerprint: string; candidate: CandidateFinding }[], observations: Observation[]): void {
     const at = now();
     this.db.prepare("UPDATE candidate_sets SET dispositions_json = ? WHERE revision_id = ?").run(JSON.stringify(dispositions), revision.id);
     for (const { findingId, fingerprint, candidate } of verified) {
@@ -511,28 +544,73 @@ export class AppStore {
            ON CONFLICT (id) DO UPDATE SET current_severity = excluded.current_severity, updated_at = excluded.updated_at`,
         )
         .run(findingId, revision.pr_id, revision.id, fingerprint, candidate.severity, at, at);
+    }
+    for (const { findingId, path, basis, candidate, location } of observations) {
+      const state = path.at(-1)!;
       this.db
         .prepare(
-          `INSERT INTO finding_observations (id, finding_id, revision_id, disposition, evidence_json, location_json, created_at)
-           VALUES (?, ?, ?, 'VERIFIED', ?, ?, ?) ON CONFLICT (finding_id, revision_id) DO NOTHING`,
+          `INSERT INTO finding_observations (id, finding_id, revision_id, disposition, evidence_json, location_json, created_at, path_json, basis)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (finding_id, revision_id) DO NOTHING`,
         )
-        .run(stableId("observation", findingId, revision.id), findingId, revision.id, JSON.stringify(candidate), JSON.stringify({ file: candidate.file, newLine: candidate.newLine }), at);
+        .run(stableId("observation", findingId, revision.id), findingId, revision.id, state, JSON.stringify(candidate), JSON.stringify(location), at, JSON.stringify(path), basis);
+      this.db.prepare("UPDATE findings SET status = ?, updated_at = ? WHERE id = ? AND status != ?").run(state, at, findingId, state);
     }
   }
 
   findingsForRevision(revisionId: string): FindingView[] {
+    const revision = this.revision(revisionId)!;
     const rows = this.db
       .prepare(
-        `SELECT f.id, f.fingerprint, f.status, f.current_severity, o.evidence_json FROM finding_observations o
-         JOIN findings f ON f.id = o.finding_id WHERE o.revision_id = ? ORDER BY o.created_at, f.id`,
+        `SELECT f.id, f.fingerprint, f.status, f.current_severity, f.first_revision_id, f.github_review_id, o.evidence_json, o.location_json, fr.head_sha AS first_head_sha
+         FROM finding_observations o JOIN findings f ON f.id = o.finding_id JOIN review_revisions fr ON fr.id = f.first_revision_id
+         WHERE o.revision_id = ? ORDER BY o.created_at, f.id`,
       )
-      .all(revisionId) as Record<string, string>[];
+      .all(revisionId) as Record<string, string | null>[];
+    // Revision N can be posting while N+1 verifies (the coordinator aborts only states before PUBLISH): a finding in
+    // an outbox that may still reach GitHub counts as posted. A missed comment is cheaper than a duplicate.
+    const inFlight = new Set(
+      (
+        this.db
+          .prepare(
+            `SELECT o.inline_finding_ids_json AS ids FROM publication_outbox o JOIN review_revisions r ON r.id = o.revision_id
+             WHERE r.pr_id = ? AND o.revision_id != ? AND o.status != 'failed' AND o.inline_finding_ids_json IS NOT NULL`,
+          )
+          .all(revision.pr_id, revisionId) as { ids: string }[]
+      ).flatMap((r) => JSON.parse(r.ids) as string[]),
+    );
+    return rows.map((row) => {
+      const location = JSON.parse(row.location_json!) as Partial<ObservedLocation>;
+      return {
+        findingId: row.id!,
+        fingerprint: row.fingerprint!,
+        status: row.status!,
+        severity: row.current_severity!,
+        candidate: JSON.parse(row.evidence_json!),
+        carried: row.first_revision_id !== revisionId,
+        firstHeadSha: row.first_head_sha!,
+        posted: row.github_review_id !== null || inFlight.has(row.id!),
+        anchored: location.headSha === undefined || location.headSha === revision.head_sha,
+      };
+    });
+  }
+
+  /** Every finding of the PR not yet RESOLVED, as last observed by a revision other than `excludeRevisionId`. */
+  openFindings(prId: string, excludeRevisionId: string): OpenFinding[] {
+    const rows = this.db
+      .prepare(
+        `SELECT f.id, f.fingerprint, f.status, o.evidence_json, o.location_json, r.head_sha FROM findings f
+         JOIN finding_observations o ON o.id = (SELECT id FROM finding_observations WHERE finding_id = f.id AND revision_id != :exclude ORDER BY created_at DESC, id LIMIT 1)
+         JOIN review_revisions r ON r.id = o.revision_id
+         WHERE f.pr_id = :pr AND f.status != 'RESOLVED' ORDER BY f.created_at, f.id`,
+      )
+      .all({ pr: prId, exclude: excludeRevisionId }) as Record<string, string>[];
     return rows.map((row) => ({
       findingId: row.id!,
       fingerprint: row.fingerprint!,
-      status: row.status!,
-      severity: row.current_severity!,
+      status: row.status as FindingState,
       candidate: JSON.parse(row.evidence_json!),
+      location: JSON.parse(row.location_json!),
+      observedAt: row.head_sha!,
     }));
   }
 

@@ -17,10 +17,12 @@ beforeAll(async () => {
   const repo = new PinnedRepo(await syncRepo(mkdtempSync(join(tmpdir(), "cache-")), "acme/shop", fixture.repoDir, 1), fixture.baseSha, fixture.headSha);
   ctx = {
     prId: "pr-1",
+    revisionId: "rev-1",
     baseSha: fixture.baseSha,
     headSha: fixture.headSha,
     files: parseDiff(await repo.diff()),
-    lineCount: (sha, path) => repo.lineCount(sha, path),
+    read: (sha, path) => repo.show(sha, path),
+    prior: [],
     thresholds: DEFAULT_CONFIG.verification,
   };
 });

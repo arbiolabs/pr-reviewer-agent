@@ -44,6 +44,7 @@ async function killThenRestart(kill: "before-post" | "after-response") {
     exit: second.code,
     revision: after.db.prepare("SELECT state FROM review_revisions").get(),
     outbox: [outbox.status, outbox.github_review_id],
+    finding: after.db.prepare("SELECT status, github_review_id FROM findings").get(),
     events: after.outboxEvents(outbox.id).map((e) => `${e.from_status} ${e.event} ${e.to_status}`),
     postAttempts: fake.postAttempts,
     reviews: fake.reviews.map((r) => r.id),
@@ -59,6 +60,7 @@ it("(a) SIGKILL after sending is committed but before the POST: restart reconcil
     exit: 0,
     revision: { state: "COMPLETED" },
     outbox: ["published", 1000],
+    finding: { status: "PUBLISHED", github_review_id: 1000 },
     events: [
       "pending SEND sending",
       "sending UNCERTAIN needs_reconciliation",
@@ -78,6 +80,7 @@ it("(c) SIGKILL after GitHub answered but before github_review_id is saved: rest
     exit: 0,
     revision: { state: "COMPLETED" },
     outbox: ["published", 1000],
+    finding: { status: "PUBLISHED", github_review_id: 1000 },
     events: ["pending SEND sending", "sending UNCERTAIN needs_reconciliation", "needs_reconciliation FOUND published"],
     postAttempts: 1,
     reviews: [1000],

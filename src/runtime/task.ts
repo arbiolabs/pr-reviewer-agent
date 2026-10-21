@@ -18,6 +18,7 @@ import { askJev, type JevOutcome, type JevRoute, selectReviewMode, type TriageIn
 import type { AppStore, RevisionRow } from "../persistence/store.ts";
 import { buildReviewRequest } from "../reasoning/request.ts";
 import { TargetDoc, type Workspace } from "../reasoning/tools.ts";
+import { evidenceTexts, headReader, locate, observe, type ObservedLocation, type PriorFinding } from "../reasoning/track.ts";
 import { verifyCandidates } from "../reasoning/verify.ts";
 import { PinnedRepo, syncRepo } from "../source/git.ts";
 import type { GitHubClient } from "../github/client.ts";
@@ -205,26 +206,45 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
     if (settled.status !== "done") throw new Error(`analysis ${settled.status}: ${settled.reason}${settled.detail ? ` ${JSON.stringify(settled.detail)}` : ""}`);
   }
 
+  /** Every open finding of the PR, located at this revision's head. Rows from before migration 055 get their evidence text from the head they were seen on. */
+  async function priorFindings(revision: RevisionRow, ws: Workspace): Promise<PriorFinding[]> {
+    const read = (sha: string, path: string) => ws.repo.show(sha, path);
+    const head = headReader(ws.repo, ws.snapshot.changedFiles);
+    const prior: PriorFinding[] = [];
+    for (const f of store.openFindings(revision.pr_id, revision.id)) {
+      const location: ObservedLocation = "evidence" in f.location ? f.location : { ...f.location, headSha: f.observedAt, evidence: await evidenceTexts(f.candidate, f.observedAt, read) };
+      prior.push({ findingId: f.findingId, fingerprint: f.fingerprint, status: f.status, candidate: f.candidate, location, located: await locate(location, revision.head_sha, head) });
+    }
+    return prior;
+  }
+
   const verify: PhaseBody<"verify"> = async (cp, revision) => {
     const set = store.candidateSet(revision.id)!;
     const ws = await deps.workspace(revision.id);
+    const prior = await priorFindings(revision, ws);
     const { dispositions, verified } = await verifyCandidates(set.candidates, {
       prId: revision.pr_id,
+      revisionId: revision.id,
       baseSha: revision.base_sha,
       headSha: revision.head_sha,
       files: ws.files,
-      lineCount: (sha, path) => ws.repo.lineCount(sha, path),
+      read: (sha, path) => ws.repo.show(sha, path),
       thresholds: config.verification,
+      prior,
     });
-    store.advance(revision.id, "VERIFY", "CANDIDATES_DISPOSED", `${verified.length} verified, ${dispositions.length - verified.length} discarded`, () =>
-      store.writeVerification(revision, dispositions, verified),
-    );
+    const observations = observe(prior, verified);
+    const detail = `${verified.length} verified, ${dispositions.length - verified.length} discarded, ${prior.length} carried`;
+    store.advance(revision.id, "VERIFY", "CANDIDATES_DISPOSED", detail, () => store.writeVerification(revision, dispositions, verified, observations));
     return { phase: "prepare", revisionId: revision.id, verifiedSetId: set.id };
   };
 
   const prepare: PhaseBody<"prepare"> = async (cp, revision, _runtime, _context, input) => {
     const findings = store.findingsForRevision(revision.id);
-    const publish = input.publish === true && !(config.review.publish_mode === "silent_no_findings" && findings.length === 0);
+    const snapshot = store.snapshot(revision.id)!;
+    const { payload, hash, inlineFindingIds } = buildPayload({ revisionId: revision.id, headSha: revision.head_sha, findings, limitations: snapshot.limitations, files: parseDiff(snapshot.diff) });
+    // silent_no_findings posts only a review that says something new: a new finding, or a first comment on a carried one.
+    const news = inlineFindingIds.length > 0 || findings.some((f) => !f.carried);
+    const publish = input.publish === true && !(config.review.publish_mode === "silent_no_findings" && !news);
     // Approval mode stores the payload the same way, then parks the revision for a human instead of posting.
     const approval = publish && config.review.publish_mode === "approval";
     if (revision.state === "PREPARE_PUBLICATION") {
@@ -236,9 +256,7 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
       // §9.3 step 1: the canonical payload is persisted with the transition into PUBLISH (or AWAITING_APPROVAL).
       store.advance(revision.id, "PREPARE_PUBLICATION", approval ? "APPROVAL_REQUIRED" : "HEAD_VERIFIED", `head still ${revision.head_sha}`, () => {
         if (!publish) return;
-        const snapshot = store.snapshot(revision.id)!;
-        const { payload, hash } = buildPayload({ revisionId: revision.id, headSha: revision.head_sha, findings, limitations: snapshot.limitations, files: parseDiff(snapshot.diff) });
-        store.ensureOutbox({ revisionId: revision.id, idempotencyKey: `${revision.id}:${PUBLISHER_VERSION}`, payloadHash: hash, payloadJson: JSON.stringify(payload) });
+        store.ensureOutbox({ revisionId: revision.id, idempotencyKey: `${revision.id}:${PUBLISHER_VERSION}`, payloadHash: hash, payloadJson: JSON.stringify(payload), inlineFindingIds });
       });
     }
     // The decision to park is the revision's state, not the live config: a rerun after a crash (even under another
@@ -246,7 +264,7 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
     if (store.revision(revision.id)!.state === "AWAITING_APPROVAL") return finished(revision.id, "AWAITING_APPROVAL");
     const outbox = store.outboxForRevision(revision.id);
     if (outbox) return { phase: "publish", revisionId: revision.id, outboxId: outbox.id };
-    store.advance(revision.id, "PUBLISH", "NO_PUBLICATION_RECORDED", input.publish ? "no findings: silent_no_findings" : "dry run: nothing published");
+    store.advance(revision.id, "PUBLISH", "NO_PUBLICATION_RECORDED", input.publish ? "nothing new to post: silent_no_findings" : "dry run: nothing published");
     return finished(revision.id, "COMPLETED");
   };
 
@@ -295,7 +313,7 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
         if (existing.kind === "found") {
           store.tx(() => {
             store.advanceOutbox(outbox.id, "FOUND", `review ${existing.reviewId} already on GitHub`, existing.reviewId);
-            store.markFindingsPublished(revision.id);
+            store.markFindingsPublished(outbox.id);
             store.advance(revision.id, "PUBLISH", "REVIEW_RECONCILED", `review ${existing.reviewId} already on GitHub`);
           });
           return finished(revision.id, "COMPLETED");
@@ -313,7 +331,7 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
         if (result.kind === "posted") {
           store.tx(() => {
             store.advanceOutbox(outbox.id, "SENT", `review ${result.reviewId}`, result.reviewId);
-            store.markFindingsPublished(revision.id);
+            store.markFindingsPublished(outbox.id);
             store.advance(revision.id, "PUBLISH", "REVIEW_RECONCILED", `review ${result.reviewId} posted`);
           });
           return finished(revision.id, "COMPLETED");

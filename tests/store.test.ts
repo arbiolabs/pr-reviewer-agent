@@ -33,7 +33,7 @@ it("derives the same revision id on reopen and applies migrations once", () => {
   store.close();
   const reopened = AppStore.open(path);
   expect(reopened.ensureRevision(key).id).toBe(first.id);
-  expect(reopened.db.prepare("SELECT name FROM schema_migrations").all()).toEqual([{ name: "001_init.sql" }, { name: "002_code_read.sql" }, { name: "003_publication.sql" }, { name: "004_coordinator.sql" }, { name: "005_webhook_retry.sql" }, { name: "006_meta.sql" }, { name: "050_stream_meta.sql" }, { name: "051_journal_without_revision.sql" }, { name: "052_control_commands.sql" }, { name: "053_control_command_attempt.sql" }, { name: "054_pull_title.sql" }]);
+  expect(reopened.db.prepare("SELECT name FROM schema_migrations").all()).toEqual([{ name: "001_init.sql" }, { name: "002_code_read.sql" }, { name: "003_publication.sql" }, { name: "004_coordinator.sql" }, { name: "005_webhook_retry.sql" }, { name: "006_meta.sql" }, { name: "050_stream_meta.sql" }, { name: "051_journal_without_revision.sql" }, { name: "052_control_commands.sql" }, { name: "053_control_command_attempt.sql" }, { name: "054_pull_title.sql" }, { name: "055_finding_tracking.sql" }]);
   expect(reopened.revisionsForPr(prId).length).toBe(1);
 });
 
@@ -67,14 +67,14 @@ function revisionInPublish(store: AppStore) {
   const prId = store.upsertPull(pull);
   const revision = store.ensureRevision({ prId, baseSha: pull.baseSha, headSha: pull.headSha, policyVersion: "1", reviewerVersion: "m2" });
   store.db.prepare("UPDATE review_revisions SET state = 'PUBLISH' WHERE id = ?").run(revision.id);
-  const outbox = store.ensureOutbox({ revisionId: revision.id, idempotencyKey: `${revision.id}:p1`, payloadHash: "h", payloadJson: "{}" });
+  const outbox = store.ensureOutbox({ revisionId: revision.id, idempotencyKey: `${revision.id}:p1`, payloadHash: "h", payloadJson: "{}", inlineFindingIds: [] });
   return { revision, outbox };
 }
 
 it("inserts one outbox row per idempotency key and returns the winner on a rerun", () => {
   const { store } = openFresh();
   const { revision, outbox } = revisionInPublish(store);
-  const again = store.ensureOutbox({ revisionId: revision.id, idempotencyKey: `${revision.id}:p1`, payloadHash: "other", payloadJson: "[]" });
+  const again = store.ensureOutbox({ revisionId: revision.id, idempotencyKey: `${revision.id}:p1`, payloadHash: "other", payloadJson: "[]", inlineFindingIds: [] });
   expect([again.id, again.payload_hash, store.db.prepare("SELECT count(*) AS n FROM publication_outbox").get()]).toEqual([outbox.id, "h", { n: 1 }]);
 });
 
@@ -100,7 +100,7 @@ function revisionAwaitingApproval(store: AppStore) {
   const revision = store.ensureRevision({ prId, baseSha: pull.baseSha, headSha: pull.headSha, policyVersion: "1+publish", reviewerVersion: "m3" });
   store.db.prepare("UPDATE review_revisions SET state = 'PREPARE_PUBLICATION' WHERE id = ?").run(revision.id);
   store.advance(revision.id, "PREPARE_PUBLICATION", "APPROVAL_REQUIRED", "head still h", () => {
-    store.ensureOutbox({ revisionId: revision.id, idempotencyKey: `${revision.id}:p1`, payloadHash: "h", payloadJson: "{}" });
+    store.ensureOutbox({ revisionId: revision.id, idempotencyKey: `${revision.id}:p1`, payloadHash: "h", payloadJson: "{}", inlineFindingIds: [] });
   });
   return { revision, outbox: store.outboxForRevision(revision.id)! };
 }
@@ -138,7 +138,7 @@ it("abandons the unsent outbox when an awaiting revision is superseded or cancel
   const prId = store.upsertPull(other);
   const revision = store.ensureRevision({ prId, baseSha: other.baseSha, headSha: other.headSha, policyVersion: "1+publish", reviewerVersion: "m3" });
   store.db.prepare("UPDATE review_revisions SET state = 'AWAITING_APPROVAL' WHERE id = ?").run(revision.id);
-  const outbox = store.ensureOutbox({ revisionId: revision.id, idempotencyKey: `${revision.id}:p1`, payloadHash: "h", payloadJson: "{}" });
+  const outbox = store.ensureOutbox({ revisionId: revision.id, idempotencyKey: `${revision.id}:p1`, payloadHash: "h", payloadJson: "{}", inlineFindingIds: [] });
   expect(store.advance(revision.id, "AWAITING_APPROVAL", "CANCELLED", "cancelled from the TUI")).toBe("FAILED");
   expect(store.outboxEvents(outbox.id)).toEqual([{ from_status: "pending", event: "ABANDON", to_status: "failed", detail: "cancelled" }]);
   expect(store.advance(revision.id, "FAILED", "MANUAL_RETRY", "retry 1")).toBe("COLLECT_CONTEXT");

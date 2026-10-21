@@ -4,8 +4,11 @@ import { type GitHubClient, GitHubError } from "../github/client.ts";
 import type { AppStore, FindingView, OutboxRow } from "../persistence/store.ts";
 import type { FileDiff } from "../source/diff.ts";
 
-/** Part of the idempotency key: a publisher that builds a different payload is a different publication. */
-export const PUBLISHER_VERSION = "p1";
+/**
+ * Part of the idempotency key: a publisher that builds a different payload is a different publication. `p2` comments
+ * only on findings never posted and lists carried ones in the body. A `p1` outbox already stored still posts as it is.
+ */
+export const PUBLISHER_VERSION = "p2";
 
 export type ReviewComment = { path: string; line: number; side: "RIGHT"; body: string };
 /** The POST body, exactly as sent. `event` is always COMMENT: the reviewer never approves or requests changes. */
@@ -21,7 +24,8 @@ const inert = (text: string) => text.replaceAll("<!--", "&lt;!--");
 
 /**
  * §9.3 steps 1 and 3: the canonical payload and its hash. The hash covers everything but the marker, which carries
- * it. Inline comments go only on verified findings whose head line is inside a hunk of the pinned diff.
+ * it. Inline comments go only on findings never posted before, anchored at this head inside a hunk of the pinned diff;
+ * a finding carried from an earlier review is listed in the body instead.
  */
 export function buildPayload(input: {
   revisionId: string;
@@ -29,18 +33,17 @@ export function buildPayload(input: {
   findings: FindingView[];
   limitations: string[];
   files: Map<string, FileDiff>;
-}): { payload: ReviewPayload; hash: string } {
-  const comments: ReviewComment[] = input.findings
-    .filter(({ candidate: c }) => c.newLine !== null && input.files.get(c.file)?.headLines.has(c.newLine))
-    .map(({ candidate: c }) => ({
-      path: c.file,
-      line: c.newLine!,
-      side: "RIGHT",
-      body: inert([`**${capitalize(c.severity)}: ${c.title}**`, "", c.explanation, ...(c.suggestedFix ? ["", `Suggested fix: ${c.suggestedFix}`] : [])].join("\n")),
-    }));
+}): { payload: ReviewPayload; hash: string; inlineFindingIds: string[] } {
+  const inline = input.findings.filter((f) => !f.posted && f.anchored && f.candidate.newLine !== null && input.files.get(f.candidate.file)?.headLines.has(f.candidate.newLine));
+  const comments: ReviewComment[] = inline.map(({ candidate: c }) => ({
+    path: c.file,
+    line: c.newLine!,
+    side: "RIGHT",
+    body: inert([`**${capitalize(c.severity)}: ${c.title}**`, "", c.explanation, ...(c.suggestedFix ? ["", `Suggested fix: ${c.suggestedFix}`] : [])].join("\n")),
+  }));
   const body = inert(renderSummary(input.headSha, input.findings, input.limitations));
   const hash = sha256(JSON.stringify({ body, commit_id: input.headSha, event: "COMMENT", comments }));
-  return { payload: { commit_id: input.headSha, body: `${body}\n${marker(input.revisionId, hash)}\n`, event: "COMMENT", comments }, hash };
+  return { payload: { commit_id: input.headSha, body: `${body}\n${marker(input.revisionId, hash)}\n`, event: "COMMENT", comments }, hash, inlineFindingIds: inline.map((f) => f.findingId) };
 }
 
 export type PostOutcome =
@@ -101,7 +104,7 @@ export function recordVerdict(store: AppStore, outbox: OutboxRow, verdict: Recon
   store.tx(() => {
     if (verdict.kind === "found") {
       store.advanceOutbox(outbox.id, "FOUND", `review ${verdict.reviewId} found by marker`, verdict.reviewId);
-      store.markFindingsPublished(outbox.revision_id);
+      store.markFindingsPublished(outbox.id);
       store.advanceFromCurrent(outbox.revision_id, "REVIEW_RECONCILED", `review ${verdict.reviewId} found on GitHub`);
     } else if (verdict.kind === "absent") {
       store.advanceOutbox(outbox.id, "ABSENT", "complete listing has no review with the marker");

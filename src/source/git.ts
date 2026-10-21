@@ -113,8 +113,8 @@ export class PinnedRepo {
     const files: ChangedFile[] = [];
     for (let i = 0; i < fields.length - 1; ) {
       const status = fields[i++]!;
-      if (status.startsWith("R") || status.startsWith("C")) i++;
-      files.push({ path: fields[i++]!, status: status[0]! });
+      const from = status.startsWith("R") || status.startsWith("C") ? fields[i++] : undefined;
+      files.push({ path: fields[i++]!, status: status[0]!, ...(from === undefined ? {} : { from }) });
     }
     return files;
   }

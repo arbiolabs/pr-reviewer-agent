@@ -230,7 +230,7 @@ it("keeps a failed run's reason after its publication is reconciled", async () =
   const prId = store.upsertPull(createFixture().pull);
   const rev = store.ensureRevision({ prId, baseSha: "b".repeat(40), headSha: "h".repeat(40), policyVersion: "1", reviewerVersion: "m1+faux/reviewer" });
   for (const event of ["CONTEXT_PERSISTED", "ROUTING_PERSISTED", "CANDIDATES_PERSISTED", "CANDIDATES_DISPOSED", "HEAD_VERIFIED"] as const) store.advanceFromCurrent(rev.id, event);
-  const outbox = store.ensureOutbox({ revisionId: rev.id, idempotencyKey: `${rev.id}:1`, payloadHash: "p", payloadJson: "{}" });
+  const outbox = store.ensureOutbox({ revisionId: rev.id, idempotencyKey: `${rev.id}:1`, payloadHash: "p", payloadJson: "{}", inlineFindingIds: [] });
   store.advanceOutbox(outbox.id, "SEND");
   store.advanceFromCurrent(rev.id, "TERMINAL_ERROR", "GitHub timed out");
   // Reconciliation finds nothing on GitHub: the outbox returns to pending, and the journal notes the publication failed.
@@ -351,7 +351,7 @@ it("sends the cited lines as evidence text, capped, sanitized, and never fetched
       confidence: 0.9,
       evidenceKind: "confirmed_by_static_trace",
     };
-    store.writeVerification(revision, [], [{ findingId: `f-${fullName}`, fingerprint: fullName, candidate }]);
+    store.writeVerification(revision, [], [{ findingId: `f-${fullName}`, fingerprint: fullName, candidate }], [{ findingId: `f-${fullName}`, path: ["DETECTED"], basis: null, candidate, location: { file: candidate.file, newLine: candidate.newLine, headSha: sha, evidence: [] } }]);
     return `f-${fullName}`;
   };
   const shop = save(1, "acme/shop", [ref(3, 7), ref(1, 100), ref(101, 200), ref(201, 201), ref(3, 7, "gone.ts")]);

@@ -44,11 +44,30 @@ function write(root: string, path: string, text: string) {
   writeFileSync(join(root, path), text);
 }
 
+const gitIn = (repoDir: string) => (...args: string[]) =>
+  execFileSync("git", ["-C", repoDir, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.com", ...args], { encoding: "utf8" }).trim();
+
+/** A later head of the fixture PR: `files` written (null deletes) on the feature branch, committed, and made the PR head. Returns the pull at that head. */
+export function pushCommit(fixture: Fixture, files: Record<string, string | null>, message = "later commit"): PullInfo {
+  const git = gitIn(fixture.repoDir);
+  git("checkout", "-q", "feature");
+  for (const [path, text] of Object.entries(files)) {
+    if (text === null) git("rm", "-q", "--", path);
+    else write(fixture.repoDir, path, text);
+  }
+  git("add", "-A");
+  git("commit", "-q", "-m", message);
+  const headSha = git("rev-parse", "HEAD");
+  git("update-ref", "refs/pull/1/head", headSha);
+  git("checkout", "-q", "main");
+  fixture.pulls.pull = { ...fixture.pull, headSha };
+  return fixture.pulls.pull;
+}
+
 export function createFixture(root = mkdtempSync(join(tmpdir(), "fixture-"))): Fixture {
   const repoDir = join(root, "origin");
   mkdirSync(repoDir);
-  const git = (...args: string[]) =>
-    execFileSync("git", ["-C", repoDir, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.com", ...args], { encoding: "utf8" }).trim();
+  const git = gitIn(repoDir);
   git("init", "-q", "-b", "main");
   write(repoDir, "src/auth/require-admin.ts", "export function requireAdmin(req: Req, res: Res, next: Next) {\n  if (!req.user?.isAdmin) return res.status(403).end();\n  next();\n}\n");
   write(repoDir, "src/routes/orders.ts", ROUTES_BASE);
