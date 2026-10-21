@@ -799,7 +799,11 @@ fn the_diff_a_finding_prefetches_changes_nothing_on_the_review_screen() {
     press(&mut m, KeyCode::Char('l'));
     press(&mut m, KeyCode::Char('d'));
     assert_eq!(m.ui.screen, Screen::Diff);
-    assert!(m.notice.as_ref().is_some_and(|n| n.text.starts_with("This diff has no ")), "{:?}", m.notice);
+    assert!(
+        m.notice.as_ref().is_some_and(|n| n.text == "No file in this diff matches \"src/server/routes/orders.ts\""),
+        "{:?}",
+        m.notice
+    );
 }
 
 #[test]

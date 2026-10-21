@@ -919,7 +919,7 @@ fn resolve_anchor(m: &mut Model, fx: &mut Vec<Effect>) {
         None => {
             d.anchor = None;
             if shown {
-                notice(m, format!("This diff has no {path}"));
+                notice(m, format!("No file in this diff matches \"{path}\""));
             }
         }
     }
