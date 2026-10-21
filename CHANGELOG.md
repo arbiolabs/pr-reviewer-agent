@@ -4,6 +4,8 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 ## [Unreleased]
 
+## [1.0.1] - 2026-10-21
+
 ### Changed
 
 - **Spinners.** The terminal client marks running work (the PR rail, the live review, the status line and posting to GitHub) with ratatui-spinner's braille spinner (`⣾⣷⣯⣟⡿⢿⣽⣻`) instead of the turning quadrant. The phase steppers show the running phase as a filled dot instead of a spinner. In the live phase bar, the running phase's segment bounces an arc like ratatui-spinner's `BarSpinner` in its `Thick` style, instead of walking a highlight. `--ascii` keeps its glyphs (#13).
@@ -49,5 +51,6 @@ This is the first release.
   - the PR is still open.
 - Command idempotency keys are bound to each run attempt, so a replayed command never has a second effect.
 
-[Unreleased]: https://github.com/diego-arbio-dev/pr-reviewer/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/diego-arbio-dev/pr-reviewer/compare/v1.0.1...HEAD
+[1.0.1]: https://github.com/diego-arbio-dev/pr-reviewer/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/diego-arbio-dev/pr-reviewer/releases/tag/v1.0.0
