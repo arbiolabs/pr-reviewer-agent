@@ -1,7 +1,7 @@
 //! Raw mode and the alternate screen, restored on drop and from the panic hook, so a crash never leaves the user's
 //! shell unusable.
 
-use std::io::{self, IsTerminal, Read, Stdout, Write};
+use std::io::{self, IsTerminal, Stdout, Write};
 use std::time::{Duration, Instant};
 
 use crossterm::cursor::{Hide, Show};
@@ -76,7 +76,9 @@ fn query_background(timeout: Duration) -> Option<Vec<u8>> {
             if left.is_zero() || !readable(left) {
                 break;
             }
-            if io::stdin().lock().read(&mut byte).ok()? == 0 {
+            // Unbuffered: std's stdin would pull the whole reply into its own buffer, where select cannot see it.
+            // SAFETY: reads at most one byte into `byte`.
+            if unsafe { libc::read(libc::STDIN_FILENO, byte.as_mut_ptr().cast(), 1) } != 1 {
                 break;
             }
             buf.push(byte[0]);
