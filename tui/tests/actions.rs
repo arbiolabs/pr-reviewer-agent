@@ -213,7 +213,7 @@ fn cancel_and_retry_name_their_target_and_settle_on_the_run_ending_or_moving() {
     assert_eq!(m.notice.as_ref().unwrap().text, "Cancelled the review of #184");
 
     press(&mut m, KeyCode::Char('R'));
-    assert_eq!(prompt(&m), "Retry run rev-184-?");
+    assert_eq!(prompt(&m), "Retry the failed review of #184?", "named like start and cancel, by PR");
     let fx = press(&mut m, KeyCode::Char('y'));
     assert_eq!(commands(&fx)[0].idempotency_key, "review.retry:rev-184-a");
 }
@@ -225,7 +225,7 @@ fn the_retry_prompt_names_the_attempt_it_opens_when_the_daemon_counts_them() {
         .replacen('{', r#"{"attempt":1,"#, 1);
     send(&mut m, &event(109, "acme/shop#184", "rev-184-a", "run.failed", &failed));
     press(&mut m, KeyCode::Char('R'));
-    assert_eq!(prompt(&m), "Retry run rev-184- (attempt 2)?");
+    assert_eq!(prompt(&m), "Retry the failed review of #184 (attempt 2)?");
 }
 
 #[test]
