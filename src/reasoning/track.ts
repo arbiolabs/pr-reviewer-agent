@@ -174,15 +174,44 @@ type Fingerprint = (c: Pick<CandidateFinding, "category" | "file" | "title">) =>
 export type Report = { candidate: CandidateFinding; location: ObservedLocation; priorHits?: EvidenceText[] };
 
 /**
- * The finding's substantial own-file evidence texts found in `lines`, the file a candidate that names the finding
- * reports, at the position found. This is how a named link checks a finding whose code was not located: the model
- * says which file, and code finds the finding's text there before the candidate's citation is compared with it.
+ * The longest substantial run of consecutive lines of `text` that occurs exactly once in `lines`, as a 1-based range
+ * with its text. A cited block often spans the code that moved and the code that changed next to it; the part that
+ * survived is still the finding's code. The floor keeps `}` or one short statement from counting, and a run that
+ * occurs twice names no place.
+ */
+export function findLongestRun(text: string, lines: string[]): EvidenceText | undefined {
+  const wanted = text.split("\n");
+  const normalized = lines.map(normalizeLine);
+  const positions = new Map<string, number[]>();
+  normalized.forEach((line, i) => positions.set(line, [...(positions.get(line) ?? []), i]));
+  // Maximal runs only: a start that continues the previous line's run was found from there.
+  const runs: { o: number; p: number; k: number }[] = [];
+  for (let o = 0; o < wanted.length; o++) {
+    for (const p of positions.get(wanted[o]!) ?? []) {
+      if (o > 0 && p > 0 && normalized[p - 1] === wanted[o - 1]) continue;
+      let k = 1;
+      while (o + k < wanted.length && normalized[p + k] === wanted[o + k]) k++;
+      runs.push({ o, p, k });
+    }
+  }
+  for (const run of runs.sort((a, b) => b.k - a.k)) {
+    const sub = wanted.slice(run.o, run.o + run.k).join("\n");
+    if (!substantial(sub)) break;
+    if (runs.filter((r) => r.o <= run.o && r.o + r.k >= run.o + run.k).length === 1) return { path: "", start: run.p + 1, end: run.p + run.k, text: sub };
+  }
+  return undefined;
+}
+
+/**
+ * The finding's own-file evidence found in `lines`, the file a candidate that names the finding reports, at the
+ * position found: for each item, its longest substantial run that occurs once there. This is how a named link checks
+ * a finding whose code was not located: the model says which file, and code finds the finding's text there before
+ * the candidate's citation is compared with it.
  */
 export function findOwnEvidence(f: PriorFinding, path: string, lines: string[]): EvidenceText[] {
   return f.location.evidence.flatMap((e) => {
-    if (e.path !== f.location.file || !substantial(e.text)) return [];
-    const start = findSnippet(e.text, lines, e.start);
-    return start === undefined ? [] : [{ ...e, path, start, end: start + e.end - e.start }];
+    const run = e.path === f.location.file ? findLongestRun(e.text, lines) : undefined;
+    return run === undefined ? [] : [{ ...run, path }];
   });
 }
 

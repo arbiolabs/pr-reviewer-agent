@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { beforeAll, expect, it } from "vitest";
 import type { CandidateFinding } from "../src/domain/types.ts";
-import { evidenceTexts, findOwnEvidence, findSnippet, headReader, linkPriors, locate, normalize, type ObservedLocation, observe, type PriorFinding, type Report, sameText, splitLines } from "../src/reasoning/track.ts";
+import { evidenceTexts, findLongestRun, findOwnEvidence, findSnippet, headReader, linkPriors, locate, normalize, type ObservedLocation, observe, type PriorFinding, type Report, sameText, splitLines } from "../src/reasoning/track.ts";
 import { fingerprint } from "../src/reasoning/verify.ts";
 import { PinnedRepo, syncRepo } from "../src/source/git.ts";
 
@@ -246,13 +246,22 @@ it("links by title words only where the finding was: in place, or near its last 
   expect(linkOne(reported({ newLine: 300 }), [prior(same())])).toBe("f-1");
 });
 
-it("finds a finding's own substantial text in the file a named candidate reports, at its new lines", async () => {
+it("finds a finding's own text in the file a named candidate reports, by the longest substantial run that occurs there once", async () => {
   const repo = new PinnedRepo(await syncRepo(cache, "acme/track", repoDir, 1), baseSha, heads.rename!);
   const lines = splitLines(await repo.show(heads.rename!, "src/routes/order-routes.ts"))!;
   expect(findOwnEvidence(prior({ kind: "file_gone" }), "src/routes/order-routes.ts", lines)).toEqual([{ path: "src/routes/order-routes.ts", start: 14, end: 17, text: normalize(EVIDENCE_LINES) }]);
   const tiny = { ...prior({ kind: "file_gone" }), location: { ...location(), evidence: [{ path: FILE, start: 12, end: 12, text: "}" }] } };
   expect(findOwnEvidence(tiny, "src/routes/order-routes.ts", lines)).toEqual([]);
   expect(findOwnEvidence(prior({ kind: "file_gone" }), "x.ts", ["nothing", "here"])).toEqual([]);
+  // A block that spans the handler and the registration survives the rewrite of its last line as the handler's lines.
+  const block = { ...prior({ kind: "changed", file: FILE }), location: { ...location(), evidence: [{ path: FILE, start: 3, end: 11, text: normalize(ROUTES.split("\n").slice(2, 11)) }] } };
+  const rewritten = splitLines(await repo.show(heads.rewrite!, FILE))!;
+  expect(findOwnEvidence(block, FILE, rewritten)).toEqual([{ path: FILE, start: 3, end: 10, text: normalize(ROUTES.split("\n").slice(2, 10)) }]);
+  // A run that occurs twice names no place, however long; a shorter run elsewhere in the block still can.
+  const twice = ["const order = db.orders.find(req.params.id);", "queueRefund(order, order.total);", "res.status(202).end();"];
+  expect(findLongestRun(twice.join("\n"), [...twice, "x", ...twice])).toBe(undefined);
+  expect(findLongestRun([...twice, "router.post(\"/orders/:id/refund\", requireUser, refundOrder);", "}"].join("\n"), [...twice, "x", ...twice, "y", 'router.post("/orders/:id/refund", requireUser, refundOrder);', "}"])).toEqual({ path: "", start: 9, end: 10, text: 'router.post("/orders/:id/refund", requireUser, refundOrder);\n}' });
+  expect(findLongestRun("}\n}", ["}", "}"])).toBe(undefined);
 });
 
 it("links a candidate that names its prior finding only where code sees the report: near the finding's anchor or on its lines at this head", () => {
