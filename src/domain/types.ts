@@ -27,7 +27,15 @@ export type CandidateFinding = {
   suggestedFix?: string;
   confidence: number;
   evidenceKind: EvidenceKind;
+  /** The open finding this candidate reports again, by the model's account; code confirms it before the IDs join. */
+  priorFindingId?: string;
 };
+
+/** The model's claim that an open finding is fixed at the head, with the head-side code that shows it. Code checks it before it counts. */
+export type ResolutionClaim = { findingId: string; codeEvidence: CodeEvidence[]; reason: string; evidenceKind: EvidenceKind };
+
+/** How VERIFY judged one resolution claim. Only ACCEPTED moves a finding to RESOLVED. */
+export type ResolutionVerdict = { findingId: string; state: "ACCEPTED" | "REFUSED"; reason: string | null };
 
 export type PullInfo = {
   installationId: number;

@@ -193,12 +193,14 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
     }, context);
     const conversation = (await runtime.conversation(child!, context))!;
     const decision = store.decision(revision.id)!;
+    // The open findings are located here for the request and again in VERIFY: each phase stands alone after a crash.
     const content = buildReviewRequest({
       snapshot: store.snapshot(revision.id)!,
       baseSha: revision.base_sha,
       headSha: revision.head_sha,
       mode: decision.selectedMode as ReviewMode,
       reasons: decision.reasons,
+      prior: await priorFindings(revision, await deps.workspace(revision.id)),
     });
     // The same request ID finds the same submission after a restart; a retry asks again under a new one.
     const requestId = cp.attempt ? `analyze:${revision.id}:${cp.attempt}` : `analyze:${revision.id}`;

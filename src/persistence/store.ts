@@ -14,7 +14,7 @@ import {
   type ReviewState,
   TERMINAL_REVIEW_STATES,
 } from "../domain/machines.ts";
-import { type CandidateFinding, type ChangedFile, type Disposition, type PullInfo, stableId } from "../domain/types.ts";
+import { type CandidateFinding, type ChangedFile, type Disposition, type PullInfo, type ResolutionClaim, type ResolutionVerdict, stableId } from "../domain/types.ts";
 import { sanitize } from "../protocol/sanitize.ts";
 import type { Observation, ObservedLocation } from "../reasoning/track.ts";
 
@@ -517,21 +517,23 @@ export class AppStore {
   }
 
   /** First submission wins: a replayed or repeated submit_candidates call cannot replace the stored set. */
-  saveCandidateSet(revisionId: string, candidates: CandidateFinding[]): { id: string; stored: boolean } {
+  saveCandidateSet(revisionId: string, candidates: CandidateFinding[], resolutions: ResolutionClaim[] = []): { id: string; stored: boolean } {
     const id = stableId("candidates", revisionId);
     const info = this.db
-      .prepare("INSERT INTO candidate_sets (id, revision_id, candidates_json, created_at) VALUES (?, ?, ?, ?) ON CONFLICT (id) DO NOTHING")
-      .run(id, revisionId, JSON.stringify(candidates), now());
+      .prepare("INSERT INTO candidate_sets (id, revision_id, candidates_json, resolutions_json, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING")
+      .run(id, revisionId, JSON.stringify(candidates), JSON.stringify(resolutions), now());
     return { id, stored: info.changes === 1 };
   }
 
-  candidateSet(revisionId: string): { id: string; candidates: CandidateFinding[]; dispositions: Disposition[] | null } | undefined {
+  candidateSet(revisionId: string): { id: string; candidates: CandidateFinding[]; resolutions: ResolutionClaim[]; dispositions: Disposition[] | null; verdicts: ResolutionVerdict[] | null } | undefined {
     const row = this.db.prepare("SELECT * FROM candidate_sets WHERE revision_id = ?").get(revisionId) as Record<string, string | null> | undefined;
     if (!row) return undefined;
     return {
       id: row.id!,
       candidates: JSON.parse(row.candidates_json!),
+      resolutions: row.resolutions_json ? JSON.parse(row.resolutions_json) : [],
       dispositions: row.dispositions_json ? JSON.parse(row.dispositions_json) : null,
+      verdicts: row.resolution_verdicts_json ? JSON.parse(row.resolution_verdicts_json) : null,
     };
   }
 
@@ -543,11 +545,18 @@ export class AppStore {
    * Writes for VERIFY → PREPARE_PUBLICATION; call inside `advance()` so they commit with the transition. `verified`
    * upserts the finding rows (a re-report keeps its ID and refreshes the severity); `observations` writes one row per
    * finding this revision saw, with the state it ended in, and moves the finding there. The observation goes in before
-   * the status changes, so the journal trigger charges the change to this revision.
+   * the status changes, so the journal trigger charges the change to this revision. `verdicts` judge the submission's
+   * resolution claims; the observations already carry what each accepted one did.
    */
-  writeVerification(revision: RevisionRow, dispositions: Disposition[], verified: { findingId: string; fingerprint: string; candidate: CandidateFinding }[], observations: Observation[]): void {
+  writeVerification(
+    revision: RevisionRow,
+    dispositions: Disposition[],
+    verified: { findingId: string; fingerprint: string; candidate: CandidateFinding }[],
+    observations: Observation[],
+    verdicts: ResolutionVerdict[] = [],
+  ): void {
     const at = now();
-    this.db.prepare("UPDATE candidate_sets SET dispositions_json = ? WHERE revision_id = ?").run(JSON.stringify(dispositions), revision.id);
+    this.db.prepare("UPDATE candidate_sets SET dispositions_json = ?, resolution_verdicts_json = ? WHERE revision_id = ?").run(JSON.stringify(dispositions), JSON.stringify(verdicts), revision.id);
     for (const { findingId, fingerprint, candidate } of verified) {
       this.db
         .prepare(

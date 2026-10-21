@@ -2,7 +2,7 @@ import { readFileSync } from "node:fs";
 import type { Context } from "@earendil-works/chord";
 import { Type } from "@earendil-works/pi-ai";
 import { defineDoc, defineExtension, defineTool, type Extension, section, type ToolExecutionApi, type ToolExecutionResult } from "@earendil-works/pi-durable";
-import type { CandidateFinding } from "../domain/types.ts";
+import type { CandidateFinding, ResolutionClaim } from "../domain/types.ts";
 import type { AppStore, RevisionRow, Snapshot } from "../persistence/store.ts";
 import type { FileDiff } from "../source/diff.ts";
 import { assertSafePath, capBytes, type PinnedRepo } from "../source/git.ts";
@@ -131,7 +131,7 @@ export function createReviewTools(deps: ToolDeps): Extension {
       defineTool({
         name: "submit_candidates",
         description:
-          "Submit the final list of candidate defects for verification. Call exactly once. An empty list is valid after you have read the diff or code.",
+          "Submit the final list of candidate defects for verification, and the open findings from earlier reviews that this head's code shows fixed. Call exactly once. An empty list is valid after you have read the diff or code.",
         parameters: SubmitCandidatesSchema,
         replay: "safe",
         execute: async (args, api, context) => {
@@ -140,9 +140,10 @@ export function createReviewTools(deps: ToolDeps): Extension {
           if (args.candidates.length === 0 && !deps.store.revision(ws.revision.id)?.code_read_at) {
             throw new Error("An empty submission needs a look at the code first: call read_diff, read_file or search_code, then submit again. Nothing was stored.");
           }
-          const { stored } = deps.store.saveCandidateSet(ws.revision.id, args.candidates as CandidateFinding[]);
+          const resolutions = (args.resolutions ?? []) as ResolutionClaim[];
+          const { stored } = deps.store.saveCandidateSet(ws.revision.id, args.candidates as CandidateFinding[], resolutions);
           return {
-            ...text(stored ? `Stored ${args.candidates.length} candidate(s) for verification.` : "Candidates were already submitted for this revision; this call changed nothing."),
+            ...text(stored ? `Stored ${args.candidates.length} candidate(s) and ${resolutions.length} resolution claim(s) for verification.` : "Candidates were already submitted for this revision; this call changed nothing."),
             control: { terminate: true },
           };
         },
