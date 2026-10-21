@@ -6,7 +6,7 @@ expression: text
 
 
   Settings
-  connected through unix:/run/user/501/pr-review/reviewer.sock
+  socket unix:/run/user/501/pr-review/reviewer.sock · connected
   GitHub accounts
     publishes as          not reported by this daemon
     accounts              not reported by this daemon version

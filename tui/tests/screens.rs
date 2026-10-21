@@ -546,3 +546,16 @@ fn a_rail_search_with_no_match_says_so_once() {
         assert_eq!(frame.matches("no PR matches").count(), 1, "{w}x{h}:\n{frame}");
     }
 }
+
+#[test]
+fn settings_names_the_socket_and_whether_it_is_connected() {
+    use crossterm::event::KeyCode;
+    use pr_review_tui::update::{Msg, NetEvent};
+    let mut s = showcase(2).key(KeyCode::Char('5'));
+    let (live, _) = render(&mut s.m, 120, 38);
+    assert!(live.contains("socket unix:/run/user/501/pr-review/reviewer.sock · connected"), "{live}");
+    s.apply(Msg::Net(NetEvent::Lost { reason: "connection refused".into(), retry_in_ms: Some(1000) }));
+    let (off, _) = render(&mut s.m, 120, 38);
+    assert!(off.contains("socket unix:/run/user/501/pr-review/reviewer.sock · not connected"), "{off}");
+    assert!(!off.contains("connected through"), "{off}");
+}

@@ -277,7 +277,9 @@ pub fn settings(c: &Ctx, f: &mut Frame, area: Rect) {
     });
     let mut lines = vec![Line::raw("")];
     lines.push(Line::from(c.span("Settings", Role::Title)));
-    lines.push(Line::from(c.span(c.fit(&format!("connected through {}", m.diag.endpoint), w), Role::Muted)));
+    let state = if m.link.welcomed() { "connected" } else { "not connected" };
+    let socket = format!("socket {} {} {state}", m.diag.endpoint, c.t.g().sep);
+    lines.push(Line::from(c.span(c.fit(&socket, w), Role::Muted)));
     gap(&mut lines);
     lines.push(heading(c, "GitHub accounts"));
     let (who, who_role) = identity(c);

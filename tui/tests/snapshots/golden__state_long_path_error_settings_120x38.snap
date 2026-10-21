@@ -7,7 +7,7 @@ expression: settings
  ✗ disconnected · retry in 2s
 
     Settings
-    connected through unix:/private/tmp/claude-501/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…
+    socket unix:/private/tmp/claude-501/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx/pr-r…
 
     GitHub accounts
       publishes as          not reported by this daemon
