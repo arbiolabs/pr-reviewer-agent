@@ -878,3 +878,41 @@ fn a_typed_alt_bracket_swallows_only_what_could_be_a_reply_and_only_briefly() {
     let typed = [(alt, 500), (key('b'), 600), (key('1'), 800), (key('f'), 801)];
     assert_eq!(through_input(&mut m, &mut late, &typed), ['1', 'f'], "200 ms after Alt+] keys act again");
 }
+
+fn page_scroll(m: &Model) -> u16 {
+    match m.top_modal() {
+        Some(Modal::Finding { scroll, .. } | Modal::Publication { scroll, .. } | Modal::Help { scroll }) => *scroll,
+        _ => panic!("no page open: {:?}", m.top_modal()),
+    }
+}
+
+#[test]
+fn a_snapshot_keeps_the_finding_readers_place_once_the_detail_is_back() {
+    let mut m = review_184();
+    send(&mut m, &read("fixtures/server.finding.detail.json"));
+    update(&mut m, Msg::Resize(80, 16));
+    press(&mut m, KeyCode::Enter);
+    for _ in 0..4 {
+        press(&mut m, KeyCode::Char('j'));
+    }
+    assert_eq!(page_scroll(&m), 4);
+    send(&mut m, &read("fixtures/server.snapshot.json"));
+    assert_eq!(page_scroll(&m), 4, "the detail is reloading");
+    send(&mut m, &read("fixtures/server.finding.detail.json"));
+    assert_eq!(page_scroll(&m), 4, "the detail came back");
+}
+
+#[test]
+fn a_snapshot_keeps_the_previews_place_once_the_preview_is_back() {
+    let mut s = common::parked(pr_review_tui::model::Look::default());
+    s.apply(Msg::Resize(80, 16));
+    s = s.key(KeyCode::Char('p'));
+    for _ in 0..4 {
+        s = s.key(KeyCode::Char('j'));
+    }
+    assert_eq!(page_scroll(&s.m), 4);
+    let snapshot = s.played.iter().find(|m| matches!(m, ServerMessage::Snapshot(_))).unwrap().clone();
+    s.server(snapshot);
+    assert!(matches!(s.m.top_modal(), Some(Modal::Publication { .. })));
+    assert_eq!(page_scroll(&s.m), 4);
+}

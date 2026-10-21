@@ -123,7 +123,9 @@ pub fn update(m: &mut Model, msg: Msg) -> Vec<Effect> {
         Msg::Net(e) => net(m, e, &mut fx),
     }
     prefetch(m, &mut fx);
-    clamp_page(m);
+    if !page_reloading(m) {
+        clamp_page(m);
+    }
     m.dirty = true;
     fx
 }
@@ -1547,6 +1549,16 @@ fn move_by(m: &mut Model, delta: isize, fx: &mut Vec<Effect>) {
             let current = m.cursor_account().map(|a| a.id.clone());
             m.ui.selected_account = step(&ids, current.as_ref(), delta);
         }
+    }
+}
+
+/// The top page's content is on its way, after a snapshot or on first open: its placeholder is shorter than what
+/// comes back, so only the reader's own moves clamp to it.
+fn page_reloading(m: &Model) -> bool {
+    match m.top_modal() {
+        Some(Modal::Publication { preview, .. }) => matches!(preview, Preview::Loading(_)),
+        Some(Modal::Finding { id, .. }) => !m.details.contains_key(id) && !m.detail_errors.contains_key(id),
+        _ => false,
     }
 }
 
