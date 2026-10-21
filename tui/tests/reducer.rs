@@ -1083,3 +1083,52 @@ fn a_selected_row_that_a_live_phase_change_hides_hands_the_cursor_to_the_nearest
     press(&mut m, KeyCode::Char('k'));
     assert_eq!(selected(&m), Some(12));
 }
+
+/// A one-entry page: `fixture` with its `list` cut to the first entry, answering `rid`.
+fn one_entry_page(fixture: &str, list: &str, rid: &str) -> String {
+    let mut v: serde_json::Value = serde_json::from_str(&read(fixture)).unwrap();
+    v["requestId"] = rid.into();
+    v[list].as_array_mut().unwrap().truncate(1);
+    v.to_string()
+}
+
+#[test]
+fn j_on_the_only_loaded_file_loads_the_next_diff_page() {
+    let mut m = review_184();
+    let fx = press(&mut m, KeyCode::Char('3'));
+    let Some(Effect::Send(ClientMessage::DiffGet { request_id, .. })) =
+        fx.iter().find(|e| matches!(e, Effect::Send(ClientMessage::DiffGet { .. })))
+    else {
+        panic!("{fx:?}")
+    };
+    send(&mut m, &one_entry_page("fixtures/server.diff.page.json", "files", request_id.as_str()));
+    press(&mut m, KeyCode::Char('h'));
+    assert_eq!((m.ui.focus, m.diff.as_ref().unwrap().files.len()), (Pane::Sidebar, 1));
+    let fx = press(&mut m, KeyCode::Char('j'));
+    let cursors: Vec<_> = fx
+        .iter()
+        .filter_map(|e| match e {
+            Effect::Send(ClientMessage::DiffGet { cursor, .. }) => Some(cursor.as_ref().map(|c| c.as_str())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(cursors, [Some("c-2")]);
+}
+
+#[test]
+fn k_on_a_one_event_timeline_page_loads_the_older_events() {
+    let mut m = review_184();
+    let fx = press(&mut m, KeyCode::Char('4'));
+    let [Effect::Send(ClientMessage::TimelineGet { request_id, .. })] = &fx[..] else { panic!("{fx:?}") };
+    send(&mut m, &one_entry_page("fixtures/server.timeline.page.json", "events", request_id.as_str()));
+    assert_eq!(m.timeline.as_ref().unwrap().events.len(), 1);
+    let fx = press(&mut m, KeyCode::Char('k'));
+    let before: Vec<_> = fx
+        .iter()
+        .filter_map(|e| match e {
+            Effect::Send(ClientMessage::TimelineGet { before_sequence, .. }) => Some(*before_sequence),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(before, [Some(99)]);
+}

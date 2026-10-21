@@ -1461,7 +1461,7 @@ fn finding_cursor(m: &Model) -> (Vec<Option<FindingId>>, Option<FindingId>) {
     (stops, if m.on_ready_line() { None } else { m.ui.selected_finding.clone() })
 }
 
-/// j/k and the paging keys: a cursor with somewhere to go, or a page with more to scroll.
+/// j/k and the paging keys: a cursor with somewhere to go, a page with more to scroll, or a page to load.
 pub fn can_move(m: &Model) -> bool {
     match m.top_modal() {
         Some(Modal::Finding { .. } | Modal::Help { .. } | Modal::Publication { .. }) => {
@@ -1477,16 +1477,17 @@ pub fn can_move(m: &Model) -> bool {
                 let (stops, at) = finding_cursor(m);
                 walks(&stops, Some(&at))
             }
+            // A next page is somewhere to go too: j on the last loaded file asks for it.
             (Screen::Diff, Pane::Sidebar) => m.diff.as_ref().is_some_and(|d| {
                 let paths: Vec<&Text> = d.files.iter().map(|f| &f.path).collect();
-                walks(&paths, d.selected_file.as_ref().as_ref())
+                walks(&paths, d.selected_file.as_ref().as_ref()) || d.next_cursor.is_some() && d.pending.is_none()
             }),
             (Screen::Diff, Pane::Main) => {
                 m.diff.as_ref().and_then(|d| d.file()).is_some_and(|f| file_rows(f).len() > 1)
             }
-            (Screen::Timeline, _) => {
-                m.timeline.as_ref().is_some_and(|t| walks(&timeline_stops(m, t), t.selected.as_ref()))
-            }
+            (Screen::Timeline, _) => m.timeline.as_ref().is_some_and(|t| {
+                walks(&timeline_stops(m, t), t.selected.as_ref()) || t.next_before.is_some() && t.pending.is_none()
+            }),
             (Screen::Settings, _) => m.domain.accounts.as_ref().is_some_and(|a| a.len() > 1),
         },
     }
@@ -1963,8 +1964,8 @@ fn move_by(m: &mut Model, delta: isize, fx: &mut Vec<Effect>) {
             let Some(t) = &m.timeline else { return };
             let seqs = timeline_stops(m, t);
             let next = step(&seqs, t.selected.as_ref(), delta);
-            // Older events sit at the top: reaching it pages them in.
-            let at_top = next.is_some() && next == seqs.first().copied();
+            // Older events sit at the top: reaching it, or a page with no row to stop on, pages them in.
+            let at_top = next == seqs.first().copied();
             let more = t.next_before.filter(|_| at_top && t.pending.is_none());
             let (scope, query) = (t.scope, t.query.clone());
             if let Some(t) = &mut m.timeline {

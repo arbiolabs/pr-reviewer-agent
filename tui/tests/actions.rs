@@ -1004,7 +1004,7 @@ fn the_footer_offers_no_key_that_has_nothing_to_act_on() {
     m.ui.screen = pr_review_tui::model::Screen::Timeline;
     assert_eq!(footer(&mut m), "Esc back  ? help  q quit", "no timeline to move through or filter");
 
-    // A timeline whose filters hide every event: they still act, moving and opening do not.
+    // A timeline whose filters hide every event, with no older page: they still act, moving and opening do not.
     let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#184");
     let rid = press(&mut m, KeyCode::Char('4')).iter().find_map(|e| match e {
         Effect::Send(ClientMessage::TimelineGet { request_id, .. }) => Some(request_id.clone()),
@@ -1012,6 +1012,7 @@ fn the_footer_offers_no_key_that_has_nothing_to_act_on() {
     });
     send(&mut m, &read("fixtures/server.timeline.page.json").replace("req-tl", rid.unwrap().as_str()));
     m.timeline.as_mut().unwrap().text = "matches nothing".into();
+    m.timeline.as_mut().unwrap().next_before = None;
     let f = footer(&mut m);
     assert!(!f.contains("j/k") && !f.contains("Enter") && f.contains("/ filter"), "{f}");
 }
