@@ -1,0 +1,37 @@
+{
+  "title": "Let admins refund an order",
+  "body": "Adds POST /orders/:id/refund so support can refund a paid order in full without editing the database.",
+  "labels": [
+    {
+      "id": "refund-auth",
+      "file": "src/routes/orders.ts",
+      "line_range": [18, 31],
+      "severity_at_least": "high",
+      "category": "security",
+      "note": "POST /orders/:id/refund is registered with requireUser only. Cancel, the other admin action, also has requireAdmin, so any signed-in member can refund any paid order in full."
+    }
+  ],
+  "commits": [
+    {
+      "dir": "commit2",
+      "delete": [],
+      "expect": [{ "label": "refund-auth", "status": "resolved" }],
+      "labels": []
+    },
+    {
+      "dir": "commit3",
+      "delete": [],
+      "expect": [],
+      "labels": [
+        {
+          "id": "refund-auth-again",
+          "file": "src/routes/orders.ts",
+          "line_range": [18, 31],
+          "severity_at_least": "high",
+          "category": "security",
+          "note": "Commit 3 drops requireAdmin from the refund route again. The fixed defect is back, so it is a new finding with one new inline comment."
+        }
+      ]
+    }
+  ]
+}
