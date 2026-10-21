@@ -796,3 +796,32 @@ fn a_link_state_still_under_way_ends_in_an_ellipsis() {
     let (f, _) = render(&mut m, 80, 24);
     assert!(f.lines().next().unwrap().trim_end().ends_with("◔ loading snapshot…"), "{f}");
 }
+
+#[test]
+fn the_footer_offers_no_key_that_has_nothing_to_act_on() {
+    let footer = |m: &mut Model| {
+        let f = frame(m);
+        f.lines().last().unwrap().split("1 inbox").next().unwrap().trim().to_string()
+    };
+    let mut m = model();
+    update(&mut m, Msg::Net(NetEvent::Opened));
+    send(&mut m, &read("fixtures/server.welcome.json"));
+    send(&mut m, &read("fixtures/server.snapshot.empty.json"));
+    assert_eq!(footer(&mut m), "? help  q quit", "nothing to move to, open or search");
+
+    let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#186");
+    m.ui.pr_filter = "nothing matches this".into();
+    m.ui.screen = pr_review_tui::model::Screen::Inbox;
+    let f = footer(&mut m);
+    assert!(
+        f.starts_with("/ search  ? help") && !f.contains("j/k") && !f.contains("Enter"),
+        "/ changes the filter: {f}"
+    );
+
+    let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#186");
+    m.ui.screen = pr_review_tui::model::Screen::Review;
+    m.ui.focus = pr_review_tui::model::Pane::Main;
+    let f = footer(&mut m);
+    assert!(f.contains("d diff") && f.contains("h pull requests"), "{f}");
+    assert!(!f.contains("j/k finding") && !f.contains("Enter read") && !f.contains("J/K"), "#186 has no findings: {f}");
+}

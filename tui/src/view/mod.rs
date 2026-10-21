@@ -429,6 +429,18 @@ fn footer_line(c: &Ctx, width: u16) -> Line<'static> {
         let url = crate::update::published_url(c.m, run_id).is_some();
         hints.retain(|h| (*h != "y publish" || can_publish) && (*h != "o open on GitHub" || url));
     }
+    // A key with nothing to act on is not offered: no PR to move to or open, no finding to read, nothing to search.
+    if c.m.top_modal().is_none() {
+        let list = c.m.ui.screen == Screen::Inbox || c.m.ui.screen == Screen::Review && c.m.ui.focus == Pane::Sidebar;
+        let shown = c.m.inbox().len();
+        let findings = c.m.selected_pr().map_or(0, |p| c.m.domain.pr_findings(&p.id).len());
+        hints.retain(|h| match *h {
+            "j/k pull request" | "Enter read" if list => shown > 0,
+            "/ search" if list => !c.m.domain.prs.is_empty(),
+            "j/k finding" | "Enter read" | "J/K scroll" if c.m.ui.screen == Screen::Review => findings > 0,
+            _ => true,
+        });
+    }
     if watch {
         hints.insert(2.min(hints.len()), "w watch live");
     }
