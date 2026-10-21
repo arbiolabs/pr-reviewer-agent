@@ -19,9 +19,10 @@ pub const COLUMN: u16 = 112;
 
 /// A quadrant turning clockwise: no frame reads as the `·` separator or the `●` of a finished phase, and block
 /// elements are in every monospace font (braille and the half circles are missing from some, freeze's among them).
+/// The ASCII bar rocks between its slants: upright it is the ASCII separator `|`, and flat the stepper's `-`.
 pub fn spinner(c: &Ctx) -> &'static str {
     const U: &[&str] = &["▘", "▝", "▗", "▖"];
-    const A: &[&str] = &["-", "\\", "|", "/"];
+    const A: &[&str] = &["/", "\\"];
     let set = if c.t.ascii { A } else { U };
     set[(c.m.now_ms / 125) as usize % set.len()]
 }

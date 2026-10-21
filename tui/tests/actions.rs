@@ -784,6 +784,25 @@ fn a_toast_is_a_sentence_and_one_still_under_way_ends_in_an_ellipsis() {
 }
 
 #[test]
+fn no_ascii_spinner_frame_reads_as_the_separator_or_a_status_glyph() {
+    let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#184");
+    m.look.ascii = true;
+    let g = pr_review_tui::theme::glyphs(true);
+    for frame in 0..4 {
+        update(&mut m, Msg::Tick(frame * 125));
+        let (f, _) = render(&mut m, 120, 38);
+        let top = f.lines().next().unwrap().to_string();
+        let at = top.find(" reviewing").unwrap_or_else(|| panic!("{top}"));
+        let spin = &top[at - 1..at];
+        assert!(top[..at - 1].ends_with(&format!("{} ", g.sep)), "{top}");
+        // `-` joins the ASCII stepper's phases.
+        for taken in [g.sep, g.idle, g.active, g.ok, g.fail, g.pending, "-"] {
+            assert_ne!(spin, taken, "frame {frame}: {top}");
+        }
+    }
+}
+
+#[test]
 fn a_link_state_still_under_way_ends_in_an_ellipsis() {
     let mut m = model();
     update(&mut m, Msg::Net(NetEvent::Opened));
