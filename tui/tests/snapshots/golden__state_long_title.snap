@@ -2,7 +2,7 @@
 source: tests/golden.rs
 expression: text
 ---
-  pr-review · ▘ reviewing #1 verify found: safeEVIL  tail               ● live
+  pr-review · ⣾ reviewing #1 verify found: safeEVIL  tail               ● live
 
 
   acme/shop  #2

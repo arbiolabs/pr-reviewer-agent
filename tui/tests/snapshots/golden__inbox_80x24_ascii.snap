@@ -14,7 +14,7 @@ expression: ascii_text
 >   acme/shop | 5555555                                                  o1 ->0
 
   / #184 Booking API
-    acme/shop | by octocat | verify                         +-+-+-/-.-. . 0.2/s
+    acme/shop | by octocat | verify                         +-+-+-+-.-. . 0.2/s
 
 
 

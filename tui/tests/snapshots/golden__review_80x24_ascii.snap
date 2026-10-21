@@ -4,11 +4,11 @@ expression: ascii_text
 ---
   pr-review | / reviewing #184 verify found: Finding f-1                * live
 
-  #184 Booking API                                        +-+-+-/-.-.  ^1 ->0
+  #184 Booking API                                        +-+-+-+-.-.  ^1 ->0
   ----------------------------------------------------------------------------
   / Reviewing now                                               :  0.2 calls/s
 
-  #184   ======= ======= ======= ======= ------- -------  verify     2 calls
+  #184   ======= ======= ======= ====--- ------- -------  verify     2 calls
 
       13:00:11  read_file   src/booking.ts:1-120
     / 13:00:12  finding     ^ HIGH Finding f-1
