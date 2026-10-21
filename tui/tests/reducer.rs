@@ -732,9 +732,11 @@ fn a_click_selects_the_pr_or_finding_under_it_and_the_wheel_scrolls_the_document
     assert!(matches!(m.top_modal(), Some(Modal::Finding { id, .. }) if id == &second.id), "a second click reads it");
 
     press(&mut m, KeyCode::Esc);
-    mouse(&mut m, K::ScrollDown, (60, 20));
-    mouse(&mut m, K::ScrollDown, (60, 20));
-    mouse(&mut m, K::ScrollUp, (60, 20));
+    // At 38 rows the card fits, so the wheel scrolls a shorter terminal.
+    update(&mut m, Msg::Resize(120, 16));
+    mouse(&mut m, K::ScrollDown, (60, 10));
+    mouse(&mut m, K::ScrollDown, (60, 10));
+    mouse(&mut m, K::ScrollUp, (60, 10));
     assert_eq!(m.ui.doc_scroll, 3);
 }
 
@@ -1131,4 +1133,39 @@ fn k_on_a_one_event_timeline_page_loads_the_older_events() {
         })
         .collect();
     assert_eq!(before, [Some(99)]);
+}
+
+/// The whole showcase played, then PR `number` opened in Review at `w`x`h`.
+fn showcase_review(number: u64, w: u16, h: u16) -> Model {
+    let mut m = showcase(usize::MAX / 2);
+    update(&mut m, Msg::Resize(w, h));
+    let id = m.domain.prs.values().find(|p| p.number == number).map(|p| p.id.clone());
+    press(&mut m, KeyCode::Char('g'));
+    while m.ui.selected_pr != id {
+        press(&mut m, KeyCode::Char('j'));
+    }
+    press(&mut m, KeyCode::Enter);
+    m
+}
+
+#[test]
+fn a_page_that_fits_offers_no_j_and_j_keeps_its_header() {
+    let mut m = showcase_review(341, 120, 38);
+    let (before, _) = common::render(&mut m, 120, 38);
+    assert!(before.contains("No findings") && !before.contains("J/K"), "{before}");
+    press(&mut m, KeyCode::Char('J'));
+    assert_eq!((m.ui.doc_scroll, common::render(&mut m, 120, 38).0), (0, before));
+}
+
+#[test]
+fn a_taller_terminal_pulls_the_scroll_back_to_what_still_hides() {
+    let mut m = showcase_review(1287, 120, 16);
+    for _ in 0..200 {
+        press(&mut m, KeyCode::Char('J'));
+    }
+    let short = m.ui.doc_scroll;
+    update(&mut m, Msg::Resize(120, 38));
+    let limit = pr_review_tui::view::doc_scroll_limit(&m);
+    assert!(short > limit, "{short} {limit}");
+    assert_eq!(m.ui.doc_scroll, limit);
 }

@@ -228,7 +228,7 @@ impl Doc {
             Some((start, end)) if end > height => end.saturating_sub(height).min(start.saturating_sub(1)),
             _ => 0,
         };
-        (auto, self.lines.len().saturating_sub(height.min(self.lines.len()) / 2))
+        (auto, self.lines.len().saturating_sub(height))
     }
 }
 

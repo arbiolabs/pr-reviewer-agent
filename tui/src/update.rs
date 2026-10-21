@@ -140,6 +140,10 @@ pub fn update(m: &mut Model, msg: Msg) -> Vec<Effect> {
     if !page_reloading(m) {
         clamp_page(m);
     }
+    // A resize or new content can leave less below the fold than the reader had scrolled past.
+    if m.top_modal().is_none() && matches!(m.ui.screen, Screen::Inbox | Screen::Review) {
+        m.ui.doc_scroll = m.ui.doc_scroll.min(crate::view::doc_scroll_limit(m));
+    }
     m.dirty = true;
     fx
 }
