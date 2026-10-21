@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { beforeAll, expect, it } from "vitest";
 import { DEFAULT_CONFIG } from "../src/config/config.ts";
 import { type CandidateFinding, type ResolutionClaim, stableId } from "../src/domain/types.ts";
-import { evidenceTexts, type ObservedLocation, type PriorFinding } from "../src/reasoning/track.ts";
+import { type EvidenceText, evidenceTexts, headReader, locate, normalize, type ObservedLocation, observe, type PriorFinding } from "../src/reasoning/track.ts";
 import { checkResolutions, fingerprint, type VerifyContext, verifyCandidates } from "../src/reasoning/verify.ts";
 import { parseDiff } from "../src/source/diff.ts";
 import { PinnedRepo, syncRepo } from "../src/source/git.ts";
@@ -23,6 +23,7 @@ beforeAll(async () => {
     headSha: fixture.headSha,
     files: parseDiff(await repo.diff()),
     read: (sha, path) => repo.show(sha, path),
+    head: headReader(repo, await repo.changedFiles()),
     prior: [],
     thresholds: DEFAULT_CONFIG.verification,
   };
@@ -138,12 +139,12 @@ it("links a candidate that names a doubted finding by the finding's text found i
 });
 
 const AUTH = "src/auth/require-admin.ts";
-/** A finding seen on an older head, whose cited code (lines 3-5 of the fixture head) this head is said to have changed. */
+/** A finding seen on an older head whose lines 4-6 also registered a put route, which this head dropped: its cited block is nowhere at this head whole. */
 const doubted = (located: PriorFinding["located"], status: PriorFinding["status"] = "PUBLISHED"): PriorFinding => ({
   findingId: "f-doubted",
   status,
   candidate: candidate({}),
-  location: { file: DEFECT.file, newLine: DEFECT.line, headSha: "older", evidence: [{ path: DEFECT.file, start: 3, end: 5, text: 'export function registerOrderRoutes(app: App) {\napp.get("/orders", requireAdmin, listOrders);\napp.delete("/orders/:id", deleteOrder);' }] },
+  location: { file: DEFECT.file, newLine: DEFECT.line, headSha: "older", evidence: [{ path: DEFECT.file, start: 4, end: 6, text: 'app.get("/orders", requireAdmin, listOrders);\napp.delete("/orders/:id", deleteOrder);\napp.put("/orders/:id", updateOrder);' }] },
   located,
 });
 const claim = (over: Partial<ResolutionClaim> = {}): ResolutionClaim => ({
@@ -153,18 +154,18 @@ const claim = (over: Partial<ResolutionClaim> = {}): ResolutionClaim => ({
   evidenceKind: "confirmed_by_static_trace",
   ...over,
 });
-const none = { reported: new Map<string, string>(), verified: [] };
+const none = { reported: new Map<string, string>(), cited: [] };
 const verdict = async (c: ResolutionClaim, prior = doubted({ kind: "changed", file: DEFECT.file })) => (await checkResolutions([c], { ...ctx, prior: [prior] }, none))[0];
 
 it("accepts a resolution claim only on a doubted finding, with head-side evidence in its file that is not a run of the finding's code unchanged", async () => {
-  // The stored text is lines 3-5 of the unchanged fixture; line 1 is outside it, so citing it reads as changed code here.
+  // Line 1 is outside the stored text, so citing it reads as changed code here.
   const outside = claim({ codeEvidence: [{ path: DEFECT.file, start: 1, end: 1, refSha: fixture.headSha }, { path: AUTH, start: 1, end: 2, refSha: fixture.headSha }] });
   expect(await verdict(outside)).toEqual({ findingId: "f-doubted", state: "ACCEPTED", reason: null });
   expect(await verdict(outside, doubted({ kind: "changed", file: DEFECT.file }, "UNCERTAIN"))).toMatchObject({ state: "ACCEPTED" });
   const sha = fixture.headSha.slice(0, 12);
   const cases: [string, ResolutionClaim, PriorFinding?][] = [
     [`evidence src/routes/orders.ts:5-5@${fixture.baseSha.slice(0, 12)} cites a SHA other than the head`, claim({ codeEvidence: [{ path: DEFECT.file, start: 5, end: 5, refSha: fixture.baseSha }] })],
-    [`evidence src/routes/orders.ts:3-5@${sha} is the finding's code unchanged`, claim({ codeEvidence: [{ path: DEFECT.file, start: 3, end: 5, refSha: fixture.headSha }] })],
+    [`evidence src/routes/orders.ts:4-5@${sha} is the finding's code unchanged`, claim({ codeEvidence: [{ path: DEFECT.file, start: 4, end: 5, refSha: fixture.headSha }] })],
     [`evidence src/routes/orders.ts:5-5@${sha} is the finding's code unchanged`, claim()],
     [`no evidence in ${DEFECT.file}`, claim({ codeEvidence: [{ path: AUTH, start: 1, end: 2, refSha: fixture.headSha }] })],
     [`its cited code is unchanged at ${DEFECT.file}:5`, claim(), doubted({ kind: "same", location: { file: DEFECT.file, newLine: 5, headSha: fixture.headSha, evidence: [] } })],
@@ -199,4 +200,51 @@ it("refuses a resolution claim when a candidate of the same revision reports the
   const withHelper = { ...prior, location: { ...prior.location, evidence: [...prior.location.evidence, { path: AUTH, start: 1, end: 3, text: "export function requireAdmin(req: Req, res: Res, next: Next) {\nif (!req.user?.isAdmin) return res.status(403).end();\nnext();" }] } };
   expect((await verifyCandidates([helper], { ...ctx, prior: [withHelper] }, [fixed])).verdicts[0]).toMatchObject({ state: "ACCEPTED" });
   expect((await verifyCandidates([], { ...ctx, prior: [prior] }, [fixed])).verdicts[0]).toMatchObject({ state: "ACCEPTED" });
+});
+
+/** A head of in-memory files: every line is anchorable, and the tree-wide search scans them all for the line. */
+function inMemory(files: Record<string, string[]>): Pick<VerifyContext, "files" | "read" | "head"> {
+  const text = async (path: string) => (files[path] ? `${files[path].join("\n")}\n` : undefined);
+  return {
+    files: new Map(Object.entries(files).map(([path, lines]) => [path, { path, text: "", headLines: new Set(lines.map((_, i) => i + 1)) }])),
+    read: (_sha, path) => text(path),
+    head: { read: text, renamedTo: () => undefined, grep: async (line) => Object.keys(files).filter((p) => files[p]!.some((l) => l.includes(line))) },
+  };
+}
+
+const A = "src/a.ts";
+const HELPER = "src/helper.ts";
+const BASE_A = ["import x;", "", "export function del(req, res) {", "  const id = req.params.id;", "  db.orders.delete(id);", "  res.status(204).end();", "}", "", "// end"];
+const BASE_HELPER = ["export function auth(u) {", "  return u.admin === true;", "}"];
+const item = (path: string, lines: string[], start: number, end: number): EvidenceText => ({ path, start, end, text: normalize(lines.slice(start - 1, end)) });
+
+/** The verdict on a claim for a finding last seen on `BASE_A`, and the state the finding ends in, at a head of `files`. */
+async function resolve(files: Record<string, string[]>, evidence: EvidenceText[], ranges: [number, number][], candidates: CandidateFinding[] = [], head: Partial<VerifyContext["head"]> = {}) {
+  const at = { ...inMemory(files), prior: [] };
+  at.head = { ...at.head, ...head };
+  const location: ObservedLocation = { file: A, newLine: 5, headSha: "older", evidence };
+  const f: PriorFinding = { findingId: "f-a", status: "PUBLISHED", candidate: candidate({ file: A, newLine: 5, codeEvidence: [] }), location, located: await locate(location, ctx.headSha, at.head, { treeWide: false }) };
+  const result = await verifyCandidates(candidates, { ...ctx, ...at, prior: [f] }, [claim({ findingId: "f-a", codeEvidence: ranges.map(([start, end]) => ({ path: A, start, end, refSha: ctx.headSha })) })]);
+  return [result.verdicts[0]!.reason, observe([f], result.verified, result).find((o) => o.findingId === "f-a")!.path.at(-1)];
+}
+
+it("refuses a resolution while any of the finding's own-file code survives at head, whatever made locate call it changed", async () => {
+  const sha = ctx.headSha.slice(0, 12);
+  // Only a helper the finding also cited changed; its own lines are byte-identical.
+  const helperChanged = { [A]: BASE_A, [HELPER]: ["export function auth(u) {", "  return Boolean(u?.admin);", "}"] };
+  expect(await resolve(helperChanged, [item(A, BASE_A, 3, 6), item(HELPER, BASE_HELPER, 1, 3)], [[3, 7]])).toEqual(["its code survives at src/a.ts:3", "POTENTIALLY_RESOLVED"]);
+  // One short line, below the floor, shifted down a line by an insert above it.
+  const shifted = { [A]: ["import x;", "import y;", ...BASE_A.slice(1)], [HELPER]: BASE_HELPER };
+  expect(await resolve(shifted, [item(A, BASE_A, 5, 5)], [[5, 6]])).toEqual(["its code survives at src/a.ts:6", "POTENTIALLY_RESOLVED"]);
+  // A comment inserted inside the cited block: no run is contiguous, but the claim cites every line of it.
+  const commented = { [A]: [...BASE_A.slice(0, 4), "  // checked upstream", ...BASE_A.slice(4)], [HELPER]: BASE_HELPER };
+  expect(await resolve(commented, [item(A, BASE_A, 3, 6)], [[3, 8]])).toEqual([`evidence src/a.ts:3-8@${sha} contains the finding's code unchanged`, "POTENTIALLY_RESOLVED"]);
+  // The file is gone and its code reappears verbatim in another file: a claim on any changed file does not resolve it.
+  const moved = { "src/b.ts": BASE_A, "src/c.ts": ["x"] };
+  expect(await resolve(moved, [item(A, BASE_A, 3, 6)], [[1, 1]])).toEqual(["its code survives at src/b.ts:3", "OUTDATED"]);
+  expect(await resolve(moved, [item(A, BASE_A, 3, 6)], [[1, 1]], [], { grep: async () => undefined })).toEqual(["its code survives in more files than the search lists", "OUTDATED"]);
+  // A guard inserted where the delete was, and the claim cites the guard: nothing of the block is found whole, and the claim is new code.
+  const guarded = { [A]: [...BASE_A.slice(0, 4), "  if (!req.user.admin) return res.status(403).end();", ...BASE_A.slice(4)], [HELPER]: BASE_HELPER };
+  expect(await resolve(guarded, [item(A, BASE_A, 3, 6)], [[5, 5]])).toEqual([null, "RESOLVED"]);
+  expect(await resolve(guarded, [item(A, BASE_A, 3, 6)], [[3, 8]])).toEqual([`evidence src/a.ts:3-8@${sha} contains the finding's code unchanged`, "POTENTIALLY_RESOLVED"]);
 });

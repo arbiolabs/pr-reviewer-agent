@@ -108,6 +108,29 @@ export async function evidenceTexts(candidate: CandidateFinding, headSha: string
   return out;
 }
 
+type LinesOf = (path: string) => Promise<string[] | undefined>;
+/** The lines of each file at head, read once. */
+const lineCache = (head: HeadReader): LinesOf => {
+  const files = new Map<string, Promise<string[] | undefined>>();
+  return (path) => files.get(path) ?? files.set(path, head.read(path).then(splitLines)).get(path)!;
+};
+
+/**
+ * Every place at head where a substantial `item`'s text sits, by one tree-wide search for its longest line, or undefined
+ * when the path list was cut at its cap and so names no place.
+ */
+async function treeHits(item: EvidenceText, head: HeadReader, linesOf: LinesOf): Promise<{ path: string; start: number }[] | undefined> {
+  const query = item.text.split("\n").reduce((a, b) => (b.length > a.length ? b : a));
+  const paths = await head.grep(query);
+  if (paths === undefined) return undefined;
+  const hits: { path: string; start: number }[] = [];
+  for (const path of paths) {
+    const start = findSnippet(item.text, (await linesOf(path)) ?? [], item.start);
+    if (start !== undefined) hits.push({ path, start });
+  }
+  return hits;
+}
+
 /**
  * Search a new head for a finding's evidence text: the same path, then the head path of its rename, then once across
  * the tree when the snippet is substantial and exactly one file holds it. Every item found is `same`, with the anchor
@@ -116,11 +139,7 @@ export async function evidenceTexts(candidate: CandidateFinding, headSha: string
  * whose text an earlier head already searched for and missed.
  */
 export async function locate(location: ObservedLocation, headSha: string, head: HeadReader, options: { treeWide: boolean } = { treeWide: true }): Promise<Located> {
-  const files = new Map<string, string[] | undefined>();
-  const linesOf = async (path: string) => {
-    if (!files.has(path)) files.set(path, splitLines(await head.read(path)));
-    return files.get(path);
-  };
+  const linesOf = lineCache(head);
   const present = async (path: string) => {
     if (await linesOf(path)) return path;
     const renamed = head.renamedTo(path);
@@ -135,17 +154,8 @@ export async function locate(location: ObservedLocation, headSha: string, head: 
       if (start !== undefined) return { path: own, start };
     }
     if (!substantial(item.text) || !options.treeWide) return undefined;
-    const snippetLines = item.text.split("\n");
-    const query = snippetLines.reduce((a, b) => (b.length > a.length ? b : a));
-    const paths = await head.grep(query);
-    if (paths === undefined) return undefined;
-    const hits: { path: string; start: number }[] = [];
-    for (const path of paths) {
-      if (path === own) continue;
-      const start = findSnippet(item.text, (await linesOf(path)) ?? [], item.start);
-      if (start !== undefined) hits.push({ path, start });
-    }
-    return hits.length === 1 ? hits[0] : undefined;
+    const hits = (await treeHits(item, head, linesOf))?.filter((hit) => hit.path !== own);
+    return hits?.length === 1 ? hits[0] : undefined;
   };
 
   const file = await present(location.file);
@@ -166,6 +176,30 @@ export async function locate(location: ObservedLocation, headSha: string, head: 
 
 /** The file an open finding sits in at the new head, when it still has one. */
 export const currentFile = (f: PriorFinding) => (f.located.kind === "same" ? f.located.location.file : f.located.kind === "changed" ? f.located.file : undefined);
+
+/**
+ * Where the finding's own-file code still sits at this head, as "at path:line", or undefined when none of it does.
+ * `located` says only that some item went missing, which a changed helper in another file, a comment inserted in the
+ * cited block, or a one-line shift of a short item also does, so a resolution check asks this instead: each own-file
+ * item is looked for anywhere in the finding's current file, and a substantial one anywhere in the tree. A tree-wide
+ * search cut at its cap counts as found, since an open finding beats a false resolution.
+ */
+export async function survivingCode(f: PriorFinding, head: HeadReader): Promise<string | undefined> {
+  const linesOf = lineCache(head);
+  const file = currentFile(f);
+  const lines = file === undefined ? undefined : await linesOf(file);
+  for (const item of f.location.evidence) {
+    if (item.path !== f.location.file || item.text === "") continue;
+    const start = lines && findSnippet(item.text, lines, item.start);
+    if (start !== undefined) return `at ${file}:${start}`;
+    if (!substantial(item.text)) continue;
+    const hits = await treeHits(item, head, linesOf);
+    if (hits === undefined) return "in more files than the search lists";
+    const hit = hits.find((h) => h.path !== file);
+    if (hit) return `at ${hit.path}:${hit.start}`;
+  }
+  return undefined;
+}
 
 const overlaps = (a: EvidenceText[], b: EvidenceText[]) => a.some((x) => b.some((y) => x.path === y.path && x.start <= y.end && y.start <= x.end));
 

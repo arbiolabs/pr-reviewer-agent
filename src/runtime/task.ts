@@ -18,7 +18,7 @@ import { askJev, type JevOutcome, type JevRoute, selectReviewMode, type TriageIn
 import type { AppStore, RevisionRow } from "../persistence/store.ts";
 import { buildReviewRequest } from "../reasoning/request.ts";
 import { TargetDoc, type Workspace } from "../reasoning/tools.ts";
-import { evidenceTexts, headReader, locate, observe, type ObservedLocation, type PriorFinding } from "../reasoning/track.ts";
+import { evidenceTexts, type HeadReader, headReader, locate, observe, type ObservedLocation, type PriorFinding } from "../reasoning/track.ts";
 import { verifyCandidates } from "../reasoning/verify.ts";
 import { PinnedRepo, syncRepo } from "../source/git.ts";
 import type { GitHubClient } from "../github/client.ts";
@@ -200,7 +200,7 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
       headSha: revision.head_sha,
       mode: decision.selectedMode as ReviewMode,
       reasons: decision.reasons,
-      prior: await priorFindings(revision, await deps.workspace(revision.id)),
+      prior: await priorFindings(revision, await deps.workspace(revision.id)).then(({ prior }) => prior),
     });
     // The same request ID finds the same submission after a restart; a retry asks again under a new one.
     const requestId = cp.attempt ? `analyze:${revision.id}:${cp.attempt}` : `analyze:${revision.id}`;
@@ -213,7 +213,7 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
    * text from the head they were seen on. A finding already doubted was searched for tree-wide by the head that doubted
    * it, so only its own file is read again: a defect that comes back elsewhere is a new finding.
    */
-  async function priorFindings(revision: RevisionRow, ws: Workspace): Promise<PriorFinding[]> {
+  async function priorFindings(revision: RevisionRow, ws: Workspace): Promise<{ prior: PriorFinding[]; head: HeadReader }> {
     const read = (sha: string, path: string) => ws.repo.show(sha, path);
     const head = headReader(ws.repo, ws.snapshot.changedFiles);
     const prior: PriorFinding[] = [];
@@ -222,13 +222,13 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
       const treeWide = f.status !== "POTENTIALLY_RESOLVED" && f.status !== "OUTDATED";
       prior.push({ findingId: f.findingId, status: f.status, candidate: f.candidate, location, located: await locate(location, revision.head_sha, head, { treeWide }) });
     }
-    return prior;
+    return { prior, head };
   }
 
   const verify: PhaseBody<"verify"> = async (cp, revision) => {
     const set = store.candidateSet(revision.id)!;
     const ws = await deps.workspace(revision.id);
-    const prior = await priorFindings(revision, ws);
+    const { prior, head } = await priorFindings(revision, ws);
     const { dispositions, verified, unverified, verdicts } = await verifyCandidates(
       set.candidates,
       {
@@ -238,6 +238,7 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
         headSha: revision.head_sha,
         files: ws.files,
         read: (sha, path) => ws.repo.show(sha, path),
+        head,
         thresholds: config.verification,
         prior,
       },
