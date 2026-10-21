@@ -113,8 +113,8 @@ export class PinnedRepo {
     const files: ChangedFile[] = [];
     for (let i = 0; i < fields.length - 1; ) {
       const status = fields[i++]!;
-      if (status.startsWith("R") || status.startsWith("C")) i++;
-      files.push({ path: fields[i++]!, status: status[0]! });
+      const from = status.startsWith("R") || status.startsWith("C") ? fields[i++] : undefined;
+      files.push({ path: fields[i++]!, status: status[0]!, ...(from === undefined ? {} : { from }) });
     }
     return files;
   }
@@ -134,12 +134,6 @@ export class PinnedRepo {
     }
   }
 
-  async lineCount(sha: string, path: string): Promise<number | undefined> {
-    const text = await this.show(sha, path);
-    if (text === undefined) return undefined;
-    return text === "" ? 0 : text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
-  }
-
   async grep(query: string, scope: string | undefined, cap = DEFAULT_OUTPUT_CAP): Promise<string> {
     const args = ["grep", "-n", "-I", "-F", "--max-count=50", "-e", query, this.headSha];
     if (scope !== undefined && scope !== "" && scope !== ".") args.push("--", assertSafePath(scope));
@@ -148,6 +142,21 @@ export class PinnedRepo {
       return capBytes(out.replaceAll(`${this.headSha}:`, ""), cap);
     } catch (error) {
       if ((error as { code?: number }).code === 1) return "";
+      throw error;
+    }
+  }
+
+  /**
+   * The head paths with a line that contains `query`, NUL-delimited by git so a colon in a path survives, or undefined
+   * when the list runs past `cap` bytes: that many files hold the line, so no caller can call one of them unique.
+   */
+  async grepPaths(query: string, cap = DEFAULT_OUTPUT_CAP): Promise<string[] | undefined> {
+    try {
+      const out = await git(this.dir, ["grep", "-l", "-z", "-I", "-F", "-e", query, this.headSha]);
+      if (Buffer.byteLength(out) > cap) return undefined;
+      return out.split("\0").filter((p) => p !== "").map((p) => p.slice(this.headSha.length + 1));
+    } catch (error) {
+      if ((error as { code?: number }).code === 1) return [];
       throw error;
     }
   }

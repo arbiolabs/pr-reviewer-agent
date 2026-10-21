@@ -14,7 +14,7 @@ The marker lets pr-review find its own earlier review on GitHub, even when its l
 
 ## The publication steps
 
-1. **Prepare.** pr-review re-reads the PR head and stores the review payload in the outbox, in the same database write that moves the revision to publishing. The payload holds the summary, the marker, `commit_id` set to the head, `event: COMMENT`, and an inline comment for each verified finding whose line is in the diff.
+1. **Prepare.** pr-review re-reads the PR head and stores the review payload in the outbox, in the same database write that moves the revision to publishing. The payload holds the summary, the marker, `commit_id` set to the head, `event: COMMENT`, and an inline comment for each finding whose line is in the diff and that no earlier review commented on. A finding carried from an earlier review is listed in the summary instead, as still present, possibly fixed, or outdated. The outbox records which findings the payload comments on, and once the review is posted each of them records that review's ID.
 2. **Check.** pr-review re-reads the PR. If the head moved, or the PR is closed or merged, the revision is superseded and nothing is posted. It then lists every page of the PR's reviews. If one of its own reviews on the head commit carries this revision's marker, the revision completes with that review's ID.
 3. **Post.** pr-review marks the outbox `sending` and commits that before the POST. It saves the returned review ID after the POST.
 4. **Reconcile.** If the result is uncertain, pr-review lists the PR's reviews again instead of posting again. Uncertain results are a 5xx, a dropped connection, a timeout, and a crash that left the outbox in `sending`.
@@ -24,6 +24,8 @@ During reconciliation:
 - If pr-review finds the review, the revision completes with that ID.
 - A timed-out write can still land later. pr-review first waits `github.timeout_ms`, then needs two complete listings, at least that far apart, that both lack the review. Only then does it post again, up to `max_retries_per_phase` times.
 - If a listing fails, the outbox stays `needs_reconciliation`, the revision fails with `cannot_safely_decide`, and nothing is posted.
+
+The same caution applies to the inline comments of a later push. A finding whose outbox is `sending` or `needs_reconciliation` may already be on GitHub, so the next revision lists it as carried and does not comment on it, until `reconcile` decides: found marks it posted, and absent leaves its outbox `pending` on the failed revision, after which the next revision comments on it once. A `pending` outbox of a revision that failed, or of a superseded one, was never sent, so its findings are not posted and the next revision comments on them.
 
 pr-review retries a 429 or a rate-limit 403 after `Retry-After` or the rate-limit reset. GitHub sends those answers before it processes the request, so the retry cannot create a second review.
 

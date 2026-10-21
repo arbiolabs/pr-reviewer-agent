@@ -1924,6 +1924,10 @@
                   "at": {
                     "type": "string",
                     "description": "RFC 3339 UTC timestamp"
+                  },
+                  "basis": {
+                    "type": "string",
+                    "description": "why the run observed this state: reverified, located, changed or file_gone; absent on a first observation and a publication"
                   }
                 }
               }

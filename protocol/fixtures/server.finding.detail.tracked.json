@@ -1,0 +1,72 @@
+{
+  "type": "finding.detail",
+  "requestId": "req-finding",
+  "finding": {
+    "id": "f-1",
+    "prId": "acme/shop#184",
+    "runId": "rev-184-c",
+    "fingerprint": "fp-f-1",
+    "title": "Finding f-1",
+    "category": "correctness",
+    "severity": "high",
+    "status": "POTENTIALLY_RESOLVED",
+    "confidence": 0.82,
+    "file": "src/booking.ts",
+    "line": 42,
+    "evidenceCount": 1,
+    "stale": false,
+    "explanation": "Two concurrent bookings can both observe `slot.free` before either sets `held`.",
+    "reasoningSummary": "Traced book() -> lock(); lock() is advisory and not awaited by the second caller.",
+    "suggestedFix": "Take the row lock with SELECT ... FOR UPDATE before checking `free`.",
+    "evidence": [
+      {
+        "kind": "code_ref",
+        "path": "src/booking.ts",
+        "start": 40,
+        "end": 43,
+        "refSha": "4444444444444444444444444444444444444444",
+        "text": "if (slot.free && !slot.held) {"
+      },
+      {
+        "kind": "tool_summary",
+        "text": "grep lock( src/ -> 3 matches"
+      },
+      {
+        "kind": "test_result",
+        "text": "booking.race.test.ts: 1 failed"
+      },
+      {
+        "kind": "scenario",
+        "text": "Two clients POST /book for slot 9 within 5 ms."
+      },
+      {
+        "kind": "link",
+        "text": "https://example.com/docs/locking"
+      }
+    ],
+    "history": [
+      {
+        "runId": "rev-184-a",
+        "disposition": "DETECTED",
+        "at": "2026-10-20T13:00:30Z"
+      },
+      {
+        "runId": "rev-184-a",
+        "disposition": "PUBLISHED",
+        "at": "2026-10-20T13:00:45Z"
+      },
+      {
+        "runId": "rev-184-b",
+        "disposition": "STILL_PRESENT",
+        "at": "2026-10-20T13:01:35Z",
+        "basis": "located"
+      },
+      {
+        "runId": "rev-184-c",
+        "disposition": "POTENTIALLY_RESOLVED",
+        "at": "2026-10-20T13:02:20Z",
+        "basis": "changed"
+      }
+    ]
+  }
+}

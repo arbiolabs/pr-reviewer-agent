@@ -45,7 +45,8 @@ export type PullInfo = {
   cloneUrl: string;
 };
 
-export type ChangedFile = { path: string; status: string };
+/** `from` is the base-side path of a rename or copy. */
+export type ChangedFile = { path: string; status: string; from?: string };
 
 // §5. `attempt` counts retries of the current phase.
 export type ReviewCheckpoint =

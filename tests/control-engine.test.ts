@@ -68,7 +68,7 @@ function seedUncertainOutbox(dataDir: string): void {
   const prId = store.upsertPull(fixture.pull);
   const rev = store.ensureRevision({ prId, baseSha: fixture.pull.baseSha, headSha: fixture.headSha, policyVersion: "1+publish", reviewerVersion: "m1+faux/reviewer" });
   for (const event of ["CONTEXT_PERSISTED", "ROUTING_PERSISTED", "CANDIDATES_PERSISTED", "CANDIDATES_DISPOSED", "HEAD_VERIFIED"] as const) store.advanceFromCurrent(rev.id, event);
-  store.advanceOutbox(store.ensureOutbox({ revisionId: rev.id, idempotencyKey: `${rev.id}:1`, payloadHash: "p", payloadJson: "{}" }).id, "SEND");
+  store.advanceOutbox(store.ensureOutbox({ revisionId: rev.id, idempotencyKey: `${rev.id}:1`, payloadHash: "p", payloadJson: "{}", inlineFindingIds: [] }).id, "SEND");
   store.advanceFromCurrent(rev.id, "TERMINAL_ERROR", "daemon stopped mid-POST");
   store.close();
 }

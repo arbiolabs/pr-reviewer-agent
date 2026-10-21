@@ -113,6 +113,11 @@ const run1 = run("rev-184-a", pr1);
 const run2 = run("rev-185-a", pr2, { phase: "COMPLETED", status: "COMPLETED", completedAt: at(-60) });
 const f1 = finding("f-1", run1);
 const f2 = finding("f-2", run2, { severity: "low", category: "performance", line: null, file: "src/cache.ts" });
+// Later heads of pr1: one run each.
+const pr1New = { ...pr1, headSha: sha("c") };
+const run1New = run("rev-184-b", pr1New, { phase: "COLLECT_CONTEXT", startedAt: at(13) });
+const pr1Third = { ...pr1, headSha: sha("d") };
+const run1Third = run("rev-184-c", pr1Third, { phase: "COLLECT_CONTEXT", startedAt: at(130) });
 
 const account = (host: string, login: string, extra: Partial<Account> = {}): Account => ({
   id: `${host}/${login}`,
@@ -1099,6 +1104,22 @@ export const fixtures: Record<string, ClientMessage | ServerMessage | Record<str
     truncated: false,
   },
   "server.finding.detail": { type: "finding.detail", requestId: "req-finding", finding: detail },
+  // A finding carried across three heads: posted on the first, found unchanged on the second, its cited code changed on the third.
+  "server.finding.detail.tracked": {
+    type: "finding.detail",
+    requestId: "req-finding",
+    finding: {
+      ...detail,
+      runId: run1Third.id,
+      status: "POTENTIALLY_RESOLVED",
+      history: [
+        { runId: run1.id, disposition: "DETECTED", at: at(30) },
+        { runId: run1.id, disposition: "PUBLISHED", at: at(45) },
+        { runId: run1New.id, disposition: "STILL_PRESENT", at: at(95), basis: "located" },
+        { runId: run1Third.id, disposition: "POTENTIALLY_RESOLVED", at: at(140), basis: "changed" },
+      ],
+    },
+  },
   "server.finding.detail.minimal": {
     type: "finding.detail",
     requestId: "req-finding",
@@ -1259,8 +1280,24 @@ const epochChange = lines(40, [
   phase({ epoch: "epoch-2", seq: 4 }, run1, "ANALYZE", "VERIFY", "CANDIDATES_PERSISTED"),
 ]);
 
-const pr1New = { ...pr1, headSha: sha("c") };
-const run1New = run("rev-184-b", pr1New, { phase: "COLLECT_CONTEXT", startedAt: at(13) });
+
+// One finding crosses two runs: posted by the first, observed still present by the second, so it is never stale.
+const run1Done = { ...run1, phase: "COMPLETED" as const, status: "COMPLETED" as const, completedAt: at(-30) };
+const carryOver = lines(40, [
+  welcome(10),
+  snapshot(10, [pr1, pr2, pr3], [run1Done, run2], [{ ...f1, status: "PUBLISHED" }, f2]),
+  ev({ seq: 11 }, "pr.updated", pr1New, { prId: pr1.id }),
+  runEvent({ seq: 12 }, "run.started", run1New),
+  findingUpdated({ seq: 13 }, { ...f1, status: "PUBLISHED", stale: true }),
+  phase({ seq: 14 }, run1New, "COLLECT_CONTEXT", "TRIAGE", "CONTEXT_PERSISTED"),
+  phase({ seq: 15 }, run1New, "TRIAGE", "ANALYZE", "ROUTING_PERSISTED"),
+  phase({ seq: 16 }, run1New, "ANALYZE", "VERIFY", "CANDIDATES_PERSISTED"),
+  findingUpdated({ seq: 17 }, { ...f1, runId: run1New.id, status: "STILL_PRESENT", line: 47 }),
+  phase({ seq: 18 }, run1New, "VERIFY", "PREPARE_PUBLICATION", "CANDIDATES_DISPOSED"),
+  phase({ seq: 19 }, run1New, "PREPARE_PUBLICATION", "PUBLISH", "HEAD_VERIFIED"),
+  phase({ seq: 20 }, run1New, "PUBLISH", "COMPLETED", "REVIEW_RECONCILED"),
+  runEvent({ seq: 21 }, "review.completed", { ...run1New, phase: "COMPLETED", status: "COMPLETED", completedAt: at(21) }),
+]);
 const superseded = lines(40, [
   welcome(10),
   snapshot(10, [pr1, pr2, pr3], [run1, run2], [f1, f2]),
@@ -1409,6 +1446,18 @@ export const playback: Record<string, { script: PlaybackLine[]; expect: Expect }
       runs: [runRow(run1, "SUPERSEDED", "SUPERSEDED"), runRow(run2), runRow(run1New)],
       findings: [
         { id: f1.id, title: f1.title, status: "DETECTED", stale: true },
+        { id: f2.id, title: f2.title, status: "DETECTED", stale: false },
+      ],
+    }),
+  },
+  "carry-over": {
+    script: carryOver,
+    expect: baseExpect({
+      lastSequence: 21,
+      prs: prRows(pr1New, pr2, pr3),
+      runs: [runRow(run1Done), runRow(run2), runRow(run1New, "COMPLETED", "COMPLETED")],
+      findings: [
+        { id: f1.id, title: f1.title, status: "STILL_PRESENT", stale: false },
         { id: f2.id, title: f2.title, status: "DETECTED", stale: false },
       ],
     }),

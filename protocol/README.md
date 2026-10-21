@@ -28,7 +28,7 @@ also arrive unsolicited (`snapshot`, `resync.required`, `error`) have an optiona
 | `event` | see below |
 | `resync.required` | `reason` (display text) |
 | `diff.page` | `prId`, `baseSha`, `headSha`, `files[]`, `nextCursor?`, `truncated` |
-| `finding.detail` | `finding`: a `Finding` plus `explanation`, `reasoningSummary`, `suggestedFix?`, `evidence[]`, `history[]` |
+| `finding.detail` | `finding`: a `Finding` plus `explanation`, `reasoningSummary`, `suggestedFix?`, `evidence[]`, `history[]` (each entry a run, the finding state it ended in, and an optional `basis` for why) |
 | `publication.preview` | `runId`, `previewId` (the payload hash the approval must name), `headSha`, `body` (the exact review text, marker included), `comments[]` (`path`, `line`, `side: RIGHT`, `body`), `event: COMMENT`, `status` |
 | `timeline.page` | `events[]` (sequenced events), `nextBeforeSequence?` |
 | `command.result` | `status: accepted` with `operationId`, or `status: rejected` with `code` and `message` |

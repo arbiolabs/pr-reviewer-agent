@@ -103,6 +103,7 @@ export const FindingDetail = Type.Object({
       runId: Id,
       disposition: oneOf(FINDING_STATES),
       at: Timestamp,
+      basis: Type.Optional(Type.String({ description: "why the run observed this state: reverified, located, changed or file_gone; absent on a first observation and a publication" })),
     }),
   ),
 });

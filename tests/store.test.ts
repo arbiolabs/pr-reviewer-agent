@@ -1,9 +1,12 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { expect, it } from "vitest";
-import type { PullInfo } from "../src/domain/types.ts";
+import type { CandidateFinding, PullInfo } from "../src/domain/types.ts";
 import { AppStore } from "../src/persistence/store.ts";
+
+const MIGRATIONS = new URL("../migrations/", import.meta.url);
 
 const pull: PullInfo = {
   installationId: 0,
@@ -33,7 +36,7 @@ it("derives the same revision id on reopen and applies migrations once", () => {
   store.close();
   const reopened = AppStore.open(path);
   expect(reopened.ensureRevision(key).id).toBe(first.id);
-  expect(reopened.db.prepare("SELECT name FROM schema_migrations").all()).toEqual([{ name: "001_init.sql" }, { name: "002_code_read.sql" }, { name: "003_publication.sql" }, { name: "004_coordinator.sql" }, { name: "005_webhook_retry.sql" }, { name: "006_meta.sql" }, { name: "050_stream_meta.sql" }, { name: "051_journal_without_revision.sql" }, { name: "052_control_commands.sql" }, { name: "053_control_command_attempt.sql" }, { name: "054_pull_title.sql" }]);
+  expect(reopened.db.prepare("SELECT name FROM schema_migrations").all()).toEqual([{ name: "001_init.sql" }, { name: "002_code_read.sql" }, { name: "003_publication.sql" }, { name: "004_coordinator.sql" }, { name: "005_webhook_retry.sql" }, { name: "006_meta.sql" }, { name: "050_stream_meta.sql" }, { name: "051_journal_without_revision.sql" }, { name: "052_control_commands.sql" }, { name: "053_control_command_attempt.sql" }, { name: "054_pull_title.sql" }, { name: "055_finding_tracking.sql" }]);
   expect(reopened.revisionsForPr(prId).length).toBe(1);
 });
 
@@ -67,14 +70,14 @@ function revisionInPublish(store: AppStore) {
   const prId = store.upsertPull(pull);
   const revision = store.ensureRevision({ prId, baseSha: pull.baseSha, headSha: pull.headSha, policyVersion: "1", reviewerVersion: "m2" });
   store.db.prepare("UPDATE review_revisions SET state = 'PUBLISH' WHERE id = ?").run(revision.id);
-  const outbox = store.ensureOutbox({ revisionId: revision.id, idempotencyKey: `${revision.id}:p1`, payloadHash: "h", payloadJson: "{}" });
+  const outbox = store.ensureOutbox({ revisionId: revision.id, idempotencyKey: `${revision.id}:p1`, payloadHash: "h", payloadJson: "{}", inlineFindingIds: [] });
   return { revision, outbox };
 }
 
 it("inserts one outbox row per idempotency key and returns the winner on a rerun", () => {
   const { store } = openFresh();
   const { revision, outbox } = revisionInPublish(store);
-  const again = store.ensureOutbox({ revisionId: revision.id, idempotencyKey: `${revision.id}:p1`, payloadHash: "other", payloadJson: "[]" });
+  const again = store.ensureOutbox({ revisionId: revision.id, idempotencyKey: `${revision.id}:p1`, payloadHash: "other", payloadJson: "[]", inlineFindingIds: [] });
   expect([again.id, again.payload_hash, store.db.prepare("SELECT count(*) AS n FROM publication_outbox").get()]).toEqual([outbox.id, "h", { n: 1 }]);
 });
 
@@ -100,7 +103,7 @@ function revisionAwaitingApproval(store: AppStore) {
   const revision = store.ensureRevision({ prId, baseSha: pull.baseSha, headSha: pull.headSha, policyVersion: "1+publish", reviewerVersion: "m3" });
   store.db.prepare("UPDATE review_revisions SET state = 'PREPARE_PUBLICATION' WHERE id = ?").run(revision.id);
   store.advance(revision.id, "PREPARE_PUBLICATION", "APPROVAL_REQUIRED", "head still h", () => {
-    store.ensureOutbox({ revisionId: revision.id, idempotencyKey: `${revision.id}:p1`, payloadHash: "h", payloadJson: "{}" });
+    store.ensureOutbox({ revisionId: revision.id, idempotencyKey: `${revision.id}:p1`, payloadHash: "h", payloadJson: "{}", inlineFindingIds: [] });
   });
   return { revision, outbox: store.outboxForRevision(revision.id)! };
 }
@@ -138,7 +141,7 @@ it("abandons the unsent outbox when an awaiting revision is superseded or cancel
   const prId = store.upsertPull(other);
   const revision = store.ensureRevision({ prId, baseSha: other.baseSha, headSha: other.headSha, policyVersion: "1+publish", reviewerVersion: "m3" });
   store.db.prepare("UPDATE review_revisions SET state = 'AWAITING_APPROVAL' WHERE id = ?").run(revision.id);
-  const outbox = store.ensureOutbox({ revisionId: revision.id, idempotencyKey: `${revision.id}:p1`, payloadHash: "h", payloadJson: "{}" });
+  const outbox = store.ensureOutbox({ revisionId: revision.id, idempotencyKey: `${revision.id}:p1`, payloadHash: "h", payloadJson: "{}", inlineFindingIds: [] });
   expect(store.advance(revision.id, "AWAITING_APPROVAL", "CANCELLED", "cancelled from the TUI")).toBe("FAILED");
   expect(store.outboxEvents(outbox.id)).toEqual([{ from_status: "pending", event: "ABANDON", to_status: "failed", detail: "cancelled" }]);
   expect(store.advance(revision.id, "FAILED", "MANUAL_RETRY", "retry 1")).toBe("COLLECT_CONTEXT");
@@ -176,4 +179,72 @@ it("journals tool activity and revision creation without adding to the audit tra
   ]);
   expect(store.auditEvents(rev.id).map((e) => e.seq)).toEqual([3]);
   expect(store.db.prepare("SELECT key, length(value) AS n FROM meta WHERE key = 'stream_epoch'").all()).toEqual([{ key: "stream_epoch", n: 32 }]);
+});
+
+const candidate: CandidateFinding = {
+  id: "c1",
+  category: "security",
+  severity: "high",
+  title: "t",
+  explanation: "e",
+  file: "src/x.ts",
+  newLine: 5,
+  codeEvidence: [],
+  reasoningSummary: "r",
+  confidence: 0.9,
+  evidenceKind: "confirmed_by_static_trace",
+};
+
+it("records a p1 outbox's review only on the findings its payload commented on", () => {
+  const { store } = openFresh();
+  const { revision, outbox } = revisionInPublish(store);
+  const observe = (findingId: string, newLine: number) => ({ findingId, path: ["DETECTED" as const], basis: null, candidate, location: { file: "src/x.ts", newLine, headSha: pull.headSha, evidence: [] } });
+  store.writeVerification(revision, [], ["f-commented", "f-listed"].map((findingId) => ({ findingId, fingerprint: findingId, candidate })), [observe("f-commented", 5), observe("f-listed", 9)]);
+  store.db.prepare("UPDATE publication_outbox SET inline_finding_ids_json = NULL, payload_json = ? WHERE id = ?").run(JSON.stringify({ comments: [{ path: "src/x.ts", line: 5 }] }), outbox.id);
+  store.advanceOutbox(outbox.id, "SEND");
+  store.advanceOutbox(outbox.id, "SENT", "review 7", 7);
+  store.markFindingsPublished(outbox.id);
+  expect(store.db.prepare("SELECT id, status, github_review_id FROM findings ORDER BY id").all()).toEqual([
+    { id: "f-commented", status: "PUBLISHED", github_review_id: 7 },
+    { id: "f-listed", status: "PUBLISHED", github_review_id: null },
+  ]);
+});
+
+it("leaves a retried VERIFY's first observation and status in place, with no second status change in the journal", () => {
+  const { store } = openFresh();
+  const prId = store.upsertPull(pull);
+  const key = { prId, baseSha: pull.baseSha, policyVersion: "1", reviewerVersion: "m" };
+  const [r1, r2] = [store.ensureRevision({ ...key, headSha: pull.headSha }), store.ensureRevision({ ...key, headSha: "2".repeat(40) })];
+  const location = { file: "src/x.ts", newLine: 5, headSha: pull.headSha, evidence: [] };
+  store.writeVerification(r1, [], [{ findingId: "f", fingerprint: "fp", candidate }], [{ findingId: "f", path: ["DETECTED"], basis: null, candidate, location }]);
+  store.writeVerification(r2, [], [], [{ findingId: "f", path: ["DETECTED", "STILL_PRESENT"], basis: "located", candidate, location }]);
+  const state = () => [store.db.prepare("SELECT status FROM findings").get(), store.db.prepare("SELECT count(*) AS n FROM audit_events WHERE event = 'FINDING_UPDATED'").get()];
+  expect(state()).toEqual([{ status: "STILL_PRESENT" }, { n: 1 }]);
+  // The retry's model run read the code differently; the first observation stands.
+  store.writeVerification(r2, [], [], [{ findingId: "f", path: ["DETECTED", "POTENTIALLY_RESOLVED"], basis: "changed", candidate, location }]);
+  expect([...state(), store.db.prepare("SELECT disposition FROM finding_observations WHERE revision_id = ?").get(r2.id)]).toEqual([{ status: "STILL_PRESENT" }, { n: 1 }, { disposition: "STILL_PRESENT" }]);
+});
+
+it("backfills the review of record at migration 055 only for findings a published payload commented on", () => {
+  const path = join(mkdtempSync(join(tmpdir(), "store-")), "app.sqlite");
+  const db = new DatabaseSync(path);
+  db.exec("CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL)");
+  for (const name of readdirSync(MIGRATIONS).filter((f) => f.endsWith(".sql") && f < "055").sort()) {
+    db.exec(readFileSync(new URL(name, MIGRATIONS), "utf8"));
+    db.prepare("INSERT INTO schema_migrations (name, applied_at) VALUES (?, ?)").run(name, "2026-10-20T00:00:00Z");
+  }
+  const at = "2026-10-20T00:00:00Z";
+  db.prepare("INSERT INTO pull_requests (id, installation_id, repository_id, number, status, latest_base_sha, latest_head_sha, updated_at, repo_full_name) VALUES ('pr', 0, 42, 7, 'ACTIVE', 'b', 'h', ?, 'acme/shop')").run(at);
+  db.prepare("INSERT INTO review_revisions (id, pr_id, base_sha, head_sha, policy_version, reviewer_version, state, created_at) VALUES ('rev', 'pr', 'b', 'h', '1', 'm', 'COMPLETED', ?)").run(at);
+  for (const [id, line] of [["f-commented", 5], ["f-listed", 9]] as const) {
+    db.prepare("INSERT INTO findings (id, pr_id, first_revision_id, fingerprint, status, current_severity, created_at, updated_at) VALUES (?, 'pr', 'rev', ?, 'PUBLISHED', 'high', ?, ?)").run(id, id, at, at);
+    db.prepare("INSERT INTO finding_observations (id, finding_id, revision_id, disposition, evidence_json, location_json, created_at) VALUES (?, ?, 'rev', 'VERIFIED', '{}', ?, ?)").run(`o-${id}`, id, JSON.stringify({ file: "src/x.ts", newLine: line }), at);
+  }
+  db.prepare("INSERT INTO publication_outbox (id, revision_id, idempotency_key, payload_hash, payload_json, status, github_review_id, updated_at) VALUES ('ob', 'rev', 'rev:p1', 'h', ?, 'published', 7, ?)").run(JSON.stringify({ comments: [{ path: "src/x.ts", line: 5 }] }), at);
+  db.close();
+  const store = AppStore.open(path);
+  expect(store.db.prepare("SELECT id, github_review_id FROM findings ORDER BY id").all()).toEqual([
+    { id: "f-commented", github_review_id: 7 },
+    { id: "f-listed", github_review_id: null },
+  ]);
 });

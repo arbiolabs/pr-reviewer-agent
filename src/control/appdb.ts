@@ -202,25 +202,31 @@ export class AppDbSource implements ControlSource {
       if (!row) throw new ControlError("NOT_FOUND", `no finding ${findingId}`);
       const candidate = JSON.parse(row.evidence_json) as CandidateFinding;
       const history = this.db
-        .prepare("SELECT revision_id, disposition, created_at FROM finding_observations WHERE finding_id = ? ORDER BY created_at")
-        .all(findingId) as { revision_id: string; disposition: string; created_at: string }[];
-      // DETECTED leaves only for PUBLISHED (FINDING_MACHINE), so the finding's first status change is its publication.
+        .prepare("SELECT revision_id, disposition, basis, created_at FROM finding_observations WHERE finding_id = ? ORDER BY created_at")
+        .all(findingId) as { revision_id: string; disposition: string; basis: string | null; created_at: string }[];
+      // A status change with no observation at the same instant is a publication (markFindingsPublished); every other
+      // change is written with its observation.
       const published = this.db
-        .prepare("SELECT revision_id, at AS created_at FROM audit_events WHERE event = 'FINDING_UPDATED' AND detail = ? ORDER BY seq LIMIT 1")
-        .get(findingId) as { revision_id: string; created_at: string } | undefined;
-      if (published) history.push({ ...published, disposition: "PUBLISHED" });
+        .prepare(
+          `SELECT revision_id, at AS created_at FROM audit_events a WHERE event = 'FINDING_UPDATED' AND detail = :id
+           AND NOT EXISTS (SELECT 1 FROM finding_observations o WHERE o.finding_id = :id AND o.revision_id = a.revision_id AND o.created_at = a.at) ORDER BY seq`,
+        )
+        .all({ id: findingId }) as { revision_id: string; created_at: string }[];
+      for (const p of published) history.push({ ...p, disposition: "PUBLISHED", basis: null });
       history.sort((a, b) => a.created_at.localeCompare(b.created_at));
+      // An observation from before migration 055 recorded VERIFIED: DETECTED until the publication entry, PUBLISHED after it.
+      let posted = false;
+      const entries = history.map((h) => {
+        const disposition = isFindingState(h.disposition) ? h.disposition : posted ? "PUBLISHED" : "DETECTED";
+        posted ||= disposition === "PUBLISHED";
+        return { runId: h.revision_id, disposition, at: h.created_at, ...(h.basis ? { basis: h.basis } : {}) };
+      });
       const finding: Omit<FindingDetail, "evidence"> = {
         ...toFinding(row),
         explanation: candidate.explanation,
         reasoningSummary: candidate.reasoningSummary,
         ...(candidate.suggestedFix ? { suggestedFix: candidate.suggestedFix } : {}),
-        // An observation records VERIFIED; until publication tracks more, a verified observation is a DETECTED finding.
-        history: history.map((h) => ({
-          runId: h.revision_id,
-          disposition: (FINDING_STATES as readonly string[]).includes(h.disposition) ? (h.disposition as Finding["status"]) : "DETECTED",
-          at: h.created_at,
-        })),
+        history: entries,
       };
       return { repo: row.repo_full_name, refs: candidate.codeEvidence, detail: finding };
     });
@@ -359,6 +365,21 @@ export class AppDbSource implements ControlSource {
     return n.n + 1;
   }
 
+  /**
+   * The state a revision's observation of a finding ended in, when there is one (made at `at`, if given). An observation
+   * from before migration 055 recorded VERIFIED: the finding was DETECTED until its first publication, which is the
+   * first FINDING_UPDATED row journaled before `seq`.
+   */
+  private observedState(findingId: string, revisionId: string, seq: number, at?: string): Finding["status"] | undefined {
+    const row = this.db
+      .prepare("SELECT disposition FROM finding_observations WHERE finding_id = ? AND revision_id = ? AND (? IS NULL OR created_at = ?)")
+      .get(findingId, revisionId, at ?? null, at ?? null) as { disposition: string } | undefined;
+    if (!row) return undefined;
+    if (isFindingState(row.disposition)) return row.disposition;
+    const published = this.db.prepare("SELECT 1 FROM audit_events WHERE event = 'FINDING_UPDATED' AND detail = ? AND seq < ? LIMIT 1").get(findingId, seq);
+    return published ? "PUBLISHED" : "DETECTED";
+  }
+
   private failureReason(revisionId: string): string | null {
     const row = this.db.prepare(`SELECT detail FROM audit_events WHERE revision_id = ? AND to_state = 'FAILED' AND ${TRANSITIONS} ORDER BY seq DESC LIMIT 1`).get(revisionId) as
       | { detail: string | null }
@@ -385,18 +406,12 @@ export class AppDbSource implements ControlSource {
       }
       case "PR_UPDATED":
         return { ...head, eventType: "pr.updated", data: this.pr(this.db.prepare("SELECT * FROM pull_requests WHERE id = ?").get(rev.pr_id) as PullRow, rev) };
-      case "FINDING_OBSERVED": {
-        // DETECTED leaves only for PUBLISHED, which a FINDING_UPDATED row records: before one, the finding was DETECTED.
-        // ponytail: a FINDING_UPDATED row still replays the current status; give it a status column once later
-        // observations (STILL_PRESENT and on) are journaled.
-        const changed = this.db
-          .prepare("SELECT 1 FROM audit_events WHERE event = 'FINDING_UPDATED' AND detail = ? AND seq <= ? LIMIT 1")
-          .get(row.detail, row.seq);
-        const finding = findingAt(rev.id);
-        return { ...ids, eventType: "finding.updated", data: changed ? finding : { ...finding, status: "DETECTED" } };
-      }
+      // An observation replays the state it ended in. A status change at the same instant as this revision's observation
+      // is that observation's; any other is the publication of the revision's review.
+      case "FINDING_OBSERVED":
+        return { ...ids, eventType: "finding.updated", data: { ...findingAt(rev.id), status: this.observedState(row.detail!, rev.id, row.seq) ?? "DETECTED" } };
       case "FINDING_UPDATED":
-        return { ...ids, eventType: "finding.updated", data: findingAt(null) };
+        return { ...ids, eventType: "finding.updated", data: { ...findingAt(rev.id), status: this.observedState(row.detail!, rev.id, row.seq, row.at) ?? "PUBLISHED" } };
       case "PUBLICATION_CHANGED":
         return { ...ids, eventType: "review.publication_changed", data: this.publicationChange(rev, row.detail ?? "") };
     }
@@ -409,6 +424,8 @@ export class AppDbSource implements ControlSource {
     return { ...ids, eventType: "review.phase_changed", data: { from, to, event, detail: row.detail } };
   }
 }
+
+const isFindingState = (disposition: string): disposition is Finding["status"] => (FINDING_STATES as readonly string[]).includes(disposition);
 
 function toFinding(row: FindingRow): Finding {
   const c = JSON.parse(row.evidence_json) as CandidateFinding;

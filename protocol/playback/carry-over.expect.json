@@ -1,0 +1,54 @@
+{
+  "streamEpoch": "epoch-1",
+  "lastSequence": 21,
+  "resyncRequested": false,
+  "toolActivityCount": 0,
+  "prs": [
+    {
+      "id": "acme/shop#184",
+      "headSha": "cccccccccccccccccccccccccccccccccccccccc",
+      "title": "Booking API"
+    },
+    {
+      "id": "acme/shop#185",
+      "headSha": "5555555555555555555555555555555555555555",
+      "title": "Fix cache eviction"
+    },
+    {
+      "id": "acme/shop#186",
+      "headSha": "6666666666666666666666666666666666666666",
+      "title": "Bump deps"
+    }
+  ],
+  "runs": [
+    {
+      "id": "rev-184-a",
+      "phase": "COMPLETED",
+      "status": "COMPLETED"
+    },
+    {
+      "id": "rev-184-b",
+      "phase": "COMPLETED",
+      "status": "COMPLETED"
+    },
+    {
+      "id": "rev-185-a",
+      "phase": "COMPLETED",
+      "status": "COMPLETED"
+    }
+  ],
+  "findings": [
+    {
+      "id": "f-1",
+      "title": "Finding f-1",
+      "status": "STILL_PRESENT",
+      "stale": false
+    },
+    {
+      "id": "f-2",
+      "title": "Finding f-2",
+      "status": "DETECTED",
+      "stale": false
+    }
+  ]
+}
