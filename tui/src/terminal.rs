@@ -139,34 +139,40 @@ pub fn split_replies(buf: &[u8]) -> (Vec<u8>, Vec<u8>) {
 }
 
 /// Drops a terminal reply that arrives after the query gave up: crossterm reads `ESC ]` as Alt+`]` and the reply's
-/// text as keys, ended by BEL (Ctrl+G) or ST (Alt+`\\`). Only in the first `WINDOW` after startup, and never more
-/// than one reply's worth of keys.
+/// text as keys, ended by BEL (Ctrl+G) or ST (Alt+`\\`). Only in the first `WINDOW` after startup, and only keys
+/// that can belong to `11;rgb:RRRR/GGGG/BBBB` arriving within `BURST` of the Alt+`]`; any other key ends it and acts.
 #[derive(Default)]
 pub struct LateReply {
-    swallowed: Option<usize>,
+    /// When the reply's Alt+`]` came, and how many keys followed it.
+    open: Option<(Duration, usize)>,
 }
 
 impl LateReply {
     pub const WINDOW: Duration = Duration::from_secs(2);
+    /// A reply arrives in one burst; a key this long after the Alt+`]` was typed by a person.
+    const BURST: Duration = Duration::from_millis(200);
     const MAX: usize = 64;
 
     /// True when `key`, `since_start` into the session, is part of a late reply and must not act.
     pub fn swallow(&mut self, key: &crossterm::event::KeyEvent, since_start: Duration) -> bool {
         use crossterm::event::{KeyCode, KeyModifiers};
         let alt = key.modifiers == KeyModifiers::ALT;
-        match self.swallowed {
-            None if since_start < Self::WINDOW && alt && key.code == KeyCode::Char(']') => {
-                self.swallowed = Some(0);
-                true
-            }
-            None => false,
-            Some(n) => {
-                let end = (key.modifiers == KeyModifiers::CONTROL && key.code == KeyCode::Char('g'))
-                    || (alt && key.code == KeyCode::Char('\\'));
-                self.swallowed = (!end && n + 1 < Self::MAX).then_some(n + 1);
-                true
-            }
+        let Some((began, n)) = self.open.take() else {
+            let starts = since_start < Self::WINDOW && alt && key.code == KeyCode::Char(']');
+            self.open = starts.then_some((since_start, 0));
+            return starts;
+        };
+        if since_start.saturating_sub(began) >= Self::BURST || n >= Self::MAX {
+            return false;
         }
+        let end = (key.modifiers == KeyModifiers::CONTROL && key.code == KeyCode::Char('g'))
+            || (alt && key.code == KeyCode::Char('\\'));
+        let plain = !key.modifiers.intersects(KeyModifiers::ALT | KeyModifiers::CONTROL);
+        let part = plain && matches!(key.code, KeyCode::Char(c) if c.is_ascii_hexdigit() || "rgb:/;".contains(c));
+        if part {
+            self.open = Some((began, n + 1));
+        }
+        end || part
     }
 }
 

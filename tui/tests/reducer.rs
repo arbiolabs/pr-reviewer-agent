@@ -864,3 +864,17 @@ fn a_late_osc11_reply_reaching_the_key_reader_fires_no_action() {
     let alt = KeyEvent::new(KeyCode::Char(']'), KeyModifiers::ALT);
     assert_eq!(through_input(&mut m, &mut late, &[(alt, 3000), (j, 3001)]), [']', 'j'], "after the window");
 }
+
+#[test]
+fn a_typed_alt_bracket_swallows_only_what_could_be_a_reply_and_only_briefly() {
+    let key = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
+    let alt = KeyEvent::new(KeyCode::Char(']'), KeyModifiers::ALT);
+    let mut m = live();
+    let mut late = pr_review_tui::terminal::LateReply::default();
+    let typed = [(alt, 500), (key('1'), 501), (key('j'), 502), (key('k'), 503), (key('1'), 504)];
+    assert_eq!(through_input(&mut m, &mut late, &typed), ['j', 'k', '1'], "j cannot be in a reply");
+
+    let mut late = pr_review_tui::terminal::LateReply::default();
+    let typed = [(alt, 500), (key('b'), 600), (key('1'), 800), (key('f'), 801)];
+    assert_eq!(through_input(&mut m, &mut late, &typed), ['1', 'f'], "200 ms after Alt+] keys act again");
+}
