@@ -27,7 +27,7 @@ Compare two results files:
 pnpm bench:compare a.json b.json
 ```
 
-Each case runs `pr-review review --dry-run --json --no-jev` against a local repository, with a fresh temporary data directory. Nothing is published. Jev is skipped so that no case calls a third-party service and the review mode depends only on the path rules. A case that touches a path such as `migrations/` or `auth` still gets a deeper review.
+Each case runs `pr-review review --dry-run --json --no-jev` against a local repository, with a fresh temporary data directory. Nothing is published. Jev is skipped so that no case calls a third-party service and the review mode depends only on the path rules. A case that touches a path under `mandatory_deep_paths`, such as `migrations/` or `auth/`, still gets a deeper review. Of the current cases, only `broken-migration` does.
 
 The table has one row per case. With several runs, each cell lists one value per run, separated by commas:
 
