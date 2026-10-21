@@ -440,15 +440,13 @@ fn the_showcase_parks_1291_and_its_preview_lands_every_comment_on_the_diff() {
         .iter()
         .position(|m| matches!(m, ServerMessage::Event(Event::Sequenced(e)) if matches!(&e.body, pr_review_tui::protocol::EventBody::PublicationChanged(_))))
         .unwrap();
-    // #338 still runs: the status line names it and counts #1291 as waiting; w visits #338, then #1291.
+    // #338 still runs: the status line names it and counts #1291 as waiting; w goes to #1291, which waits on the reader.
     let mut s = showcase(parked + 1).key(crossterm::event::KeyCode::Char('w'));
     let (frame, _) = render(&mut s.m, 120, 38);
     assert!(
         first_line(&frame).contains("reviewing #338") && first_line(&frame).contains("◔ 1 awaiting you"),
         "{frame}"
     );
-    let mut s = s.key(crossterm::event::KeyCode::Char('w'));
-    let (frame, _) = render(&mut s.m, 120, 38);
     assert!(frame.contains("◔ Ready to publish · p previews"), "{frame}");
     let mut s = s.key(crossterm::event::KeyCode::Char('p'));
     let (frame, _) = render(&mut s.m, 120, 160);
@@ -517,4 +515,21 @@ fn the_reader_and_the_preview_say_how_much_is_below_until_the_end() {
         let (end, _) = render(&mut end.m, 80, 24);
         assert!(!end.contains("more below"), "{name}: a cue at the end:\n{end}");
     }
+}
+
+#[test]
+fn w_goes_first_to_the_review_waiting_for_you_then_to_the_running_ones() {
+    use crossterm::event::KeyCode;
+    use pr_review_tui::protocol::{Event, ServerMessage};
+    // #1291 parks at line 41; then #338's reviewer does something, so it holds the newest activity.
+    let mut s = showcase(42);
+    let ServerMessage::Event(Event::Sequenced(mut e)) = common::script("showcase")[11].clone() else { panic!() };
+    e.prev_sequence = s.m.stream.last_applied;
+    e.sequence = std::num::NonZeroU64::new(e.prev_sequence + 1).unwrap();
+    s.server(ServerMessage::Event(Event::Sequenced(e)));
+    let number = |s: &Sim| s.m.selected_pr().unwrap().number;
+    let s = s.key(KeyCode::Char('w'));
+    assert_eq!(number(&s), 1291, "the parked review first");
+    let s = s.key(KeyCode::Char('w'));
+    assert_eq!(number(&s), 338, "then the running one");
 }

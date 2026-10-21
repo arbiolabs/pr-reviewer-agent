@@ -328,20 +328,20 @@ fn awaiting_approval_is_its_own_amber_state_in_the_stepper_the_rail_and_the_stat
 }
 
 #[test]
-fn w_steps_through_running_reviews_then_the_parked_ones() {
+fn w_steps_through_parked_reviews_then_the_running_ones() {
     let mut m = parked();
-    // #185 starts running: w goes there first, then to the parked #184.
+    // #185 starts running: w goes to the parked #184 first, since it waits on the reader, then to #185.
     let started =
         run_json("rev-185-b", "acme/shop#185", "5555555555555555555555555555555555555555", "ANALYZE", "RUNNING");
     send(&mut m, &event(14, "acme/shop#185", "rev-185-b", "run.started", &started));
     m.ui.selected_pr = Some(pr_review_tui::protocol::PrId::new("acme/shop#186"));
     let selected = |m: &Model| m.ui.selected_pr.as_ref().unwrap().to_string();
     press(&mut m, KeyCode::Char('w'));
-    assert_eq!(selected(&m), "acme/shop#185");
-    press(&mut m, KeyCode::Char('w'));
     assert_eq!(selected(&m), "acme/shop#184");
     press(&mut m, KeyCode::Char('w'));
     assert_eq!(selected(&m), "acme/shop#185");
+    press(&mut m, KeyCode::Char('w'));
+    assert_eq!(selected(&m), "acme/shop#184");
 }
 
 #[test]

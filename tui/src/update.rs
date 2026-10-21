@@ -1578,29 +1578,31 @@ fn select_account(m: &mut Model) {
     confirm(m, prompt, Command::SelectAccount(AccountParams { account_id: a.id }));
 }
 
-/// `w`: the running review's document, one key from anywhere. Pressed again, it moves on to the next running PR.
+/// `w`: the review that needs the reader, one key from anywhere. Parked reviews come first, because the human is
+/// the bottleneck, then the running ones; pressed again, it moves on to the next.
 fn watch(m: &mut Model) {
-    // Running reviews first, then the parked ones waiting for approval.
     let mut running: Vec<(bool, u64, PrId)> = m
         .domain
         .runs
         .values()
         .filter(|r| r.status == RunStatus::Running)
-        .filter_map(|r| Some((r.parked(), m.domain.prs.get(&r.pr_id)?.number, r.pr_id.clone())))
+        .filter_map(|r| Some((!r.parked(), m.domain.prs.get(&r.pr_id)?.number, r.pr_id.clone())))
         .collect();
     running.sort();
-    let active: Vec<PrId> = running.iter().filter(|r| !r.0).map(|r| r.2.clone()).collect();
+    let active: Vec<PrId> = running.iter().filter(|r| r.0).map(|r| r.2.clone()).collect();
+    let parked = running.first().is_some_and(|r| !r.0);
     let running: Vec<(u64, PrId)> = running.into_iter().map(|(_, n, id)| (n, id)).collect();
     if running.is_empty() {
         notice(m, "no review is running");
         return;
     }
-    // First the review the status line names: the running PR with the newest activity.
+    // With nothing parked, first the review the status line names: the running PR with the newest activity.
     let newest = m
         .domain
         .activity
         .iter()
         .rev()
+        .filter(|_| !parked)
         .find_map(|a| running.iter().find(|r| a.pr_id.as_ref() == Some(&r.1) && active.contains(&r.1)));
     let first = newest.unwrap_or(&running[0]).1.clone();
     let at = running.iter().position(|r| Some(&r.1) == m.ui.selected_pr.as_ref());
