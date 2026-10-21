@@ -413,7 +413,7 @@ fn phase_line(c: &Ctx, run: Option<&Run>, w: usize) -> Line<'static> {
         RunStatus::Completed => {
             // A clock that ran backwards gives no duration rather than a negative one.
             let took = run.completed_at.as_ref().and_then(|e| Some(secs(e.as_str())? - start?)).filter(|s| *s >= 0);
-            let took = took.map_or(String::new(), |s| format!(" in {}m {:02}s", s / 60, s % 60));
+            let took = took.map_or(String::new(), |s| format!(" in {}", duration(s as u64)));
             (format!("{} done{took}", g.ok), Role::Ok)
         }
         RunStatus::Running if run.parked() => (format!("{} waiting for you", g.pending), Role::Pending),
@@ -733,6 +733,15 @@ fn code_block(c: &Ctx, ev: &Evidence, f: &Finding, w: usize, max: usize) -> Vec<
     out
 }
 
+/// "34s" under a minute, "4m 30s" under an hour, "1h 2m" from there.
+pub fn duration(secs: u64) -> String {
+    match secs {
+        0..60 => format!("{secs}s"),
+        60..3600 => format!("{}m {}s", secs / 60, secs % 60),
+        _ => format!("{}h {}m", secs / 3600, secs % 3600 / 60),
+    }
+}
+
 // ---------------------------------------------------------------- finding page
 
 /// Enter on a card: the whole finding as an article, every piece of evidence in full.
@@ -922,7 +931,14 @@ pub(crate) fn inset(
 
 #[cfg(test)]
 mod tests {
-    use super::{fold_rule, opens};
+    use super::{duration, fold_rule, opens};
+
+    #[test]
+    fn durations_read_in_the_largest_units_that_matter() {
+        assert_eq!(duration(34), "34s");
+        assert_eq!(duration(270), "4m 30s");
+        assert_eq!(duration(3720), "1h 2m");
+    }
 
     #[test]
     fn the_card_hint_counts_evidence_in_the_singular_and_plural() {
