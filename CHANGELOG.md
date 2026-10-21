@@ -6,7 +6,7 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 ### Added
 
-- **Benchmark.** `pnpm bench -- --model provider/id` runs the dry-run review over 12 labeled cases in `bench/cases/` (8 with one seeded bug, 4 known-clean) and prints precision, recall, the verifier's discards, and one row per case. `--runs N` repeats the set to show variance, `--json` writes a results file, and `pnpm bench:compare` compares two of them. It calls a real model, so it never runs in CI (#TBD).
+- **Benchmark.** `pnpm bench -- --model provider/id` runs the dry-run review over 12 labeled cases in `bench/cases/` (8 with one seeded bug, 4 known-clean) and prints precision, recall, the verifier's discards, and one row per case. `--runs N` repeats the set to show variance, `--json` writes a results file, and `pnpm bench:compare` compares two of them. It calls a real model, so it never runs in CI (#22).
 
 ### Fixed
 
