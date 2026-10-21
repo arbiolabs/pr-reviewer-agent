@@ -179,7 +179,7 @@ export type Report = { candidate: CandidateFinding; location: ObservedLocation; 
  * survived is still the finding's code. The floor keeps `}` or one short statement from counting, and a run that
  * occurs twice names no place.
  */
-export function findLongestRun(text: string, lines: string[]): EvidenceText | undefined {
+export function findLongestRun(text: string, lines: string[]): Omit<EvidenceText, "path"> | undefined {
   const wanted = text.split("\n");
   const normalized = lines.map(normalizeLine);
   const positions = new Map<string, number[]>();
@@ -197,7 +197,7 @@ export function findLongestRun(text: string, lines: string[]): EvidenceText | un
   for (const run of runs.sort((a, b) => b.k - a.k)) {
     const sub = wanted.slice(run.o, run.o + run.k).join("\n");
     if (!substantial(sub)) break;
-    if (runs.filter((r) => r.o <= run.o && r.o + r.k >= run.o + run.k).length === 1) return { path: "", start: run.p + 1, end: run.p + run.k, text: sub };
+    if (runs.filter((r) => r.o <= run.o && r.o + r.k >= run.o + run.k).length === 1) return { start: run.p + 1, end: run.p + run.k, text: sub };
   }
   return undefined;
 }

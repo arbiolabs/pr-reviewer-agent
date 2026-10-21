@@ -153,15 +153,19 @@ const claim = (over: Partial<ResolutionClaim> = {}): ResolutionClaim => ({
   evidenceKind: "confirmed_by_static_trace",
   ...over,
 });
-const verdict = async (c: ResolutionClaim, prior = doubted({ kind: "changed", file: DEFECT.file }), reported = new Map<string, string>()) => (await checkResolutions([c], { ...ctx, prior: [prior] }, reported))[0];
+const none = { reported: new Map<string, string>(), verified: [] };
+const verdict = async (c: ResolutionClaim, prior = doubted({ kind: "changed", file: DEFECT.file })) => (await checkResolutions([c], { ...ctx, prior: [prior] }, none))[0];
 
-it("accepts a resolution claim only on a doubted finding, with head-side evidence in its file that is not the finding's code unchanged", async () => {
-  expect(await verdict(claim())).toEqual({ findingId: "f-doubted", state: "ACCEPTED", reason: null });
-  expect(await verdict(claim(), doubted({ kind: "changed", file: DEFECT.file }, "UNCERTAIN"))).toMatchObject({ state: "ACCEPTED" });
+it("accepts a resolution claim only on a doubted finding, with head-side evidence in its file that is not a run of the finding's code unchanged", async () => {
+  // The stored text is lines 3-5 of the unchanged fixture; line 1 is outside it, so citing it reads as changed code here.
+  const outside = claim({ codeEvidence: [{ path: DEFECT.file, start: 1, end: 1, refSha: fixture.headSha }, { path: AUTH, start: 1, end: 2, refSha: fixture.headSha }] });
+  expect(await verdict(outside)).toEqual({ findingId: "f-doubted", state: "ACCEPTED", reason: null });
+  expect(await verdict(outside, doubted({ kind: "changed", file: DEFECT.file }, "UNCERTAIN"))).toMatchObject({ state: "ACCEPTED" });
   const sha = fixture.headSha.slice(0, 12);
   const cases: [string, ResolutionClaim, PriorFinding?][] = [
     [`evidence src/routes/orders.ts:5-5@${fixture.baseSha.slice(0, 12)} cites a SHA other than the head`, claim({ codeEvidence: [{ path: DEFECT.file, start: 5, end: 5, refSha: fixture.baseSha }] })],
     [`evidence src/routes/orders.ts:3-5@${sha} is the finding's code unchanged`, claim({ codeEvidence: [{ path: DEFECT.file, start: 3, end: 5, refSha: fixture.headSha }] })],
+    [`evidence src/routes/orders.ts:5-5@${sha} is the finding's code unchanged`, claim()],
     [`no evidence in ${DEFECT.file}`, claim({ codeEvidence: [{ path: AUTH, start: 1, end: 2, refSha: fixture.headSha }] })],
     [`its cited code is unchanged at ${DEFECT.file}:5`, claim(), doubted({ kind: "same", location: { file: DEFECT.file, newLine: 5, headSha: fixture.headSha, evidence: [] } })],
     ["no open finding f-nobody", claim({ findingId: "f-nobody" })],
@@ -172,18 +176,27 @@ it("accepts a resolution claim only on a doubted finding, with head-side evidenc
   ];
   for (const [reason, c, prior] of cases) expect((await verdict(c, prior))?.reason, reason).toBe(reason);
   // A finding whose file is gone is resolved by evidence in a file this pull request changes, not anywhere.
-  expect(await verdict(claim(), doubted({ kind: "file_gone" }, "OUTDATED"))).toMatchObject({ state: "ACCEPTED" });
+  expect(await verdict(outside, doubted({ kind: "file_gone" }, "OUTDATED"))).toMatchObject({ state: "ACCEPTED" });
   expect((await verdict(claim({ codeEvidence: [{ path: AUTH, start: 1, end: 2, refSha: fixture.headSha }] }), doubted({ kind: "file_gone" })))?.reason).toBe("no evidence in a file this pull request changes");
-  expect((await checkResolutions([claim(), claim()], { ...ctx, prior: [doubted({ kind: "changed", file: DEFECT.file })] }, new Map())).map((v) => v.reason)).toEqual([null, "duplicate of an earlier claim"]);
+  expect((await checkResolutions([outside, outside], { ...ctx, prior: [doubted({ kind: "changed", file: DEFECT.file })] }, none)).map((v) => v.reason)).toEqual([null, "duplicate of an earlier claim"]);
 });
 
-it("refuses a resolution claim when a candidate of the same revision reports the finding again, verified or not", async () => {
+it("refuses a resolution claim when a candidate of the same revision reports the finding again, verified or not, or still cites its code", async () => {
   const prior = doubted({ kind: "changed", file: DEFECT.file });
+  const fixed = claim({ codeEvidence: [{ path: DEFECT.file, start: 1, end: 1, refSha: fixture.headSha }] });
   // c1 is the finding's own title and lines: it links by rule 3 without naming the finding.
-  const relinked = await verifyCandidates([candidate({})], { ...ctx, prior: [prior] }, [claim()]);
+  const relinked = await verifyCandidates([candidate({})], { ...ctx, prior: [prior] }, [fixed]);
   expect(relinked.dispositions[0]!.findingId).toBe("f-doubted");
   expect(relinked.verdicts).toEqual([{ findingId: "f-doubted", state: "REFUSED", reason: "candidate c1 reports it again" }]);
-  const named = await verifyCandidates([candidate({ id: "c2", title: "Deleting an order never checks who owns it", priorFindingId: "f-doubted", evidenceKind: "suspected" })], { ...ctx, prior: [prior] }, [claim()]);
+  const named = await verifyCandidates([candidate({ id: "c2", title: "Deleting an order never checks who owns it", priorFindingId: "f-doubted", evidenceKind: "suspected" })], { ...ctx, prior: [prior] }, [fixed]);
   expect([named.dispositions[0]!.state, named.unverified, named.verdicts[0]!.reason]).toEqual(["DISCARDED", ["f-doubted"], "candidate c2 reports it again"]);
-  expect((await verifyCandidates([], { ...ctx, prior: [prior] }, [claim()])).verdicts[0]).toMatchObject({ state: "ACCEPTED" });
+  // A second defect in the same handler: its verified report cites two of the finding's lines, so the handler is still live.
+  const sibling = candidate({ id: "c3", title: "Deleting an order never checks who owns it", codeEvidence: [{ path: DEFECT.file, start: 4, end: 5, refSha: fixture.headSha }] });
+  const cited = await verifyCandidates([sibling], { ...ctx, prior: [prior] }, [fixed]);
+  expect([cited.dispositions[0]!.state, cited.dispositions[0]!.findingId === "f-doubted", cited.verdicts[0]!.reason]).toEqual(["VERIFIED", false, "candidate c3 still cites its code at src/routes/orders.ts:4-5"]);
+  // A helper both cite is not the finding's code, and one shared line is below the floor.
+  const helper = candidate({ id: "c4", title: "Deleting an order never checks who owns it", codeEvidence: [{ path: AUTH, start: 1, end: 3, refSha: fixture.headSha }, { path: DEFECT.file, start: 5, end: 5, refSha: fixture.headSha }] });
+  const withHelper = { ...prior, location: { ...prior.location, evidence: [...prior.location.evidence, { path: AUTH, start: 1, end: 3, text: "export function requireAdmin(req: Req, res: Res, next: Next) {\nif (!req.user?.isAdmin) return res.status(403).end();\nnext();" }] } };
+  expect((await verifyCandidates([helper], { ...ctx, prior: [withHelper] }, [fixed])).verdicts[0]).toMatchObject({ state: "ACCEPTED" });
+  expect((await verifyCandidates([], { ...ctx, prior: [prior] }, [fixed])).verdicts[0]).toMatchObject({ state: "ACCEPTED" });
 });

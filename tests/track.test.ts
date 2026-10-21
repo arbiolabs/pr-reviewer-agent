@@ -260,7 +260,7 @@ it("finds a finding's own text in the file a named candidate reports, by the lon
   // A run that occurs twice names no place, however long; a shorter run elsewhere in the block still can.
   const twice = ["const order = db.orders.find(req.params.id);", "queueRefund(order, order.total);", "res.status(202).end();"];
   expect(findLongestRun(twice.join("\n"), [...twice, "x", ...twice])).toBe(undefined);
-  expect(findLongestRun([...twice, "router.post(\"/orders/:id/refund\", requireUser, refundOrder);", "}"].join("\n"), [...twice, "x", ...twice, "y", 'router.post("/orders/:id/refund", requireUser, refundOrder);', "}"])).toEqual({ path: "", start: 9, end: 10, text: 'router.post("/orders/:id/refund", requireUser, refundOrder);\n}' });
+  expect(findLongestRun([...twice, "router.post(\"/orders/:id/refund\", requireUser, refundOrder);", "}"].join("\n"), [...twice, "x", ...twice, "y", 'router.post("/orders/:id/refund", requireUser, refundOrder);', "}"])).toEqual({ start: 9, end: 10, text: 'router.post("/orders/:id/refund", requireUser, refundOrder);\n}' });
   expect(findLongestRun("}\n}", ["}", "}"])).toBe(undefined);
 });
 

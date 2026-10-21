@@ -4,7 +4,7 @@ import { CANDIDATE_MACHINE, type CandidateEvent, type CandidateState } from "../
 import { type CandidateFinding, type CodeEvidence, type Disposition, type ResolutionClaim, type ResolutionVerdict, SEVERITIES, sha256, stableId } from "../domain/types.ts";
 import type { FileDiff } from "../source/diff.ts";
 import { assertSafePath } from "../source/git.ts";
-import { currentFile, evidenceTexts, findOwnEvidence, linkPriors, normalize, type ObservedLocation, type PriorFinding, type Report, splitLines } from "./track.ts";
+import { currentFile, evidenceTexts, findLongestRun, findOwnEvidence, findSnippet, linkPriors, normalize, type ObservedLocation, type PriorFinding, type Report, splitLines } from "./track.ts";
 
 export type VerifyContext = {
   prId: string;
@@ -68,20 +68,30 @@ async function structuralProblem(candidate: CandidateFinding, ctx: VerifyContext
   return undefined;
 }
 
+/** What this revision's verified candidates say: which open finding each reports again, and the code each cites. */
+export type Contradictions = { reported: Map<string, string>; verified: Pick<VerifiedFinding, "candidate" | "location">[] };
+
 /**
  * Why a resolution claim fails, or `undefined` when code supports it. A claim must name an open finding whose cited
  * code changed or whose file is gone at this head (a changed line alone never resolves, but unchanged code never does
- * either), which no candidate of this revision reports again. Its evidence must be confirmed_by_static_trace, exist
- * at the head SHA, include a range in the finding's file at this head (or, when that file is gone, in a file this
- * pull request changes), and cite no range that is the finding's own code unchanged. `reported` maps each open
- * finding a candidate reported again to that candidate.
+ * either), which no candidate of this revision reports again or still cites: a verified candidate whose evidence
+ * shares a substantial run with the finding's own code says that code is still part of a live defect, as when a
+ * handler stays reachable through a second unguarded route. The claim's evidence must be confirmed_by_static_trace,
+ * exist at the head SHA, include a range in the finding's file at this head (or, when that file is gone, in a file
+ * this pull request changes), and cite no range that is a run of the finding's own code unchanged. Both code
+ * comparisons read only the finding's own-file evidence: a helper both cite says nothing about the defect.
  */
-async function refusal(claim: ResolutionClaim, ctx: VerifyContext, reported: Map<string, string>, seen: Set<string>): Promise<string | undefined> {
+async function refusal(claim: ResolutionClaim, ctx: VerifyContext, { reported, verified }: Contradictions, seen: Set<string>): Promise<string | undefined> {
   const f = ctx.prior.find((p) => p.findingId === claim.findingId);
   if (!f) return `no open finding ${claim.findingId}`;
   if (seen.has(claim.findingId)) return "duplicate of an earlier claim";
   const by = reported.get(claim.findingId);
   if (by !== undefined) return `candidate ${by} reports it again`;
+  const own = f.location.evidence.filter((e) => e.path === f.location.file);
+  for (const v of verified) {
+    const cites = v.location.evidence.find((e) => own.some((old) => findLongestRun(old.text, e.text.split("\n")) !== undefined));
+    if (cites) return `candidate ${v.candidate.id} still cites its code at ${cites.path}:${cites.start}-${cites.end}`;
+  }
   if (f.located.kind === "same") return `its cited code is unchanged at ${f.located.location.file}:${f.located.location.newLine ?? "?"}`;
   if (claim.evidenceKind !== "confirmed_by_static_trace") return `evidence is ${claim.evidenceKind}`;
   if (claim.codeEvidence.length === 0) return "no code evidence";
@@ -89,7 +99,7 @@ async function refusal(claim: ResolutionClaim, ctx: VerifyContext, reported: Map
     const problem = await rangeProblem(evidence, ctx, [ctx.headSha], "cites a SHA other than the head");
     if (problem !== undefined) return problem;
     const text = normalize(splitLines(await ctx.read(ctx.headSha, evidence.path))!.slice(evidence.start - 1, evidence.end));
-    if (f.location.evidence.some((old) => old.text === text)) return `evidence ${where(evidence)} is the finding's code unchanged`;
+    if (own.some((old) => findSnippet(text, old.text.split("\n"), 1) !== undefined)) return `evidence ${where(evidence)} is the finding's code unchanged`;
   }
   const file = currentFile(f);
   const inScope = (path: string) => (file === undefined ? ctx.files.has(path) : path === file);
@@ -98,11 +108,11 @@ async function refusal(claim: ResolutionClaim, ctx: VerifyContext, reported: Map
 }
 
 /** One verdict per claim, in order; only an ACCEPTED one moves its finding to RESOLVED (spec §4.3). */
-export async function checkResolutions(claims: ResolutionClaim[], ctx: VerifyContext, reported: Map<string, string>): Promise<ResolutionVerdict[]> {
+export async function checkResolutions(claims: ResolutionClaim[], ctx: VerifyContext, contradictions: Contradictions): Promise<ResolutionVerdict[]> {
   const verdicts: ResolutionVerdict[] = [];
   const seen = new Set<string>();
   for (const claim of claims) {
-    const reason = await refusal(claim, ctx, reported, seen);
+    const reason = await refusal(claim, ctx, contradictions, seen);
     seen.add(claim.findingId);
     verdicts.push({ findingId: claim.findingId, state: reason === undefined ? "ACCEPTED" : "REFUSED", reason: reason ?? null });
   }
@@ -187,5 +197,5 @@ export async function verifyCandidates(
   for (const [i, c] of candidates.entries()) {
     for (const id of [dispositions[i]!.findingId, c.priorFindingId]) if (id && ctx.prior.some((p) => p.findingId === id) && !reported.has(id)) reported.set(id, c.id);
   }
-  return { dispositions, verified, unverified, verdicts: await checkResolutions(resolutions, ctx, reported) };
+  return { dispositions, verified, unverified, verdicts: await checkResolutions(resolutions, ctx, { reported, verified }) };
 }
