@@ -652,8 +652,9 @@ const ledgerRun = showRun(ledger, SHOW_OPEN - 610, {
     "Diff too large to review: 212 files and 18,406 changed lines exceed the 8,000-line budget. Most of it is migrations/0042_partition_ledger.sql. Exclude generated files or split the PR.",
 });
 
+const showPersonal = account("github.com", "dperalta", { ghActive: true });
 const showAccounts = [
-  account("github.com", "dperalta", { ghActive: true }),
+  showPersonal,
   account("github.com", "acme-review-bot", { selected: true, scopes: ["read:org", "repo"] }),
 ];
 
@@ -786,8 +787,8 @@ const showcaseFixtures: Record<string, ServerMessage> = Object.fromEntries([
 
 const signInActivity = (tool: string, summary: string) => (s: Seq) => activity(s, signInRun, tool, summary);
 const drainActivity = (tool: string, summary: string) => (s: Seq) => activity(s, drainRun, tool, summary);
-// The step after `after` waits until the client sends that command; playback accepts it (protocol/README.md).
-type ShowStep = [delayMs: number, make: ((s: Seq) => ServerMessage) | "heartbeat", after?: "review.publish"];
+// A step with `after` waits until the client sends a command that gate names; playback accepts it (protocol/README.md).
+type ShowStep = [delayMs: number, make: ((s: Seq) => ServerMessage) | "heartbeat", after?: string];
 const signInPublication = (status: PublicationChange["status"], reviewId?: number) => (s: Seq) =>
   ev(
     s,
@@ -796,6 +797,7 @@ const signInPublication = (status: PublicationChange["status"], reviewId?: numbe
     { prId: signIn.id, runId: signInRun.id },
   );
 const SIGNIN_REVIEW_ID = 2209184;
+const ordersRerunId = stableId("revision", orders.id, orders.headSha, "rerun");
 const showSteps: ShowStep[] = [
   [600, (s) => runEvent(s, "run.started", signInRun)],
   [420, signInActivity("read_diff", "3 files changed (+6 -3): src/server/auth/callback.ts, src/server/auth/login.ts, src/client/pages/SignIn.tsx")],
@@ -839,14 +841,20 @@ const showSteps: ShowStep[] = [
   [800, (s) => phase(s, signInRun, "PREPARE_PUBLICATION", "AWAITING_APPROVAL", "APPROVAL_REQUIRED")],
   [40, signInPublication("awaiting_approval")],
   [600, (s) => phase(s, signInRun, "AWAITING_APPROVAL", "PUBLISH", "APPROVED"), "review.publish"],
-  [300, signInPublication("publishing")],
-  [1200, signInPublication("published", SIGNIN_REVIEW_ID)],
-  [80, (s) => findingUpdated(s, { ...findingOf(openRedirect), status: "PUBLISHED" })],
-  [60, (s) => findingUpdated(s, { ...findingOf(sessionFixation), status: "PUBLISHED" })],
-  [400, (s) => phase(s, signInRun, "PUBLISH", "COMPLETED", "REVIEW_RECONCILED")],
-  [40, (s) => runEvent(s, "review.completed", { ...signInRun, phase: "COMPLETED", status: "COMPLETED", completedAt: at(s.t!) })],
+  [300, signInPublication("publishing"), "review.publish"],
+  [1200, signInPublication("published", SIGNIN_REVIEW_ID), "review.publish"],
+  [80, (s) => findingUpdated(s, { ...findingOf(openRedirect), status: "PUBLISHED" }), "review.publish"],
+  [60, (s) => findingUpdated(s, { ...findingOf(sessionFixation), status: "PUBLISHED" }), "review.publish"],
+  [400, (s) => phase(s, signInRun, "PUBLISH", "COMPLETED", "REVIEW_RECONCILED"), "review.publish"],
+  [40, (s) => runEvent(s, "review.completed", { ...signInRun, phase: "COMPLETED", status: "COMPLETED", completedAt: at(s.t!) }), "review.publish"],
   [4000, "heartbeat"],
   [4000, "heartbeat"],
+  // What s, c and R do in the showcase, each on the one target it scripts: they play whenever the reader sends them.
+  [500, (s) => runEvent(s, "run.started", { ...started(ordersRun), id: ordersRerunId, startedAt: at(s.t!) }), `review.start:${orders.id}:${orders.headSha}`],
+  [500, (s) => phase(s, drainRun, "ANALYZE", "FAILED", "CANCELLED"), `review.cancel:${drainRun.id}`],
+  [40, (s) => runEvent(s, "run.failed", { ...drainRun, phase: "FAILED", status: "FAILED", completedAt: at(s.t!), failureReason: "cancelled from the TUI" }), `review.cancel:${drainRun.id}`],
+  [500, (s) => runEvent(s, "run.started", { ...started(ledgerRun), failureReason: undefined, attempt: 2, startedAt: at(s.t!) }), `review.retry:${ledgerRun.id}`],
+  [300, (s) => accountsUpdated(s, showAccounts.map((a) => ({ ...a, selected: a.id === showPersonal.id }))), `account.select:${showPersonal.id}`],
 ];
 
 
@@ -1341,7 +1349,7 @@ export const playback: Record<string, { script: PlaybackLine[]; expect: Expect }
     script: showcaseScript(),
     expect: {
       streamEpoch: EPOCH,
-      lastSequence: 86,
+      lastSequence: 91,
       resyncRequested: false,
       toolActivityCount: 29,
       prs: prRows(orders, requestIds, signIn, drain, ledger),
@@ -1350,13 +1358,14 @@ export const playback: Record<string, { script: PlaybackLine[]; expect: Expect }
         runRow(requestIdsRun),
         runRow(signInRun, "COMPLETED", "COMPLETED"),
         runRow(drainOldRun),
-        runRow(drainRun, "ANALYZE", "RUNNING"),
-        runRow(ledgerRun),
+        runRow(drainRun, "FAILED", "FAILED"),
+        runRow(ledgerRun, "COLLECT_CONTEXT", "RUNNING"),
+        { id: ordersRerunId, phase: "COLLECT_CONTEXT", status: "RUNNING" },
       ],
       findings: showDetails.map((f) => ({ id: f.id, title: f.title, status: f.runId === signInRun.id ? "PUBLISHED" : "DETECTED", stale: f.stale })),
       accounts: [
-        { id: "github.com/acme-review-bot", state: "ok", ghActive: false, selected: true },
-        { id: "github.com/dperalta", state: "ok", ghActive: true, selected: false },
+        { id: "github.com/acme-review-bot", state: "ok", ghActive: false, selected: false },
+        { id: "github.com/dperalta", state: "ok", ghActive: true, selected: true },
       ],
       publications: [{ runId: signInRun.id, status: "published" }],
     },

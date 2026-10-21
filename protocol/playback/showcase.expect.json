@@ -1,6 +1,6 @@
 {
   "streamEpoch": "epoch-1",
-  "lastSequence": 86,
+  "lastSequence": 91,
   "resyncRequested": false,
   "toolActivityCount": 29,
   "prs": [
@@ -33,7 +33,12 @@
   "runs": [
     {
       "id": "1c71d3ed584967adfb3a51cee84ec16a",
-      "phase": "ANALYZE",
+      "phase": "FAILED",
+      "status": "FAILED"
+    },
+    {
+      "id": "32720635888713e46dc1cf0581f60c2f",
+      "phase": "COLLECT_CONTEXT",
       "status": "RUNNING"
     },
     {
@@ -58,8 +63,8 @@
     },
     {
       "id": "e7451b06cf78ead5913962040f41cb76",
-      "phase": "FAILED",
-      "status": "FAILED"
+      "phase": "COLLECT_CONTEXT",
+      "status": "RUNNING"
     }
   ],
   "findings": [
@@ -111,13 +116,13 @@
       "id": "github.com/acme-review-bot",
       "state": "ok",
       "ghActive": false,
-      "selected": true
+      "selected": false
     },
     {
       "id": "github.com/dperalta",
       "state": "ok",
       "ghActive": true,
-      "selected": false
+      "selected": true
     }
   ],
   "publications": [

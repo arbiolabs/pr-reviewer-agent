@@ -157,8 +157,11 @@ The fixtures write control bytes as JSON `\u` escapes.
   check it against.
 - `fixtures/invalid/*.json` holds messages that must be rejected. Each one has a `.why.txt` file next to it.
 - `playback/<name>.ndjson` is a scripted server session. Each line is `{ "delayMs": n, "message": <server message> }`.
-  The script ignores what the client sends, except that a line may carry `"after": "<command>"`: it waits until the
-  client sends that command, which playback answers `accepted`, and only then starts its delay.
+  The script ignores what the client sends, except that a line may carry `"after": "<gate>"`: it waits until the
+  client sends a command the gate names, which playback answers `accepted`, and only then starts its delay. A gate is
+  a command name (`review.publish`) or one command on one target, spelled as its idempotency key
+  (`review.cancel:<runId>`). An opened gated line plays ahead of the lines still waiting, so `--playback` numbers the
+  events of a script with gates as it plays them. A command no gate names is rejected with `CAPABILITY_DENIED`.
 - `playback/<name>.expect.json` is the client state after the whole script: `streamEpoch`, `lastSequence`,
   `resyncRequested`, `toolActivityCount` (the number of activity events applied), and `prs`, `runs` and `findings`
   sorted by `id`, plus `accounts` (`id`, `state`, `ghActive`, `selected`, sorted by `id`) when the script's snapshot

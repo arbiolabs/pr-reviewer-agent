@@ -155,3 +155,74 @@ fn r_in_the_showcase_resyncs_from_the_played_snapshot_and_replays_what_followed(
     assert_eq!(summary(&after.m)["findings"], summary(&before.m)["findings"]);
     assert_eq!(after.m.stream.last_applied, before.m.stream.last_applied);
 }
+
+/// Plays every line the script would play now, answering the client the way `--playback` does.
+fn drive(p: &mut pr_review_tui::playback::Player, m: &mut pr_review_tui::model::Model, mut fx: Vec<Effect>) {
+    loop {
+        let mut replies = Vec::new();
+        for e in fx.drain(..) {
+            if let Effect::Send(req) = e {
+                replies.extend(p.answer(&req));
+            }
+        }
+        if replies.is_empty() {
+            let Some((i, _)) = p.next() else { return };
+            replies.push(p.play(i));
+        }
+        for r in replies {
+            fx.extend(update(m, Msg::Net(NetEvent::Message(r))));
+        }
+    }
+}
+
+#[test]
+fn every_command_the_showcase_grants_plays_a_scripted_outcome() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use pr_review_tui::model::{Modal, Screen};
+    use pr_review_tui::playback::{Player, load};
+    use pr_review_tui::protocol::PublicationStatus;
+    let mut p = Player::new(load(&protocol_dir().join("playback/showcase.ndjson")).unwrap());
+    let mut m = model();
+    let fx = update(&mut m, Msg::Net(NetEvent::Opened));
+    drive(&mut p, &mut m, fx);
+    let key = |c: char| Msg::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
+    // The PR each command acts on in the showcase, and the keys that send it.
+    let plays: [(&str, u64, &[char]); 5] = [
+        ("review.publish", 1291, &['p', 'y']),
+        ("review.start", 1287, &['s', 'y']),
+        ("review.cancel", 338, &['c', 'y']),
+        ("review.retry", 345, &['R', 'y']),
+        ("account.select", 0, &['5', 'j', '\n', 'y']),
+    ];
+    let mut granted: Vec<String> = m.server.as_ref().unwrap().capabilities.iter().map(|c| c.to_string()).collect();
+    let mut scripted: Vec<String> = plays.iter().map(|p| p.0.to_string()).collect();
+    granted.sort();
+    scripted.sort();
+    assert_eq!(granted, scripted, "every capability the showcase grants has a scripted outcome below");
+    for (cap, number, keys) in plays {
+        m.ui.modals.clear();
+        m.ui.screen = Screen::Review;
+        if let Some(pr) = m.domain.prs.values().find(|p| p.number == number) {
+            m.ui.selected_pr = Some(pr.id.clone());
+        }
+        for &k in keys {
+            let msg = if k == '\n' { Msg::Key(KeyEvent::new(KeyCode::Enter, KeyModifiers::NONE)) } else { key(k) };
+            let fx = update(&mut m, msg);
+            drive(&mut p, &mut m, fx);
+        }
+        match cap {
+            "review.publish" => {
+                let run = m.domain.latest_run(m.ui.selected_pr.as_ref().unwrap()).unwrap().id.clone();
+                assert_eq!(m.domain.publications[&run].status, PublicationStatus::Published, "{cap}");
+            }
+            _ => {
+                assert!(
+                    !matches!(m.top_modal(), Some(Modal::Confirm { .. })),
+                    "{cap} never settled: {:?}",
+                    m.top_modal()
+                );
+                assert!(m.notice.as_ref().is_some_and(|n| !n.text.contains("rejected")), "{cap}: {:?}", m.notice);
+            }
+        }
+    }
+}

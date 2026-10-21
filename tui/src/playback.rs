@@ -1,8 +1,9 @@
 //! `--playback FILE.ndjson`: plays a scripted server session into the app with no socket. The script owns the stream;
 //! requests the script cannot know about (diff, finding detail, timeline) are answered from `protocol/fixtures/`. A
 //! timeline is the events already played on top of the history the `server.timeline.page.showcase-*` pages recorded
-//! before the session opened. A line with `after: "<command>"` holds until the client sends that command, which the
-//! playback then accepts: the showcase's approval plays only once the reader approves it. A `snapshot.get` (the `r`
+//! before the session opened. A line with `after: "<gate>"` holds until the client sends a command the gate names,
+//! which the playback then accepts: the showcase's approval plays only once the reader approves it, and its start,
+//! cancel, retry and account switch play whenever the reader sends them. A `snapshot.get` (the `r`
 //! key) is answered with the last snapshot played and every event played after it, so the client catches up again.
 
 use std::path::{Path, PathBuf};
@@ -42,46 +43,126 @@ pub fn load(path: &Path) -> Result<Script, String> {
     Ok(Script { steps, fixtures })
 }
 
+/// The script as it plays: what is left, the commands the reader sent that open a gate, and the messages sent so far.
+pub struct Player {
+    steps: Vec<Step>,
+    pub fixtures: PathBuf,
+    gates: Vec<String>,
+    sent: Vec<String>,
+    /// A gated line plays when the reader acts, out of file order, so a script with gates numbers its events as it
+    /// plays them. A script without gates keeps the numbers it was written with, gaps and duplicates included.
+    renumber: bool,
+    last: Option<u64>,
+    pub played: Vec<ServerMessage>,
+}
+
+/// A gate names a command (`review.publish`) or one command on one target, as its idempotency key does
+/// (`review.cancel:<runId>`).
+fn opens(gate: &str, key: &str) -> bool {
+    key == gate || key.strip_prefix(gate).is_some_and(|rest| rest.starts_with(':'))
+}
+
+impl Player {
+    pub fn new(script: Script) -> Player {
+        let gates: Vec<String> = script.steps.iter().filter_map(|s| s.after.clone()).collect();
+        Player {
+            renumber: !gates.is_empty(),
+            steps: script.steps,
+            fixtures: script.fixtures,
+            gates,
+            sent: Vec::new(),
+            last: None,
+            played: Vec::new(),
+        }
+    }
+
+    fn open(&self, s: &Step) -> bool {
+        s.after.as_ref().is_none_or(|a| self.sent.contains(a))
+    }
+
+    /// The line to play next and its delay: a gated line the reader opened plays first, wherever it sits; else the
+    /// next line, unless it waits on a gate.
+    pub fn next(&self) -> Option<(usize, Duration)> {
+        let gated = self.steps.iter().position(|s| s.after.is_some() && self.open(s));
+        let i = gated.or_else(|| self.steps.first().filter(|s| s.after.is_none()).map(|_| 0))?;
+        Some((i, self.steps[i].delay))
+    }
+
+    pub fn play(&mut self, i: usize) -> ServerMessage {
+        let mut msg = self.steps.remove(i).message;
+        match &mut msg {
+            ServerMessage::Snapshot(s) => self.last = Some(s.sequence),
+            ServerMessage::Event(Event::Sequenced(e)) => {
+                if let Some(last) = self.last.filter(|_| self.renumber) {
+                    e.prev_sequence = last;
+                    e.sequence = std::num::NonZeroU64::new(last + 1).unwrap_or(e.sequence);
+                }
+                self.last = Some(e.sequence.get());
+            }
+            _ => {}
+        }
+        self.played.push(msg.clone());
+        msg
+    }
+
+    /// The replies to a client request: a command a gate names is accepted and opens it; any other is rejected,
+    /// saying where the script plays that command.
+    pub fn answer(&mut self, req: &ClientMessage) -> Vec<ServerMessage> {
+        use crate::protocol::{CommandOutcome, CommandResult, Text};
+        let ClientMessage::Command(c) = req else { return answer(&self.fixtures, &self.played, req) };
+        let key = c.idempotency_key.clone();
+        let opened: Vec<String> = self.gates.iter().filter(|g| opens(g, &key)).cloned().collect();
+        let outcome = if opened.is_empty() {
+            let name = c.command.name();
+            let message = match self.gates.iter().find(|g| opens(name, g)).and_then(|g| self.target(g)) {
+                Some(target) => format!("the showcase plays {name} on {target} only"),
+                None => format!("the showcase does not play {name}"),
+            };
+            CommandOutcome::Rejected {
+                code: crate::protocol::ErrorCode::CapabilityDenied,
+                message: Text::new(&message),
+            }
+        } else {
+            self.sent.extend(opened);
+            let operation = match &c.command {
+                crate::protocol::Command::Publish(p) => format!("review.publish:{}", p.run_id),
+                _ => key,
+            };
+            CommandOutcome::Accepted { operation_id: Text::new(&operation) }
+        };
+        vec![ServerMessage::CommandResult(CommandResult { request_id: c.request_id.clone(), outcome })]
+    }
+
+    /// What a gate's target reads as to the reader: `#338` for a PR or a run, the account for an account.
+    fn target(&self, gate: &str) -> Option<String> {
+        let id = gate.split(':').nth(1)?;
+        let snapshot = self.played.iter().find_map(|m| match m {
+            ServerMessage::Snapshot(s) => Some(s),
+            _ => None,
+        })?;
+        let pr = snapshot.runs.iter().find(|r| r.id.as_str() == id).map_or(id, |r| r.pr_id.as_str());
+        Some(snapshot.prs.iter().find(|p| p.id.as_str() == pr).map_or(id.to_string(), |p| format!("#{}", p.number)))
+    }
+}
+
 pub async fn run(script: Script, tx: mpsc::Sender<Msg>, mut rx: mpsc::Receiver<NetCmd>) {
-    let mut played: Vec<ServerMessage> = Vec::new();
+    let mut player = Player::new(script);
     if tx.send(Msg::Net(NetEvent::Opened)).await.is_err() {
         return;
     }
-    // The commands the script waits for, and those the client has sent.
-    let gates: Vec<String> = script.steps.iter().filter_map(|s| s.after.clone()).collect();
-    let mut sent: Vec<String> = Vec::new();
-    let mut steps = script.steps.into_iter();
-    let mut next = steps.next();
     loop {
-        let open = next.as_ref().is_some_and(|s| s.after.as_ref().is_none_or(|a| sent.contains(a)));
-        let delay = next.as_ref().filter(|_| open).map(|s| s.delay);
+        let next = player.next();
         tokio::select! {
-            _ = tokio::time::sleep(delay.unwrap_or(Duration::MAX)), if delay.is_some() => {
-                let Some(Step { message: msg, .. }) = next.take() else { continue };
-                played.push(msg.clone());
+            _ = tokio::time::sleep(next.map_or(Duration::MAX, |n| n.1)), if next.is_some() => {
+                let Some((i, _)) = next else { continue };
+                let msg = player.play(i);
                 if tx.send(Msg::Net(NetEvent::Message(msg))).await.is_err() {
                     return;
                 }
-                next = steps.next();
             }
             cmd = rx.recv() => match cmd {
-                Some(NetCmd::Send(ClientMessage::Command(c))) if gates.iter().any(|g| g == c.command.name()) => {
-                    sent.push(c.command.name().to_string());
-                    let reply = ServerMessage::CommandResult(crate::protocol::CommandResult {
-                        request_id: c.request_id,
-                        outcome: crate::protocol::CommandOutcome::Accepted {
-                            operation_id: crate::protocol::Text::new(&match &c.command {
-                                crate::protocol::Command::Publish(p) => format!("review.publish:{}", p.run_id),
-                                _ => c.idempotency_key.clone(),
-                            }),
-                        },
-                    });
-                    if tx.send(Msg::Net(NetEvent::Message(reply))).await.is_err() {
-                        return;
-                    }
-                }
                 Some(NetCmd::Send(req)) => {
-                    for reply in answer(&script.fixtures, &played, &req) {
+                    for reply in player.answer(&req) {
                         if tx.send(Msg::Net(NetEvent::Message(reply))).await.is_err() {
                             return;
                         }
