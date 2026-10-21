@@ -106,9 +106,15 @@ async fn run(settings: config::Settings, script: Option<playback::Script>) -> st
     let size = guard.terminal.size()?;
     model.size = (size.width, size.height);
     let input = msg_tx.clone();
+    for k in pr_review_tui::terminal::typed_before_start() {
+        let _ = msg_tx.try_send(Msg::Key(k));
+    }
+    let opened = Instant::now();
     std::thread::spawn(move || {
+        let mut late = pr_review_tui::terminal::LateReply::default();
         loop {
             let msg = match event::read() {
+                Ok(TermEvent::Key(k)) if late.swallow(&k, opened.elapsed()) => continue,
                 Ok(TermEvent::Key(k)) => Msg::Key(k),
                 // Motion events would wake the app on every cell the pointer crosses.
                 Ok(TermEvent::Mouse(e)) if !matches!(e.kind, MouseEventKind::Moved | MouseEventKind::Drag(_)) => {

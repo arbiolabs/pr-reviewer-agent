@@ -811,3 +811,36 @@ fn a_command_result_for_a_request_the_client_never_sent_is_ignored() {
     let (frame, _) = common::render(&mut s.m, 120, 38);
     assert!(!frame.contains("waiting for the daemon"), "{frame}");
 }
+
+/// The keys crossterm reads from a late `ESC ] 11 ; rgb:… BEL`: Alt+`]`, the text as plain keys, BEL as Ctrl+G.
+fn late_osc11() -> Vec<KeyEvent> {
+    let mut keys = vec![KeyEvent::new(KeyCode::Char(']'), KeyModifiers::ALT)];
+    keys.extend("11;rgb:1717/1717/1717".chars().map(|c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)));
+    keys.push(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::CONTROL));
+    keys
+}
+
+#[test]
+fn a_late_osc11_reply_reaching_the_key_reader_fires_no_action() {
+    use pr_review_tui::terminal::LateReply;
+    let fresh = live();
+    let mut raw = live();
+    for k in late_osc11() {
+        update(&mut raw, Msg::Key(k));
+    }
+    assert!(raw.top_modal().is_some() || raw.ui.screen != fresh.ui.screen, "unfiltered, the reply acts as keys");
+
+    let mut m = live();
+    let mut late = LateReply::default();
+    let at = std::time::Duration::from_millis(400);
+    for k in late_osc11() {
+        if !late.swallow(&k, at) {
+            assert!(update(&mut m, Msg::Key(k)).is_empty(), "{k:?} sent something");
+        }
+    }
+    assert_eq!(m.top_modal(), None);
+    assert_eq!((m.ui.screen, &m.ui.pr_filter), (fresh.ui.screen, &fresh.ui.pr_filter));
+    assert!(!late.swallow(&KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE), at), "the next key acts");
+    let alt = KeyEvent::new(KeyCode::Char(']'), KeyModifiers::ALT);
+    assert!(!late.swallow(&alt, std::time::Duration::from_secs(3)), "after the window, Alt+] is a key again");
+}
