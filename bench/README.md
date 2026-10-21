@@ -103,7 +103,7 @@ The metrics, in priority order:
 
 1. **False-resolution rate.** Expectations of `open` or `not_resolved` whose finding ended `RESOLVED`, over all such expectations. A false `RESOLVED` hides a live defect, so this one gates a release.
 2. **Identity kept.** Expectations of `open` where the review's finding on the label has the first review's finding ID, over all `open` expectations.
-3. **Duplicate-comment rate.** Inline comments after the first review on a label that already had an inline comment, over all inline comments. A comment is on a label when its path and line match the label's current location, as a finding would.
+3. **Duplicate-comment rate.** Inline comments on a label that had an inline comment in an earlier review, over all inline comments. Two comments in one review on one label are two findings, not a re-post. A comment is on a label when its path and line match the label's current location, as a finding would.
 4. **Resolution recall.** Expectations of `resolved` whose finding ended `RESOLVED`, over all such expectations.
 
 The runner also prints how many labels added by a later commit a new finding matched. A label that the first review missed has no finding ID, and its expectations count in no metric. The table shows its status as `unmatched`.

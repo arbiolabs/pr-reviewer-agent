@@ -62,7 +62,7 @@ it("follows a moved label, and counts a false resolution and a lost identity", (
   });
 });
 
-it("needs a new finding ID for a label a later commit adds, and leaves a label the first review missed out of every rate", () => {
+it("needs a new finding ID for a label a later commit adds, leaves a label the first review missed out of every rate, and takes two comments in one review on one label as two findings", () => {
   const missed: TrackedLabel = { ...label, id: "missed", file: "src/c.ts" };
   const again: TrackedLabel = { ...label, id: "again" };
   const other: TrackedLabel = { ...label, id: "other", file: "src/d.ts" };
@@ -72,7 +72,7 @@ it("needs a new finding ID for a label a later commit adds, and leaves a label t
     {
       findings: [tracked("f1", "src/a.ts", 11), tracked("f3", "src/d.ts", 10)],
       statuses: { f1: "RESOLVED", f3: "DETECTED" },
-      comments: [{ path: "src/a.ts", line: 11 }, { path: "src/d.ts", line: 10 }, { path: "src/e.ts", line: 1 }],
+      comments: [{ path: "src/a.ts", line: 11 }, { path: "src/d.ts", line: 10 }, { path: "src/d.ts", line: 12 }, { path: "src/e.ts", line: 1 }],
     },
   ];
   const commits = [commit([{ label: "auth", status: "resolved" }, { label: "missed", status: "not_resolved" }]), commit([], [again, other])];
@@ -83,7 +83,7 @@ it("needs a new finding ID for a label a later commit adds, and leaves a label t
     ],
     falseResolution: { n: 0, of: 0 },
     identityKept: { n: 0, of: 0 },
-    duplicateComments: { n: 0, of: 4 },
+    duplicateComments: { n: 0, of: 5 },
     resolutionRecall: { n: 1, of: 1 },
     newFound: { n: 1, of: 2 },
   });

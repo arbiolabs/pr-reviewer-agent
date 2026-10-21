@@ -68,8 +68,8 @@ const meets = (expected: ExpectedStatus, status: string | undefined) =>
 
 /**
  * Scores a multi-commit case. `steps[0]` reviews the first head and `steps[i]` the head after `commits[i - 1]`. The
- * first step's line match gives each label a finding ID, and later steps read that ID's status. An inline comment after
- * the first step is a duplicate when its label already had one. The duplicate rate's denominator is every inline comment.
+ * first step's line match gives each label a finding ID, and later steps read that ID's status. An inline comment is
+ * a duplicate when its label had one in an earlier step. The duplicate rate's denominator is every inline comment.
  */
 export function scoreTracking(labels: TrackedLabel[], commits: Commit[], steps: Step[]): TrackScore {
   const ids = new Map(score(labels, steps[0]!.findings).matched.map((m) => [m.label.id, m.finding.findingId]));
@@ -82,14 +82,16 @@ export function scoreTracking(labels: TrackedLabel[], commits: Commit[], steps: 
     r.of++;
     if (hit) r.n++;
   };
-  const tally = (step: number, active: TrackedLabel[], comments: InlineComment[]) => {
+  // Two comments in one review on one label are two findings, not a re-post, so only earlier reviews' comments count.
+  const tally = (active: TrackedLabel[], comments: InlineComment[]) => {
+    const before = new Set(commented);
     for (const c of comments) {
       const label = active.find((l) => near(l, c.path, c.line));
-      count(rates.duplicateComments, step > 0 && label !== undefined && commented.has(label.id));
+      count(rates.duplicateComments, label !== undefined && before.has(label.id));
       if (label) commented.add(label.id);
     }
   };
-  tally(0, labels, steps[0]!.comments);
+  tally(labels, steps[0]!.comments);
   for (const [i, commit] of commits.entries()) {
     const step = steps[i + 1]!;
     const known = new Set(ids.values());
@@ -114,7 +116,7 @@ export function scoreTracking(labels: TrackedLabel[], commits: Commit[], steps: 
       }
       outcomes.push({ step: i + 1, label: e.label, expected: e.status, findingId, status, ok: findingId !== undefined && meets(e.status, status), idKept });
     }
-    tally(i + 1, active, step.comments);
+    tally(active, step.comments);
   }
   return { outcomes, ...rates };
 }
