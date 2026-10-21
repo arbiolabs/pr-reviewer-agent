@@ -4,6 +4,10 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- **Benchmark.** `pnpm bench -- --model provider/id` runs the dry-run review over 12 labeled cases in `bench/cases/` (8 with one seeded bug, 4 known-clean) and prints precision, recall, the verifier's discards, and one row per case. `--runs N` repeats the set to show variance, `--json` writes a results file, and `pnpm bench:compare` compares two of them. It calls a real model, so it never runs in CI (#TBD).
+
 ### Fixed
 
 - **Jev skip reason.** `pr-review serve` and `pr-review daemon --allow-commands` record `jev_skipped_no_key` when they skip Jev for lack of `TYPESAFE_API_KEY`, instead of `jev_skipped_private_repo`, which was wrong for public repositories. A per-PR `review` of a private repository still records `jev_skipped_private_repo` (#21).
