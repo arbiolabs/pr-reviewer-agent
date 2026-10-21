@@ -7,7 +7,7 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 ### Added
 
 - **Benchmark.** `pnpm bench -- --model provider/id` runs the dry-run review over 12 labeled cases in `bench/cases/` (8 with one seeded bug, 4 known-clean) and prints precision, recall, the verifier's discards, and one row per case. `--runs N` repeats the set to show variance, `--json` writes a results file, and `pnpm bench:compare` compares two of them. It calls a real model, so it never runs in CI (#22).
-- **Setup checks in the terminal client.** The daemon sends the `pr-review setup --check` results in `welcome.checks`, an optional field that older clients ignore. Settings lists them under **Setup**, and an empty inbox names the missing checks and their fixes. The client never asks for or sends a secret (#TBD).
+- **Setup checks in the terminal client.** The daemon sends the `pr-review setup --check` results in `welcome.checks`, an optional field that older clients ignore. Settings lists them under **Setup**, and an empty inbox names the missing checks and their fixes. The client never asks for or sends a secret (#23).
 
 ### Fixed
 
