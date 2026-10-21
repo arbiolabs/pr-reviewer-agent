@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { beforeAll, expect, it } from "vitest";
 import type { CandidateFinding } from "../src/domain/types.ts";
-import { evidenceTexts, findSnippet, headReader, linkPriors, locate, normalize, type ObservedLocation, observe, type PriorFinding, sameText } from "../src/reasoning/track.ts";
+import { evidenceTexts, findOwnEvidence, findSnippet, headReader, linkPriors, locate, normalize, type ObservedLocation, observe, type PriorFinding, type Report, sameText, splitLines } from "../src/reasoning/track.ts";
 import { fingerprint } from "../src/reasoning/verify.ts";
 import { PinnedRepo, syncRepo } from "../src/source/git.ts";
 
@@ -185,9 +185,9 @@ const same = (file = FILE, shift = 0): PriorFinding["located"] => ({
   kind: "same",
   location: { file, newLine: 11 + shift, headSha: "new", evidence: [{ path: file, start: 9 + shift, end: 12 + shift, text: normalize(EVIDENCE_LINES) }] },
 });
-const reported = (over: Partial<CandidateFinding>, evidence: ObservedLocation["evidence"] = []): { candidate: CandidateFinding; location: ObservedLocation } => {
+const reported = (over: Partial<CandidateFinding>, evidence: ObservedLocation["evidence"] = [], priorHits?: ObservedLocation["evidence"]): Report => {
   const c = { ...candidate, ...over };
-  return { candidate: c, location: { file: c.file, newLine: c.newLine, headSha: "new", evidence } };
+  return { candidate: c, location: { file: c.file, newLine: c.newLine, headSha: "new", evidence }, ...(priorHits ? { priorHits } : {}) };
 };
 const linkOne = (report: ReturnType<typeof reported>, priors: PriorFinding[]) => linkPriors([report], fingerprint, priors)[0]?.findingId;
 const cites = (start: number, end: number, file = FILE) => [{ path: file, start, end, text: normalize(ROUTES.split("\n").slice(start - 1, end)) }];
@@ -246,6 +246,38 @@ it("links by title words only where the finding was: in place, or near its last 
   expect(linkOne(reported({ newLine: 300 }), [prior(same())])).toBe("f-1");
 });
 
+it("finds a finding's own substantial text in the file a named candidate reports, at its new lines", async () => {
+  const repo = new PinnedRepo(await syncRepo(cache, "acme/track", repoDir, 1), baseSha, heads.rename!);
+  const lines = splitLines(await repo.show(heads.rename!, "src/routes/order-routes.ts"))!;
+  expect(findOwnEvidence(prior({ kind: "file_gone" }), "src/routes/order-routes.ts", lines)).toEqual([{ path: "src/routes/order-routes.ts", start: 14, end: 17, text: normalize(EVIDENCE_LINES) }]);
+  const tiny = { ...prior({ kind: "file_gone" }), location: { ...location(), evidence: [{ path: FILE, start: 12, end: 12, text: "}" }] } };
+  expect(findOwnEvidence(tiny, "src/routes/order-routes.ts", lines)).toEqual([]);
+  expect(findOwnEvidence(prior({ kind: "file_gone" }), "x.ts", ["nothing", "here"])).toEqual([]);
+});
+
+it("links a candidate that names its prior finding only where code sees the report: near the finding's anchor or on its lines at this head", () => {
+  const named = { priorFindingId: "f-1", title: "Anyone can refund" };
+  // The code was rewritten in place: the anchor drifted past LINK_DISTANCE, but the citation overlaps the lines last seen.
+  const changed = prior({ kind: "changed", file: FILE });
+  expect(linkOne(reported({ ...named, newLine: 15 }, [{ path: FILE, start: 10, end: 15, text: "rewritten" }]), [changed])).toBe("f-1");
+  expect(linkOne(reported({ ...named, newLine: 15 }, [{ path: FILE, start: 14, end: 15, text: "rewritten" }]), [changed])).toBe(undefined);
+  expect(linkOne(reported({ ...named, newLine: 13 }, [{ path: FILE, start: 14, end: 15, text: "rewritten" }]), [changed])).toBe("f-1");
+  expect(linkOne(reported({ ...named, newLine: 300 }), [changed])).toBe(undefined);
+  expect(linkOne(reported({ ...named, newLine: 15, category: "correctness" }, [{ path: FILE, start: 10, end: 15, text: "x" }]), [changed])).toBe(undefined);
+  expect(linkOne(reported({ ...named, newLine: 15, file: "x.ts" }, [{ path: "x.ts", start: 10, end: 15, text: "x" }]), [changed])).toBe(undefined);
+  // The file is gone and the model says which file holds the code now: the finding's text found there must meet the citation.
+  const gone = prior({ kind: "file_gone" });
+  const hits = [{ path: "src/routes/order-routes.ts", start: 14, end: 17, text: normalize(EVIDENCE_LINES) }];
+  const moved = (start: number, end: number, priorHits = hits) => reported({ ...named, file: "src/routes/order-routes.ts", newLine: 20 }, [{ path: "src/routes/order-routes.ts", start, end, text: "shifted by one" }], priorHits);
+  expect(linkOne(moved(15, 18), [gone])).toBe("f-1");
+  expect(linkOne(moved(18, 20), [gone])).toBe(undefined);
+  expect(linkOne(moved(15, 18, []), [gone])).toBe(undefined);
+  // Naming a finding whose code is found in place still needs the report at that place.
+  expect(linkOne(reported({ ...named, newLine: 13 }, cites(13, 14)), [prior(same())])).toBe("f-1");
+  expect(linkOne(reported({ ...named, newLine: 40 }, cites(40, 41)), [prior(same())])).toBe(undefined);
+  expect(linkOne(reported({ priorFindingId: "f-9", title: "Anyone can refund", newLine: 13 }, cites(13, 14)), [prior(same())])).toBe(undefined);
+});
+
 it("assigns each open finding to at most one candidate, the best-scoring one, and leaves the rest fresh", () => {
   const f = prior(same());
   const byTitle = reported({ id: "c-title", title: "Refund route lacks requireAdmin", newLine: 13 }, cites(13, 14));
@@ -274,4 +306,22 @@ it("observes every open finding once: re-reported, located, changed or gone, and
   expect(rows[2]!.candidate.codeEvidence).toEqual([{ path: FILE, start: 29, end: 32, refSha: "new" }]);
   // A doubted finding observed as changed again has no legal event and stays where it is.
   expect(observe([prior({ kind: "changed", file: FILE }, "POTENTIALLY_RESOLVED")], [])[0]!.path).toEqual(["POTENTIALLY_RESOLVED"]);
+});
+
+it("resolves a doubted finding on an accepted claim, leaves one re-reported without verification uncertain, and records a refused claim", () => {
+  const rows = (f: PriorFinding, claims: Parameters<typeof observe>[2]) => observe([f], [], claims).map((o) => [o.path.join(">"), o.basis]);
+  const accepted = { verdicts: [{ findingId: "f-1", state: "ACCEPTED" as const, reason: null }], unverified: [] };
+  const refused = { verdicts: [{ findingId: "f-1", state: "REFUSED" as const, reason: "x" }], unverified: [] };
+  const unverified = { verdicts: [], unverified: ["f-1"] };
+  expect(rows(prior({ kind: "changed", file: FILE }), accepted)).toEqual([["PUBLISHED>POTENTIALLY_RESOLVED>RESOLVED", "resolution_checked"]]);
+  expect(rows(prior({ kind: "file_gone" }, "OUTDATED"), accepted)).toEqual([["OUTDATED>RESOLVED", "resolution_checked"]]);
+  expect(rows(prior({ kind: "file_gone" }, "UNCERTAIN"), accepted)).toEqual([["UNCERTAIN>OUTDATED>RESOLVED", "resolution_checked"]]);
+  expect(rows(prior({ kind: "changed", file: FILE }), refused)).toEqual([["PUBLISHED>POTENTIALLY_RESOLVED", "resolution_refused"]]);
+  expect(rows(prior({ kind: "changed", file: FILE }), unverified)).toEqual([["PUBLISHED>POTENTIALLY_RESOLVED>UNCERTAIN", "reported_unverified"]]);
+  expect(rows(prior({ kind: "changed", file: FILE }, "UNCERTAIN"), unverified)).toEqual([["UNCERTAIN>POTENTIALLY_RESOLVED>UNCERTAIN", "reported_unverified"]]);
+  // Code found the finding's code in place: no claim or unverified report moves it off STILL_PRESENT.
+  expect(rows(prior(same()), unverified)).toEqual([["PUBLISHED>STILL_PRESENT", "located"]]);
+  expect(rows(prior(same()), accepted)).toEqual([["PUBLISHED>STILL_PRESENT", "located"]]);
+  // A verified re-report wins over any claim about the finding.
+  expect(observe([prior({ kind: "changed", file: FILE })], [{ findingId: "f-1", candidate, location: location() }], accepted).map((o) => [o.path.join(">"), o.basis])).toEqual([["PUBLISHED>STILL_PRESENT", "reverified"]]);
 });

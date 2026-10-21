@@ -229,7 +229,7 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
     const set = store.candidateSet(revision.id)!;
     const ws = await deps.workspace(revision.id);
     const prior = await priorFindings(revision, ws);
-    const { dispositions, verified } = await verifyCandidates(set.candidates, {
+    const { dispositions, verified, unverified } = await verifyCandidates(set.candidates, {
       prId: revision.pr_id,
       revisionId: revision.id,
       baseSha: revision.base_sha,
@@ -239,7 +239,7 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
       thresholds: config.verification,
       prior,
     });
-    const observations = observe(prior, verified);
+    const observations = observe(prior, verified, { verdicts: [], unverified });
     const detail = `${verified.length} verified, ${dispositions.length - verified.length} discarded, ${prior.length} carried`;
     store.advance(revision.id, "VERIFY", "CANDIDATES_DISPOSED", detail, () => store.writeVerification(revision, dispositions, verified, observations));
     return { phase: "prepare", revisionId: revision.id, verifiedSetId: set.id };

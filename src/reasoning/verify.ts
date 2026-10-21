@@ -4,7 +4,7 @@ import { CANDIDATE_MACHINE, type CandidateEvent, type CandidateState } from "../
 import { type CandidateFinding, type Disposition, SEVERITIES, sha256, stableId } from "../domain/types.ts";
 import type { FileDiff } from "../source/diff.ts";
 import { assertSafePath } from "../source/git.ts";
-import { evidenceTexts, linkPriors, type ObservedLocation, type PriorFinding } from "./track.ts";
+import { evidenceTexts, findOwnEvidence, linkPriors, type ObservedLocation, type PriorFinding, type Report, splitLines } from "./track.ts";
 
 export type VerifyContext = {
   prId: string;
@@ -77,10 +77,12 @@ const step = (path: CandidateState[], event: CandidateEvent): CandidateState[] =
  * The candidates that pass are then linked to the PR's open findings one-to-one (track.ts): a linked candidate
  * takes that finding's ID, and any other gets a new one. Two candidates that get the same new ID are one defect
  * reported twice, so the second is a duplicate. Two that read as the same open finding are not: the second is new.
+ * `unverified` names the open findings a candidate reported again (`priorFindingId`) without a verified link to it.
  */
-export async function verifyCandidates(candidates: CandidateFinding[], ctx: VerifyContext): Promise<{ dispositions: Disposition[]; verified: VerifiedFinding[] }> {
+export async function verifyCandidates(candidates: CandidateFinding[], ctx: VerifyContext): Promise<{ dispositions: Disposition[]; verified: VerifiedFinding[]; unverified: string[] }> {
   const dispositions: Disposition[] = [];
-  const passed: { index: number; candidate: CandidateFinding; path: CandidateState[]; location: ObservedLocation }[] = [];
+  const passed: (Report & { index: number; path: CandidateState[] })[] = [];
+  const named = (candidate: CandidateFinding) => ctx.prior.find((f) => f.findingId === candidate.priorFindingId);
   const discard = (index: number, candidate: CandidateFinding, path: CandidateState[], reason: string) => {
     dispositions[index] = { candidateId: candidate.id, state: "DISCARDED", path: step(path, "REJECT"), reason, findingId: null };
   };
@@ -102,7 +104,10 @@ export async function verifyCandidates(candidates: CandidateFinding[], ctx: Veri
       continue;
     }
     const location: ObservedLocation = { file: candidate.file, newLine: candidate.newLine, headSha: ctx.headSha, evidence: await evidenceTexts(candidate, ctx.headSha, ctx.read) };
-    passed.push({ index, candidate, path, location });
+    // A candidate that names a finding whose code was not located says which file holds it now: look for its text there.
+    const prior = named(candidate);
+    const priorHits = prior && prior.located.kind !== "same" ? findOwnEvidence(prior, candidate.file, splitLines(await ctx.read(ctx.headSha, candidate.file)) ?? []) : [];
+    passed.push({ index, candidate, path, location, priorHits });
   }
   const linked = linkPriors(passed, fingerprint, ctx.prior);
   const verified: VerifiedFinding[] = [];
@@ -119,5 +124,6 @@ export async function verifyCandidates(candidates: CandidateFinding[], ctx: Veri
     dispositions[index] = { candidateId: candidate.id, state: "VERIFIED", path: step(path, "CONFIRM"), reason: null, findingId };
     verified.push({ findingId, fingerprint: print, candidate, location });
   }
-  return { dispositions, verified };
+  const unverified = candidates.filter((c, i) => named(c) && dispositions[i]!.findingId !== c.priorFindingId).map((c) => c.priorFindingId!);
+  return { dispositions, verified, unverified };
 }

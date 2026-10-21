@@ -2,7 +2,7 @@
 // each observation stores the normalized text of its head-side evidence, and a later head is searched for that text.
 import { transition } from "../domain/machine.ts";
 import { FINDING_MACHINE, type FindingEvent, type FindingState } from "../domain/machines.ts";
-import type { CandidateFinding, ChangedFile } from "../domain/types.ts";
+import type { CandidateFinding, ChangedFile, ResolutionVerdict } from "../domain/types.ts";
 import type { PinnedRepo } from "../source/git.ts";
 
 /** The text a finding points at, enough to find it again without the old commit. */
@@ -17,8 +17,12 @@ export type Located =
   | { kind: "changed"; file: string }
   | { kind: "file_gone" };
 
-/** Why an observation ended where it did. A first observation has none. */
-export type Basis = "reverified" | "located" | "changed" | "file_gone";
+/**
+ * Why an observation ended where it did. A first observation has none. `resolution_checked` is a resolution claim
+ * code accepted, `resolution_refused` one it refused, and `reported_unverified` a re-report of the finding that
+ * failed VERIFY, which leaves a doubted finding UNCERTAIN.
+ */
+export type Basis = "reverified" | "located" | "changed" | "file_gone" | "resolution_checked" | "resolution_refused" | "reported_unverified";
 
 export type PriorFinding = {
   findingId: string;
@@ -166,7 +170,21 @@ export const currentFile = (f: PriorFinding) => (f.located.kind === "same" ? f.l
 const overlaps = (a: EvidenceText[], b: EvidenceText[]) => a.some((x) => b.some((y) => x.path === y.path && x.start <= y.end && y.start <= x.end));
 
 type Fingerprint = (c: Pick<CandidateFinding, "category" | "file" | "title">) => string;
-type Report = { candidate: CandidateFinding; location: ObservedLocation };
+/** A verified candidate with its evidence text, plus, when it names a prior finding, that finding's own code found in the candidate's file (`findOwnEvidence`). */
+export type Report = { candidate: CandidateFinding; location: ObservedLocation; priorHits?: EvidenceText[] };
+
+/**
+ * The finding's substantial own-file evidence texts found in `lines`, the file a candidate that names the finding
+ * reports, at the position found. This is how a named link checks a finding whose code was not located: the model
+ * says which file, and code finds the finding's text there before the candidate's citation is compared with it.
+ */
+export function findOwnEvidence(f: PriorFinding, path: string, lines: string[]): EvidenceText[] {
+  return f.location.evidence.flatMap((e) => {
+    if (e.path !== f.location.file || !substantial(e.text)) return [];
+    const start = findSnippet(e.text, lines, e.start);
+    return start === undefined ? [] : [{ ...e, path, start, end: start + e.end - e.start }];
+  });
+}
 
 /**
  * The finding's evidence in its own file, at the path that file has at this head: the located ranges when its code was
@@ -183,22 +201,41 @@ function ownEvidence(f: PriorFinding): EvidenceText[] {
 }
 
 /**
+ * Whether a candidate that names the finding (`priorFindingId`) reports it where code can see it: the anchor is
+ * within LINK_DISTANCE of the finding's anchor at this head, or a cited range overlaps the finding's evidence at this
+ * head. That evidence is the located ranges when the code was found, else the finding's own text found in the
+ * candidate's file (`priorHits`), plus the ranges last seen when the candidate reports the finding's file. The
+ * finding's file, when it still exists, must be the candidate's: a report elsewhere is a new finding.
+ */
+function namedLink(candidate: CandidateFinding, cited: EvidenceText[], f: PriorFinding, priorHits: EvidenceText[]): boolean {
+  const file = currentFile(f);
+  if (file !== undefined && file !== candidate.file) return false;
+  const evidence = file === undefined ? priorHits : [...ownEvidence(f), ...priorHits];
+  const lastLine = f.located.kind === "same" ? f.located.location.newLine : file === undefined ? null : f.location.newLine;
+  const nearAnchor = candidate.newLine !== null && lastLine !== null && Math.abs(candidate.newLine - lastLine) <= LINK_DISTANCE;
+  return nearAnchor || overlaps(cited, evidence);
+}
+
+/**
  * How strongly a verified candidate reads as another report of an open finding, or undefined when it does not. Every
  * link needs the candidate in the finding's category and in its file at this head, after the rename the diff reports,
- * and reads only what each cites in its own file. 3: the fingerprint agrees, so the title names the same defect, and
- * the report is where the finding was: its code is found in place, or the anchor is within LINK_DISTANCE of the
- * finding's last anchor, or the cited ranges overlap its last evidence. A fixed defect and a second instance of it
- * with the same title far down the file are two findings. 2: a cited text agrees (substantial and equal). 1: the
- * anchor is within LINK_DISTANCE of the located anchor and the cited ranges overlap the located evidence.
+ * and reads only what each cites in its own file. 4: the candidate names the finding and `namedLink` confirms where
+ * it reports it. 3: the fingerprint agrees, so the title names the same defect, and the report is where the finding
+ * was: its code is found in place, or the anchor is within LINK_DISTANCE of the finding's last anchor, or the cited
+ * ranges overlap its last evidence. A fixed defect and a second instance of it with the same title far down the file
+ * are two findings. 2: a cited text agrees (substantial and equal). 1: the anchor is within LINK_DISTANCE of the
+ * located anchor and the cited ranges overlap the located evidence.
  * When the finding's file is gone and the diff names no rename (a file the PR added shows as added, not renamed),
- * a substantial equal cited text is what says where the code went, so that link alone may cross files.
+ * a substantial equal cited text, or a named link whose file holds the finding's text, is what says where the code
+ * went, so those links alone may cross files.
  * Two defects on neighbouring lines in one category are told apart by what they cite: a report that cites none of
  * the finding's code is a new finding. That can duplicate a comment; it never hides a defect.
  */
-function linkScore(candidate: CandidateFinding, location: ObservedLocation, fingerprintOf: Fingerprint, f: PriorFinding): number | undefined {
+function linkScore({ candidate, location, priorHits = [] }: Report, fingerprintOf: Fingerprint, f: PriorFinding): number | undefined {
   if (candidate.category !== f.candidate.category) return undefined;
   const own = ownEvidence(f);
   const cited = location.evidence.filter((e) => e.path === candidate.file);
+  if (candidate.priorFindingId === f.findingId && namedLink(candidate, cited, f, priorHits)) return 4;
   const sameCitedText = cited.some((e) => own.some((p) => sameText(e.text, p.text)));
   const file = currentFile(f);
   if (file === undefined) return sameCitedText ? 2 : undefined;
@@ -223,7 +260,7 @@ const anchorDistance = (candidate: CandidateFinding, f: PriorFinding) =>
 export function linkPriors(reports: Report[], fingerprintOf: Fingerprint, prior: PriorFinding[]): (PriorFinding | undefined)[] {
   const pairs = reports.flatMap((r, i) =>
     prior.flatMap((f) => {
-      const score = linkScore(r.candidate, r.location, fingerprintOf, f);
+      const score = linkScore(r, fingerprintOf, f);
       return score === undefined ? [] : [{ i, f, score, distance: anchorDistance(r.candidate, f) }];
     }),
   );
@@ -250,20 +287,41 @@ export function walk(status: FindingState, event: FindingEvent): FindingState[] 
   return result.ok ? [status, result.state] : [status];
 }
 
+/** `path` extended by one more step on `event` when the machine allows it from where the path ends. */
+const extend = (path: FindingState[], event: FindingEvent): FindingState[] => [...path, ...walk(path.at(-1)!, event).slice(1)];
+
+/**
+ * What else this revision said about open findings: the resolution claims code accepted or refused (`ResolutionVerdict`),
+ * and the findings a candidate named as still present without a verified link (`unverified`).
+ */
+export type Claims = { verdicts: ResolutionVerdict[]; unverified: Iterable<string> };
+
 /**
  * One observation per finding this revision touched: a verified candidate that links to an open finding re-observes
  * it as present, every other open finding is observed as located, and a candidate linked to nothing is a new finding.
+ * A located finding then takes what the model claimed about it, as far as code confirmed it: an accepted resolution
+ * claim resolves a doubted finding, and an unverified re-report leaves a doubted finding UNCERTAIN.
  */
-export function observe(prior: PriorFinding[], verified: { findingId: string; candidate: CandidateFinding; location: ObservedLocation }[]): Observation[] {
+export function observe(prior: PriorFinding[], verified: { findingId: string; candidate: CandidateFinding; location: ObservedLocation }[], claims: Claims = { verdicts: [], unverified: [] }): Observation[] {
   const linked = new Map(verified.map((v) => [v.findingId, v]));
+  const verdicts = new Map(claims.verdicts.map((v) => [v.findingId, v.state]));
+  const unverified = new Set(claims.unverified);
   const carried = prior.map((f): Observation => {
     const link = linked.get(f.findingId);
     if (link) return { findingId: f.findingId, path: walk(f.status, "OBSERVED_PRESENT"), basis: "reverified", candidate: link.candidate, location: link.location };
-    const [event, basis] = CARRY[f.located.kind];
-    if (f.located.kind !== "same") return { findingId: f.findingId, path: walk(f.status, event), basis, candidate: f.candidate, location: f.location };
+    const [event, located] = CARRY[f.located.kind];
+    let path = walk(f.status, event);
+    let basis: Basis = located;
+    // Each claim moves the finding only where the machine allows it: a finding found in place stays STILL_PRESENT.
+    const resolved = verdicts.get(f.findingId) === "ACCEPTED" ? extend(path, "CONFIRMED_RESOLVED") : path;
+    const uncertain = unverified.has(f.findingId) ? extend(path, "OBSERVED_UNCERTAIN") : path;
+    if (resolved.length > path.length) [path, basis] = [resolved, "resolution_checked"];
+    else if (uncertain.length > path.length) [path, basis] = [uncertain, "reported_unverified"];
+    else if (verdicts.get(f.findingId) === "REFUSED") basis = "resolution_refused";
+    if (f.located.kind !== "same") return { findingId: f.findingId, path, basis, candidate: f.candidate, location: f.location };
     const at = f.located.location;
     const candidate = { ...f.candidate, file: at.file, newLine: at.newLine, codeEvidence: at.evidence.map(({ path, start, end }) => ({ path, start, end, refSha: at.headSha })) };
-    return { findingId: f.findingId, path: walk(f.status, event), basis, candidate, location: at };
+    return { findingId: f.findingId, path, basis, candidate, location: at };
   });
   const known = new Set(prior.map((f) => f.findingId));
   const fresh = verified.filter((v) => !known.has(v.findingId)).map((v): Observation => ({ findingId: v.findingId, path: ["DETECTED"], basis: null, candidate: v.candidate, location: v.location }));

@@ -3,7 +3,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, expect, it } from "vitest";
 import { DEFAULT_CONFIG } from "../src/config/config.ts";
-import type { CandidateFinding } from "../src/domain/types.ts";
+import { type CandidateFinding, stableId } from "../src/domain/types.ts";
 import { evidenceTexts, type ObservedLocation, type PriorFinding } from "../src/reasoning/track.ts";
 import { fingerprint, type VerifyContext, verifyCandidates } from "../src/reasoning/verify.ts";
 import { parseDiff } from "../src/source/diff.ts";
@@ -110,10 +110,29 @@ it("links one candidate to an open finding and keeps a second one at the same li
   const location: ObservedLocation = { file: DEFECT.file, newLine: DEFECT.line, headSha: fixture.headSha, evidence: await evidenceTexts(first, fixture.headSha, ctx.read) };
   const open: PriorFinding = { findingId: "f-open", status: "PUBLISHED", candidate: first, location, located: { kind: "same", location } };
   const second = candidate({ id: "c2", title: "Deleting an order never checks who owns it" });
-  const { dispositions, verified } = await verifyCandidates([second, first], { ...ctx, prior: [open] });
+  const { dispositions, verified, unverified } = await verifyCandidates([second, first], { ...ctx, prior: [open] });
   expect(dispositions.map((d) => [d.candidateId, d.state, d.reason])).toEqual([
     ["c2", "VERIFIED", null],
     ["c1", "VERIFIED", null],
   ]);
   expect(verified.map((v) => v.findingId === "f-open")).toEqual([false, true]);
+  expect(unverified).toEqual([]);
+});
+
+it("links a candidate that names a doubted finding by the finding's text found in the candidate's file, and lists a named re-report that fails as unverified", async () => {
+  const first = candidate({});
+  const location: ObservedLocation = { file: DEFECT.file, newLine: DEFECT.line, headSha: "older", evidence: [{ path: DEFECT.file, start: 3, end: 5, text: "export function registerOrderRoutes(app: App) {\napp.get(\"/orders\", requireAdmin, listOrders);\napp.delete(\"/orders/:id\", deleteOrder);" }] };
+  const doubted: PriorFinding = { findingId: "f-doubted", status: "PUBLISHED", candidate: first, location, located: { kind: "changed", file: DEFECT.file } };
+  const named = candidate({ id: "c3", title: "Deleting an order never checks who owns it", priorFindingId: "f-doubted", codeEvidence: [{ path: DEFECT.file, start: 5, end: 5, refSha: fixture.headSha }] });
+  const linked = await verifyCandidates([named], { ...ctx, prior: [doubted] });
+  expect(linked.dispositions[0]!.findingId).toBe("f-doubted");
+  expect(linked.unverified).toEqual([]);
+  // A name no open finding has is ignored; the candidate is judged by the other rules, which make this one new.
+  const stranger = candidate({ id: "c4", title: "Deleting an order never checks who owns it", priorFindingId: "f-nobody" });
+  const failed = await verifyCandidates([{ ...named, evidenceKind: "suspected" }, stranger], { ...ctx, prior: [doubted] });
+  expect(failed.dispositions.map((d) => [d.state, d.findingId])).toEqual([
+    ["DISCARDED", null],
+    ["VERIFIED", stableId("finding", "pr-1", "rev-1", fingerprint(stranger))],
+  ]);
+  expect(failed.unverified).toEqual(["f-doubted"]);
 });
