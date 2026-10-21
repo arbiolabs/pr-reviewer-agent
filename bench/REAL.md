@@ -57,6 +57,8 @@ The report prints one row per pull and these sections:
 
 The sheet also lists each unique candidate the verifier discarded, with `kind: "discarded"` and its `discardReason`. Reported findings have `kind: "reported"`. The report reads the discarded candidates from each review's own store under `work/`, because `results.json` keeps only the reasons. Grade them the same way: the report then prints the share of graded discards that were real, which is what the verifier's strictness costs. A discarded entry's id starts with `discarded:`, so it never collides with a reported finding.
 
+**Another AI reviewer.** Some PRs carry reviews from [vikrrantshah/pr-review-agent](https://github.com/vikrrantshah/pr-review-agent), which posts from a person's account, so its comments look human. The report sets its inline comments (written `Critical: ...` or `Important: ...`) apart from the human ones. It also rebuilds that agent's findings on the snapshot head, from its inline comments and the findings its reviews list in the body. A section compares the two reviewers one to one, by path and line. The sheet lists its findings with `kind: "agent"`, and grading them gives its precision next to pr-review's. Its findings are unverified model output, so agreement with it is not correctness.
+
 ## Limits
 
 - **Human comments are weak labels.** They cover what a reviewer chose to mention, on the lines they chose. A defect that no human commented on is not a false positive, and a comment about naming is not a missed defect.
