@@ -691,3 +691,35 @@ fn the_ascii_rail_keeps_the_head_sha_of_a_pr_with_findings_as_the_unicode_rail_d
         assert!(row.contains("647fb3b"), "ascii {ascii}: {row}");
     }
 }
+
+/// The showcase played whole, with PR `number` on the Review page.
+fn reading(number: u64) -> Sim {
+    let mut s = showcase(usize::MAX);
+    s.m.ui.screen = pr_review_tui::model::Screen::Review;
+    s.m.ui.selected_pr = s.m.domain.prs.values().find(|p| p.number == number).map(|p| p.id.clone());
+    s
+}
+
+#[test]
+fn a_toast_gives_way_to_the_panel_that_opens_after_it_and_to_another_view() {
+    use crossterm::event::KeyCode;
+    let s = reading(1296).key(KeyCode::Char('c'));
+    assert_eq!(s.m.notice.as_ref().unwrap().text, "Can't cancel #1296: no review is running on it");
+    let mut s = s.key(KeyCode::Char('s'));
+    assert_eq!(s.m.notice, None, "the panel is a new view");
+    let (frame, _) = render(&mut s.m, 120, 38);
+    assert!(frame.lines().last().unwrap().contains("y confirm  n/Esc cancel"), "{frame}");
+
+    let s = reading(1296).key(KeyCode::Char('c')).key(KeyCode::Char('5'));
+    assert_eq!(s.m.notice, None, "Settings is a new view");
+}
+
+#[test]
+fn a_toast_raised_under_a_panel_shows_below_the_title_and_leaves_the_panel_its_key_line() {
+    use crossterm::event::KeyCode;
+    let mut s = reading(1296).key(KeyCode::Char('s')).key(KeyCode::Char('r'));
+    let (frame, _) = render(&mut s.m, 120, 38);
+    let lines: Vec<&str> = frame.lines().collect();
+    assert_eq!(lines[1].trim(), "Refreshing the snapshot…", "{frame}");
+    assert!(lines.last().unwrap().contains("y confirm  n/Esc cancel"), "{frame}");
+}

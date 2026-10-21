@@ -123,10 +123,16 @@ pub fn update(m: &mut Model, msg: Msg) -> Vec<Effect> {
         Msg::Resize(w, h) => m.size = (w, h),
         Msg::Key(k) => {
             if let Some(a) = keymap::resolve(m.ui.screen, m.top_modal(), k) {
+                let before = (view_of(m), m.notice.clone());
                 act(m, a, &mut fx);
+                forget_old_toast(m, before);
             }
         }
-        Msg::Mouse(e) => mouse(m, e, &mut fx),
+        Msg::Mouse(e) => {
+            let before = (view_of(m), m.notice.clone());
+            mouse(m, e, &mut fx);
+            forget_old_toast(m, before);
+        }
         Msg::Net(e) => net(m, e, &mut fx),
     }
     prefetch(m, &mut fx);
@@ -292,6 +298,18 @@ fn fail_request(m: &mut Model, id: &RequestId, message: Text) -> bool {
         return false;
     }
     true
+}
+
+/// What the reader is looking at: the screen and the panels over it.
+fn view_of(m: &Model) -> (Screen, usize) {
+    (m.ui.screen, m.ui.modals.len())
+}
+
+/// A toast speaks about the view it was raised in, so a key that changes the view without raising one clears it.
+fn forget_old_toast(m: &mut Model, (view, notice): ((Screen, usize), Option<Notice>)) {
+    if view_of(m) != view && m.notice == notice {
+        m.notice = None;
+    }
 }
 
 /// Every toast goes through here and reads as a sentence: a debug build, and so every test that reaches one, fails on

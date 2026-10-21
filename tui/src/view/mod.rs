@@ -177,7 +177,6 @@ pub fn view(m: &Model, f: &mut Frame) {
     let banner = banner(&c, area.width);
     let [title, tabs, banner_area, body, footer] = regions(&c, area);
     f.render_widget(Paragraph::new(status_line(&c, title.width)), title);
-    let _ = tabs;
     if let Some(b) = banner {
         f.render_widget(Paragraph::new(b), banner_area);
     }
@@ -195,12 +194,18 @@ pub fn view(m: &Model, f: &mut Frame) {
         modals::modal(&c, f, body, modal);
     }
     toast(&c, f, footer, body);
+    if let Some(n) = m.notice.as_ref().filter(|_| m.top_modal().is_some()) {
+        let row = if tabs.height > 0 { tabs } else { title };
+        let line =
+            c.span(c.pad(&c.fit(&format!(" {}", n.text), row.width as usize), row.width as usize), Role::Pending);
+        f.render_widget(Paragraph::new(Line::from(line)), row);
+    }
 }
 
 /// A notice too long for the footer beside the views takes the whole footer and wraps upward over the body's last
 /// rows, instead of being cut.
 fn toast(c: &Ctx, f: &mut Frame, footer: Rect, body: Rect) {
-    let Some(n) = c.m.notice.as_ref().filter(|_| !matches!(c.m.top_modal(), Some(Modal::Input { .. }))) else {
+    let Some(n) = c.m.notice.as_ref().filter(|_| c.m.top_modal().is_none()) else {
         return;
     };
     let room = footer.width.saturating_sub(views_w(c) as u16 + 3) as usize;
@@ -399,7 +404,8 @@ fn footer_line(c: &Ctx, width: u16) -> Line<'static> {
             c.span("  Enter apply  Esc cancel", Role::Muted),
         ]);
     }
-    if let Some(n) = &c.m.notice {
+    // Under a panel the footer is the panel's key line, and the toast shows below the title.
+    if let Some(n) = c.m.notice.as_ref().filter(|_| c.m.top_modal().is_none()) {
         return Line::from(c.span(c.pad(&format!(" {}", n.text), w), Role::Pending));
     }
     let hints = crate::offer::fit(crate::offer::offered(c.m), w);
