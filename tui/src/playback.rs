@@ -53,6 +53,8 @@ pub struct Player {
     /// A gated line plays when the reader acts, out of file order, so a script with gates numbers its events as it
     /// plays them. A script without gates keeps the numbers it was written with, gaps and duplicates included.
     renumber: bool,
+    /// Runs the reader cancelled: the script's later ungated lines about them drop once the cancel has played.
+    cancelled: Vec<crate::protocol::RunId>,
     last: Option<u64>,
     pub played: Vec<ServerMessage>,
 }
@@ -72,6 +74,7 @@ impl Player {
             fixtures: script.fixtures,
             gates,
             sent: Vec::new(),
+            cancelled: Vec::new(),
             last: None,
             played: Vec::new(),
         }
@@ -82,11 +85,15 @@ impl Player {
     }
 
     /// The line to play next and its delay: a gated line the reader opened plays first, wherever it sits; else the
-    /// next line, unless it waits on a gate. An ungated line about a run that has since ended (the reader cancelled it)
-    /// drops.
+    /// next line, unless it waits on a gate. An ungated line about a run the reader cancelled, once it has ended,
+    /// drops; every other script plays as written, stale lines included.
     pub fn upcoming(&mut self) -> Option<(usize, Duration)> {
-        let ended: Vec<crate::protocol::RunId> =
-            self.runs().into_iter().filter(|r| r.status != RunStatus::Running).map(|r| r.id).collect();
+        let ended: Vec<crate::protocol::RunId> = self
+            .runs()
+            .into_iter()
+            .filter(|r| r.status != RunStatus::Running && self.cancelled.contains(&r.id))
+            .map(|r| r.id)
+            .collect();
         self.steps.retain(|s| match &s.message {
             ServerMessage::Event(Event::Sequenced(e)) if s.after.is_none() => {
                 e.run_id.as_ref().is_none_or(|id| !ended.contains(id))
@@ -140,6 +147,9 @@ impl Player {
                 message: Text::new(&message),
             }
         } else {
+            if let Some(run) = key.strip_prefix("review.cancel:") {
+                self.cancelled.push(crate::protocol::RunId::new(run));
+            }
             self.sent.extend(opened);
             let operation = match &c.command {
                 crate::protocol::Command::Publish(p) => format!("review.publish:{}", p.run_id),

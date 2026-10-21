@@ -235,6 +235,48 @@ fn every_script_played_by_the_player_settles_live_and_r_settles_again() {
 }
 
 #[test]
+fn every_script_played_by_the_player_reaches_its_expected_state() {
+    use pr_review_tui::playback::{Player, load};
+    use pr_review_tui::protocol::{Command, CommandRequest, RequestId, RunId, RunParams};
+    let mut names: Vec<String> = std::fs::read_dir(protocol_dir().join("playback"))
+        .unwrap()
+        .filter_map(|e| e.unwrap().file_name().to_str()?.strip_suffix(".ndjson").map(String::from))
+        .collect();
+    names.sort();
+    assert_eq!(names.len(), 10);
+    for name in names {
+        let path = protocol_dir().join(format!("playback/{name}.ndjson"));
+        let mut gates: Vec<String> = load(&path).unwrap().steps.into_iter().filter_map(|s| s.after).collect();
+        gates.dedup();
+        let mut p = Player::new(load(&path).unwrap());
+        let mut m = model();
+        let mut fx = update(&mut m, Msg::Net(NetEvent::Opened));
+        // The reader acts each time the script waits for them, in the order the script expects.
+        for gate in gates.into_iter().map(Some).chain([None]) {
+            drive(&mut p, &mut m, std::mem::take(&mut fx));
+            let Some(gate) = gate else { break };
+            let run_id = RunId::new(gate.split(':').nth(1).unwrap_or("-"));
+            let req = CommandRequest {
+                request_id: RequestId::new("reader"),
+                idempotency_key: gate,
+                command: Command::Cancel(RunParams { run_id }),
+            };
+            for r in p.answer(&ClientMessage::Command(req)) {
+                fx.extend(update(&mut m, Msg::Net(NetEvent::Message(r))));
+            }
+        }
+        let (got, want) = (summary(&m), expect(&name));
+        if want["resyncRequested"] == true {
+            // The raw feed leaves its snapshot.get unanswered; the player answers it, so the client catches up.
+            assert_eq!(m.link, Link::Live, "{name}");
+            assert_eq!((&got["prs"], &got["streamEpoch"]), (&want["prs"], &want["streamEpoch"]), "{name}");
+        } else {
+            assert_eq!(got, want, "{name}");
+        }
+    }
+}
+
+#[test]
 fn every_command_the_showcase_grants_plays_a_scripted_outcome() {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     use pr_review_tui::model::{Modal, Screen};
