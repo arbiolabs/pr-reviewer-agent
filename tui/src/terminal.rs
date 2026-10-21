@@ -58,6 +58,8 @@ pub fn detect_palette() -> Palette {
 
 /// Keys typed while the query read the terminal's reply, handed to the input path once it starts.
 static TYPED: std::sync::Mutex<Vec<u8>> = std::sync::Mutex::new(Vec::new());
+/// The query gave up inside the OSC reply: the rest of it is on its way to the key reader.
+static REPLY_CUT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
 /// Sends OSC 11 and then DA1, which every terminal answers, so the DA1 reply marks the end of whatever the terminal
 /// had to say. A terminal that answers neither costs `timeout`. It reads one byte at a time and stops at the DA1
@@ -88,6 +90,7 @@ fn query_background(timeout: Duration) -> Option<Vec<u8>> {
     })();
     let _ = disable_raw_mode();
     let reply = reply?;
+    REPLY_CUT.store(inside_osc(&reply), std::sync::atomic::Ordering::Relaxed);
     let (answers, typed) = split_replies(&reply);
     if let Ok(mut t) = TYPED.lock() {
         *t = typed;
@@ -95,11 +98,31 @@ fn query_background(timeout: Duration) -> Option<Vec<u8>> {
     Some(answers)
 }
 
-/// The keys typed before the terminal answered, as key events: printable ASCII, Enter, Tab and Backspace.
+/// The keys typed before the terminal answered, as key events: printable ASCII, Enter, Tab and Backspace. An escape
+/// sequence (an arrow key's `ESC [ A`, Alt+x) drops whole, never as the plain keys inside it.
 pub fn typed_before_start() -> Vec<crossterm::event::KeyEvent> {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     let typed = TYPED.lock().map(|mut t| std::mem::take(&mut *t)).unwrap_or_default();
-    typed
+    let mut plain = Vec::new();
+    let mut bytes = typed.into_iter().peekable();
+    while let Some(b) = bytes.next() {
+        if b != 0x1b {
+            plain.push(b);
+            continue;
+        }
+        match bytes.next() {
+            // CSI: parameter and intermediate bytes, then one final byte.
+            Some(b'[') => {
+                while bytes.next_if(|b| (0x20..0x40).contains(b)).is_some() {}
+                bytes.next();
+            }
+            Some(b'O') => {
+                bytes.next();
+            }
+            _ => {}
+        }
+    }
+    plain
         .into_iter()
         .filter_map(|b| match b {
             b'\r' | b'\n' => Some(KeyCode::Enter),
@@ -153,6 +176,13 @@ impl LateReply {
     const BURST: Duration = Duration::from_millis(200);
     const MAX: usize = 64;
 
+    /// The filter for the key reader that starts after the query: already open when the query gave up inside the
+    /// OSC reply, so the tail that follows, which has no Alt+`]` of its own, is swallowed too.
+    pub fn after_query() -> LateReply {
+        let cut = REPLY_CUT.swap(false, std::sync::atomic::Ordering::Relaxed);
+        LateReply { open: cut.then_some((Duration::ZERO, 0)) }
+    }
+
     /// True when `key`, `since_start` into the session, is part of a late reply and must not act.
     pub fn swallow(&mut self, key: &crossterm::event::KeyEvent, since_start: Duration) -> bool {
         use crossterm::event::{KeyCode, KeyModifiers};
@@ -197,6 +227,13 @@ fn readable(timeout: Duration) -> bool {
         let mut tv = libc::timeval { tv_sec: timeout.as_secs() as _, tv_usec: timeout.subsec_micros() as _ };
         libc::select(libc::STDIN_FILENO + 1, &mut set, std::ptr::null_mut(), std::ptr::null_mut(), &mut tv) > 0
     }
+}
+
+/// An `ESC ]` with no BEL or ST after it.
+fn inside_osc(buf: &[u8]) -> bool {
+    let Some(start) = buf.windows(2).rposition(|w| w == b"\x1b]") else { return false };
+    let rest = &buf[start + 2..];
+    !rest.contains(&0x07) && !rest.windows(2).any(|w| w == b"\x1b\\")
 }
 
 /// `ESC [ ? 6 2 ; 2 2 c`: a DA1 reply is `ESC [ ?`, digits and semicolons, then `c`.

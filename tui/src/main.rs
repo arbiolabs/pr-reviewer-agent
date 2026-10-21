@@ -111,7 +111,7 @@ async fn run(settings: config::Settings, script: Option<playback::Script>) -> st
     }
     let opened = Instant::now();
     std::thread::spawn(move || {
-        let mut late = pr_review_tui::terminal::LateReply::default();
+        let mut late = pr_review_tui::terminal::LateReply::after_query();
         loop {
             let Ok(ev) = event::read() else { return };
             let Some(msg) = pr_review_tui::terminal::input(ev, &mut late, opened.elapsed()) else { continue };
