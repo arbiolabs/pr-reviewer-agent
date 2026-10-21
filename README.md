@@ -33,6 +33,41 @@ Each review runs as a durable task with fixed phases: collect context, triage, a
 - **Verify.** Code, not the model, checks every candidate finding. The finding must sit on a line in the diff, and its evidence must exist at the cited commit. Candidates that fail are discarded and their reasons recorded.
 - **Publish.** The review goes through an outbox. pr-review checks GitHub for its own earlier review before posting. When a write's result is uncertain, it reconciles against GitHub instead of retrying blindly.
 
+### The review state machine
+
+Each commit's review moves through these states, as defined by `REVIEW_MACHINE` in [`src/domain/machines.ts`](src/domain/machines.ts):
+
+```mermaid
+stateDiagram-v2
+    direction LR
+    [*] --> COLLECT_CONTEXT
+    COLLECT_CONTEXT --> TRIAGE: CONTEXT_PERSISTED
+    TRIAGE --> ANALYZE: ROUTING_PERSISTED
+    ANALYZE --> VERIFY: CANDIDATES_PERSISTED
+    VERIFY --> PREPARE_PUBLICATION: CANDIDATES_DISPOSED
+    PREPARE_PUBLICATION --> PUBLISH: HEAD_VERIFIED
+    PREPARE_PUBLICATION --> AWAITING_APPROVAL: APPROVAL_REQUIRED
+    AWAITING_APPROVAL --> PUBLISH: APPROVED
+    AWAITING_APPROVAL --> FAILED: CANCELLED
+    PUBLISH --> COMPLETED: REVIEW_RECONCILED
+    PUBLISH --> COMPLETED: NO_PUBLICATION_RECORDED
+    PUBLISH --> RECONCILE: WRITE_UNCERTAIN
+    RECONCILE --> COMPLETED: REVIEW_RECONCILED
+    RECONCILE --> PUBLISH: CONFIRMED_NOT_POSTED
+    RECONCILE --> FAILED: TERMINAL_ERROR
+    FAILED --> COLLECT_CONTEXT: MANUAL_RETRY
+    FAILED --> COMPLETED: REVIEW_RECONCILED
+    COMPLETED --> [*]
+    SUPERSEDED --> [*]
+```
+
+To keep the diagram readable, two kinds of transition are left out:
+
+- Every state from `COLLECT_CONTEXT` through `PUBLISH` moves to `FAILED` on `TERMINAL_ERROR`. `AWAITING_APPROVAL` is the exception: it fails only when the review is cancelled.
+- Every state from `COLLECT_CONTEXT` through `PUBLISH`, `AWAITING_APPROVAL` included, moves to `SUPERSEDED` on `NEWER_HEAD` or `PR_NOT_OPEN`. `PUBLISH` does so only while nothing has been sent. `RECONCILE` never does, because a write may already have reached GitHub, and only reconciliation can decide.
+
+`COMPLETED` and `SUPERSEDED` are final. `FAILED` stays final unless a manual retry restarts the review, or a later reconcile finds the review on GitHub.
+
 [`docs/SPEC.md`](docs/SPEC.md) is the full design.
 
 ## The terminal client
