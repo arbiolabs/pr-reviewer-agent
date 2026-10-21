@@ -1,0 +1,28 @@
+---
+source: tests/golden.rs
+expression: ascii_text
+---
+  pr-review | ~ #184 waiting for you | p previews                       * live
+
+
+  acme/shop #184 -> publication preview
+
+  Publish this review?
+  acme/shop #184 at 4444444 | as event COMMENT | 1 inline comment
+
+  y publishes exactly this to GitHub   Esc closes without publishing
+
+  Summary
+    Automated PR review
+
+    Reviewed commit: 4444444444444444444444444444444444444444
+
+    Found 1 actionable issue.
+
+    - High: Finding f-1 (src/booking.ts:42)
+
+    Review performed with isolated read-only tools. Human review is still
+    required.
+    hidden marker  <!-- durable-review:rev-184-a:8984214f9b29fcaf2ced0509cf~
+    ~ 20 more below, j scrolls
+   j/k scroll  y publish  m raw markdown  Esc close

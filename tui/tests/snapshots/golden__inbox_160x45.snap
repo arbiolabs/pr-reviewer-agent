@@ -2,25 +2,25 @@
 source: tests/golden.rs
 expression: text
 ---
-  pr-review · • reviewing #184 verify found: Finding f-1                                                                                                ● live
+  pr-review · ▘ reviewing #184 verify found: Finding f-1                                                                                                ● live
 
 
-  PULL REQUESTS                3               acme/shop  #185
-                                               Fix cache eviction
-  · #186 Bump deps                             bbbbbbb → 5555555 · claude-opus-5-5 · run rev-185-
-    shop 6666666     not reviewed
-                                               ● Collect ── ● Triage ── ● Analyze ── ● Verify ── ● Prepare ── ● Publish                      ✓ done
+  PULL REQUESTS                    3       acme/shop  #185
+                                           Fix cache eviction
+  · #186 Bump deps                         bbbbbbb → 5555555 · claude-opus-5-5 · run rev-185-
+    shop 6666666         not reviewed
+                                           ● Collect ── ● Triage ── ● Analyze ── ● Verify ── ● Prepare ── ● Publish                                  ✓ done
 ▌ ○ #185 Fix cache eviction
-▌   shop 5555555            ○1 →0              1 finding   ○ 1 low                                                             · none on GitHub yet
-                                               ────────────────────────────────────────────────────────────────────────────────────────────────────
-  • #184 Booking API
-    shop      ●─●─●─•─○─○ ▁ 0.2/s              │ ○ LOW   performance                                                       detected · 82% confident
-                                               │ Finding f-2
-                                               │ src/cache.ts (whole file)
-                                               │
-                                               │ e
-                                               │
-                                               │ Enter read it beside the diff    d diff at this line
+▌   shop 5555555                ○1 →0      1 finding   ○ 1 low                                                                         · none on GitHub yet
+                                           ────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  ▘ #184 Booking API
+    shop          ●─●─●─▘─○─○ ▁ 0.2/s      │ ○ LOW   performance                                                                   detected · 82% confident
+                                           │ Finding f-2
+                                           │ src/cache.ts (whole file)
+                                           │
+                                           │ e
+                                           │
+                                           │ Enter  the reasoning · the diff    d diff at this line
 
 
 
@@ -46,4 +46,4 @@ expression: text
 
 
 
-   j/k pull request  Enter read  w watch live  / search  ? help  q quit                                                  1 inbox  2 review  3 diff  4 timeline
+   j/k pull request  Enter read  w watch live  / search  ? help  q quit                                      1 inbox  2 review  3 diff  4 timeline  5 settings

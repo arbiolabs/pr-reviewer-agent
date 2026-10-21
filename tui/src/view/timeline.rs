@@ -12,7 +12,7 @@ use crate::model::TimelineScope;
 use crate::protocol::{EventBody, Phase, RunChange, SequencedEvent};
 use crate::text::width;
 use crate::theme::{Bg, Role, finding_status, phase_name};
-use crate::update::timeline_rows;
+use crate::update::{is_heading, timeline_rows, timeline_shown, timeline_stops};
 
 pub fn actor(e: &SequencedEvent) -> &'static str {
     match e.body {
@@ -50,65 +50,99 @@ pub fn summary(c: &Ctx, e: &SequencedEvent) -> (String, Role) {
             let selected = accounts.iter().find(|a| a.selected).map_or("none".into(), |a| a.id.to_string());
             (format!("GitHub accounts updated: {} listed, selected {selected}", accounts.len()), Role::Normal)
         }
+        EventBody::PublicationChanged(p) => {
+            let url = p
+                .url
+                .as_ref()
+                .filter(|_| p.status == crate::protocol::PublicationStatus::Published)
+                .map_or(String::new(), |u| format!(" {u}"));
+            (
+                format!("publication {}{url}", crate::theme::publication_status(p.status).0),
+                crate::theme::publication_status(p.status).1,
+            )
+        }
         EventBody::Other(kind) => (format!("{kind} (not shown by this client version)"), Role::Muted),
     }
 }
 
-/// The detail under an open row: where the event sits in the stream, then its whole text, as an inset block.
+/// The detail under an open row, as an inset block: what the event carries in full (the whole tool summary; for a
+/// finding its title, severity, place and the start of its explanation), then where it sits in the stream.
 fn detail_block(c: &Ctx, e: &SequencedEvent, phase: Option<Phase>, w: usize) -> Vec<Line<'static>> {
     let g = c.t.g();
     let surface = c.t.bg(Bg::Surface);
     let sep = format!("  {}  ", g.sep);
     let row = |spans: Vec<Span<'static>>| Line::from(filled(spans, w, surface));
-    let field = |k: &str, v: String| {
-        vec![
-            Span::styled(format!("{k} "), c.s(Role::Muted).patch(surface)),
-            Span::styled(v, c.s(Role::Normal).patch(surface)),
-        ]
-    };
-    let join = |parts: Vec<Vec<Span<'static>>>| {
-        let mut out = vec![Span::styled("  ", surface)];
-        for (i, p) in parts.into_iter().enumerate() {
-            if i > 0 {
-                out.push(Span::styled(sep.clone(), c.s(Role::Muted).patch(surface)));
-            }
-            out.extend(p);
-        }
-        out
+    let text = |t: &str, role: Role| -> Vec<Line<'static>> {
+        super::code::rich(c, t, w.saturating_sub(4), role)
+            .into_iter()
+            .map(|l| {
+                let mut s = vec![Span::styled("  ", surface)];
+                s.extend(l.into_iter().map(|x| x.patch_style(surface)));
+                row(s)
+            })
+            .collect()
     };
     let mut lines = vec![row(vec![])];
-    lines.push(row(join(vec![
-        field("sequence", e.sequence.get().to_string()),
-        field("after", e.prev_sequence.to_string()),
-        field("epoch", e.stream_epoch.to_string()),
-    ])));
-    let mut second = vec![field("at", e.occurred_at.to_string()), field("by", actor(e).into())];
+    match &e.body {
+        EventBody::FindingUpdated(f) => {
+            let (glyph, sev, role) = c.t.severity(f.severity);
+            let (status, _) = finding_status(f.status);
+            let cat = f.category.label();
+            lines.extend(text(f.title.as_str(), Role::Title));
+            let head = format!("{glyph} {sev}  {cat}  {status} {} {:.0}% confident", g.sep, f.confidence * 100.0);
+            lines.extend(text(&head, role));
+            let place = match f.line {
+                Some(l) => format!("{}:{l}", f.file),
+                None => format!("{} (whole file)", f.file),
+            };
+            lines.extend(text(&place, Role::Accent));
+            lines.push(row(vec![]));
+            match c.m.details.get(&f.id) {
+                Some(d) => {
+                    let prose = text(d.explanation.as_str(), Role::Normal);
+                    let more = prose.len() > 4;
+                    lines.extend(prose.into_iter().take(4));
+                    if more {
+                        lines.push(row(vec![Span::styled(
+                            format!("  {}", g.ellipsis),
+                            c.s(Role::Muted).patch(surface),
+                        )]));
+                    }
+                }
+                None => lines.extend(text(&format!("loading the explanation{}", g.ellipsis), Role::Muted)),
+            }
+            lines.push(row(vec![]));
+            lines.push(row(vec![Span::styled("  Enter reads the finding", c.s(Role::Accent).patch(surface))]));
+        }
+        EventBody::ToolActivity(a) => {
+            lines.extend(text(a.tool.as_str(), Role::Accent));
+            lines.extend(text(a.summary.as_str(), Role::Normal));
+        }
+        _ => {
+            let (t, role) = summary(c, e);
+            lines.extend(text(&t, role));
+        }
+    }
+    lines.push(row(vec![]));
+    let mut place = vec![format!("at {}", e.occurred_at), format!("by {}", actor(e))];
     if let Some(p) = phase {
-        second.push(field("phase", phase_name(p).into()));
+        place.push(format!("phase {}", phase_name(p)));
     }
     if let Some(r) = &e.run_id {
-        second.push(field("run", r.short().to_string()));
+        place.push(format!("run {}", r.short()));
     }
-    lines.push(row(join(second)));
-    lines.push(row(vec![]));
-    let (text, role) = summary(c, e);
-    for l in super::code::rich(c, &text, w.saturating_sub(4), role) {
-        let mut s = vec![Span::styled("  ", surface)];
-        s.extend(l.into_iter().map(|x| x.patch_style(surface)));
-        lines.push(row(s));
-    }
-    if let EventBody::FindingUpdated(_) = e.body {
-        lines.push(row(vec![]));
-        lines.push(row(vec![Span::styled("  Enter reads the finding", c.s(Role::Accent).patch(surface))]));
-    }
+    place.push(format!("sequence {} after {} in {}", e.sequence.get(), e.prev_sequence, e.stream_epoch));
+    lines.extend(text(&place.join(&sep), Role::Muted));
     lines.push(row(vec![]));
     lines
 }
 
-/// `ANALYZE ───── 14:30:04`: where a phase starts. A phase change is its own heading, so it is never a row too.
-fn heading(c: &Ctx, phase: Option<Phase>, at: &str, w: usize, selected: bool) -> Line<'static> {
+/// `ANALYZE ───── 14:30:04`: where a phase starts. A phase change is its own heading, so it is never a row too. Events
+/// outside any run sit under BEFORE THE RUN until a run has shown, and under a neutral PR heading after that.
+fn heading(c: &Ctx, phase: Option<Phase>, after_a_run: bool, at: &str, w: usize, selected: bool) -> Line<'static> {
     let st = c.t.bg(if selected { Bg::Select } else { Bg::Base });
-    let name = phase.map_or("BEFORE THE RUN", phase_name).replace('_', " ");
+    let outside = if after_a_run { "PR" } else { "BEFORE THE RUN" };
+    let name = phase.map_or(outside, phase_name).replace('_', " ");
     let time = format!(" {}", time_of(at));
     let rule = (if c.t.ascii { "-" } else { "─" }).repeat(w.saturating_sub(width(&name) + width(&time) + 2));
     Line::from(filled(
@@ -136,6 +170,21 @@ fn event_line(c: &Ctx, e: &SequencedEvent, w: usize, selected: bool) -> Line<'st
         EventBody::FindingUpdated(f) => {
             let (gl, sev, r) = c.t.severity(f.severity);
             (gl, r, c.pad(sev, 13), format!("{}  {}", f.title, finding_status(f.status).0), r)
+        }
+        EventBody::PublicationChanged(p) => {
+            let (word, role) = crate::theme::publication_status(p.status);
+            let gl = match p.status {
+                crate::protocol::PublicationStatus::Published => g.ok,
+                crate::protocol::PublicationStatus::Failed => g.fail,
+                _ => g.pending,
+            };
+            // A URL belongs to the review once published; a daemon may attach today's to older rows.
+            let url = p
+                .url
+                .as_ref()
+                .filter(|_| p.status == crate::protocol::PublicationStatus::Published)
+                .map_or(String::new(), |u| format!("  {u}"));
+            (gl, role, c.pad("publication", 13), format!("{word}{url}"), role)
         }
         EventBody::Run(change, r) => {
             let (gl, word, role) = c.t.run_status(r.status);
@@ -166,13 +215,25 @@ fn event_line(c: &Ctx, e: &SequencedEvent, w: usize, selected: bool) -> Line<'st
 }
 
 pub fn timeline(c: &Ctx, f: &mut Frame, area: Rect) {
-    let col = super::doc::column(area);
-    let w = col.width as usize;
+    let col = super::doc::reading(area);
     let Some(t) = &c.m.timeline else {
         let text = "No timeline loaded. Select a PR and press t.";
         f.render_widget(Paragraph::new(vec![Line::raw(""), Line::from(c.span(text, Role::Muted))]), col);
         return;
     };
+    f.render_widget(Paragraph::new(page(c, t, col).0), col);
+}
+
+/// The event whose row, heading or open detail is at screen row `y` of a timeline drawn in `area`.
+pub fn hit(c: &Ctx, area: Rect, y: u16) -> Option<u64> {
+    let col = super::doc::reading(area);
+    let (_, owners) = page(c, c.m.timeline.as_ref()?, col);
+    *owners.get(y.checked_sub(col.y)? as usize)?
+}
+
+/// The lines the timeline shows in `col`, and the event each one belongs to.
+fn page(c: &Ctx, t: &crate::model::TimelineView, col: Rect) -> (Vec<Line<'static>>, Vec<Option<u64>>) {
+    let w = col.width as usize;
     let g = c.t.g();
     let pr = t.query.pr.as_ref().and_then(|id| c.m.domain.prs.get(id));
     let scope = match t.scope {
@@ -184,6 +245,9 @@ pub fn timeline(c: &Ctx, f: &mut Frame, area: Rect) {
         },
     };
     let rows = timeline_rows(c.m, t);
+    let total = timeline_shown(c.m, t).iter().filter(|(e, _)| !is_heading(e)).count();
+    let filtered = t.category.is_some() || t.phase.is_some() || !t.text.is_empty();
+    let count = if filtered { format!("{} of {total}", timeline_stops(c.m, t).len()) } else { total.to_string() };
     let mut head = vec![Line::raw("")];
     head.push(Line::from(match pr {
         Some(p) => vec![
@@ -199,15 +263,14 @@ pub fn timeline(c: &Ctx, f: &mut Frame, area: Rect) {
     head.push(Line::from(c.span(
         c.fit(
             &format!(
-                "{} of {} {}, oldest first {} {scope} (f) {} {} (v) {} phase {} (P)",
-                rows.len(),
-                t.events.len(),
-                if t.events.len() == 1 { "event" } else { "events" },
+                "{count} {}, oldest first {} {scope} (f) {} {} (v) {} phase {} (P){}",
+                if total == 1 { "event" } else { "events" },
                 g.sep,
                 g.sep,
                 t.category.map_or("all kinds", |x| x.label()),
                 g.sep,
-                t.phase.map_or("any", phase_name)
+                t.phase.map_or("any", phase_name),
+                if t.text.is_empty() { String::new() } else { format!(" {} \"{}\" (/)", g.sep, t.text) },
             ),
             w,
         ),
@@ -217,46 +280,60 @@ pub fn timeline(c: &Ctx, f: &mut Frame, area: Rect) {
     if let Some(e) = &t.error {
         head.push(Line::from(c.span(c.fit(&format!("timeline unavailable: {e}"), w), Role::Fail)));
     } else if rows.is_empty() {
-        let text = if t.pending.is_some() { format!("loading{}", g.ellipsis) } else { "No events match.".into() };
+        let text = match (t.pending.is_some(), filtered || t.scope != TimelineScope::Pr) {
+            (true, _) => format!("loading{}", g.ellipsis),
+            (false, true) => "no events match the filters (f v P /)".into(),
+            (false, false) => "no events recorded yet".into(),
+        };
         head.push(Line::from(c.span(text, Role::Muted)));
     }
     let mut body: Vec<Line<'static>> = Vec::new();
+    let mut owners: Vec<Option<u64>> = Vec::new();
     if t.next_before.is_some() {
         body.push(Line::from(c.span("older events load as you reach the top", Role::Muted)));
     }
     let mut at = 0;
     let mut last: Option<Option<Phase>> = None;
     let mut after_heading = false;
+    let mut after_a_run = false;
     for (e, phase) in &rows {
-        let selected = t.selected == Some(e.sequence.get());
+        let seq = e.sequence.get();
+        let selected = t.selected == Some(seq);
+        owners.resize(body.len(), None);
         if selected {
             at = body.len();
         }
-        let change = matches!(e.body, EventBody::PhaseChanged(_));
+        let change = is_heading(e);
         if change || last.is_some_and(|p| p != *phase) || (last.is_none() && phase.is_some()) {
             // An empty phase's heading sits right under the one before it.
             if !body.is_empty() && !after_heading {
                 body.push(Line::raw(""));
             }
             if !change {
-                body.push(heading(c, *phase, e.occurred_at.as_str(), w, false));
+                body.push(heading(c, *phase, after_a_run, e.occurred_at.as_str(), w, false));
             }
         }
+        after_a_run |= phase.is_some();
         last = Some(*phase);
         after_heading = change && t.open != Some(e.sequence.get());
+        owners.resize(body.len(), None);
         body.push(if change {
-            heading(c, *phase, e.occurred_at.as_str(), w, selected)
+            heading(c, *phase, after_a_run, e.occurred_at.as_str(), w, selected)
         } else {
             event_line(c, e, w, selected)
         });
         if t.open == Some(e.sequence.get()) {
             body.extend(detail_block(c, e, *phase, w));
         }
+        owners.resize(body.len(), (!change).then_some(seq));
     }
+    owners.resize(body.len(), None);
     let h = (col.height as usize).saturating_sub(head.len());
     // Keep the open detail in view under its row when it fits.
     let focus = if t.open.is_some() && t.open == t.selected { at + h / 3 } else { at };
     let range = window(body.len(), Some(focus.min(body.len().saturating_sub(1))), h);
+    let mut owned = vec![None; head.len()];
+    owned.extend(owners.drain(range.clone()));
     head.extend(body.drain(range));
-    f.render_widget(Paragraph::new(head), col);
+    (head, owned)
 }

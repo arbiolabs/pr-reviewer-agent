@@ -27,26 +27,49 @@ pub fn diff(c: &Ctx, f: &mut Frame, area: Rect) {
     };
     let anchored = diff_findings(c.m, d);
     let tree_focus = c.focused(Pane::Sidebar);
-    let (rail, body) = match c.width {
-        // Below the wide layout the code needs every column; h shows the file list in its place.
-        Width::Narrow | Width::Medium if tree_focus => (Some(area), None),
-        Width::Narrow | Width::Medium => {
-            (None, Some(Rect { x: area.x + 1, width: area.width.saturating_sub(2), ..area }))
-        }
-        Width::Wide => {
-            let rw = 34;
-            (Some(Rect { width: rw, ..area }), Some(Rect { x: area.x + rw + 2, width: area.width - rw - 3, ..area }))
-        }
-    };
+    let (rail, body) = layout(c, area);
     if let Some(r) = rail {
         tree(c, f, r, d, &anchored, tree_focus);
     }
     if let Some(b) = body {
         let head = Rect { height: 3.min(b.height), ..b };
         f.render_widget(Paragraph::new(header(c, d, &anchored, b.width as usize)), head);
-        let rest = Rect { y: b.y + 3, height: b.height.saturating_sub(3), ..b };
-        hunks(c, f, rest, d, &anchored);
+        hunks(c, f, listing(b), d, &anchored);
     }
+}
+
+/// The file list and the patch areas. Below the wide layout the code needs every column; h shows the file list in
+/// its place.
+fn layout(c: &Ctx, area: Rect) -> (Option<Rect>, Option<Rect>) {
+    match c.width {
+        Width::Narrow | Width::Medium if c.focused(Pane::Sidebar) => (Some(area), None),
+        Width::Narrow | Width::Medium => {
+            (None, Some(Rect { x: area.x + 1, width: area.width.saturating_sub(2), ..area }))
+        }
+        Width::Wide => {
+            let rw = super::rail::rail_w(area.width);
+            (Some(Rect { width: rw, ..area }), Some(Rect { x: area.x + rw + 2, width: area.width - rw - 3, ..area }))
+        }
+    }
+}
+
+/// The patch listing under the three header rows.
+fn listing(b: Rect) -> Rect {
+    Rect { y: b.y + 3, height: b.height.saturating_sub(3), ..b }
+}
+
+/// What a click at (`x`, `y`) on the Diff screen in `area` lands on: a file in the list or a row of the patch.
+pub fn hit(c: &Ctx, area: Rect, x: u16, y: u16) -> Option<super::Hit> {
+    let d = c.m.diff.as_ref()?;
+    let (rail, body) = layout(c, area);
+    if let Some(r) = rail.filter(|r| x < r.x + r.width) {
+        let (range, rh) = tree_window(d, r);
+        let i = range.start + (y.checked_sub(r.y + TREE_HEAD)? as usize) / rh;
+        return (i < range.end).then(|| super::Hit::DiffFile(d.files[i].path.clone()));
+    }
+    let rest = listing(body?);
+    let (_, owners) = listing_lines(c, rest, d, &diff_findings(c.m, d))?;
+    owners.get(y.checked_sub(rest.y)? as usize).copied().flatten().map(super::Hit::DiffRow)
 }
 
 fn header(c: &Ctx, d: &DiffView, anchored: &[&Finding], w: usize) -> Vec<Line<'static>> {
@@ -74,6 +97,14 @@ fn header(c: &Ctx, d: &DiffView, anchored: &[&Finding], w: usize) -> Vec<Line<'s
         second.push(c.span(format!("   loading{}", g.ellipsis), Role::Pending));
     } else if let Some(e) = &d.error {
         second.push(c.span(format!("   diff unavailable: {e}"), Role::Fail));
+    } else if let Some(q) = &d.search {
+        let matches = &d.matches;
+        let here = d.selected_file.as_ref().and_then(|p| d.files.iter().position(|f| &f.path == p));
+        let pos = match matches.iter().position(|m| Some(m.0) == here && m.1 == d.cursor) {
+            Some(i) => format!("match {} of {} for \"{q}\"", i + 1, matches.len()),
+            None => format!("{} matches for \"{q}\"", matches.len()),
+        };
+        second.push(c.span(format!("   {pos}"), Role::Accent));
     } else {
         let at = anchored.iter().position(|f| on_cursor(d, f));
         let pos = at.map_or(String::new(), |i| format!("finding {} of {}", i + 1, anchored.len()));
@@ -118,9 +149,8 @@ fn tree(c: &Ctx, f: &mut Frame, area: Rect, d: &DiffView, anchored: &[&Finding],
         Line::raw(""),
     ];
     let sel = d.selected_file.as_ref().and_then(|p| d.files.iter().position(|x| &x.path == p));
-    let rh = if d.files.len() * 3 + 4 <= area.height as usize { 3 } else { 2 };
-    let h = (area.height as usize).saturating_sub(4);
-    for i in window(d.files.len(), sel, h / rh) {
+    let (range, rh) = tree_window(d, area);
+    for i in range {
         let file = &d.files[i];
         let selected = Some(i) == sel;
         let st = if selected { c.t.bg(Bg::Select) } else { base };
@@ -166,6 +196,17 @@ fn tree(c: &Ctx, f: &mut Frame, area: Rect, d: &DiffView, anchored: &[&Finding],
     f.render_widget(Paragraph::new(lines), area);
 }
 
+/// Rows above the first file: blank, heading, blank.
+const TREE_HEAD: u16 = 3;
+
+/// Which files the list shows in `area`, and the rows each takes.
+fn tree_window(d: &DiffView, area: Rect) -> (std::ops::Range<usize>, usize) {
+    let sel = d.selected_file.as_ref().and_then(|p| d.files.iter().position(|x| &x.path == p));
+    let rh = if d.files.len() * 3 + 4 <= area.height as usize { 3 } else { 2 };
+    let h = (area.height as usize).saturating_sub(4);
+    (window(d.files.len(), sel, h / rh), rh)
+}
+
 /// A code line soft-wraps onto at most this many rows, then ends in an ellipsis.
 const WRAP_ROWS: usize = 4;
 /// Columns before the code: severity marker, old and new line numbers, the sign.
@@ -187,26 +228,7 @@ fn hunks(c: &Ctx, f: &mut Frame, area: Rect, d: &DiffView, anchored: &[&Finding]
         f.render_widget(note(text), area);
         return;
     }
-    let rows = file_rows(file);
-    let h = (area.height as usize).saturating_sub(usize::from(file.truncated));
-    // Every row draws at least one line, so the rows within `h` of the cursor hold every line the window can show.
-    let near = d.cursor.saturating_sub(h)..(d.cursor + h + 1).min(rows.len());
-    let mut lines: Vec<Line> = Vec::new();
-    let mut at = 0;
-    for (i, row) in rows.iter().enumerate().take(near.end).skip(near.start) {
-        let cursor = i == d.cursor;
-        if cursor {
-            at = lines.len();
-        }
-        if matches!(row, DiffRow::Header(_)) && i > 0 {
-            lines.push(Line::raw(""));
-        }
-        let stack = row_findings(anchored, file, row);
-        lines.extend(row_lines(c, row, stack.first().copied(), w, cursor && c.focused(Pane::Main)));
-        lines.extend(annotations(c, &stack, w, cursor.then_some(d.stack)));
-    }
-    let range = window(lines.len(), Some(at), h);
-    let mut lines: Vec<Line> = lines.drain(range).collect();
+    let Some((mut lines, _)) = listing_lines(c, area, d, anchored) else { return };
     if file.truncated {
         let shown: usize = file.hunks.iter().map(|h| h.lines.len()).sum();
         let total = (file.additions + file.deletions) as usize;
@@ -215,6 +237,41 @@ fn hunks(c: &Ctx, f: &mut Frame, area: Rect, d: &DiffView, anchored: &[&Finding]
         ));
     }
     f.render_widget(Paragraph::new(lines), area);
+}
+
+/// The patch lines the listing shows in `area` around the cursor, and the file row each belongs to.
+fn listing_lines(
+    c: &Ctx,
+    area: Rect,
+    d: &DiffView,
+    anchored: &[&Finding],
+) -> Option<(Vec<Line<'static>>, Vec<Option<usize>>)> {
+    let file = d.file().filter(|f| f.status != FileStatus::Binary && !f.hunks.is_empty())?;
+    let w = area.width as usize;
+    let rows = file_rows(file);
+    let h = (area.height as usize).saturating_sub(usize::from(file.truncated));
+    // Every row draws at least one line, so the rows within `h` of the cursor hold every line the window can show.
+    let near = d.cursor.saturating_sub(h)..(d.cursor + h + 1).min(rows.len());
+    let mut lines: Vec<Line<'static>> = Vec::new();
+    let mut owners: Vec<Option<usize>> = Vec::new();
+    let mut at = 0;
+    for (i, row) in rows.iter().enumerate().take(near.end).skip(near.start) {
+        let cursor = i == d.cursor;
+        if cursor {
+            at = lines.len();
+        }
+        if matches!(row, DiffRow::Header(_)) && i > 0 {
+            lines.push(Line::raw(""));
+            owners.push(None);
+        }
+        let stack = row_findings(anchored, file, row);
+        lines.extend(row_lines(c, row, stack.first().copied(), w, cursor && c.focused(Pane::Main)));
+        lines.extend(annotations(c, &stack, w, cursor.then_some(d.stack)));
+        owners.resize(lines.len(), Some(i));
+    }
+    let range = window(lines.len(), Some(at), h);
+    let owners = owners.drain(range.clone()).collect();
+    Some((lines.drain(range).collect(), owners))
 }
 
 /// The findings on one line, written under it like review comments: one row each, most severe first, in its own
@@ -254,10 +311,12 @@ fn row_lines(c: &Ctx, row: &DiffRow, hit: Option<&Finding>, w: usize, cursor: bo
                 Some((at, ctx)) => (format!("@@ {} @@", at.trim()), ctx.trim().to_string()),
                 None => (text.to_string(), String::new()),
             };
+            // The ranges, then the function name, on one row: a wrapped tail would sit alone at the top of the view.
+            let room = w.saturating_sub(GUTTER - 1).max(1);
             let spans = vec![
-                Span::styled(format!("{:>w$}", "", w = GUTTER - 1), st),
-                Span::styled(format!("{at}  "), c.s(Role::Muted).patch(st)),
-                Span::styled(c.fit(&ctx, w.saturating_sub(GUTTER + width(&at) + 1)), c.s(Role::Hunk).patch(st)),
+                Span::styled(" ".repeat(GUTTER - 1), st),
+                Span::styled(c.fit(&format!("{at}  "), room), c.s(Role::Muted).patch(st)),
+                Span::styled(c.fit(&ctx, room.saturating_sub(width(&at) + 2)), c.s(Role::Hunk).patch(st)),
             ];
             vec![Line::from(filled(spans, w, st))]
         }

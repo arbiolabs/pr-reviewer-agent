@@ -5,7 +5,7 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Clear, Paragraph};
+use ratatui::widgets::Paragraph;
 
 use super::Ctx;
 use super::code::{highlight, rich};
@@ -14,13 +14,16 @@ use crate::protocol::{Evidence, EvidenceKind, Finding, FindingDetail, FindingId,
 use crate::text::width;
 use crate::theme::{Bg, Role, finding_status, phase_name};
 
-pub const COLUMN: u16 = 100;
+/// The reading column's widest: room for code and about 15 words of prose a line.
+pub const COLUMN: u16 = 112;
 
+/// A quadrant turning clockwise: no frame reads as the `·` separator or the `●` of a finished phase, and block
+/// elements are in every monospace font (braille and the half circles are missing from some, freeze's among them).
 pub fn spinner(c: &Ctx) -> &'static str {
-    const U: [&str; 4] = ["•", "●", "●", "•"];
-    const A: [&str; 4] = ["-", "\\", "|", "/"];
-    let n = (c.m.now_ms / 125) as usize;
-    if c.t.ascii { A[n % 4] } else { U[n % 4] }
+    const U: &[&str] = &["▘", "▝", "▗", "▖"];
+    const A: &[&str] = &["-", "\\", "|", "/"];
+    let set = if c.t.ascii { A } else { U };
+    set[(c.m.now_ms / 125) as usize % set.len()]
 }
 
 fn secs(at: &str) -> Option<i64> {
@@ -46,6 +49,7 @@ pub fn phase_label(p: Phase) -> &'static str {
         Phase::Analyze => "analyze",
         Phase::Verify => "verify",
         Phase::PreparePublication => "prepare",
+        Phase::AwaitingApproval => "awaiting you",
         Phase::Publish => "publish",
         Phase::Reconcile => "reconcile",
         Phase::Completed => "done",
@@ -99,7 +103,12 @@ pub fn screen(c: &Ctx, f: &mut Frame, area: Rect) {
     let Some(doc_area) = doc_area else { return };
     let col = column(doc_area);
     let Some(pr) = c.m.selected_pr() else {
-        let empty = super::rail::empty_rail(c, c.m.domain.prs.len());
+        let total = c.m.domain.prs.len();
+        let empty = match rail {
+            // The rail already says nothing matches; the column says how to change that.
+            Some(_) if total > 0 => vec![("/ edits the search".to_string(), Role::Muted)],
+            _ => super::rail::empty_rail(c, total),
+        };
         let lines = empty.into_iter().map(|(t, role)| Line::from(c.span(t.trim_start(), role)));
         let p = Paragraph::new(std::iter::once(Line::raw("")).chain(lines).collect::<Vec<_>>())
             .wrap(ratatui::widgets::Wrap { trim: false });
@@ -135,7 +144,7 @@ fn sticky(c: &Ctx, pr: &Pr, w: usize) -> Line<'static> {
 
 /// The rail and the document areas. Below 100 columns only one shows: the rail while it has focus.
 pub fn split(area: Rect, rail_focus: bool) -> (Option<Rect>, Option<Rect>) {
-    let rw = super::rail::RAIL_W;
+    let rw = super::rail::rail_w(area.width);
     match area.width {
         100.. => (Some(Rect { width: rw, ..area }), Some(Rect { x: area.x + rw, width: area.width - rw, ..area })),
         _ if rail_focus => (Some(area), None),
@@ -149,6 +158,15 @@ pub fn column(area: Rect) -> Rect {
     Rect { x: area.x + (area.width - w) / 2, width: w, ..area }
 }
 
+/// The reading column of a page over the whole body (Timeline, Settings, Help, the readers). Once the area right of
+/// the rail holds a full column, it sits where Review puts it, so switching views does not move the text.
+pub fn reading(area: Rect) -> Rect {
+    match split(area, false).1 {
+        Some(doc) if doc.width >= COLUMN + 4 => column(doc),
+        _ => column(area),
+    }
+}
+
 /// What a click at (`x`, `y`) on the Review or Inbox screen in `area` lands on.
 pub fn hit(c: &Ctx, area: Rect, x: u16, y: u16) -> Option<super::Hit> {
     let rail_focus = c.m.ui.screen == Screen::Inbox || c.focused(Pane::Sidebar);
@@ -160,6 +178,9 @@ pub fn hit(c: &Ctx, area: Rect, x: u16, y: u16) -> Option<super::Hit> {
     let pr = c.m.selected_pr()?;
     let doc = document(c, pr, col.width as usize, col.height as usize);
     let line = (y.checked_sub(col.y)? + doc.scroll(c, col.height as usize)) as usize;
+    if doc.ready == Some(line) {
+        return Some(super::Hit::Ready);
+    }
     doc.owners.iter().rev().find(|(start, _)| *start <= line).map(|(_, id)| super::Hit::Finding(id.clone()))
 }
 
@@ -180,6 +201,8 @@ pub struct Doc {
     pub card: Option<(usize, usize)>,
     /// The first line of each finding's card, in order, so a click resolves to the card under it.
     pub owners: Vec<(usize, FindingId)>,
+    /// The "Ready to publish" line of a parked run.
+    pub ready: Option<usize>,
     /// Rows the open card's explanation scrolls through before J moves the document itself.
     pub prose_rest: usize,
 }
@@ -241,7 +264,7 @@ pub fn document(c: &Ctx, pr: &Pr, w: usize, height: usize) -> Doc {
     lines.push(Line::raw(""));
 
     let findings = c.m.domain.pr_findings(&pr.id);
-    let running = run.is_some_and(|r| r.status == RunStatus::Running);
+    let running = run.is_some_and(|r| r.active());
     lines.push(summary_line(c, pr, &findings, w));
     lines.push(Line::from(c.span(rule(c, w), Role::Muted)));
     if !compact {
@@ -264,6 +287,18 @@ pub fn document(c: &Ctx, pr: &Pr, w: usize, height: usize) -> Doc {
     if running && c.m.look.show_activity {
         let log = if findings.is_empty() { height.saturating_sub(lines.len() + 6).max(5) } else { 4 };
         live(c, pr, w, log, &mut lines);
+    }
+    let mut ready = None;
+    if run.is_some_and(|r| r.parked()) {
+        ready = Some(lines.len());
+        let on = c.m.on_ready_line() && c.m.ui.screen == Screen::Review && c.m.ui.focus != Pane::Sidebar;
+        lines.push(Line::from(vec![
+            c.span(format!("{} Ready to publish", g.pending), if on { Role::Selected } else { Role::Pending }),
+            c.span(format!(" {} ", g.sep), Role::Muted),
+            c.span("p", Role::Accent),
+            c.span(" previews", Role::Muted),
+        ]));
+        lines.push(Line::raw(""));
     }
     if findings.is_empty() && run.is_some_and(|r| r.status == RunStatus::Completed) {
         lines.push(Line::from(c.span(format!("{} No actionable issues found in the reviewed scope.", g.ok), Role::Ok)));
@@ -291,7 +326,7 @@ pub fn document(c: &Ctx, pr: &Pr, w: usize, height: usize) -> Doc {
         }
     }
     let card = card_at.map(|(s, e)| (s, e.min(lines.len())));
-    Doc { lines, card, owners, prose_rest }
+    Doc { lines, card, owners, ready, prose_rest }
 }
 
 /// Rows the next card's head needs to stay in view under the open card: its severity, title and location.
@@ -309,7 +344,8 @@ fn summary_line(c: &Ctx, pr: &Pr, findings: &[&Finding], w: usize) -> Line<'stat
     let words = |compact: bool| {
         let mut left = vec![c.span(
             match live.len() {
-                0 if c.m.domain.latest_run(&pr.id).is_some_and(|r| r.status == RunStatus::Completed) => {
+                // "yet" only while a run can still add one.
+                0 if c.m.domain.latest_run(&pr.id).is_some_and(|r| r.status != RunStatus::Running) => {
                     "No findings".to_string()
                 }
                 0 => "No findings yet".to_string(),
@@ -357,54 +393,62 @@ fn phase_line(c: &Ctx, run: Option<&Run>, w: usize) -> Line<'static> {
         Phase::Analyze => 2,
         Phase::Verify => 3,
         Phase::PreparePublication => 4,
-        Phase::Publish | Phase::Reconcile => 5,
+        Phase::AwaitingApproval | Phase::Publish | Phase::Reconcile => 5,
         Phase::Completed => 6,
         _ => 7,
     };
     let (done, todo, link) = if c.t.ascii { ("+", ".", " - ") } else { ("●", "○", " ── ") };
-    let mut spans = Vec::new();
-    for (i, name) in NAMES.iter().enumerate() {
-        if i > 0 {
-            spans.push(c.span(link, Role::Muted));
+    // Widest first: connectors and every name; then no connectors; then only the current phase named.
+    let build = |link: Option<&str>, all: bool| {
+        let mut spans = Vec::new();
+        for (i, name) in NAMES.iter().enumerate() {
+            if i > 0 {
+                spans.push(c.span(link.unwrap_or(" "), Role::Muted));
+            }
+            let (glyph, role) = match () {
+                _ if cur == 7 => (todo, Role::Muted),
+                _ if i < cur => (done, Role::Ok),
+                _ if i == cur && run.parked() => (g.pending, Role::Pending),
+                _ if i == cur && run.status == RunStatus::Running => (spinner(c), Role::Accent),
+                _ if i == cur => (g.pending, Role::Pending),
+                _ => (todo, Role::Muted),
+            };
+            let label_role = if i == cur && run.parked() {
+                Role::Pending
+            } else if i == cur && cur < 6 {
+                Role::Focus
+            } else if i < cur {
+                Role::Normal
+            } else {
+                Role::Muted
+            };
+            spans.push(c.span(glyph, role));
+            if all || i == cur {
+                spans.push(c.span(format!(" {name}"), label_role));
+            }
         }
-        let (glyph, role) = match () {
-            _ if cur == 7 => (todo, Role::Muted),
-            _ if i < cur => (done, Role::Ok),
-            _ if i == cur && run.status == RunStatus::Running => (spinner(c), Role::Accent),
-            _ if i == cur => (g.pending, Role::Pending),
-            _ => (todo, Role::Muted),
-        };
-        let label_role = if i == cur && cur < 6 {
-            Role::Focus
-        } else if i < cur {
-            Role::Normal
-        } else {
-            Role::Muted
-        };
-        spans.push(c.span(format!("{glyph} "), role));
-        spans.push(c.span(*name, label_role));
-    }
+        spans
+    };
     let start = secs(run.started_at.as_str());
     let tail = match run.status {
         RunStatus::Completed => {
             // A clock that ran backwards gives no duration rather than a negative one.
             let took = run.completed_at.as_ref().and_then(|e| Some(secs(e.as_str())? - start?)).filter(|s| *s >= 0);
-            let took = took.map_or(String::new(), |s| format!(" in {}m {:02}s", s / 60, s % 60));
+            let took = took.map_or(String::new(), |s| format!(" in {}", duration(s as u64)));
             (format!("{} done{took}", g.ok), Role::Ok)
         }
+        RunStatus::Running if run.parked() => (format!("{} waiting for you", g.pending), Role::Pending),
         RunStatus::Running => (format!("since {}", time_of(run.started_at.as_str())), Role::Muted),
         RunStatus::Failed => (format!("{} failed", g.fail), Role::Fail),
         RunStatus::Superseded => (format!("{} superseded", g.idle), Role::Muted),
         RunStatus::Unknown => ("?".into(), Role::Muted),
     };
     let right = vec![c.span(tail.0, tail.1)];
-    if spans_w(&spans) + spans_w(&right) + 2 > w {
-        // Narrow: drop the connectors.
-        spans.retain(|s| s.content != link);
-        for s in spans.iter_mut().filter(|s| s.content.ends_with(' ')) {
-            s.content = format!(" {}", s.content).into();
-        }
-    }
+    let fits = |spans: &Vec<Span<'static>>| spans_w(spans) + spans_w(&right) + 2 <= w;
+    let spans = [build(Some(link), true), build(None, true), build(None, false)]
+        .into_iter()
+        .find(fits)
+        .unwrap_or_else(|| build(None, false));
     Line::from(split_row(spans, right, w))
 }
 
@@ -418,7 +462,7 @@ fn live(c: &Ctx, pr: &Pr, w: usize, log: usize, lines: &mut Vec<Line<'static>>) 
     let left = vec![c.span(format!("{} ", spinner(c)), Role::Accent), c.span("Reviewing now", Role::Title)];
     let right = vec![
         c.span(sparkline(c, &rate(c, Some(&pr.id), spark_w)), Role::Accent),
-        c.span(format!("  {rate_now:.1} calls/s"), Role::Muted),
+        c.span(format!("  {} calls/s", super::live::rate_label(rate_now)), Role::Muted),
     ];
     lines.push(Line::from(split_row(left, right, w)));
     lines.push(Line::raw(""));
@@ -497,7 +541,7 @@ fn card_head(c: &Ctx, f: &Finding, w: usize, selected: bool) -> Vec<Vec<Span<'st
     let g = c.t.g();
     let (glyph, _, role) = c.t.severity(f.severity);
     let (status, srole) = finding_status(f.status);
-    let cat = format!("{:?}", f.category).to_lowercase();
+    let cat = f.category.label();
     let left =
         vec![c.span(format!("{glyph} {}", sev_word(f.severity)), role), c.span(format!("   {cat}"), Role::Muted)];
     let right =
@@ -559,20 +603,9 @@ fn card(
         body.extend(code_block(c, ev, f, iw, code_lines));
     }
     body.push(vec![]);
-    let mut parts = vec![];
-    if !d.evidence.is_empty() {
-        parts.push(format!("all {} evidence", d.evidence.len()));
-    }
-    if d.suggested_fix.is_some() {
-        parts.push("the fix".into());
-    }
-    let opens = match parts.len() {
-        0 => "read it beside the diff".to_string(),
-        _ => format!("{} and the diff", parts.join(", ")),
-    };
     let mut hint = vec![
         c.span("Enter", Role::Accent),
-        c.span(format!(" {opens}    "), Role::Muted),
+        c.span(format!("  {}    ", opens(d.evidence.len(), d.suggested_fix.is_some(), c.t.g().sep)), Role::Muted),
         c.span("d", Role::Accent),
         c.span(" diff at this line", Role::Muted),
     ];
@@ -581,6 +614,20 @@ fn card(
     }
     body.push(hint);
     (barred(c, f.severity, focused, body), rest)
+}
+
+/// What Enter on an open card opens: `3 evidence items · the fix · the diff`.
+fn opens(evidence: usize, fix: bool, sep: &str) -> String {
+    let mut parts = match evidence {
+        0 => vec!["the reasoning".to_string()],
+        1 => vec!["1 evidence item".to_string()],
+        n => vec![format!("{n} evidence items")],
+    };
+    if fix {
+        parts.push("the fix".into());
+    }
+    parts.push("the diff".into());
+    parts.join(&format!(" {sep} "))
 }
 
 /// How many explanation rows and code lines fit in `room` rows; the code block adds a path row and a cut note.
@@ -705,17 +752,21 @@ fn code_block(c: &Ctx, ev: &Evidence, f: &Finding, w: usize, max: usize) -> Vec<
     out
 }
 
+/// "34s" under a minute, "4m 30s" under an hour, "1h 2m" from there.
+pub fn duration(secs: u64) -> String {
+    match secs {
+        0..60 => format!("{secs}s"),
+        60..3600 => format!("{}m {}s", secs / 60, secs % 60),
+        _ => format!("{}h {}m", secs / 3600, secs % 3600 / 60),
+    }
+}
+
 // ---------------------------------------------------------------- finding page
 
 /// Enter on a card: the whole finding as an article, every piece of evidence in full.
-pub fn finding_page(c: &Ctx, f: &mut Frame, area: Rect, id: &FindingId, scroll: u16) {
-    f.render_widget(Clear, area);
-    f.render_widget(Paragraph::new("").style(c.t.bg(Bg::Base)), area);
-    let col = column(area);
-    let w = col.width as usize;
+pub fn finding_lines(c: &Ctx, w: usize, id: &FindingId) -> Vec<Line<'static>> {
     let Some(fd) = c.m.domain.findings.get(id) else {
-        f.render_widget(Paragraph::new(c.span("This finding is no longer in the snapshot.", Role::Muted)), col);
-        return;
+        return vec![Line::from(c.span("This finding is no longer in the snapshot.", Role::Muted))];
     };
     let iw = w.saturating_sub(2);
     let mut lines = vec![Line::raw("")];
@@ -776,7 +827,7 @@ pub fn finding_page(c: &Ctx, f: &mut Frame, area: Rect, id: &FindingId, scroll: 
         }
     }
     lines.extend(barred(c, fd.severity, true, body));
-    f.render_widget(Paragraph::new(lines).scroll((scroll, 0)), col);
+    lines
 }
 
 /// A tool, test or scenario line from the evidence: `◎ search_code "x": 4 matches`, wrapped under its text.
@@ -817,17 +868,30 @@ fn fix_block(c: &Ctx, code: &str, w: usize) -> Vec<Vec<Span<'static>>> {
 /// Rows of the change itself around the finding's anchor, from the diff the reader loads when it opens, so the
 /// finding reads against what the PR changed without leaving the page.
 fn diff_inset(c: &Ctx, fd: &Finding, w: usize) -> Vec<Vec<Span<'static>>> {
+    let key = crate::update::finding_diff_key(c.m, &fd.id);
+    inset(c, key.as_ref(), &fd.file, fd.line.map(|l| l.get()), c.t.severity(fd.severity).2, w)
+}
+
+/// Up to eleven rows of `path`'s change in the diff `key` names, around head line `anchor`, which is lifted and
+/// marked in `mark`.
+pub(crate) fn inset(
+    c: &Ctx,
+    key: Option<&crate::model::DiffKey>,
+    path: &crate::protocol::Text,
+    anchor: Option<u32>,
+    mark: Role,
+    w: usize,
+) -> Vec<Vec<Span<'static>>> {
     use crate::model::{DiffRow, file_rows};
     use crate::protocol::LineKind;
     let note = |text: String, role| vec![vec![c.span(text, role)]];
-    let key = crate::update::finding_diff_key(c.m, &fd.id);
-    let Some(d) = c.m.diff.as_ref().filter(|d| Some(&d.key) == key.as_ref()) else {
+    let Some(d) = c.m.diff.as_ref().filter(|d| Some(&d.key) == key) else {
         return note(format!("loading the diff{}", c.t.g().ellipsis), Role::Pending);
     };
     if let Some(e) = &d.error {
         return note(format!("diff unavailable: {e}"), Role::Fail);
     }
-    let Some(file) = d.files.iter().find(|x| x.path == fd.file) else {
+    let Some(file) = d.files.iter().find(|x| &x.path == path) else {
         let text = match d.pending {
             Some(_) => format!("loading the diff{}", c.t.g().ellipsis),
             None => "this file is not in the diff".into(),
@@ -835,7 +899,6 @@ fn diff_inset(c: &Ctx, fd: &Finding, w: usize) -> Vec<Vec<Span<'static>>> {
         return note(text, Role::Muted);
     };
     let rows = file_rows(file);
-    let anchor = fd.line.map(|l| l.get());
     let at = anchor
         .and_then(|a| rows.iter().position(|r| matches!(r, DiffRow::Line(l) if l.new.is_some_and(|n| n >= a))))
         .unwrap_or(0);
@@ -869,11 +932,7 @@ fn diff_inset(c: &Ctx, fd: &Finding, w: usize) -> Vec<Vec<Span<'static>>> {
                 };
                 let bg = if hit { Bg::Anchor } else { bg };
                 let st = c.t.bg(bg);
-                let (mark, mrole) = if hit {
-                    (if c.t.ascii { ">" } else { "▶" }, c.t.severity(fd.severity).2)
-                } else {
-                    (" ", Role::Muted)
-                };
+                let (mark, mrole) = if hit { (if c.t.ascii { ">" } else { "▶" }, mark) } else { (" ", Role::Muted) };
                 let num = l.new.or(l.old).map_or(String::new(), |n| n.to_string());
                 let mut s = vec![
                     Span::styled(format!(" {mark}"), c.s(mrole).patch(st)),
@@ -891,7 +950,21 @@ fn diff_inset(c: &Ctx, fd: &Finding, w: usize) -> Vec<Vec<Span<'static>>> {
 
 #[cfg(test)]
 mod tests {
-    use super::fold_rule;
+    use super::{duration, fold_rule, opens};
+
+    #[test]
+    fn durations_read_in_the_largest_units_that_matter() {
+        assert_eq!(duration(34), "34s");
+        assert_eq!(duration(270), "4m 30s");
+        assert_eq!(duration(3720), "1h 2m");
+    }
+
+    #[test]
+    fn the_card_hint_counts_evidence_in_the_singular_and_plural() {
+        assert_eq!(opens(1, false, "·"), "1 evidence item · the diff");
+        assert_eq!(opens(3, true, "·"), "3 evidence items · the fix · the diff");
+        assert_eq!(opens(0, false, "|"), "the reasoning | the diff");
+    }
 
     #[test]
     fn the_fold_rule_cuts_the_explanation_to_three_then_the_code_to_five_then_the_explanation_to_one() {

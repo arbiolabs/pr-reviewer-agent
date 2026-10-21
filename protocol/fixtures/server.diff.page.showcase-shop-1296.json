@@ -1,0 +1,74 @@
+{
+  "type": "diff.page",
+  "requestId": "req-diff",
+  "prId": "af0169e8e89241b47e6114e4f1939c53",
+  "baseSha": "8d81a014d13e51fdf6be0d2fbf436afd2a8a5154",
+  "headSha": "3799cf3add99e8b583f4c2c6883bba1ba8d89249",
+  "files": [
+    {
+      "path": "src/server/checkout/giftCards.ts",
+      "status": "modified",
+      "additions": 5,
+      "deletions": 1,
+      "hunks": [
+        {
+          "header": "@@ -12,4 +12,8 @@ export async function applyGiftCard(db: Db, cartId: string, code: string) {",
+          "oldStart": 12,
+          "newStart": 12,
+          "lines": [
+            {
+              "kind": "context",
+              "old": 12,
+              "new": 12,
+              "text": "export async function applyGiftCard(db: Db, cartId: string, code: string) {"
+            },
+            {
+              "kind": "context",
+              "old": 13,
+              "new": 13,
+              "text": "  const cart = await db.cart.findUniqueOrThrow({ where: { id: cartId } });"
+            },
+            {
+              "kind": "del",
+              "old": 14,
+              "text": "  throw new NotSupportedError(\"gift cards\");"
+            },
+            {
+              "kind": "add",
+              "new": 14,
+              "text": "  const card = await db.giftCard.findUnique({ where: { code } });"
+            },
+            {
+              "kind": "add",
+              "new": 15,
+              "text": "  if (!card || card.balance <= 0) throw new InvalidGiftCardError(code);"
+            },
+            {
+              "kind": "add",
+              "new": 16,
+              "text": "  const amount = Math.min(card.balance, cart.total);"
+            },
+            {
+              "kind": "add",
+              "new": 17,
+              "text": "  await db.giftCard.update({ where: { code }, data: { balance: card.balance - amount } });"
+            },
+            {
+              "kind": "add",
+              "new": 18,
+              "text": "  return db.cart.update({ where: { id: cartId }, data: { giftCardAmount: amount } });"
+            },
+            {
+              "kind": "context",
+              "old": 15,
+              "new": 19,
+              "text": "}"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    }
+  ],
+  "truncated": false
+}

@@ -2,25 +2,25 @@
 source: tests/golden.rs
 expression: text
 ---
-  pr-review · • reviewing #184 collect started                                                                  ● live
+  pr-review · ▘ reviewing #184 collect started                                                                  ● live
 
 
   PULL REQUESTS                3    acme/shop  #184
                                     Booking API
   · #186 Bump deps                  by octocat · bbbbbbb → ccccccc · claude-opus-5-5 · run rev-184-
     shop 6666666     not reviewed
-                                     • Collect ○ Triage ○ Analyze ○ Verify ○ Prepare ○ Publish          since 13:00:13
+                                    ▘ Collect ○ Triage ○ Analyze ○ Verify ○ Prepare ○ Publish           since 13:00:13
   ○ #185 Fix cache eviction
     shop 5555555            ○1 →0   No findings yet   1 from an older head
                                     ──────────────────────────────────────────────────────────────────────────────────
-▌ • #184 Booking API
-▌   shop      •─○─○─○─○─○ ▁ 0.0/s   • Reviewing now                                  ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁  0.0 calls/s
+▌ ▘ #184 Booking API
+▌   shop      ▘─○─○─○─○─○ ▁ 0.0/s   ▘ Reviewing now                                  ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁  0.0 calls/s
 
                                     #184   ━━━━━━━━ ──────── ──────── ──────── ──────── ────────  collect    3 calls
 
                                         13:00:12  run         started
                                         13:00:13  finding     ▲ HIGH Finding f-1
-                                      • 13:00:14  run         started
+                                      ▘ 13:00:14  run         started
 
                                     ┃ ▲ HIGH   correctness                                    detected · 82% confident
                                     ┃ Finding f-1
@@ -32,11 +32,11 @@ expression: text
                                     ┃   src/booking.ts  lines 40-43 @ 4444444
                                     ┃    40 │ if (slot.free && !slot.held) {
                                     ┃
-                                    ┃ Enter all 5 evidence, the fix and the diff    d diff at this line
+                                    ┃ Enter  5 evidence items · the fix · the diff    d diff at this line
 
 
 
 
 
 
-   j/k finding  Enter read  w watch live  d diff  J/K scroll  h pull requests    1 inbox  2 review  3 diff  4 timeline
+   j/k finding  Enter read  d diff  h pull requests  ? help  q quit  1 inbox  2 review  3 diff  4 timeline  5 settings

@@ -1,0 +1,105 @@
+---
+source: tests/light.rs
+expression: frame
+---
+  pr-review · ▘ reviewing #184 publish                                                                          ● live
+
+
+    acme/shop #184 → publication preview
+
+    Published on GitHub
+    acme/shop #184 at 4444444 · as event COMMENT · 1 inline comment
+
+    ✓ published on GitHub as review 3141
+      https://github.com/acme/shop/pull/184#pullrequestreview-3141
+      o opens it in the browser
+
+    Summary
+      Automated PR review
+
+      Reviewed commit: 4444444444444444444444444444444444444444
+
+      Found 1 actionable issue.
+
+      - High: Finding f-1 (src/booking.ts:42)
+
+      Review performed with isolated read-only tools. Human review is still required.
+      hidden marker  <!-- durable-review:rev-184-a:8984214f9b29fcaf2ced0509cf489c6b44205df8bf23ee27c492494f5a09a9…
+
+    Inline comments (1)
+
+    src/booking.ts:42  new side
+      High: Finding f-1
+
+      Two concurrent bookings can both observe slot.free before either sets held.
+
+      src/booking.ts  +2 -1   d opens the full diff
+      @@ -40,3 +40,4 @@ export function book()
+        40     const slot = await lock(id);
+        41 -   if (slot.free) {
+        41 +   if (slot.free && !slot.held) {
+      … 6 more below, j scrolls
+   j/k scroll  m raw markdown  o open on GitHub  Esc close           1 inbox  2 review  3 diff  4 timeline  5 settings
+
+aabbbbbbbbbacadabbbbbbbbbabbbbadddddddaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaeaeeeeaa
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+aaaacccccccccaccccacadddddddddddadddddddaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+aaaabbbbbbbbbabbabbbbbbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+aaaacccccccccaccccaccacccccccacaccacccccacccccccacacaccccccacccccccaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+aaaaeaeeeeeeeeeaeeaeeeeeeaeeaeeeeeeaeeeeaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+aaaaaaddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+aaaaaacacccccaccaccacccacccccccaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+aaaadddddddaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+aaaaaabbbbbbbbbabbabbbbbbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+aaaaaabbbbbbbbabbbbbbbaffffffffffffffffffffffffffffffffffffffffaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+aaaaaabbbbbababbbbbbbbbbabbbbbbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+aaaaaababbbbbabbbbbbbabbbabfffffffffffffffffbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+aaaaaabbbbbbabbbbbbbbbabbbbabbbbbbbbabbbbbbbbbabbbbbbabbbbbabbbbbbabbabbbbbabbbbbbbbbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+aaaaaaccccccaccccccaaccccaccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccaaaaaa
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+aaaaddddddaddddddddadddaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+aaaadddddddddddddddddaacccaccccaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+aaaaaabbbbbabbbbbbbabbbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+aaaaaabbbabbbbbbbbbbabbbbbbbbabbbabbbbabbbbbbbafffffffffabbbbbbabbbbbbabbbbaffffbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+aaaagghhhhhhhhhhhhhhggiigjjggghghhhhhghhhghhhhghhhhgggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggaaaa
+aaaaggffgfffffgfffffgffgffffffgffffffffgffffffggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggaaaa
+aaaagggghhgggggkkkkkgllllglgkkkkkgmmmmlllllgggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggaaaa
+aaaannnnoonpnnnqqnrrrrrrrrrrrnrnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnaaaa
+aaaassssttsusssvvswwwwwwwwwwswwswwwwwwwwwwwswsssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssaaaa
+aaaaaacacaccccaccccccacacccccccaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+aaacccaccccccaacacccaccccccccaacaccccaccaccccccaacccacccccaaaaaaaaaaacacccccaacaddddddaacaccccaacaccccccccaacaccccccccaa
+
+a - on base
+b text on base
+c muted on base
+d accent on base
+e ok on base
+f type on surface
+g - on surface
+h muted on surface
+i ok on surface
+j fail on surface
+k keyword on surface
+l text on surface
+m accent on surface
+n - on del
+o muted on del
+p fail on del
+q keyword on del
+r text on del
+s - on add
+t muted on add
+u ok on add
+v keyword on add
+w text on add

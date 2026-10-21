@@ -91,6 +91,8 @@ pub enum Effect {
     Send(ClientMessage),
     /// Stop reconnecting: the server is incompatible.
     Close,
+    /// Open a published review in the browser, on an explicit keypress. Always an `https://github.com/` URL.
+    OpenUrl(String),
     Quit,
 }
 
@@ -106,7 +108,14 @@ pub fn update(m: &mut Model, msg: Msg) -> Vec<Effect> {
             expire_requests(m);
             // Ages on the banner and the diagnostics screen tick.
             let running = m.domain.runs.values().any(|r| r.status == RunStatus::Running);
-            if m.ui.screen == Screen::Settings || !m.link.accepts_events() || running {
+            let accepted = m.ui.modals.iter().any(|x| {
+                matches!(
+                    x,
+                    Modal::Confirm { state: ConfirmState::Accepted { .. }, .. }
+                        | Modal::Publication { publish: ConfirmState::Accepted { .. }, .. }
+                )
+            });
+            if m.ui.screen == Screen::Settings || !m.link.accepts_events() || running || accepted {
                 m.dirty = true;
             }
             return fx;
@@ -121,8 +130,34 @@ pub fn update(m: &mut Model, msg: Msg) -> Vec<Effect> {
         Msg::Net(e) => net(m, e, &mut fx),
     }
     prefetch(m, &mut fx);
+    settle_timeline_cursor(m);
+    if !page_reloading(m) {
+        clamp_page(m);
+    }
     m.dirty = true;
     fx
+}
+
+/// A selected row a filter or a newer event hid (a phase change is a heading, not a row) hands the cursor to the
+/// nearest row still shown, so the cursor never vanishes or jumps to the top.
+fn settle_timeline_cursor(m: &mut Model) {
+    let Some(t) = &m.timeline else { return };
+    let Some(sel) = t.selected else { return };
+    let stops = timeline_stops(m, t);
+    if stops.is_empty() || stops.contains(&sel) {
+        return;
+    }
+    let at = t.events.iter().position(|e| e.sequence.get() == sel).unwrap_or(0);
+    let nearest = t
+        .events
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| stops.contains(&e.sequence.get()))
+        .min_by_key(|(i, _)| i.abs_diff(at))
+        .map(|(_, e)| e.sequence.get());
+    if let Some(t) = &mut m.timeline {
+        t.selected = nearest;
+    }
 }
 
 /// The document shows every card's evidence, so the selected PR's details load as soon as it is selected.
@@ -165,11 +200,11 @@ fn expire_requests(m: &mut Model) {
         m.sent_at.iter().filter(|(_, at)| now.saturating_sub(**at) >= timeout).map(|(id, _)| id.clone()).collect();
     for id in expired {
         m.sent_at.remove(&id);
-        let confirm = m.ui.modals.iter_mut().find_map(|x| match x {
-            Modal::Confirm { state, .. } if *state == ConfirmState::Requested(id.clone()) => Some(state),
-            _ => None,
-        });
-        if let Some(state) = confirm {
+        if m.snapshot_request.as_ref() == Some(&id) {
+            m.snapshot_request = None;
+            transition(m, LinkInput::SnapshotTimedOut);
+            m.dirty = true;
+        } else if let Some(state) = waiting_confirm(m, &id) {
             *state = ConfirmState::TimedOut;
             m.dirty = true;
         } else if fail_request(m, &id, Text::new(TIMED_OUT)) {
@@ -178,9 +213,54 @@ fn expire_requests(m: &mut Model) {
     }
 }
 
+/// The confirmation, in a panel or the publication page, that waits on the reply to `id`.
+fn waiting_confirm<'a>(m: &'a mut Model, id: &RequestId) -> Option<&'a mut ConfirmState> {
+    m.ui.modals.iter_mut().find_map(|x| match x {
+        Modal::Confirm { state, .. } | Modal::Publication { publish: state, .. }
+            if *state == ConfirmState::Requested(id.clone()) =>
+        {
+            Some(state)
+        }
+        _ => None,
+    })
+}
+
+/// The daemon answers a start's own key with its recorded run, even once that run has ended: no event will follow,
+/// so the panel closes and says the head is reviewed.
+fn settle_replayed_start(m: &mut Model) {
+    let ended = |modal: &Modal| match modal {
+        Modal::Confirm { command: Command::Start(_), state: ConfirmState::Accepted { operation, .. }, .. } => {
+            let run = operation.as_str().strip_prefix("review.start:").unwrap_or_default();
+            m.domain.runs.get(&RunId::new(run)).is_some_and(|r| r.status != RunStatus::Running)
+        }
+        _ => false,
+    };
+    let Some(i) = m.ui.modals.iter().position(ended) else { return };
+    let Modal::Confirm { command: Command::Start(p), state: ConfirmState::Accepted { operation, .. }, .. } =
+        m.ui.modals.remove(i)
+    else {
+        return;
+    };
+    let run = operation.as_str().strip_prefix("review.start:").map(RunId::new);
+    // The daemon's words for a head whose review ended.
+    let why = match run.and_then(|r| m.domain.runs.get(&r)).map(|r| r.status) {
+        Some(RunStatus::Failed) => "failed its review; retry it instead",
+        Some(RunStatus::Superseded) => "is superseded by a newer head",
+        _ => "is already reviewed",
+    };
+    let pr = m.domain.prs.get(&p.pr_id).map_or(p.pr_id.to_string(), |x| format!("#{}", x.number));
+    notice(m, format!("{pr} at {} {why}", p.expected_head_sha.short()));
+}
+
 /// Clears the pending marker that waits on `id` and shows `message` there. False when nothing waits on it.
 fn fail_request(m: &mut Model, id: &RequestId, message: Text) -> bool {
-    if let Some(f) = m.detail_requests.remove(id) {
+    let preview = m.ui.modals.iter_mut().find_map(|x| match x {
+        Modal::Publication { preview, .. } if *preview == Preview::Loading(id.clone()) => Some(preview),
+        _ => None,
+    });
+    if let Some(preview) = preview {
+        *preview = Preview::Failed(message);
+    } else if let Some(f) = m.detail_requests.remove(id) {
         m.detail_errors.insert(f, message);
     } else if let Some(d) = m.diff.as_mut().filter(|d| d.pending.as_ref() == Some(id)) {
         d.pending = None;
@@ -253,6 +333,11 @@ fn net(m: &mut Model, e: NetEvent, fx: &mut Vec<Effect>) {
             {
                 d.error = Some(lost);
             }
+            for x in &mut m.ui.modals {
+                if let Modal::Publication { preview: preview @ Preview::Loading(_), .. } = x {
+                    *preview = Preview::Failed(Text::new("connection lost before the preview arrived"));
+                }
+            }
             m.detail_requests.clear();
             m.snapshot_request = None;
             m.stale_snapshots.clear();
@@ -278,7 +363,16 @@ fn snapshot_get(m: &mut Model, fx: &mut Vec<Effect>) {
 
 fn server_message(m: &mut Model, msg: ServerMessage, fx: &mut Vec<Effect>) {
     match msg {
-        ServerMessage::Welcome { protocol_version, server_version, session_id, capabilities, stream_epoch, .. } => {
+        ServerMessage::Welcome {
+            protocol_version,
+            server_version,
+            session_id,
+            capabilities,
+            stream_epoch,
+            mode,
+            read_only_reason,
+            ..
+        } => {
             if protocol_version != PROTOCOL_VERSION {
                 let message = Text::new(&format!("server speaks protocol {protocol_version}"));
                 if transition(m, LinkInput::Mismatch { supported: vec![protocol_version], message }) {
@@ -286,7 +380,8 @@ fn server_message(m: &mut Model, msg: ServerMessage, fx: &mut Vec<Effect>) {
                 }
                 return;
             }
-            m.server = Some(ServerInfo { protocol_version, server_version, session_id, capabilities });
+            m.server =
+                Some(ServerInfo { protocol_version, server_version, session_id, capabilities, mode, read_only_reason });
             let resuming = m.stream.epoch.as_ref() == Some(&stream_epoch);
             if !transition(m, LinkInput::Welcomed { resuming }) {
                 return;
@@ -334,25 +429,45 @@ fn server_message(m: &mut Model, msg: ServerMessage, fx: &mut Vec<Effect>) {
                 }
             }
         }
+        ServerMessage::PublicationPreview(p) => {
+            // Snapshots carry no publication status, so after a resync the preview is where it comes back from.
+            if m.domain
+                .publications
+                .get(&p.run_id)
+                .is_none_or(|x| x.status != p.status || x.review_id.is_none() && p.review_id.is_some())
+            {
+                let (review_id, url) = (p.review_id, p.url.clone());
+                let seeded = PublicationChanged { run_id: p.run_id.clone(), status: p.status, review_id, url };
+                m.domain.publications.insert(p.run_id.clone(), seeded);
+            }
+            for x in &mut m.ui.modals {
+                if let Modal::Publication { run_id, preview, .. } = x
+                    && *run_id == p.run_id
+                    && matches!(&*preview, Preview::Loading(id) if Some(id) == p.request_id.as_ref())
+                {
+                    *preview = Preview::Ready(Box::new(p.clone()));
+                }
+            }
+        }
         ServerMessage::CommandResult(r) => {
-            let confirm = m.ui.modals.iter_mut().find_map(|x| match x {
-                Modal::Confirm { state, .. } if *state == ConfirmState::Requested(r.request_id.clone()) => Some(state),
-                _ => None,
-            });
-            if let Some(state) = confirm {
+            let Some(&verb) = m.commands_sent.get(&r.request_id) else { return };
+            let now = m.now_ms;
+            if let Some(state) = waiting_confirm(m, &r.request_id) {
                 *state = match r.outcome {
-                    CommandOutcome::Accepted { operation_id } => ConfirmState::Accepted(operation_id),
-                    CommandOutcome::Rejected { code, message } => {
-                        ConfirmState::Failed(Text::new(&format!("{code}: {message}")))
+                    CommandOutcome::Accepted { operation_id } => {
+                        ConfirmState::Accepted { operation: operation_id, at_ms: now }
                     }
+                    CommandOutcome::Rejected { code, message } => ConfirmState::Refused { code, message },
                 };
+                settle_replayed_start(m);
                 return;
             }
             let text = match r.outcome {
-                CommandOutcome::Accepted { operation_id } => {
-                    format!("request accepted ({operation_id}); waiting for events")
+                CommandOutcome::Accepted { .. } => "Sent; waiting for the daemon to confirm it".to_string(),
+                CommandOutcome::Rejected { code, message } => {
+                    m.diag.error(now, format!("{code}: {message}"));
+                    format!("Can't {verb}: {message}")
                 }
-                CommandOutcome::Rejected { code, message } => format!("rejected {code}: {message}"),
             };
             notice(m, text);
         }
@@ -429,8 +544,22 @@ fn apply_snapshot(m: &mut Model, s: Snapshot, fx: &mut Vec<Effect>) {
         let (scope, query) = (t.scope, t.query.clone());
         load_timeline(m, scope, query, fx);
     }
-    if let Some(Modal::Finding { id, .. }) = m.top_modal().cloned() {
-        fetch_detail(m, &id, fx);
+    match m.top_modal().cloned() {
+        Some(Modal::Finding { id, .. }) => fetch_detail(m, &id, fx),
+        // The events that moved the publication may be the ones the resync lost: ask again, whatever it showed.
+        Some(Modal::Publication { run_id, .. }) => fetch_preview(m, run_id, fx),
+        _ => {}
+    }
+}
+
+/// Asks for `run`'s stored payload; the top publication page shows it when it arrives.
+fn fetch_preview(m: &mut Model, run: RunId, fx: &mut Vec<Effect>) {
+    let request = send(m, fx, |request_id| ClientMessage::PublicationGet { request_id, run_id: run.clone() });
+    if let Some(Modal::Publication { preview, .. }) = m.ui.modals.last_mut() {
+        *preview = match request {
+            Some(id) => Preview::Loading(id),
+            None => Preview::Failed(Text::new(OFFLINE)),
+        };
     }
 }
 
@@ -521,6 +650,10 @@ fn apply_body(m: &mut Model, e: &SequencedEvent, fx: &mut Vec<Effect>) {
             settle_account_select(m, accounts);
             return;
         }
+        EventBody::PublicationChanged(p) => {
+            d.publications.insert(p.run_id.clone(), p.clone());
+            None
+        }
         EventBody::Other(_) => None,
     };
     let pr = match &e.body {
@@ -532,6 +665,7 @@ fn apply_body(m: &mut Model, e: &SequencedEvent, fx: &mut Vec<Effect>) {
     if let Some(kind) = kind {
         d.push_activity(Activity { sequence: seq, at: e.occurred_at.clone(), pr_id: pr, kind, recv_ms: m.now_ms });
     }
+    settle_command(m, e);
     if let EventBody::FindingUpdated(f) = &e.body
         && matches!(m.top_modal(), Some(Modal::Finding { id, .. }) if id == &f.id)
     {
@@ -545,7 +679,7 @@ fn apply_body(m: &mut Model, e: &SequencedEvent, fx: &mut Vec<Effect>) {
 fn settle_account_select(m: &mut Model, accounts: &[Account]) {
     let done = |modal: &Modal| match modal {
         Modal::Confirm { command: Command::SelectAccount(p), state, .. } => {
-            matches!(state, ConfirmState::Requested(_) | ConfirmState::Accepted(_) | ConfirmState::TimedOut)
+            matches!(state, ConfirmState::Requested(_) | ConfirmState::Accepted { .. } | ConfirmState::TimedOut)
                 && accounts.iter().any(|a| a.selected && a.id == p.account_id)
         }
         _ => false,
@@ -555,6 +689,52 @@ fn settle_account_select(m: &mut Model, accounts: &[Account]) {
     if let Some(a) = accounts.iter().find(|a| a.selected) {
         notice(m, format!("GitHub reads and publishing now use {} on {}", a.login, a.host));
     }
+}
+
+/// A start, retry or cancel is done when an event shows its effect, never on `accepted`: the run it started, the
+/// retried run moving again, the cancelled run ending. That event closes the panel, even one whose reply was dropped.
+fn settle_command(m: &mut Model, e: &SequencedEvent) {
+    let shows = |command: &Command| match (command, &e.body) {
+        (Command::Start(p), EventBody::Run(RunChange::Started | RunChange::Failed, r)) => {
+            r.pr_id == p.pr_id && r.head_sha == p.expected_head_sha
+        }
+        (Command::Retry(p), EventBody::Run(_, r)) => r.id == p.run_id,
+        (Command::Retry(p), EventBody::PhaseChanged(c)) => c.run_id == p.run_id,
+        (Command::Cancel(p), EventBody::Run(RunChange::Failed | RunChange::Superseded, r)) => r.id == p.run_id,
+        (Command::Cancel(p), EventBody::PhaseChanged(c)) => {
+            c.run_id == p.run_id && matches!(c.to, Phase::Failed | Phase::Superseded)
+        }
+        _ => false,
+    };
+    let done = |modal: &Modal| match modal {
+        Modal::Confirm { command, state, .. } => {
+            !matches!(state, ConfirmState::Asking | ConfirmState::Refused { .. }) && shows(command)
+        }
+        _ => false,
+    };
+    let Some(i) = m.ui.modals.iter().position(done) else { return };
+    let Modal::Confirm { command, .. } = m.ui.modals.remove(i) else { return };
+    let number = |run: &RunId| {
+        let pr = m.domain.runs.get(run).and_then(|r| m.domain.prs.get(&r.pr_id));
+        pr.map_or(format!("run {}", run.short()), |p| format!("#{}", p.number))
+    };
+    let what = match (&command, &e.body) {
+        (Command::Cancel(_), EventBody::Run(_, r)) => format!("Cancelled the review of {}", number(&r.id)),
+        (Command::Cancel(p), _) => format!("Cancelled the review of {}", number(&p.run_id)),
+        (Command::Retry(p), _) => {
+            let attempt = m.domain.runs.get(&p.run_id).and_then(|r| r.attempt);
+            format!("Retrying {}{}", number(&p.run_id), attempt.map_or(String::new(), |n| format!(" (attempt {n})")))
+        }
+        (_, EventBody::Run(RunChange::Started, r)) => {
+            format!("Started reviewing {} at {}", number(&r.id), r.head_sha.short())
+        }
+        (_, EventBody::Run(RunChange::Failed, r)) => {
+            let why = r.failure_reason.as_ref().map_or(String::new(), |x| format!(": {x}"));
+            format!("The review of {} failed{why}", number(&r.id))
+        }
+        _ => return,
+    };
+    notice(m, what);
 }
 
 /// Re-resolves selections by ID after the lists changed; an ID that vanished falls back to the first entry.
@@ -569,8 +749,11 @@ fn reselect(m: &mut Model) {
         return;
     };
     let findings = m.domain.pr_findings(&pr);
-    let keep = m.ui.selected_finding.as_ref().is_some_and(|id| findings.iter().any(|f| &f.id == id));
+    let keep =
+        m.on_ready_line() || m.ui.selected_finding.as_ref().is_some_and(|id| findings.iter().any(|f| &f.id == id));
     if !keep {
+        // With no finding to hold it, the cursor rests on a parked run's ready line, so Enter opens the preview.
+        m.ui.ready_line = if findings.is_empty() { m.parked_run().map(|r| r.id.clone()) } else { None };
         m.ui.selected_finding = findings.first().map(|f| f.id.clone());
     }
 }
@@ -640,6 +823,8 @@ fn load_diff(m: &mut Model, key: DiffKey, anchor: Option<(Text, Option<u32>)>, f
         cursor: 0,
         stack: 0,
         anchor,
+        search: None,
+        matches: Vec::new(),
     });
     diff_get(m, None, fx);
 }
@@ -686,6 +871,7 @@ fn apply_diff_page(m: &mut Model, p: DiffPage, fx: &mut Vec<Effect>) {
     }
     d.next_cursor = p.next_cursor;
     d.truncated = p.truncated;
+    d.matches = d.search.as_ref().map_or(vec![], |q| diff_matches(d, q));
     if d.selected_file.is_none() {
         d.selected_file = d.files.first().map(|f| f.path.clone());
     }
@@ -774,7 +960,8 @@ fn finding_stops(m: &Model, d: &DiffView) -> Vec<(usize, usize, usize)> {
 // ---- timeline ----
 
 fn load_timeline(m: &mut Model, scope: TimelineScope, query: TimelineQuery, fx: &mut Vec<Effect>) {
-    let (category, phase) = m.timeline.as_ref().map_or((None, None), |t| (t.category, t.phase));
+    let (category, phase, text) =
+        m.timeline.as_ref().map_or((None, None, String::new()), |t| (t.category, t.phase, t.text.clone()));
     let pending = send(m, fx, |request_id| ClientMessage::TimelineGet {
         request_id,
         pr_id: query.pr.clone(),
@@ -794,6 +981,7 @@ fn load_timeline(m: &mut Model, scope: TimelineScope, query: TimelineQuery, fx: 
         open: None,
         category,
         phase,
+        text,
     });
 }
 
@@ -807,35 +995,107 @@ fn timeline_query(m: &Model, scope: TimelineScope) -> TimelineQuery {
     }
 }
 
-/// The phase each event happened in: the `from` of the next later phase change of its run, else the run's phase now.
+/// The phase each event happened in (`events` newest first): the run's phase as the events before it left it, from
+/// phase changes and the runs that run events carry. An event older than every loaded phase change takes the `from`
+/// of the next later one, else the run's phase now.
 pub fn event_phases(m: &Model, events: &[SequencedEvent]) -> Vec<Option<Phase>> {
     let mut later_from: std::collections::BTreeMap<&RunId, Phase> = Default::default();
-    events
+    let fallback: Vec<Option<Phase>> = events
         .iter()
         .map(|e| {
             let run = e.run_id.as_ref()?;
+            let phase = later_from.get(run).copied().or_else(|| m.domain.runs.get(run).map(|r| r.phase));
             if let EventBody::PhaseChanged(p) = &e.body {
                 later_from.insert(run, p.from);
-                return Some(p.to);
             }
-            later_from.get(run).copied().or_else(|| m.domain.runs.get(run).map(|r| r.phase))
+            phase
+        })
+        .collect();
+    let mut now: std::collections::BTreeMap<&RunId, Phase> = Default::default();
+    let mut out: Vec<Option<Phase>> = events
+        .iter()
+        .zip(fallback)
+        .rev()
+        .map(|(e, fallback)| {
+            let run = e.run_id.as_ref()?;
+            match &e.body {
+                EventBody::PhaseChanged(p) => {
+                    now.insert(run, p.to);
+                }
+                EventBody::Run(_, r) => {
+                    now.insert(run, r.phase);
+                }
+                // The publisher's own statuses belong to PUBLISH, even when the journal wrote the run's next phase first.
+                EventBody::PublicationChanged(p)
+                    if matches!(
+                        p.status,
+                        PublicationStatus::Publishing | PublicationStatus::Published | PublicationStatus::Uncertain
+                    ) =>
+                {
+                    return Some(Phase::Publish);
+                }
+                _ => {}
+            }
+            now.get(run).copied().or(fallback)
+        })
+        .collect();
+    out.reverse();
+    out
+}
+
+/// The words `/` matches an event by: what it names, the way its row reads.
+pub fn event_text(e: &SequencedEvent) -> String {
+    match &e.body {
+        EventBody::PrUpdated(p) => format!("#{} {} {}", p.number, p.title, p.head_sha.short()),
+        EventBody::Run(change, r) => {
+            let reason = r.failure_reason.as_ref().map_or("", |x| x.as_str());
+            format!("{change:?} {:?} {} {reason}", r.status, r.head_sha.short())
+        }
+        EventBody::PhaseChanged(p) => format!("{:?} {:?} {}", p.from, p.to, p.event),
+        EventBody::FindingUpdated(f) => format!("{} {} {:?} {:?}", f.title, f.file, f.severity, f.status),
+        EventBody::ToolActivity(a) => format!("{} {}", a.tool, a.summary),
+        EventBody::PublicationChanged(p) => {
+            format!("publication {:?} {}", p.status, p.url.as_ref().map_or("", |u| u.as_str()))
+        }
+        EventBody::AccountsUpdated(a) => a.iter().map(|x| x.login.to_string()).collect::<Vec<_>>().join(" "),
+        EventBody::Other(kind) => kind.to_string(),
+    }
+}
+
+/// The events the timeline shows after its category, phase and text filters, oldest first, with their inferred phases.
+/// The rows the timeline shows with no filter, oldest first. A phase the run passed straight through (a retry
+/// resuming from a checkpoint) has no rows, so its change is no row either.
+pub fn timeline_shown<'a>(m: &Model, t: &'a TimelineView) -> Vec<(&'a SequencedEvent, Option<Phase>)> {
+    let mut rows: Vec<_> = t.events.iter().zip(event_phases(m, &t.events)).collect();
+    rows.reverse();
+    let passed: Vec<bool> = rows
+        .windows(2)
+        .map(|w| is_heading(w[0].0) && is_heading(w[1].0) && w[0].0.run_id == w[1].0.run_id)
+        .chain([false])
+        .collect();
+    rows.into_iter().zip(passed).filter(|(_, skip)| !skip).map(|(row, _)| row).collect()
+}
+
+/// The shown rows the filters keep.
+pub fn timeline_rows<'a>(m: &Model, t: &'a TimelineView) -> Vec<(&'a SequencedEvent, Option<Phase>)> {
+    let text = t.text.to_lowercase();
+    timeline_shown(m, t)
+        .into_iter()
+        .filter(|(e, p)| {
+            t.category.is_none_or(|c| EventCategory::of(&e.body) == c)
+                && t.phase.is_none_or(|want| *p == Some(want))
+                && (text.is_empty() || event_text(e).to_lowercase().contains(&text))
         })
         .collect()
 }
 
-/// The events the timeline shows after its category and phase filters, oldest first, with their inferred phases.
-pub fn timeline_rows<'a>(m: &Model, t: &'a TimelineView) -> Vec<(&'a SequencedEvent, Option<Phase>)> {
-    let phases = event_phases(m, &t.events);
-    let mut rows: Vec<_> = t
-        .events
-        .iter()
-        .zip(phases)
-        .filter(|(e, p)| {
-            t.category.is_none_or(|c| EventCategory::of(&e.body) == c) && t.phase.is_none_or(|want| *p == Some(want))
-        })
-        .collect();
-    rows.reverse();
-    rows
+/// The sequences the cursor stops on: the rows the filters keep, without the phase changes drawn as headings.
+pub fn timeline_stops(m: &Model, t: &TimelineView) -> Vec<u64> {
+    timeline_rows(m, t).iter().filter(|(e, _)| !is_heading(e)).map(|(e, _)| e.sequence.get()).collect()
+}
+
+pub fn is_heading(e: &SequencedEvent) -> bool {
+    matches!(e.body, EventBody::PhaseChanged(_))
 }
 
 const PHASE_CYCLE: [Option<Phase>; 9] = [
@@ -877,10 +1137,10 @@ fn act(m: &mut Model, a: Action, fx: &mut Vec<Effect>) {
     match a {
         Action::Quit => fx.push(Effect::Quit),
         Action::Help => {
-            if m.top_modal() == Some(&Modal::Help) {
+            if matches!(m.top_modal(), Some(Modal::Help { .. })) {
                 m.ui.modals.pop();
             } else {
-                m.ui.modals.push(Modal::Help);
+                m.ui.modals.push(Modal::Help { scroll: 0 });
             }
         }
         Action::Back => {
@@ -888,6 +1148,11 @@ fn act(m: &mut Model, a: Action, fx: &mut Vec<Effect>) {
                 && m.ui.modals.is_empty()
             {
                 t.open = None;
+            } else if let Some(d) = m.diff.as_mut().filter(|d| m.ui.screen == Screen::Diff && d.search.is_some())
+                && m.ui.modals.is_empty()
+            {
+                d.search = None;
+                d.matches.clear();
             } else if m.ui.modals.pop().is_none() {
                 m.ui.screen = match m.ui.screen {
                     Screen::Diff | Screen::Timeline => Screen::Review,
@@ -897,7 +1162,7 @@ fn act(m: &mut Model, a: Action, fx: &mut Vec<Effect>) {
         }
         Action::Goto(s) => goto(m, s, fx),
         Action::Refresh => {
-            if m.link == Link::Live {
+            if matches!(m.link, Link::Live | Link::Stalled { .. }) {
                 resync(m, "manual refresh", fx);
                 notice(m, "refreshing snapshot");
             } else {
@@ -917,13 +1182,14 @@ fn act(m: &mut Model, a: Action, fx: &mut Vec<Effect>) {
             m.ui.focus = if m.ui.focus == Pane::Main { Pane::Sidebar } else { Pane::Main }
         }
         Action::Open => open(m, fx),
+        // `/` searches what the screen shows: the diff's text, the timeline's events, else the PR list.
         Action::Search => {
-            if m.ui.screen == Screen::Diff {
-                act(m, Action::JumpTo, fx);
-            } else {
-                let before = m.ui.pr_filter.clone();
-                m.ui.modals.push(Modal::Input { purpose: InputPurpose::Search, buffer: before.clone(), before });
-            }
+            let (purpose, before) = match (m.ui.screen, &m.timeline, &m.diff) {
+                (Screen::Diff, _, Some(d)) => (InputPurpose::DiffSearch, d.search.clone().unwrap_or_default()),
+                (Screen::Timeline, Some(t), _) => (InputPurpose::TimelineFilter, t.text.clone()),
+                _ => (InputPurpose::Search, m.ui.pr_filter.clone()),
+            };
+            m.ui.modals.push(Modal::Input { purpose, buffer: before.clone(), before });
         }
         Action::JumpTo => m.ui.modals.push(Modal::Input {
             purpose: InputPurpose::JumpTo,
@@ -944,7 +1210,19 @@ fn act(m: &mut Model, a: Action, fx: &mut Vec<Effect>) {
         }
         Action::NextFinding => next_finding(m, 1, fx),
         Action::PrevFinding => next_finding(m, -1, fx),
-        Action::Mutation(mu) => mutation(m, mu),
+        Action::Mutation(mu) => mutation(m, mu, fx),
+        Action::OpenUrl => {
+            if let Some(Modal::Publication { run_id, .. }) = m.top_modal()
+                && let Some(url) = published_url(m, run_id)
+            {
+                fx.push(Effect::OpenUrl(url));
+            }
+        }
+        Action::ToggleRaw => {
+            if let Some(Modal::Publication { raw, .. }) = m.ui.modals.last_mut() {
+                *raw = !*raw;
+            }
+        }
         Action::Accounts => {
             goto(m, Screen::Settings, fx);
             if m.domain.accounts.is_none() {
@@ -972,20 +1250,24 @@ fn act(m: &mut Model, a: Action, fx: &mut Vec<Effect>) {
         Action::InputBackspace => edit_input(m, |b| {
             b.pop();
         }),
-        Action::InputCancel => {
-            if let Some(Modal::Input { purpose: InputPurpose::Search, before, .. }) = m.ui.modals.pop() {
+        Action::InputCancel => match m.ui.modals.pop() {
+            Some(Modal::Input { purpose: InputPurpose::Search, before, .. }) => {
                 m.ui.pr_filter = before;
                 reselect(m);
             }
-        }
-        Action::Confirm => send_confirmed(m, fx),
-        Action::InputSubmit => {
-            if let Some(Modal::Input { purpose, buffer, .. }) = m.ui.modals.pop()
-                && purpose == InputPurpose::JumpTo
-            {
-                jump_to(m, &buffer, fx);
+            Some(Modal::Input { purpose: InputPurpose::TimelineFilter, before, .. }) => {
+                if let Some(t) = &mut m.timeline {
+                    t.text = before;
+                }
             }
-        }
+            _ => {}
+        },
+        Action::Confirm => send_confirmed(m, fx),
+        Action::InputSubmit => match m.ui.modals.pop() {
+            Some(Modal::Input { purpose: InputPurpose::JumpTo, buffer, .. }) => jump_to(m, &buffer, fx),
+            Some(Modal::Input { purpose: InputPurpose::DiffSearch, buffer, .. }) => diff_search(m, buffer),
+            _ => {}
+        },
     }
 }
 
@@ -1005,7 +1287,7 @@ fn mouse(m: &mut Model, e: MouseEvent, fx: &mut Vec<Effect>) {
         _ => return,
     };
     match (m.top_modal(), m.ui.screen) {
-        (Some(Modal::Finding { .. }), _) => move_by(m, delta, fx),
+        (Some(Modal::Finding { .. } | Modal::Help { .. } | Modal::Publication { .. }), _) => move_by(m, delta, fx),
         (Some(_), _) => {}
         (None, Screen::Inbox | Screen::Review) => {
             m.ui.doc_scroll = (m.ui.doc_scroll + delta as i32).clamp(0, crate::view::doc_scroll_limit(m));
@@ -1029,6 +1311,15 @@ fn click(m: &mut Model, x: u16, y: u16, fx: &mut Vec<Effect>) {
                 reselect(m);
             }
         }
+        Some(crate::view::Hit::Ready) => {
+            if let Some(r) = m.parked_run().cloned() {
+                m.ui.screen = Screen::Review;
+                m.ui.focus = Pane::Main;
+                m.ui.ready_line = Some(r.id.clone());
+                m.ui.selected_finding = None;
+                open_publication(m, r, fx);
+            }
+        }
         Some(crate::view::Hit::Finding(id)) => {
             m.ui.screen = Screen::Review;
             m.ui.focus = Pane::Main;
@@ -1039,60 +1330,171 @@ fn click(m: &mut Model, x: u16, y: u16, fx: &mut Vec<Effect>) {
                 m.ui.doc_scroll = 0;
             }
         }
+        Some(crate::view::Hit::DiffFile(path)) => {
+            if let Some(d) = &mut m.diff
+                && d.selected_file.as_ref() != Some(&path)
+            {
+                d.selected_file = Some(path);
+                d.cursor = 0;
+                d.stack = 0;
+            }
+        }
+        // A click puts the cursor on the row; a click on the cursor's row opens what Enter would.
+        Some(crate::view::Hit::DiffRow(row)) => {
+            m.ui.focus = Pane::Main;
+            if let Some(d) = &mut m.diff {
+                if d.cursor == row {
+                    open(m, fx);
+                } else {
+                    d.cursor = row;
+                    d.stack = 0;
+                }
+            }
+        }
+        Some(crate::view::Hit::Event(seq)) => {
+            if let Some(t) = &mut m.timeline {
+                if t.selected == Some(seq) {
+                    open(m, fx);
+                } else {
+                    t.selected = Some(seq);
+                }
+            }
+        }
+        Some(crate::view::Hit::View(s)) => goto(m, s, fx),
         None => {}
     }
 }
 
-fn mutation(m: &mut Model, mu: Mutation) {
-    let cap = mu.capability();
-    let why = if !m.link.accepts_events() {
-        "the client is not live"
-    } else if !m.may_write(cap) {
-        "the server grants no write capability (read-only)"
+/// Why `capability` cannot be sent now, in the words the help page and the notices use; `None` when it can.
+pub fn write_block(m: &Model, capability: &str) -> Option<&'static str> {
+    if !m.link.accepts_events() {
+        Some("the client is not live")
+    } else if m.may_write(capability) {
+        None
     } else {
-        let pr = m.selected_pr().cloned();
-        let run = pr.as_ref().and_then(|p| m.domain.latest_run(&p.id)).cloned();
-        let ask = match (mu, pr, run) {
-            (Mutation::Start, Some(p), _) => Some((
-                format!("Start a review of #{} at {}?", p.number, p.head_sha.short()),
-                Command::Start(StartParams { pr_id: p.id, expected_head_sha: p.head_sha }),
-            )),
-            (Mutation::Retry, _, Some(r)) => {
-                Some((format!("Retry run {}?", r.id), Command::Retry(RunParams { run_id: r.id })))
-            }
-            (Mutation::Cancel, _, Some(r)) => {
-                Some((format!("Cancel run {}?", r.id), Command::Cancel(RunParams { run_id: r.id })))
-            }
-            _ => None,
-        };
-        let Some((prompt, command)) = ask else {
-            notice(m, format!("{cap} unavailable: nothing selected it applies to, or no preview yet"));
-            return;
-        };
-        confirm(m, cap, prompt, command);
+        Some(m.server.as_ref().and_then(|s| s.commands_off()).unwrap_or("the daemon does not grant it"))
+    }
+}
+
+/// `s`, `R`, `c` and `p` on the selected PR: a confirmation panel naming the exact target, or a notice saying why not.
+fn mutation(m: &mut Model, mu: Mutation, fx: &mut Vec<Effect>) {
+    let cap = mu.capability();
+    let verb = match mu {
+        Mutation::Start => "start a review",
+        Mutation::Retry => "retry",
+        Mutation::Cancel => "cancel",
+        Mutation::Publish => "publish",
+    };
+    if let Some(why) = write_block(m, cap) {
+        notice(m, format!("Can't {verb}: {why}"));
+        return;
+    }
+    let Some(p) = m.selected_pr().cloned() else {
+        notice(m, format!("Can't {verb}: no PR is selected"));
         return;
     };
-    notice(m, format!("{cap} unavailable: {why}"));
+    let run = m.domain.latest_run(&p.id).cloned();
+    let (prompt, command) = match (mu, run) {
+        (Mutation::Start, _) => (
+            format!("Start a review of #{} at {}?", p.number, p.head_sha.short()),
+            Command::Start(StartParams { pr_id: p.id, expected_head_sha: p.head_sha }),
+        ),
+        (Mutation::Retry, Some(r)) if r.status == RunStatus::Failed => {
+            let next = r.attempt.map_or(String::new(), |n| format!(" (attempt {})", n + 1));
+            (format!("Retry run {}{next}?", r.id.short()), Command::Retry(RunParams { run_id: r.id }))
+        }
+        (Mutation::Cancel, Some(r)) if r.status == RunStatus::Running => {
+            let what = if r.phase == Phase::AwaitingApproval { "parked" } else { "running" };
+            (format!("Cancel the {what} review of #{}?", p.number), Command::Cancel(RunParams { run_id: r.id }))
+        }
+        (Mutation::Publish, Some(r)) if r.phase == Phase::AwaitingApproval => {
+            open_publication(m, r, fx);
+            return;
+        }
+        (mu, _) => {
+            notice(
+                m,
+                match mu {
+                    Mutation::Retry => format!("Can't retry #{}: its latest run has not failed", p.number),
+                    Mutation::Cancel => format!("Can't cancel #{}: no review is running on it", p.number),
+                    _ => format!("Nothing to publish on #{}", p.number),
+                },
+            );
+            return;
+        }
+    };
+    confirm(m, prompt, command);
+}
+
+/// The publication page for a parked run: its stored payload, and the diff its comments sit on.
+fn open_publication(m: &mut Model, r: Run, fx: &mut Vec<Effect>) {
+    m.ui.modals.retain(|x| !matches!(x, Modal::Publication { .. }));
+    m.ui.modals.push(Modal::Publication {
+        run_id: r.id.clone(),
+        scroll: 0,
+        preview: Preview::Failed(Text::new(OFFLINE)),
+        publish: ConfirmState::Asking,
+        raw: false,
+    });
+    fetch_preview(m, r.id, fx);
+    load_diff(m, DiffKey { pr: r.pr_id, base: r.base_sha, head: r.head_sha }, None, fx);
+}
+
+/// Why `y` on this preview would not publish it, or `None` when it would. A preview is stale once its run left
+/// AWAITING_APPROVAL or the PR has a newer head than the one it was written for.
+pub fn publish_block(m: &Model, p: &PublicationPreview) -> Option<String> {
+    if let Some(why) = write_block(m, "review.publish") {
+        return Some(why.to_string());
+    }
+    let Some(run) = m.domain.runs.get(&p.run_id) else { return Some("the run is no longer tracked".into()) };
+    if run.phase != Phase::AwaitingApproval {
+        return Some(format!(
+            "stale: the run is now {}, no longer awaiting approval",
+            crate::theme::phase_name(run.phase)
+        ));
+    }
+    let head = m.domain.prs.get(&run.pr_id).map_or(&run.head_sha, |pr| &pr.head_sha);
+    if *head != p.head_sha || run.head_sha != p.head_sha {
+        return Some(format!("stale: the PR head is now {}; this preview is for {}", head.short(), p.head_sha.short()));
+    }
+    None
 }
 
 /// Opens the generic confirmation modal; `y` inside it sends `command`.
-pub fn confirm(m: &mut Model, title: &str, prompt: String, command: Command) {
-    m.ui.modals.push(Modal::Confirm { title: title.into(), prompt, command, state: ConfirmState::Asking });
+pub fn confirm(m: &mut Model, prompt: String, command: Command) {
+    m.ui.modals.push(Modal::Confirm { prompt, command, state: ConfirmState::Asking });
+}
+
+/// The review's GitHub URL once it is published, and only an `https://github.com/` one.
+pub fn published_url(m: &Model, run: &RunId) -> Option<String> {
+    let p = m.domain.publications.get(run).filter(|p| p.status == PublicationStatus::Published)?;
+    p.url.as_ref().map(|u| u.to_string()).filter(|u| u.starts_with("https://github.com/"))
 }
 
 fn send_confirmed(m: &mut Model, fx: &mut Vec<Effect>) {
-    let Some(Modal::Confirm { command, state: ConfirmState::Asking | ConfirmState::TimedOut, .. }) =
-        m.top_modal().cloned()
-    else {
-        return;
+    let command = match m.top_modal().cloned() {
+        Some(Modal::Confirm { command, state: ConfirmState::Asking | ConfirmState::TimedOut, .. }) => command,
+        Some(Modal::Publication {
+            run_id,
+            preview: Preview::Ready(p),
+            publish: ConfirmState::Asking | ConfirmState::TimedOut,
+            ..
+        }) if publish_block(m, &p).is_none() => Command::Publish(PublishParams {
+            run_id,
+            preview_id: p.preview_id.clone(),
+            expected_head_sha: p.head_sha.clone(),
+        }),
+        _ => return,
     };
     let idempotency_key = command.idempotency_key();
+    let verb = command.verb();
     let Some(request_id) =
         send(m, fx, |request_id| ClientMessage::Command(CommandRequest { request_id, idempotency_key, command }))
     else {
         return;
     };
-    if let Some(Modal::Confirm { state, .. }) = m.ui.modals.last_mut() {
+    m.commands_sent.insert(request_id.clone(), verb);
+    if let Some(Modal::Confirm { state, .. } | Modal::Publication { publish: state, .. }) = m.ui.modals.last_mut() {
         *state = ConfirmState::Requested(request_id);
     }
 }
@@ -1100,9 +1502,17 @@ fn send_confirmed(m: &mut Model, fx: &mut Vec<Effect>) {
 fn edit_input(m: &mut Model, f: impl FnOnce(&mut String)) {
     if let Some(Modal::Input { purpose, buffer, .. }) = m.ui.modals.last_mut() {
         f(buffer);
-        if *purpose == InputPurpose::Search {
-            m.ui.pr_filter = buffer.clone();
-            reselect(m);
+        match purpose {
+            InputPurpose::Search => {
+                m.ui.pr_filter = buffer.clone();
+                reselect(m);
+            }
+            InputPurpose::TimelineFilter => {
+                if let Some(t) = &mut m.timeline {
+                    t.text = buffer.clone();
+                }
+            }
+            InputPurpose::JumpTo | InputPurpose::DiffSearch => {}
         }
     }
 }
@@ -1132,9 +1542,10 @@ fn goto(m: &mut Model, s: Screen, fx: &mut Vec<Effect>) {
 
 fn move_by(m: &mut Model, delta: isize, fx: &mut Vec<Effect>) {
     if let Some(top) = m.ui.modals.last_mut() {
-        if let Modal::Finding { scroll, .. } = top {
-            *scroll = (*scroll as isize + delta).clamp(0, u16::MAX as isize) as u16;
+        if let Modal::Finding { scroll, .. } | Modal::Help { scroll } | Modal::Publication { scroll, .. } = top {
+            *scroll = (*scroll as isize + delta).max(0).min(u16::MAX as isize) as u16;
         }
+        clamp_page(m);
         return;
     }
     match (m.ui.screen, m.ui.focus) {
@@ -1150,9 +1561,18 @@ fn move_by(m: &mut Model, delta: isize, fx: &mut Vec<Effect>) {
         }
         (Screen::Review, Pane::Main) => {
             let Some(pr) = m.ui.selected_pr.clone() else { return };
-            let ids: Vec<FindingId> = m.domain.pr_findings(&pr).iter().map(|f| f.id.clone()).collect();
-            let next = step(&ids, m.ui.selected_finding.as_ref(), delta);
-            if next != m.ui.selected_finding {
+            // A parked run's ready line sits above the findings, as `None`.
+            let parked = m.parked_run().map(|r| r.id.clone());
+            let ids: Vec<Option<FindingId>> = parked
+                .iter()
+                .map(|_| None)
+                .chain(m.domain.pr_findings(&pr).iter().map(|f| Some(f.id.clone())))
+                .collect();
+            let current = if m.on_ready_line() { None } else { m.ui.selected_finding.clone() };
+            if let Some(next) = step(&ids, Some(&current), delta)
+                && next != current
+            {
+                m.ui.ready_line = if next.is_none() { parked } else { None };
                 m.ui.selected_finding = next;
                 m.ui.doc_scroll = 0;
             }
@@ -1181,7 +1601,7 @@ fn move_by(m: &mut Model, delta: isize, fx: &mut Vec<Effect>) {
         }
         (Screen::Timeline, _) => {
             let Some(t) = &m.timeline else { return };
-            let seqs: Vec<u64> = timeline_rows(m, t).iter().map(|(e, _)| e.sequence.get()).collect();
+            let seqs = timeline_stops(m, t);
             let next = step(&seqs, t.selected.as_ref(), delta);
             // Older events sit at the top: reaching it pages them in.
             let at_top = next.is_some() && next == seqs.first().copied();
@@ -1215,6 +1635,26 @@ fn move_by(m: &mut Model, delta: isize, fx: &mut Vec<Effect>) {
     }
 }
 
+/// The top page's content is on its way, after a snapshot or on first open: its placeholder is shorter than what
+/// comes back, so only the reader's own moves clamp to it.
+fn page_reloading(m: &Model) -> bool {
+    match m.top_modal() {
+        Some(Modal::Publication { preview, .. }) => matches!(preview, Preview::Loading(_)),
+        Some(Modal::Finding { id, .. }) => !m.details.contains_key(id) && !m.detail_errors.contains_key(id),
+        _ => false,
+    }
+}
+
+/// Keeps the top page's scroll within its content, which changes as details, previews and sizes arrive.
+fn clamp_page(m: &mut Model) {
+    let limit = crate::view::page_scroll_limit(m);
+    if let Some(Modal::Finding { scroll, .. } | Modal::Help { scroll } | Modal::Publication { scroll, .. }) =
+        m.ui.modals.last_mut()
+    {
+        *scroll = (*scroll).min(limit);
+    }
+}
+
 fn open(m: &mut Model, fx: &mut Vec<Effect>) {
     if m.top_modal().is_some() {
         return;
@@ -1226,7 +1666,9 @@ fn open(m: &mut Model, fx: &mut Vec<Effect>) {
         }
         (Screen::Review, Pane::Sidebar) => m.ui.focus = Pane::Main,
         (Screen::Review, _) => {
-            if let Some(id) = m.ui.selected_finding.clone() {
+            if let Some(r) = m.parked_run().filter(|_| m.on_ready_line()).cloned() {
+                open_publication(m, r, fx);
+            } else if let Some(id) = m.ui.selected_finding.clone() {
                 open_finding(m, id, fx);
             }
         }
@@ -1258,9 +1700,13 @@ fn open(m: &mut Model, fx: &mut Vec<Effect>) {
             // Enter shows the detail under the row; on an open finding event it reads the finding, else it folds.
             match (t.open == Some(seq), finding) {
                 (true, Some(id)) => open_finding(m, id, fx),
-                (open, _) => {
+                (open, finding) => {
                     if let Some(t) = &mut m.timeline {
                         t.open = (!open).then_some(seq);
+                    }
+                    // The open detail quotes the finding's explanation.
+                    if let Some(id) = finding.filter(|id| !open && !m.details.contains_key(id)) {
+                        fetch_detail(m, &id, fx);
                     }
                 }
             }
@@ -1279,25 +1725,35 @@ fn select_account(m: &mut Model) {
         return;
     }
     let prompt = format!("Use {} on {} for GitHub reads and publishing?", a.login, a.host);
-    confirm(m, "account.select", prompt, Command::SelectAccount(AccountParams { account_id: a.id }));
+    confirm(m, prompt, Command::SelectAccount(AccountParams { account_id: a.id }));
 }
 
-/// `w`: the running review's document, one key from anywhere. Pressed again, it moves on to the next running PR.
+/// `w`: the review that needs the reader, one key from anywhere. Parked reviews come first, because the human is
+/// the bottleneck, then the running ones; pressed again, it moves on to the next.
 fn watch(m: &mut Model) {
-    let mut running: Vec<(u64, PrId)> = m
+    let mut running: Vec<(bool, u64, PrId)> = m
         .domain
         .runs
         .values()
         .filter(|r| r.status == RunStatus::Running)
-        .filter_map(|r| Some((m.domain.prs.get(&r.pr_id)?.number, r.pr_id.clone())))
+        .filter_map(|r| Some((!r.parked(), m.domain.prs.get(&r.pr_id)?.number, r.pr_id.clone())))
         .collect();
     running.sort();
+    let active: Vec<PrId> = running.iter().filter(|r| r.0).map(|r| r.2.clone()).collect();
+    let parked = running.first().is_some_and(|r| !r.0);
+    let running: Vec<(u64, PrId)> = running.into_iter().map(|(_, n, id)| (n, id)).collect();
     if running.is_empty() {
         notice(m, "no review is running");
         return;
     }
-    // First the review the status line names: the running PR with the newest activity.
-    let newest = m.domain.activity.iter().rev().find_map(|a| running.iter().find(|r| a.pr_id.as_ref() == Some(&r.1)));
+    // With nothing parked, first the review the status line names: the running PR with the newest activity.
+    let newest = m
+        .domain
+        .activity
+        .iter()
+        .rev()
+        .filter(|_| !parked)
+        .find_map(|a| running.iter().find(|r| a.pr_id.as_ref() == Some(&r.1) && active.contains(&r.1)));
     let first = newest.unwrap_or(&running[0]).1.clone();
     let at = running.iter().position(|r| Some(&r.1) == m.ui.selected_pr.as_ref());
     let watching = m.ui.screen == Screen::Review && m.top_modal().is_none();
@@ -1350,11 +1806,25 @@ fn open_diff(m: &mut Model, fx: &mut Vec<Effect>) {
 }
 
 fn next_finding(m: &mut Model, dir: isize, fx: &mut Vec<Effect>) {
+    // In the reader, n and N turn the page to the PR's next or previous finding, and the document follows.
+    if let Some(Modal::Finding { id, .. }) = m.top_modal() {
+        let id = id.clone();
+        let Some(pr) = m.domain.findings.get(&id).map(|f| f.pr_id.clone()) else { return };
+        let ids: Vec<FindingId> = m.domain.pr_findings(&pr).iter().map(|f| f.id.clone()).collect();
+        if let Some(next) = step(&ids, Some(&id), dir).filter(|n| *n != id) {
+            m.ui.modals.pop();
+            m.ui.selected_finding = Some(next.clone());
+            m.ui.doc_scroll = 0;
+            open_finding(m, next, fx);
+        }
+        return;
+    }
     match m.ui.screen {
         Screen::Review => {
             m.ui.focus = Pane::Main;
             move_by(m, dir, fx);
         }
+        Screen::Diff if m.diff.as_ref().is_some_and(|d| d.search.is_some()) => walk_matches(m, dir, false),
         Screen::Diff => {
             let Some(d) = &m.diff else { return };
             let stops = finding_stops(m, d);
@@ -1382,6 +1852,50 @@ fn next_finding(m: &mut Model, dir: isize, fx: &mut Vec<Effect>) {
         }
         _ => {}
     }
+}
+
+/// (file index, row) of every diff line whose text contains `query`, ignoring case, in diff order.
+pub fn diff_matches(d: &DiffView, query: &str) -> Vec<(usize, usize)> {
+    let q = query.to_lowercase();
+    let mut out = Vec::new();
+    for (fi, f) in d.files.iter().enumerate() {
+        for (ri, row) in file_rows(f).iter().enumerate() {
+            if matches!(row, DiffRow::Line(l) if l.text.as_str().to_lowercase().contains(&q)) {
+                out.push((fi, ri));
+            }
+        }
+    }
+    out
+}
+
+fn diff_search(m: &mut Model, query: String) {
+    if let Some(d) = &mut m.diff {
+        d.search = Some(query).filter(|q| !q.is_empty());
+        d.matches = d.search.as_ref().map_or(vec![], |q| diff_matches(d, q));
+    }
+    walk_matches(m, 1, true);
+}
+
+/// Moves the diff cursor to the next (`dir` > 0) or previous match of its search, wrapping; `here` counts the line
+/// under the cursor.
+fn walk_matches(m: &mut Model, dir: isize, here: bool) {
+    let Some(d) = &mut m.diff else { return };
+    let Some(q) = d.search.clone() else { return };
+    let stops = d.matches.clone();
+    let at = (d.selected_file.as_ref().and_then(|p| d.files.iter().position(|f| &f.path == p)).unwrap_or(0), d.cursor);
+    let target = if dir > 0 {
+        stops.iter().find(|s| **s > at || (here && **s == at)).or(stops.first())
+    } else {
+        stops.iter().rev().find(|s| **s < at).or(stops.last())
+    };
+    let Some(&(fi, row)) = target else {
+        notice(m, format!("no line in this diff contains \"{q}\""));
+        return;
+    };
+    d.selected_file = Some(d.files[fi].path.clone());
+    d.cursor = row;
+    d.stack = 0;
+    m.ui.focus = Pane::Main;
 }
 
 fn jump_to(m: &mut Model, spec: &str, fx: &mut Vec<Effect>) {

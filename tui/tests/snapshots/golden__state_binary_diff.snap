@@ -2,7 +2,7 @@
 source: tests/golden.rs
 expression: text
 ---
-  pr-review · • reviewing #184 verify found: Finding f-1                                                        ● live
+  pr-review · ▘ reviewing #184 verify found: Finding f-1                                                        ● live
 
                                     assets/logo.png   +0 -0
   FILES  4                          acme/shop #184 · bbbbbbb → 4444444   TRUNCATED
@@ -39,4 +39,4 @@ expression: text
 
 
 
-   j/k line  n/N finding  w watch live  Enter read  h files  : jump  Esc back    1 inbox  2 review  3 diff  4 timeline
+   j/k file  Enter or l code  w watch live  Esc back  ? help         1 inbox  2 review  3 diff  4 timeline  5 settings

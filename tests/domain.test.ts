@@ -13,9 +13,12 @@ import {
   OUTBOX_EVENTS,
   OUTBOX_MACHINE,
   OUTBOX_STATES,
+  type OutboxStatus,
+  publicationStatus,
   REVIEW_EVENTS,
   REVIEW_MACHINE,
   REVIEW_STATES,
+  type ReviewState,
 } from "../src/domain/machines.ts";
 
 function matrix<S extends string, E extends string>(
@@ -77,9 +80,14 @@ matrix("review task machine", REVIEW_MACHINE, REVIEW_STATES, REVIEW_EVENTS, [
   "VERIFY PR_NOT_OPEN SUPERSEDED",
   "VERIFY TERMINAL_ERROR FAILED",
   "PREPARE_PUBLICATION HEAD_VERIFIED PUBLISH",
+  "PREPARE_PUBLICATION APPROVAL_REQUIRED AWAITING_APPROVAL",
   "PREPARE_PUBLICATION NEWER_HEAD SUPERSEDED",
   "PREPARE_PUBLICATION PR_NOT_OPEN SUPERSEDED",
   "PREPARE_PUBLICATION TERMINAL_ERROR FAILED",
+  "AWAITING_APPROVAL APPROVED PUBLISH",
+  "AWAITING_APPROVAL NEWER_HEAD SUPERSEDED",
+  "AWAITING_APPROVAL PR_NOT_OPEN SUPERSEDED",
+  "AWAITING_APPROVAL CANCELLED FAILED",
   "PUBLISH REVIEW_RECONCILED COMPLETED",
   "PUBLISH NO_PUBLICATION_RECORDED COMPLETED",
   "PUBLISH WRITE_UNCERTAIN RECONCILE",
@@ -92,6 +100,21 @@ matrix("review task machine", REVIEW_MACHINE, REVIEW_STATES, REVIEW_EVENTS, [
   "FAILED MANUAL_RETRY COLLECT_CONTEXT",
   "FAILED REVIEW_RECONCILED COMPLETED",
 ], ["COMPLETED", "SUPERSEDED"]);
+
+it("derives the publication status the TUI shows from the revision and its outbox", () => {
+  const cases: [string, string, string | null][] = [
+    ["AWAITING_APPROVAL", "pending", "awaiting_approval"],
+    ["PUBLISH", "pending", "publishing"],
+    ["PUBLISH", "sending", "publishing"],
+    ["RECONCILE", "needs_reconciliation", "uncertain"],
+    ["FAILED", "needs_reconciliation", "uncertain"],
+    ["COMPLETED", "published", "published"],
+    ["SUPERSEDED", "failed", "failed"],
+    ["FAILED", "pending", "failed"],
+    ["COLLECT_CONTEXT", "pending", null],
+  ];
+  expect(cases.map(([state, outbox]) => publicationStatus(state as ReviewState, outbox as OutboxStatus))).toEqual(cases.map((c) => c[2]));
+});
 
 matrix("publication outbox", OUTBOX_MACHINE, OUTBOX_STATES, OUTBOX_EVENTS, [
   "pending SEND sending",

@@ -20,7 +20,7 @@ expression: ascii_text
                                     |
                                     | e
                                     |
-                                    | Enter read it beside the diff    d diff at this line
+                                    | Enter  the reasoning | the diff    d diff at this line
 
 
 
@@ -39,4 +39,4 @@ expression: ascii_text
 
 
 
-   j/k pull request  Enter read  w watch live  / search  ? help  q quit          1 inbox  2 review  3 diff  4 timeline
+   j/k pull request  Enter read  / search  ? help  q quit            1 inbox  2 review  3 diff  4 timeline  5 settings

@@ -2,15 +2,15 @@
 source: tests/golden.rs
 expression: text
 ---
-  pr-review · 0 PRs tracked · nothing running                   ✗ disconnected
+  pr-review · not connected                                     ✗ disconnected
 
- ✗ disconnected: connection refused · retrying in 2.0s · showing last known sta…
+ ✗ disconnected · retry in 2s
 
   PULL REQUESTS                                                              0
 
-  unavailable: connection refused
-  is `pr-review daemon` running?
-
+  No daemon at /run/user/501/pr-review/reviewer.sock.
+  Start one with `pr-review daemon`.
+  connection refused
 
 
 

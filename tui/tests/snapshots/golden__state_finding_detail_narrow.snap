@@ -2,7 +2,7 @@
 source: tests/golden.rs
 expression: text
 ---
-  pr-review · • reviewing #184 verify new finding   ● live
+  pr-review · ▘ reviewing #184 verify new finding   ● live
 
 
   acme/shop #184 → finding 1 of 1
@@ -16,5 +16,5 @@ expression: text
   ┃ before either sets held.
   ┃
   ┃ Evidence
-  ┃   src/booking.ts  lines 40-43 @ 4444444
-   j/k scroll  d diff at anchor  t timeline  Esc close
+    … 32 more below, j scrolls
+   j/k scroll  n/N finding  d diff at anchor  Esc close

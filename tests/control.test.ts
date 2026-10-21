@@ -91,7 +91,7 @@ describe("handshake", () => {
     for (const name of names) c.send(JSON.parse(readFileSync(join(PROTOCOL_DIR, "fixtures", `client.command.${name}.json`), "utf8")));
     await c.waitFor(() => c.messages.filter((m) => m.type === "command.result").length === 4);
     expect(c.messages.filter((m) => m.type === "command.result")).toEqual(
-      names.map((name) => ({ type: "command.result", requestId: "req-cmd", status: "rejected", code: "CAPABILITY_DENIED", message: `${name} is not available in this version` })),
+      names.map((name) => ({ type: "command.result", requestId: "req-cmd", status: "rejected", code: "CAPABILITY_DENIED", message: `${name} is not available from a fixture server` })),
     );
   });
 

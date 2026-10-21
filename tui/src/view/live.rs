@@ -36,6 +36,15 @@ pub fn sparkline(c: &Ctx, data: &[u64]) -> String {
     data.iter().map(|n| levels[(*n as usize * (levels.len() - 1)).div_ceil(max as usize)]).collect()
 }
 
+/// A rate in at most four columns: `0.2`, `42`, then `99+` for a burst.
+pub fn rate_label(per_sec: f64) -> String {
+    match per_sec {
+        r if r < 9.95 => format!("{r:.1}"),
+        r if r < 99.5 => format!("{r:.0}"),
+        _ => "99+".into(),
+    }
+}
+
 /// One cell for a rate: how busy, at a glance.
 pub fn rate_cell(c: &Ctx, per_sec: f64) -> &'static str {
     let levels: &[&str] = if c.t.ascii { &[".", ":", "|", "#"] } else { &["▁", "▃", "▅", "▇"] };
@@ -50,13 +59,13 @@ pub fn phase_index(p: Phase) -> Option<usize> {
         Phase::Analyze => 2,
         Phase::Verify => 3,
         Phase::PreparePublication => 4,
-        Phase::Publish | Phase::Reconcile => 5,
+        Phase::AwaitingApproval | Phase::Publish | Phase::Reconcile => 5,
         Phase::Completed => 6,
         Phase::Failed | Phase::Superseded | Phase::Unknown => return None,
     })
 }
 
-/// `●─●─◐─○─○─○`: eleven cells, the current phase pulsing while the run is live.
+/// `●─●─◔─○─○─○`: eleven cells, the current phase pulsing while the run is live.
 pub fn stepper(c: &Ctx, run: &Run) -> Vec<Span<'static>> {
     let cur = phase_index(run.phase);
     let (done, todo, link) = if c.t.ascii { ("+", ".", "-") } else { ("●", "○", "─") };
@@ -68,6 +77,8 @@ pub fn stepper(c: &Ctx, run: &Run) -> Vec<Span<'static>> {
         }
         let (glyph, role) = match cur {
             Some(k) if i < k => (done, Role::Ok),
+            // Parked before PUBLISH: waiting for the reader, so it holds still in amber instead of spinning.
+            Some(k) if i == k && run.parked() => (c.t.g().pending, Role::Pending),
             Some(k) if i == k && run.status == RunStatus::Running => (spinner(c), Role::Accent),
             _ => (todo, Role::Muted),
         };
@@ -87,6 +98,7 @@ pub fn phase_bar(c: &Ctx, run: &Run, seg: usize) -> Vec<Span<'static>> {
         }
         match cur {
             Some(k) if i < k => out.push(c.span(full.repeat(seg), Role::Ok)),
+            Some(k) if i == k && run.parked() => out.push(c.span(rail.repeat(seg), Role::Pending)),
             Some(k) if i == k && run.status == RunStatus::Running => {
                 let hot = (c.m.now_ms / 250) as usize % seg.max(1);
                 for j in 0..seg {
@@ -111,12 +123,13 @@ mod tests {
         let m = Model::new("x", Look::default(), Screen::Review, None);
         let c = Ctx {
             m: &m,
-            t: Theme { color: false, ascii: false, terminal_bg: false },
+            t: Theme { color: false, ascii: false, terminal_bg: false, palette: Default::default() },
             width: super::super::Width::Wide,
         };
         assert_eq!(sparkline(&c, &[0, 1, 3, 6]), "▁▃▅█");
         assert_eq!(sparkline(&c, &[0, 1, 2, 3]), "▁▄▆█");
         assert_eq!(rate_cell(&c, 0.0), "▁");
         assert_eq!(rate_cell(&c, 1.2), "▅");
+        assert_eq!([rate_label(0.2), rate_label(42.4), rate_label(400.0)], ["0.2", "42", "99+"]);
     }
 }

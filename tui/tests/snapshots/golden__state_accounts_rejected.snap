@@ -2,27 +2,27 @@
 source: tests/golden.rs
 expression: text
 ---
-  pr-review · 3 PRs tracked · nothing running                           ● live
+  pr-review · ▘ reviewing #184 verify                                   ● live
 
 
-  Settings
-  connected through unix:/run/user/501/pr-review/reviewer.sock
-  GitHub accounts
-    publishes as          diego-arbio-dev on github.com
-    diego-arbio-dev  github.com  ✓ ok      gh active           Enter selects
-  ▌ octo-work        github.com  ✓ ok                          Enter selects
-  Connec▌
-    stat▌  ACCOUNT.SELECT
-    prot▌  Use octo-work on github.com for GitHub reads and publishing?
-    serv▌  sends account.select
-    sess▌
-    capa▌  rejected: CONFLICT: GITHUB_TOKEN is set in the daemon envir…
-  Stream▌
-    epoch, last sequence  epoch-1, 10
-    snapshot, heartbeat   0.0s ago, never
-    resyncs / reconnects  0 / 0
-    activity              0 feed entries kept (cap 2000); 0 tool events appli…
-  Display
-    glyphs, color         unicode, color
-    background            theme: painted ink
-   y confirm  n/Esc cancel
+  Use octo-work on github.com for GitHub reads and publishing?
+  daemon command account.select · CONFLICT
+
+  Can't switch accounts: GITHUB_TOKEN is set in the daemon environment; it
+  overrides any selection
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+   Esc closes

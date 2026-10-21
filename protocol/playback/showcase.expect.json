@@ -1,8 +1,8 @@
 {
   "streamEpoch": "epoch-1",
-  "lastSequence": 80,
+  "lastSequence": 116,
   "resyncRequested": false,
-  "toolActivityCount": 29,
+  "toolActivityCount": 34,
   "prs": [
     {
       "id": "0c11e2592c6105aa27f93216e41c13bd",
@@ -13,6 +13,11 @@
       "id": "93da1c66980faac69f5b91a8afad6c2e",
       "headSha": "c2711bd4932dfe7d8c2f99dfed5215eeccdbcff9",
       "title": "Drain webhook workers on SIGTERM"
+    },
+    {
+      "id": "af0169e8e89241b47e6114e4f1939c53",
+      "headSha": "3799cf3add99e8b583f4c2c6883bba1ba8d89249",
+      "title": "Gift cards: redeem a balance at checkout"
     },
     {
       "id": "bb205280d64320002381b7dac2c86343",
@@ -32,9 +37,14 @@
   ],
   "runs": [
     {
+      "id": "026c29bd51c925bec421a619dceedb17",
+      "phase": "COMPLETED",
+      "status": "COMPLETED"
+    },
+    {
       "id": "1c71d3ed584967adfb3a51cee84ec16a",
-      "phase": "ANALYZE",
-      "status": "RUNNING"
+      "phase": "FAILED",
+      "status": "FAILED"
     },
     {
       "id": "554ffb5bdeae41d386b08a9038dd6058",
@@ -58,8 +68,8 @@
     },
     {
       "id": "e7451b06cf78ead5913962040f41cb76",
-      "phase": "FAILED",
-      "status": "FAILED"
+      "phase": "COMPLETED",
+      "status": "COMPLETED"
     }
   ],
   "findings": [
@@ -72,13 +82,13 @@
     {
       "id": "6663d915445dcbffacc5d5255fa69963",
       "title": "Sign-in redirects to any URL passed in returnTo",
-      "status": "DETECTED",
+      "status": "PUBLISHED",
       "stale": false
     },
     {
       "id": "7c768d13420e527545cfc2c3bfeb921e",
       "title": "Session id is no longer rotated at sign-in",
-      "status": "DETECTED",
+      "status": "PUBLISHED",
       "stale": false
     },
     {
@@ -92,6 +102,12 @@
       "title": "Run returns before in-flight deliveries finish",
       "status": "DETECTED",
       "stale": true
+    },
+    {
+      "id": "d4ee96ff2509ee8bf02eb5c1cf5b2d29",
+      "title": "A gift card redeemed in two carts at once is spent twice",
+      "status": "DETECTED",
+      "stale": false
     },
     {
       "id": "ddd4e53cecab4ad368ff9cc94a85fe1d",
@@ -111,13 +127,19 @@
       "id": "github.com/acme-review-bot",
       "state": "ok",
       "ghActive": false,
-      "selected": true
+      "selected": false
     },
     {
       "id": "github.com/dperalta",
       "state": "ok",
       "ghActive": true,
-      "selected": false
+      "selected": true
+    }
+  ],
+  "publications": [
+    {
+      "runId": "d1ed7b3b7b96a280414a43f18864bd2b",
+      "status": "published"
     }
   ]
 }

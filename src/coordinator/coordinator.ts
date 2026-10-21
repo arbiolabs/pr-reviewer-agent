@@ -155,10 +155,17 @@ export class Coordinator {
     return state;
   }
 
-  /** §11: in-flight revisions of other heads (all, with no head) are marked superseded_requested; those not yet publishing are aborted. */
+  /**
+   * §11: in-flight revisions of other heads (all, with no head) are marked superseded_requested; those not yet publishing
+   * are aborted. A revision parked for approval has no task and nothing sent, so it is superseded on the spot.
+   */
   private supersedeOlder(prId: string, headSha: string | undefined): void {
     for (const revision of this.deps.store.unfinishedRevisions(prId)) {
       if (revision.head_sha === headSha) continue;
+      if (revision.state === "AWAITING_APPROVAL") {
+        this.deps.store.advanceFromCurrent(revision.id, headSha === undefined ? "PR_NOT_OPEN" : "NEWER_HEAD", headSha === undefined ? "pr_not_open" : `head moved to ${headSha}`);
+        continue;
+      }
       this.deps.store.requestSupersede(revision.id);
       if (!revision.durable_task_id || !ABORTABLE.includes(revision.state) || this.aborts.has(revision.id)) continue;
       const abort = this.deps

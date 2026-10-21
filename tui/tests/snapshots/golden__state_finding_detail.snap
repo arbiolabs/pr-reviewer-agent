@@ -2,41 +2,41 @@
 source: tests/golden.rs
 expression: text
 ---
-  pr-review · • reviewing #184 verify found: Finding f-1                                                        ● live
+  pr-review · ▘ reviewing #184 verify found: Finding f-1                                                        ● live
 
 
-          acme/shop #184 → finding 1 of 1
+    acme/shop #184 → finding 1 of 1
 
-          ┃ ▲ HIGH   correctness                                                      detected · 82% confident
-          ┃ Finding f-1
-          ┃ src/booking.ts:42
-          ┃
-          ┃ What is wrong
-          ┃ Two concurrent bookings can both observe slot.free before either sets held.
-          ┃
-          ┃ Evidence
-          ┃   src/booking.ts  lines 40-43 @ 4444444
-          ┃    40 │ if (slot.free && !slot.held) {
-          ┃
-          ┃ ◎ grep lock( src/ -> 3 matches
-          ┃
-          ┃ ◎ test booking.race.test.ts: 1 failed
-          ┃
-          ┃ ◎ scenario Two clients POST /book for slot 9 within 5 ms.
-          ┃
-          ┃ ◎ link https://example.com/docs/locking
-          ┃
-          ┃ Diff at the anchor
-          ┃   src/booking.ts  +2 -1   d opens the full diff
-          ┃   @@ -40,3 +40,4 @@ export function book()
-          ┃     40     const slot = await lock(id);
-          ┃     41 -   if (slot.free) {
-          ┃     41 +   if (slot.free && !slot.held) {
-          ┃  ▶  42 +     slot.held = true;
-          ┃     43     }
-          ┃
-          ┃ How the reviewer checked
-          ┃ Traced book() -> lock(); lock() is advisory and not awaited by the second caller.
-          ┃ model-written summary, not a confirmation
-          ┃
-   j/k scroll  d diff at anchor  t timeline  Esc close                           1 inbox  2 review  3 diff  4 timeline
+    ┃ ▲ HIGH   correctness                                                                  detected · 82% confident
+    ┃ Finding f-1
+    ┃ src/booking.ts:42
+    ┃
+    ┃ What is wrong
+    ┃ Two concurrent bookings can both observe slot.free before either sets held.
+    ┃
+    ┃ Evidence
+    ┃   src/booking.ts  lines 40-43 @ 4444444
+    ┃    40 │ if (slot.free && !slot.held) {
+    ┃
+    ┃ ◎ grep lock( src/ -> 3 matches
+    ┃
+    ┃ ◎ test booking.race.test.ts: 1 failed
+    ┃
+    ┃ ◎ scenario Two clients POST /book for slot 9 within 5 ms.
+    ┃
+    ┃ ◎ link https://example.com/docs/locking
+    ┃
+    ┃ Diff at the anchor
+    ┃   src/booking.ts  +2 -1   d opens the full diff
+    ┃   @@ -40,3 +40,4 @@ export function book()
+    ┃     40     const slot = await lock(id);
+    ┃     41 -   if (slot.free) {
+    ┃     41 +   if (slot.free && !slot.held) {
+    ┃  ▶  42 +     slot.held = true;
+    ┃     43     }
+    ┃
+    ┃ How the reviewer checked
+    ┃ Traced book() -> lock(); lock() is advisory and not awaited by the second caller.
+    ┃ model-written summary, not a confirmation
+      … 6 more below, j scrolls
+   j/k scroll  n/N finding  d diff at anchor  t timeline  Esc close  1 inbox  2 review  3 diff  4 timeline  5 settings

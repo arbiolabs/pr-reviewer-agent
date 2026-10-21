@@ -6,12 +6,13 @@ import { createRegistry, defineExtension, Harness, type ModelRef, type TaskId } 
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import lockfile from "proper-lockfile";
 import type { Config } from "../config/config.ts";
-import { TERMINAL_REVIEW_STATES } from "../domain/machines.ts";
+import { IDLE_REVIEW_STATES, TERMINAL_REVIEW_STATES } from "../domain/machines.ts";
 import type { PullInfo } from "../domain/types.ts";
 import type { GitHubClient } from "../github/client.ts";
 import type { PullSource } from "../github/pulls.ts";
 import type { JevRoute } from "../jev/decision.ts";
 import { AppStore, type RevisionRow } from "../persistence/store.ts";
+import { reconcileOutbox } from "../publish/publisher.ts";
 import { createReviewTools, type Workspace } from "../reasoning/tools.ts";
 import { parseDiff } from "../source/diff.ts";
 import { PinnedRepo } from "../source/git.ts";
@@ -128,23 +129,32 @@ export async function startReview(
   const prId = app.store.upsertPull(pull);
   // Publishing is part of the policy: a dry run of a head never blocks publishing that head later (§2 invariant 3).
   const policyVersion = options.publish ? `${basePolicyVersion}${PUBLISH_POLICY}` : basePolicyVersion;
-  let revision = app.store.ensureRevision({ prId, baseSha: pull.baseSha, headSha: pull.headSha, policyVersion, reviewerVersion: app.reviewerVersion });
-  if (options.retry && TERMINAL_REVIEW_STATES.includes(revision.state)) {
-    const n = app.store.retryCount(revision.id) + 1;
-    app.store.advance(revision.id, revision.state, "MANUAL_RETRY", `manual override: ${options.retrySource ?? "pr-review review --retry"} (retry ${n})`);
-    revision = app.store.revision(revision.id)!;
-  }
+  const revision = app.store.ensureRevision({ prId, baseSha: pull.baseSha, headSha: pull.headSha, policyVersion, reviewerVersion: app.reviewerVersion });
+  if (options.retry && TERMINAL_REVIEW_STATES.includes(revision.state)) return retryReview(app, revision, options.retrySource ?? "pr-review review --retry");
   const taskId = await ensureTask(app, revision, options.publish ?? false);
   return { revision: app.store.revision(revision.id)!, taskId };
 }
 
 /**
- * The durable task for the revision's current attempt, created only if no task for it exists; `undefined` for a
- * terminal revision. Recovery calls this for every unfinished revision.
+ * Reopen a revision through the audited MANUAL_RETRY override (§4.1), which the machine allows only from FAILED, and
+ * give the new attempt its task. `onCommit` runs in the override's transaction.
+ */
+export async function retryReview(app: App, revision: RevisionRow, retrySource: string, onCommit?: () => void): Promise<StartedReview> {
+  const n = app.store.retryCount(revision.id) + 1;
+  app.store.advance(revision.id, revision.state, "MANUAL_RETRY", `manual override: ${retrySource} (retry ${n})`, onCommit);
+  const reopened = app.store.revision(revision.id)!;
+  return { revision: reopened, taskId: await ensureTask(app, reopened, publishes(reopened)) };
+}
+
+/**
+ * The durable task for the revision's current attempt, created only if no task for it exists; `undefined` for an
+ * idle revision (terminal, or parked for approval). Recovery calls this for every unfinished revision. An attempt
+ * opened by APPROVED starts at the publish phase of the stored outbox.
  */
 export async function ensureTask(app: App, revision: RevisionRow, publish: boolean): Promise<TaskId<ReviewResult> | undefined> {
-  if (TERMINAL_REVIEW_STATES.includes(revision.state)) return undefined;
-  const retry = app.store.retryCount(revision.id);
+  if (IDLE_REVIEW_STATES.includes(revision.state)) return undefined;
+  const reopenings = app.store.reopenings(revision.id);
+  const retry = reopenings.length;
   const root = await app.harness.root(ctx);
   const taskId = await root.commit(async (tx) => {
     // ponytail: linear scan of every review task; index revision -> task in a session document if this grows.
@@ -157,21 +167,46 @@ export async function ensureTask(app: App, revision: RevisionRow, publish: boole
       if (!page.next) break;
       page = await tx.scanTasks({ kind: REVIEW_TASK_NAME }, 100, page.next);
     }
-    return tx.createTask(app.task, { revisionId: revision.id, retry, publish }, { ownership: { kind: "conversation" } });
+    const approved = reopenings.at(-1) === "APPROVED" ? { approvedOutboxId: app.store.outboxForRevision(revision.id)!.id } : {};
+    return tx.createTask(app.task, { revisionId: revision.id, retry, publish, ...approved }, { ownership: { kind: "conversation" } });
   }, ctx);
   app.store.setDurableTask(revision.id, String(taskId));
   return taskId;
 }
 
-/** Wait for the revision's task; a task that ended without the revision reaching a terminal state fails it. */
+/**
+ * Wait for the revision's task; a task that ended without the revision reaching an idle state fails it, unless a later
+ * attempt (an approval) has taken the revision over.
+ */
 export async function finishReview(app: App, started: StartedReview): Promise<RevisionRow> {
   if (started.taskId !== undefined) {
     const settled = await app.harness.waitForTask(started.taskId, ctx);
     const outcome = settled.state.outcome;
-    if (!TERMINAL_REVIEW_STATES.includes(app.store.revision(started.revision.id)!.state)) {
+    const current = app.store.revision(started.revision.id)!;
+    if (!IDLE_REVIEW_STATES.includes(current.state) && current.durable_task_id === String(started.taskId)) {
       const why = outcome.status === "completed" ? "completed without a terminal revision state" : (outcome.error?.message ?? outcome.reason ?? outcome.status);
       app.store.advanceFromCurrent(started.revision.id, "TERMINAL_ERROR", `durable task ${outcome.status}: ${why}`);
     }
   }
   return app.store.revision(started.revision.id)!;
+}
+
+/**
+ * §11 startup recovery, in order: durable tasks resume, unfinished revisions get their task back, and outboxes whose
+ * write may have reached GitHub are reconciled before anything new is posted. `track` follows each piece of work.
+ */
+export async function recover(app: App, github: (installationId: number) => GitHubClient, track: (work: Promise<unknown>) => void): Promise<void> {
+  const store = app.store;
+  app.harness.resume();
+  for (const revision of store.unfinishedRevisions()) {
+    const taskId = await ensureTask(app, revision, publishes(revision));
+    if (taskId !== undefined) track(finishReview(app, { revision, taskId }));
+  }
+  for (const outbox of store.uncertainOutboxes()) {
+    const revision = store.revision(outbox.revision_id)!;
+    // An unfinished revision's own task reconciles in its PUBLISH or RECONCILE phase.
+    if (store.unfinishedRevisions(revision.pr_id).some((r) => r.id === revision.id)) continue;
+    const pr = store.pullById(revision.pr_id)!;
+    track(reconcileOutbox(store, github(pr.installation_id), { fullName: pr.repo_full_name, number: pr.number }, outbox));
+  }
 }

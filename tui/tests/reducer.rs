@@ -87,15 +87,17 @@ fn the_top_modal_takes_keys_and_esc_pops_one_at_a_time() {
     assert_eq!(sent(&fx), ["diff.get"], "the detail came with the PR; the reader adds the diff at its anchor");
 
     press(&mut m, KeyCode::Char('?'));
-    assert_eq!(m.top_modal(), Some(&Modal::Help));
+    assert_eq!(m.top_modal(), Some(&Modal::Help { scroll: 0 }));
     let before = m.ui.selected_finding.clone();
     press(&mut m, KeyCode::Char('j'));
     assert_eq!(m.ui.selected_finding, before);
 
     press(&mut m, KeyCode::Esc);
     assert!(matches!(m.top_modal(), Some(Modal::Finding { scroll: 0, .. })));
+    // The reader takes j, and a page that fits its rows does not scroll past its end.
     press(&mut m, KeyCode::Char('j'));
-    assert!(matches!(m.top_modal(), Some(Modal::Finding { scroll: 1, .. })));
+    assert!(matches!(m.top_modal(), Some(Modal::Finding { scroll: 0, .. })));
+    assert_eq!(m.ui.selected_finding, before);
     press(&mut m, KeyCode::Esc);
     assert_eq!(m.top_modal(), None);
     assert_eq!(m.ui.screen, Screen::Review);
@@ -144,10 +146,7 @@ fn y_and_write_shortcuts_never_send_anything() {
         assert_eq!(press(&mut m, KeyCode::Char('y')), []);
         assert_eq!(press(&mut m, KeyCode::Char('s')), []);
     }
-    assert_eq!(
-        m.notice.as_ref().map(|n| n.text.as_str()),
-        Some("review.start unavailable: the server grants no write capability (read-only)")
-    );
+    assert_eq!(m.notice.as_ref().map(|n| n.text.as_str()), Some("Can't start a review: the daemon does not grant it"));
 }
 
 #[test]
@@ -255,9 +254,10 @@ fn y_confirms_only_inside_the_confirmation_modal_and_sends_the_command_once() {
     let Some(Modal::Confirm { state, .. }) = m.top_modal() else { panic!() };
     assert_eq!(
         state,
-        &pr_review_tui::model::ConfirmState::Failed(pr_review_tui::protocol::Text::new(
-            "CAPABILITY_DENIED: review.start is not available in this version"
-        ))
+        &pr_review_tui::model::ConfirmState::Refused {
+            code: pr_review_tui::protocol::ErrorCode::CapabilityDenied,
+            message: pr_review_tui::protocol::Text::new("review.start is not available in this version"),
+        }
     );
     press(&mut m, KeyCode::Esc);
     assert_eq!(m.top_modal(), None);
@@ -315,9 +315,9 @@ fn timeline_category_filter_hides_other_events() {
     };
     assert_eq!(shown(&m), [99, 100], "oldest first");
     press(&mut m, KeyCode::Char('v'));
-    assert_eq!(shown(&m), [100]);
+    assert_eq!(shown(&m), [99], "tool calls");
     press(&mut m, KeyCode::Char('v'));
-    assert_eq!(shown(&m), [99]);
+    assert_eq!(shown(&m), [] as [u64; 0], "findings");
 }
 
 #[test]
@@ -376,7 +376,7 @@ fn account_select_waits_for_accounts_updated_before_showing_the_selection() {
     let accepted =
         r#"{"type":"command.result","requestId":"RID","status":"accepted","operationId":"account.select:11"}"#;
     send(&mut m, &accepted.replace("RID", c.request_id.as_str()));
-    assert!(matches!(m.top_modal(), Some(Modal::Confirm { state: ConfirmState::Accepted(_), .. })));
+    assert!(matches!(m.top_modal(), Some(Modal::Confirm { state: ConfirmState::Accepted { .. }, .. })));
     assert_eq!(identity(&m), "active github.com/diego-arbio-dev", "accepted alone changes nothing");
 
     let event = script("accounts").pop().unwrap();
@@ -399,8 +399,27 @@ fn a_rejected_account_select_shows_the_code_and_message_in_the_modal() {
     assert_eq!(c.idempotency_key, "account.select:github.com/diego-arbio-dev");
     let rejected = r#"{"type":"command.result","requestId":"RID","status":"rejected","code":"NOT_FOUND","message":"gh lists no account github.com/diego-arbio-dev"}"#;
     send(&mut m, &rejected.replace("RID", c.request_id.as_str()));
-    let Some(Modal::Confirm { state: ConfirmState::Failed(e), .. }) = m.top_modal() else { panic!() };
-    assert_eq!(e.as_str(), "NOT_FOUND: gh lists no account github.com/diego-arbio-dev");
+    let Some(Modal::Confirm { state: ConfirmState::Refused { code, message }, .. }) = m.top_modal() else { panic!() };
+    assert_eq!(code.to_string(), "NOT_FOUND");
+    assert_eq!(message.as_str(), "gh lists no account github.com/diego-arbio-dev");
+}
+
+#[test]
+fn a_confirm_panel_offers_y_only_while_y_can_send() {
+    let footer = |m: &mut Model| {
+        render(m, 120, 38).0.lines().last().unwrap_or_default().trim().split("    ").next().unwrap().to_string()
+    };
+    let mut m = accounts_live();
+    press(&mut m, KeyCode::Char('A'));
+    press(&mut m, KeyCode::Enter);
+    assert_eq!(footer(&mut m), "y confirm  n/Esc cancel");
+    let fx = press(&mut m, KeyCode::Char('y'));
+    assert_eq!(footer(&mut m), "Esc closes", "requested");
+    let [Effect::Send(ClientMessage::Command(c))] = &fx[..] else { panic!("{fx:?}") };
+    let rejected =
+        r#"{"type":"command.result","requestId":"RID","status":"rejected","code":"NOT_FOUND","message":"no"}"#;
+    send(&mut m, &rejected.replace("RID", c.request_id.as_str()));
+    assert_eq!(footer(&mut m), "Esc closes", "refused");
 }
 
 #[test]
@@ -658,12 +677,11 @@ fn enter_opens_an_events_detail_inline_and_esc_folds_it_before_leaving() {
     let [Effect::Send(ClientMessage::TimelineGet { request_id, .. })] = &fx[..] else { panic!("{fx:?}") };
     send(&mut m, &read("fixtures/server.timeline.page.json").replace("req-tl", request_id.as_str()));
     let open = |m: &Model| m.timeline.as_ref().and_then(|t| t.open);
-    assert_eq!(m.timeline.as_ref().and_then(|t| t.selected), Some(100), "lands on the newest, at the bottom");
+    assert_eq!(m.timeline.as_ref().and_then(|t| t.selected), Some(99), "lands on the newest row, not its heading");
     press(&mut m, KeyCode::Enter);
-    assert_eq!((open(&m), m.top_modal()), (Some(100), None));
+    assert_eq!((open(&m), m.top_modal()), (Some(99), None));
     press(&mut m, KeyCode::Enter);
     assert_eq!(open(&m), None, "Enter again folds a non-finding event");
-    press(&mut m, KeyCode::Char('k'));
     press(&mut m, KeyCode::Enter);
     assert_eq!(open(&m), Some(99));
     press(&mut m, KeyCode::Esc);
@@ -782,4 +800,282 @@ fn the_diff_a_finding_prefetches_changes_nothing_on_the_review_screen() {
     press(&mut m, KeyCode::Char('d'));
     assert_eq!(m.ui.screen, Screen::Diff);
     assert!(m.notice.as_ref().is_some_and(|n| n.text.ends_with("is not in this diff")), "{:?}", m.notice);
+}
+
+#[test]
+fn a_snapshot_that_never_arrives_ends_the_resync_with_an_error_and_r_asks_again() {
+    let mut m = live();
+    let fx = press(&mut m, KeyCode::Char('r'));
+    assert_eq!(sent(&fx), ["snapshot.get"]);
+    assert_eq!(m.link, Link::Resyncing);
+    let late = m.request_timeout_ms + 1;
+    update(&mut m, Msg::Tick(late));
+    assert!(matches!(m.link, Link::Stalled { .. }), "{:?}", m.link);
+    let (frame, _) = common::render(&mut m, 120, 38);
+    assert!(frame.contains("the snapshot did not arrive; r asks again"), "{frame}");
+    let fx = press(&mut m, KeyCode::Char('r'));
+    assert_eq!(sent(&fx), ["snapshot.get"], "r retries");
+    assert_eq!(m.link, Link::Resyncing);
+    send(&mut m, &read("fixtures/server.snapshot.json"));
+    assert_eq!(m.link, Link::Live);
+}
+
+#[test]
+fn a_command_result_for_a_request_the_client_never_sent_is_ignored() {
+    let mut m = live();
+    send(&mut m, &read("fixtures/server.command.result.accepted.json"));
+    assert_eq!(m.notice, None);
+    let mut lines = script("approval");
+    lines.truncate(12);
+    let stray = ServerMessage::parse(&read("fixtures/server.command.result.rejected.json")).unwrap();
+    lines.insert(6, stray.clone());
+    lines.push(stray);
+    let mut s = common::Sim::new(pr_review_tui::model::Look::default());
+    for msg in lines {
+        s.server(msg);
+    }
+    assert_eq!(s.m.notice, None, "a stray command.result in the stream pops no toast");
+    let (frame, _) = common::render(&mut s.m, 120, 38);
+    assert!(!frame.contains("Refused"), "{frame}");
+}
+
+/// The keys crossterm reads from a late `ESC ] 11 ; rgb:… BEL`: Alt+`]`, the text as plain keys, BEL as Ctrl+G.
+fn late_osc11() -> Vec<KeyEvent> {
+    let mut keys = vec![KeyEvent::new(KeyCode::Char(']'), KeyModifiers::ALT)];
+    keys.extend("11;rgb:1717/1717/1717".chars().map(|c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)));
+    keys.push(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::CONTROL));
+    keys
+}
+
+/// Feeds key events through the input thread's path, `since_start` into the session, and returns what reached the
+/// reducer.
+fn through_input(m: &mut Model, late: &mut pr_review_tui::terminal::LateReply, keys: &[(KeyEvent, u64)]) -> Vec<char> {
+    let mut acted = vec![];
+    for (k, ms) in keys {
+        let at = std::time::Duration::from_millis(*ms);
+        if let Some(msg) = pr_review_tui::terminal::input(crossterm::event::Event::Key(*k), late, at) {
+            if let KeyCode::Char(c) = k.code {
+                acted.push(c);
+            }
+            update(m, msg);
+        }
+    }
+    acted
+}
+
+#[test]
+fn a_late_osc11_reply_reaching_the_key_reader_fires_no_action() {
+    let fresh = live();
+    let mut raw = live();
+    for k in late_osc11() {
+        update(&mut raw, Msg::Key(k));
+    }
+    assert!(raw.top_modal().is_some() || raw.ui.screen != fresh.ui.screen, "unfiltered, the reply acts as keys");
+
+    let mut m = live();
+    let mut late = pr_review_tui::terminal::LateReply::default();
+    let reply: Vec<_> = late_osc11().into_iter().map(|k| (k, 400)).collect();
+    assert_eq!(through_input(&mut m, &mut late, &reply), Vec::<char>::new());
+    assert_eq!(m.top_modal(), None);
+    assert_eq!((m.ui.screen, &m.ui.pr_filter), (fresh.ui.screen, &fresh.ui.pr_filter));
+    let j = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE);
+    assert_eq!(through_input(&mut m, &mut late, &[(j, 401)]), ['j'], "the next key acts");
+    let alt = KeyEvent::new(KeyCode::Char(']'), KeyModifiers::ALT);
+    assert_eq!(through_input(&mut m, &mut late, &[(alt, 3000), (j, 3001)]), [']', 'j'], "after the window");
+}
+
+#[test]
+fn a_typed_alt_bracket_swallows_only_what_could_be_a_reply_and_only_briefly() {
+    let key = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
+    let alt = KeyEvent::new(KeyCode::Char(']'), KeyModifiers::ALT);
+    let mut m = live();
+    let mut late = pr_review_tui::terminal::LateReply::default();
+    let typed = [(alt, 500), (key('1'), 501), (key('j'), 502), (key('k'), 503), (key('1'), 504)];
+    assert_eq!(through_input(&mut m, &mut late, &typed), ['j', 'k', '1'], "j cannot be in a reply");
+
+    let mut late = pr_review_tui::terminal::LateReply::default();
+    let typed = [(alt, 500), (key('b'), 600), (key('1'), 800), (key('f'), 801)];
+    assert_eq!(through_input(&mut m, &mut late, &typed), ['1', 'f'], "200 ms after Alt+] keys act again");
+}
+
+fn page_scroll(m: &Model) -> u16 {
+    match m.top_modal() {
+        Some(Modal::Finding { scroll, .. } | Modal::Publication { scroll, .. } | Modal::Help { scroll }) => *scroll,
+        _ => panic!("no page open: {:?}", m.top_modal()),
+    }
+}
+
+#[test]
+fn a_snapshot_keeps_the_finding_readers_place_once_the_detail_is_back() {
+    let mut m = review_184();
+    send(&mut m, &read("fixtures/server.finding.detail.json"));
+    update(&mut m, Msg::Resize(80, 16));
+    press(&mut m, KeyCode::Enter);
+    for _ in 0..4 {
+        press(&mut m, KeyCode::Char('j'));
+    }
+    assert_eq!(page_scroll(&m), 4);
+    send(&mut m, &read("fixtures/server.snapshot.json"));
+    assert_eq!(page_scroll(&m), 4, "the detail is reloading");
+    send(&mut m, &read("fixtures/server.finding.detail.json"));
+    assert_eq!(page_scroll(&m), 4, "the detail came back");
+}
+
+#[test]
+fn a_snapshot_keeps_the_previews_place_once_the_preview_is_back() {
+    let mut s = common::parked(pr_review_tui::model::Look::default());
+    s.apply(Msg::Resize(80, 16));
+    s = s.key(KeyCode::Char('p'));
+    for _ in 0..4 {
+        s = s.key(KeyCode::Char('j'));
+    }
+    assert_eq!(page_scroll(&s.m), 4);
+    let snapshot = s.played.iter().find(|m| matches!(m, ServerMessage::Snapshot(_))).unwrap().clone();
+    s.server(snapshot);
+    assert!(matches!(s.m.top_modal(), Some(Modal::Publication { .. })));
+    assert_eq!(page_scroll(&s.m), 4);
+}
+
+#[test]
+fn a_preview_after_a_resync_mid_publish_brings_back_the_review_and_its_link() {
+    let mut s = common::parked(pr_review_tui::model::Look::default()).key(KeyCode::Char('p'));
+    let snapshot = s.played.iter().find(|m| matches!(m, ServerMessage::Snapshot(_))).unwrap().clone();
+    s.server(snapshot);
+    send(&mut s.m, &read("fixtures/server.publication.preview.published.json"));
+    let (frame, _) = common::render(&mut s.m, 120, 38);
+    assert!(frame.contains("published on GitHub as review 3141"), "{frame}");
+    let fx = press(&mut s.m, KeyCode::Char('o'));
+    assert_eq!(fx, [Effect::OpenUrl("https://github.com/acme/shop/pull/184#pullrequestreview-3141".into())]);
+}
+
+#[test]
+fn a_pr_updated_event_retitles_the_pr_in_the_rail_and_the_header() {
+    let mut m = review_184();
+    send(&mut m, &pr_event(109, 184, "Booking API v2"));
+    let (frame, _) = common::render(&mut m, 120, 38);
+    assert_eq!(frame.matches("Booking API v2").count(), 2, "{frame}");
+}
+
+/// #184's timeline after a retry resumed from a checkpoint: three phase changes in a row, then the first thing that
+/// happens.
+fn checkpoint_timeline() -> Model {
+    let mut m = review_184();
+    let fx = press(&mut m, KeyCode::Char('4'));
+    let rid = fx
+        .iter()
+        .find_map(|e| match e {
+            Effect::Send(ClientMessage::TimelineGet { request_id, .. }) => Some(request_id.as_str().to_string()),
+            _ => None,
+        })
+        .unwrap();
+    let ev = |seq: u64, kind: &str, data: &str| {
+        format!(
+            r#"{{"type":"event","streamEpoch":"epoch-1","sequence":{seq},"prevSequence":{},"occurredAt":"2026-10-20T13:01:{seq}Z","prId":"acme/shop#184","runId":"rev-184-a","eventType":"{kind}","data":{data}}}"#,
+            seq - 1
+        )
+    };
+    let phase = |seq, from: &str, to: &str| {
+        ev(seq, "review.phase_changed", &format!(r#"{{"from":"{from}","to":"{to}","event":"E","detail":null}}"#))
+    };
+    let events = [
+        ev(14, "tool.activity", r#"{"tool":"read_diff","summary":"src/booking.ts"}"#),
+        phase(13, "ANALYZE", "VERIFY"),
+        phase(12, "TRIAGE", "ANALYZE"),
+        phase(11, "COLLECT_CONTEXT", "TRIAGE"),
+    ];
+    let page = format!(r#"{{"type":"timeline.page","requestId":"{rid}","events":[{}]}}"#, events.join(","));
+    send(&mut m, &page);
+    m
+}
+
+#[test]
+fn a_phase_with_no_rows_gets_no_heading_in_the_timeline() {
+    let mut m = checkpoint_timeline();
+    let (frame, _) = common::render(&mut m, 120, 38);
+    let headings: Vec<&str> = frame
+        .lines()
+        .filter(|l| l.contains("────"))
+        .map(|l| l.trim_start_matches(['▌', ' ']).split(' ').next().unwrap())
+        .collect();
+    assert_eq!(headings, ["VERIFY"], "{frame}");
+}
+
+#[test]
+fn v_cycles_the_kinds_that_are_rows_and_never_phase_changes() {
+    let mut m = checkpoint_timeline();
+    let kinds: Vec<&str> = (0..9)
+        .map(|_| {
+            press(&mut m, KeyCode::Char('v'));
+            m.timeline.as_ref().unwrap().category.map_or("all", |c| c.label())
+        })
+        .collect();
+    assert_eq!(kinds, ["tool", "finding", "run", "pr", "account", "publication", "other", "all", "tool"]);
+}
+
+#[test]
+fn the_timeline_counts_the_events_it_shows_and_a_filter_counts_against_them() {
+    let mut m = checkpoint_timeline();
+    let count = |m: &mut Model| {
+        let (frame, _) = common::render(m, 120, 38);
+        frame.lines().find_map(|l| l.trim().split_once(", oldest first")).unwrap().0.to_string()
+    };
+    assert_eq!(count(&mut m), "1 event", "no filter: the tool call; VERIFY is a heading");
+    for _ in 0..3 {
+        press(&mut m, KeyCode::Char('k'));
+        assert_eq!(m.timeline.as_ref().unwrap().selected, Some(14), "the cursor never lands on the heading");
+    }
+    press(&mut m, KeyCode::Char('v'));
+    assert_eq!(count(&mut m), "1 of 1 event", "tool calls");
+    press(&mut m, KeyCode::Char('P'));
+    assert_eq!(count(&mut m), "0 of 1 event", "tool calls in COLLECT_CONTEXT");
+}
+
+#[test]
+fn a_finished_run_with_no_findings_says_no_findings_and_only_a_running_one_says_yet() {
+    let mut m = review_184();
+    let pr = PrId::new("acme/shop#184");
+    m.domain.findings.retain(|_, f| f.pr_id != pr);
+    let run = m.domain.latest_run(&pr).unwrap().id.clone();
+    let says = |m: &mut Model, status: RunStatus| {
+        m.domain.runs.get_mut(&run).unwrap().status = status;
+        let (frame, _) = common::render(m, 120, 38);
+        let at = frame.find("No findings").unwrap();
+        frame[at..].split("   ").next().unwrap().trim().to_string()
+    };
+    assert_eq!(says(&mut m, RunStatus::Failed), "No findings", "cancelled or failed: nothing more will come");
+    assert_eq!(says(&mut m, RunStatus::Completed), "No findings");
+    assert_eq!(says(&mut m, RunStatus::Running), "No findings yet");
+}
+
+#[test]
+fn a_selected_row_that_a_live_phase_change_hides_hands_the_cursor_to_the_nearest_row() {
+    let mut m = review_184();
+    let fx = press(&mut m, KeyCode::Char('4'));
+    let [Effect::Send(ClientMessage::TimelineGet { request_id, .. })] = &fx[..] else { panic!("{fx:?}") };
+    let ev = |seq: u64, prev: u64, kind: &str, data: &str| {
+        format!(
+            r#"{{"type":"event","streamEpoch":"epoch-1","sequence":{seq},"prevSequence":{prev},"occurredAt":"2026-10-20T13:02:{:02}Z","prId":"acme/shop#184","runId":"rev-184-a","eventType":"{kind}","data":{data}}}"#,
+            seq % 60
+        )
+    };
+    let tool = |seq| ev(seq, seq - 1, "tool.activity", r#"{"tool":"read_diff","summary":"src/booking.ts"}"#);
+    let phase = |seq, prev, from: &str, to: &str| {
+        ev(seq, prev, "review.phase_changed", &format!(r#"{{"from":"{from}","to":"{to}","event":"E","detail":null}}"#))
+    };
+    let page = [
+        phase(14, 13, "VERIFY", "PREPARE_PUBLICATION"),
+        tool(13),
+        tool(12),
+        phase(11, 10, "ANALYZE", "VERIFY"),
+        tool(10),
+    ];
+    let page = format!(r#"{{"type":"timeline.page","requestId":"{request_id}","events":[{}]}}"#, page.join(","));
+    send(&mut m, &page);
+    send(&mut m, &phase(109, 108, "PREPARE_PUBLICATION", "AWAITING_APPROVAL"));
+    let selected = |m: &Model| m.timeline.as_ref().unwrap().selected;
+    assert_eq!(selected(&m), Some(13), "the newest row, nearest the hidden phase change");
+    let (frame, _) = common::render(&mut m, 120, 38);
+    assert_eq!(frame.lines().filter(|l| l.trim_start().starts_with('▌')).count(), 1, "{frame}");
+    press(&mut m, KeyCode::Char('k'));
+    assert_eq!(selected(&m), Some(12));
 }

@@ -7,6 +7,7 @@ export const REVIEW_STATES = [
   "ANALYZE",
   "VERIFY",
   "PREPARE_PUBLICATION",
+  "AWAITING_APPROVAL",
   "PUBLISH",
   "RECONCILE",
   "COMPLETED",
@@ -21,6 +22,9 @@ export const REVIEW_EVENTS = [
   "CANDIDATES_PERSISTED",
   "CANDIDATES_DISPOSED",
   "HEAD_VERIFIED",
+  "APPROVAL_REQUIRED",
+  "APPROVED",
+  "CANCELLED",
   "REVIEW_RECONCILED",
   "NO_PUBLICATION_RECORDED",
   "WRITE_UNCERTAIN",
@@ -35,12 +39,21 @@ export type ReviewEvent = (typeof REVIEW_EVENTS)[number];
 // Whether a write may have reached GitHub is the outbox's status, not the revision's: the store refuses PUBLISH's
 // NEWER_HEAD and PR_NOT_OPEN unless the outbox is still pending, and any TERMINAL_ERROR moves a `sending` outbox to
 // needs_reconciliation (§2 invariants 6 and 10). FAILED + REVIEW_RECONCILED is a later reconcile finding the review.
+// AWAITING_APPROVAL (publish_mode approval) holds the stored payload until a human approves; nothing is sent there, so
+// a new head or a cancel abandons the outbox.
 export const REVIEW_MACHINE: Table<ReviewState, ReviewEvent> = {
   COLLECT_CONTEXT: { CONTEXT_PERSISTED: "TRIAGE", NEWER_HEAD: "SUPERSEDED", PR_NOT_OPEN: "SUPERSEDED", TERMINAL_ERROR: "FAILED" },
   TRIAGE: { ROUTING_PERSISTED: "ANALYZE", NEWER_HEAD: "SUPERSEDED", PR_NOT_OPEN: "SUPERSEDED", TERMINAL_ERROR: "FAILED" },
   ANALYZE: { CANDIDATES_PERSISTED: "VERIFY", NEWER_HEAD: "SUPERSEDED", PR_NOT_OPEN: "SUPERSEDED", TERMINAL_ERROR: "FAILED" },
   VERIFY: { CANDIDATES_DISPOSED: "PREPARE_PUBLICATION", NEWER_HEAD: "SUPERSEDED", PR_NOT_OPEN: "SUPERSEDED", TERMINAL_ERROR: "FAILED" },
-  PREPARE_PUBLICATION: { HEAD_VERIFIED: "PUBLISH", NEWER_HEAD: "SUPERSEDED", PR_NOT_OPEN: "SUPERSEDED", TERMINAL_ERROR: "FAILED" },
+  PREPARE_PUBLICATION: {
+    HEAD_VERIFIED: "PUBLISH",
+    APPROVAL_REQUIRED: "AWAITING_APPROVAL",
+    NEWER_HEAD: "SUPERSEDED",
+    PR_NOT_OPEN: "SUPERSEDED",
+    TERMINAL_ERROR: "FAILED",
+  },
+  AWAITING_APPROVAL: { APPROVED: "PUBLISH", NEWER_HEAD: "SUPERSEDED", PR_NOT_OPEN: "SUPERSEDED", CANCELLED: "FAILED" },
   PUBLISH: {
     REVIEW_RECONCILED: "COMPLETED",
     NO_PUBLICATION_RECORDED: "COMPLETED",
@@ -58,6 +71,26 @@ export const REVIEW_MACHINE: Table<ReviewState, ReviewEvent> = {
 
 /** Terminal for automatic progress; FAILED can still be reopened by the audited MANUAL_RETRY override. */
 export const TERMINAL_REVIEW_STATES: readonly ReviewState[] = ["COMPLETED", "FAILED", "SUPERSEDED"];
+
+/** States with no durable task: terminal, or parked until a human approves. A revision here is still "unfinished" for supersession. */
+export const IDLE_REVIEW_STATES: readonly ReviewState[] = [...TERMINAL_REVIEW_STATES, "AWAITING_APPROVAL"];
+
+/** What the TUI shows about a revision's publication, derived from the revision and its outbox (protocol `review.publication_changed`). */
+export const PUBLICATION_STATUSES = ["awaiting_approval", "publishing", "published", "uncertain", "failed"] as const;
+export type PublicationStatus = (typeof PUBLICATION_STATUSES)[number];
+
+/**
+ * `null` when the outbox says nothing new: a retried run reopens its outbox to `pending` while it reviews again
+ * from COLLECT_CONTEXT, and that is not publishing.
+ */
+export function publicationStatus(state: ReviewState, outbox: OutboxStatus): PublicationStatus | null {
+  if (outbox === "published") return "published";
+  if (outbox === "failed") return "failed";
+  if (outbox === "needs_reconciliation") return "uncertain";
+  if (state === "AWAITING_APPROVAL") return "awaiting_approval";
+  if (state === "PUBLISH" || state === "RECONCILE") return "publishing";
+  return TERMINAL_REVIEW_STATES.includes(state) ? "failed" : null;
+}
 
 // §9.3 publication outbox. `sending` is committed before the POST, so a crash leaves proof that a write may have
 // happened; from there only reconciliation, never a second POST, decides. NOT_SENT is the one way back: GitHub provably

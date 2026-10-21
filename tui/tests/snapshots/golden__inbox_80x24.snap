@@ -2,7 +2,7 @@
 source: tests/golden.rs
 expression: text
 ---
-  pr-review · • reviewing #184 verify found: Finding f-1                ● live
+  pr-review · ▘ reviewing #184 verify found: Finding f-1                ● live
 
 
   PULL REQUESTS                                                              3
@@ -13,8 +13,8 @@ expression: text
 ▌ ○ #185 Fix cache eviction
 ▌   acme/shop · 5555555                                                   ○1 →0
 
-  • #184 Booking API
-    acme/shop · by octocat · verify                         ●─●─●─•─○─○ ▁ 0.2/s
+  ▘ #184 Booking API
+    acme/shop · by octocat · verify                         ●─●─●─▘─○─○ ▁ 0.2/s
 
 
 

@@ -1,12 +1,13 @@
 import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
-import { COORDINATOR_STATES, FINDING_STATES, REVIEW_STATES, type ReviewState } from "../domain/machines.ts";
+import { COORDINATOR_STATES, FINDING_STATES, PUBLICATION_STATUSES, publicationStatus, REVIEW_STATES, type ReviewState } from "../domain/machines.ts";
 import type { CandidateFinding } from "../domain/types.ts";
 import { ACCOUNT_KEY, chooseAccount, detectGh, type Env, type GhDetection, listAccounts } from "../github/accounts.ts";
-import { AppStore, type PullRow, type RevisionRow } from "../persistence/store.ts";
+import { AppStore, type OutboxRow, REOPENINGS, type PullRow, type RevisionRow, TRANSITIONS } from "../persistence/store.ts";
+import type { ReviewPayload } from "../publish/publisher.ts";
 import { sanitize } from "../protocol/sanitize.ts";
-import type { Account, Finding, FindingDetail, Pr, Run, SequencedEvent } from "../protocol/v1.ts";
+import type { Account, Finding, FindingDetail, Pr, PublicationChange, PublicationPreview, Run, SequencedEvent } from "../protocol/v1.ts";
 import { isMissingObject, offlineReadsSupported, PinnedRepo } from "../source/git.ts";
 import { type DiffPage, pageDiff, parseDiffFiles } from "./diff.ts";
 import { ControlError, type ControlSource, type DiffRequest, type Snapshot, type TimelinePage, type TimelineRequest } from "./source.ts";
@@ -78,8 +79,8 @@ export function excerpt(content: string, start: number, end: number): string | u
  * writes are account rows, through `writer`: the selection and a journal row whenever gh's accounts change.
  */
 export class AppDbSource implements ControlSource {
-  private readonly db: DatabaseSync;
-  private readonly writer: AppStore;
+  protected readonly db: DatabaseSync;
+  protected readonly writer: AppStore;
   private readonly dataDir: string;
   private readonly env: Env;
   private readonly streamEpoch: string;
@@ -87,20 +88,31 @@ export class AppDbSource implements ControlSource {
   /** File contents by repo, sha and path, least recently used first. Misses are not cached: a later sync may add the blob. */
   private readonly blobs = new Map<string, string>();
   private gh: { at: number; detection: GhDetection } | undefined;
+  readonly mode: "engine" | "read-only" = "read-only";
+  /** Why this daemon is read-only, for `welcome` and the CAPABILITY_DENIED message; engine sources have none. */
+  readonly readOnlyReason: string | undefined;
 
-  private constructor(dataDir: string, writer: AppStore, env: Env) {
+  protected constructor(dataDir: string, writer: AppStore, env: Env, readOnlyReason = "the daemon is read-only") {
     this.dataDir = dataDir;
     this.writer = writer;
     this.env = env;
+    this.readOnlyReason = readOnlyReason;
     this.db = new DatabaseSync(join(dataDir, "app.sqlite"), { readOnly: true });
     this.db.exec("PRAGMA busy_timeout = 5000");
     this.streamEpoch = (this.db.prepare("SELECT value FROM meta WHERE key = 'stream_epoch'").get() as { value: string }).value;
   }
 
-  /** Creates or migrates the app DB first, so the epoch exists before any review ran. `env` is where gh and GITHUB_TOKEN are looked up. */
-  static open(dataDir: string, env: Env = process.env): AppDbSource {
+  /**
+   * Creates or migrates the app DB first, so the epoch exists before any review ran. `env` is where gh and GITHUB_TOKEN
+   * are looked up; `readOnlyReason` is why this daemon could not host the engine.
+   */
+  static open(dataDir: string, env: Env = process.env, readOnlyReason?: string): AppDbSource {
     mkdirSync(dataDir, { recursive: true });
-    return new AppDbSource(dataDir, AppStore.open(join(dataDir, "app.sqlite")), env);
+    return new AppDbSource(dataDir, AppStore.open(join(dataDir, "app.sqlite")), env, readOnlyReason);
+  }
+
+  unavailable(command: string): string {
+    return `${command} is not available: ${this.readOnlyReason}`;
   }
 
   /** Re-run gh detection when the cached one is older than `maxAgeMs`; a change from what this data dir last saw is journaled. */
@@ -150,7 +162,7 @@ export class AppDbSource implements ControlSource {
       sequence: this.latestSequence(),
       prs: (this.db.prepare("SELECT * FROM pull_requests ORDER BY updated_at DESC, id").all() as PullRow[]).map((p) => this.pr(p)),
       runs: (this.db.prepare("SELECT * FROM review_revisions ORDER BY created_at, id").all() as RevisionRow[]).map((r) =>
-        this.run(r, r.state, r.completed_at, r.state === "FAILED" ? this.failureReason(r.id) : null),
+        this.run(r, r.state, r.completed_at, r.state === "FAILED" ? this.failureReason(r.id) : null, this.attempt(r.id, null)),
       ),
       findings: (this.db.prepare(FINDING_SELECT).all({ id: null, revision: null }) as FindingRow[]).map(toFinding),
       accounts: this.accounts(),
@@ -192,6 +204,12 @@ export class AppDbSource implements ControlSource {
       const history = this.db
         .prepare("SELECT revision_id, disposition, created_at FROM finding_observations WHERE finding_id = ? ORDER BY created_at")
         .all(findingId) as { revision_id: string; disposition: string; created_at: string }[];
+      // DETECTED leaves only for PUBLISHED (FINDING_MACHINE), so the finding's first status change is its publication.
+      const published = this.db
+        .prepare("SELECT revision_id, at AS created_at FROM audit_events WHERE event = 'FINDING_UPDATED' AND detail = ? ORDER BY seq LIMIT 1")
+        .get(findingId) as { revision_id: string; created_at: string } | undefined;
+      if (published) history.push({ ...published, disposition: "PUBLISHED" });
+      history.sort((a, b) => a.created_at.localeCompare(b.created_at));
       const finding: Omit<FindingDetail, "evidence"> = {
         ...toFinding(row),
         explanation: candidate.explanation,
@@ -252,13 +270,52 @@ export class AppDbSource implements ControlSource {
     return clean(pageDiff(this.diffCache.files, request));
   }
 
-  close(): void {
+  /** TUI_SPEC §5.5: exactly what the outbox will post, so the approval names what the user saw. */
+  async publication(runId: string): Promise<PublicationPreview> {
+    return this.read(() => {
+      const revision = this.db.prepare("SELECT * FROM review_revisions WHERE id = ?").get(runId) as RevisionRow | undefined;
+      const outbox = revision && this.outboxOf(runId);
+      if (!revision || !outbox) throw new ControlError("NOT_FOUND", `no stored publication for run ${runId}`);
+      const payload = JSON.parse(outbox.payload_json) as ReviewPayload;
+      // A reopened run reviewing again still holds its old payload, which waits for an approval it must re-earn.
+      const status = publicationStatus(revision.state, outbox.status) ?? "awaiting_approval";
+      const { reviewId, url } = this.publicationChange(revision, status);
+      return {
+        runId,
+        previewId: outbox.payload_hash,
+        headSha: payload.commit_id,
+        body: payload.body,
+        comments: payload.comments,
+        event: payload.event,
+        status,
+        ...(reviewId === undefined ? {} : { reviewId, url }),
+      };
+    });
+  }
+
+  close(): void | Promise<void> {
     this.db.close();
     this.writer.close();
   }
 
   private revision(id: string): RevisionRow {
     return this.db.prepare("SELECT * FROM review_revisions WHERE id = ?").get(id) as RevisionRow;
+  }
+
+  private outboxOf(revisionId: string): OutboxRow | undefined {
+    return this.db.prepare("SELECT * FROM publication_outbox WHERE revision_id = ? ORDER BY updated_at DESC LIMIT 1").get(revisionId) as OutboxRow | undefined;
+  }
+
+  /**
+   * `review.publication_changed` data: the journaled status, plus the review on a `published` row. The outbox gets its
+   * review id in the same write that makes it `published`, its final status, so that row is the first one it was true at.
+   */
+  private publicationChange(rev: RevisionRow, status: string): PublicationChange {
+    const known = (PUBLICATION_STATUSES as readonly string[]).includes(status) ? (status as PublicationChange["status"]) : "failed";
+    const reviewId = known === "published" ? this.outboxOf(rev.id)?.github_review_id : undefined;
+    if (!reviewId) return { runId: rev.id, status: known };
+    const pr = this.db.prepare("SELECT repo_full_name, number FROM pull_requests WHERE id = ?").get(rev.pr_id) as { repo_full_name: string; number: number };
+    return { runId: rev.id, status: known, reviewId, url: `https://github.com/${pr.repo_full_name}/pull/${pr.number}#pullrequestreview-${reviewId}` };
   }
 
   private pr(pull: PullRow, at?: RevisionRow): Pr {
@@ -269,7 +326,7 @@ export class AppDbSource implements ControlSource {
       id: pull.id,
       repository: pull.repo_full_name,
       number: pull.number,
-      title: latest ? (JSON.parse(latest.pr_json) as { title: string }).title : `${pull.repo_full_name}#${pull.number}`,
+      title: pull.title ?? (latest ? (JSON.parse(latest.pr_json) as { title: string }).title : `${pull.repo_full_name}#${pull.number}`),
       headSha: at?.head_sha ?? pull.latest_head_sha,
       baseSha: at?.base_sha ?? pull.latest_base_sha,
       lifecycle: (COORDINATOR_STATES as readonly string[]).includes(pull.status) ? (pull.status as Pr["lifecycle"]) : "ACTIVE",
@@ -277,7 +334,7 @@ export class AppDbSource implements ControlSource {
   }
 
   /** A run as of one journal row: everything but phase, completion and failure is fixed when the revision is created. */
-  private run(r: RevisionRow, phase: ReviewState, completedAt: string | null, failureReason: string | null): Run {
+  private run(r: RevisionRow, phase: ReviewState, completedAt: string | null, failureReason: string | null, attempt: number): Run {
     const status = phase === "COMPLETED" || phase === "FAILED" || phase === "SUPERSEDED" ? phase : "RUNNING";
     return {
       id: r.id,
@@ -290,11 +347,20 @@ export class AppDbSource implements ControlSource {
       startedAt: r.created_at,
       ...(status !== "RUNNING" && completedAt ? { completedAt } : {}),
       ...(failureReason ? { failureReason } : {}),
+      attempt,
     };
   }
 
+  /** The 1-based run attempt as of journal row `seq` (null: now), counted in reopenings like the engine's command keys. */
+  private attempt(revisionId: string, seq: number | null): number {
+    const n = this.db
+      .prepare(`SELECT count(*) AS n FROM audit_events WHERE revision_id = ? AND event IN (${REOPENINGS.map((e) => `'${e}'`).join(", ")}) AND (? IS NULL OR seq <= ?)`)
+      .get(revisionId, seq, seq) as { n: number };
+    return n.n + 1;
+  }
+
   private failureReason(revisionId: string): string | null {
-    const row = this.db.prepare("SELECT detail FROM audit_events WHERE revision_id = ? AND to_state = 'FAILED' ORDER BY seq DESC LIMIT 1").get(revisionId) as
+    const row = this.db.prepare(`SELECT detail FROM audit_events WHERE revision_id = ? AND to_state = 'FAILED' AND ${TRANSITIONS} ORDER BY seq DESC LIMIT 1`).get(revisionId) as
       | { detail: string | null }
       | undefined;
     return row?.detail ?? null;
@@ -319,16 +385,26 @@ export class AppDbSource implements ControlSource {
       }
       case "PR_UPDATED":
         return { ...head, eventType: "pr.updated", data: this.pr(this.db.prepare("SELECT * FROM pull_requests WHERE id = ?").get(rev.pr_id) as PullRow, rev) };
-      case "FINDING_OBSERVED":
-        return { ...ids, eventType: "finding.updated", data: findingAt(rev.id) };
+      case "FINDING_OBSERVED": {
+        // DETECTED leaves only for PUBLISHED, which a FINDING_UPDATED row records: before one, the finding was DETECTED.
+        // ponytail: a FINDING_UPDATED row still replays the current status; give it a status column once later
+        // observations (STILL_PRESENT and on) are journaled.
+        const changed = this.db
+          .prepare("SELECT 1 FROM audit_events WHERE event = 'FINDING_UPDATED' AND detail = ? AND seq <= ? LIMIT 1")
+          .get(row.detail, row.seq);
+        const finding = findingAt(rev.id);
+        return { ...ids, eventType: "finding.updated", data: changed ? finding : { ...finding, status: "DETECTED" } };
+      }
       case "FINDING_UPDATED":
         return { ...ids, eventType: "finding.updated", data: findingAt(null) };
+      case "PUBLICATION_CHANGED":
+        return { ...ids, eventType: "review.publication_changed", data: this.publicationChange(rev, row.detail ?? "") };
     }
     const { from_state: from, to_state: to, event } = row;
     if (!isPhase(from) || !isPhase(to)) return { ...ids, eventType: `journal.${event}`, data: { from, to, event, detail: row.detail } };
-    if (event === "REVISION_CREATED" || event === "MANUAL_RETRY") return { ...ids, eventType: "run.started", data: this.run(rev, to, null, null) };
+    if (event === "REVISION_CREATED" || event === "MANUAL_RETRY") return { ...ids, eventType: "run.started", data: this.run(rev, to, null, null, this.attempt(rev.id, row.seq)) };
     if (to === "COMPLETED" || to === "FAILED" || to === "SUPERSEDED") {
-      return { ...ids, eventType: TERMINAL_EVENT[to], data: this.run(rev, to, row.at, to === "FAILED" ? row.detail : null) };
+      return { ...ids, eventType: TERMINAL_EVENT[to], data: this.run(rev, to, row.at, to === "FAILED" ? row.detail : null, this.attempt(rev.id, row.seq)) };
     }
     return { ...ids, eventType: "review.phase_changed", data: { from, to, event, detail: row.detail } };
   }

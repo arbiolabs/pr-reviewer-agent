@@ -2,25 +2,25 @@
 source: tests/golden.rs
 expression: text
 ---
-  pr-review · • reviewing #184 verify found: Finding f-1                                                ✗ disconnected
+  pr-review · last known state, 0s old                                                                  ✗ disconnected
 
- ✗ disconnected: no message for 30s (heartbeat timeout) · retrying in 1.0s · showing last known state · writes disabled
+ ✗ disconnected · retry in 1s · last known state
 
   PULL REQUESTS                3    acme/shop  #184
                                     Booking API
   · #186 Bump deps                  by octocat · bbbbbbb → 4444444 · claude-opus-5-5 · run rev-184-
     shop 6666666     not reviewed
-                                     ● Collect ● Triage ● Analyze • Verify ○ Prepare ○ Publish          since 13:00:00
+                                    ● Collect ● Triage ● Analyze ▘ Verify ○ Prepare ○ Publish           since 13:00:00
   ○ #185 Fix cache eviction
     shop 5555555            ○1 →0   1 finding   ▲ 1 high                                          · none on GitHub yet
                                     ──────────────────────────────────────────────────────────────────────────────────
-▌ • #184 Booking API
-▌   shop      ●─●─●─•─○─○ ▁ 0.2/s   • Reviewing now                                  ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▄  0.2 calls/s
+▌ ▘ #184 Booking API
+▌   shop      ●─●─●─▘─○─○ ▁ 0.2/s   ▘ Reviewing now                                  ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▄  0.2 calls/s
 
                                     #184   ━━━━━━━━ ━━━━━━━━ ━━━━━━━━ ━━━━━━━━ ──────── ────────  verify     2 calls
 
                                         13:00:11  read_file   src/booking.ts:1-120
-                                      • 13:00:12  finding     ▲ HIGH Finding f-1
+                                      ▘ 13:00:12  finding     ▲ HIGH Finding f-1
 
                                     ┃ ▲ HIGH   correctness                                    detected · 82% confident
                                     ┃ Finding f-1
@@ -31,7 +31,7 @@ expression: text
                                     ┃   src/booking.ts  lines 40-43 @ 4444444
                                     ┃    40 │ if (slot.free && !slot.held) {
                                     ┃
-                                    ┃ Enter all 5 evidence, the fix and the diff    d diff at this line
+                                    ┃ Enter  5 evidence items · the fix · the diff    d diff at this line
 
 
 
@@ -39,4 +39,4 @@ expression: text
 
 
 
-   j/k finding  Enter read  w watch live  d diff  J/K scroll  h pull requests    1 inbox  2 review  3 diff  4 timeline
+   j/k finding  Enter read  d diff  h pull requests  ? help  q quit  1 inbox  2 review  3 diff  4 timeline  5 settings

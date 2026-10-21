@@ -104,6 +104,7 @@ it("streams a real review to a client attached from the start, with no gaps", as
       model: "faux/reviewer",
       startedAt: revision.created_at,
       completedAt: revision.completed_at,
+      attempt: 1,
     },
   ]);
   const [finding] = snapshot.findings;
@@ -191,9 +192,10 @@ it("maps failure, manual retry and supersession, and sanitizes repository text",
 
   const store = AppStore.open(join(dataDir, "app.sqlite"));
   cleanup.push(() => store.close());
-  const prId = store.upsertPull({ ...createFixture().pull, title: "ignored" });
+  // GitHub's title is what the PR reads as; the reviewed context's copy only stands in for rows that predate it.
+  const prId = store.upsertPull({ ...createFixture().pull, title: "\u001b[31mevil\u001b[0m\u009b2J title" });
   const rev = store.ensureRevision({ prId, baseSha: "b".repeat(40), headSha: "h".repeat(40), policyVersion: "1", reviewerVersion: "m1+faux/reviewer" });
-  store.saveSnapshot({ revisionId: rev.id, pr: { title: "\u001b[31mevil\u001b[0m\u009b2J title", body: "", fullName: "acme/shop", number: 1, cloneUrl: "" }, changedFiles: [], diff: "", limitations: [] });
+  store.saveSnapshot({ revisionId: rev.id, pr: { title: "an older title", body: "", fullName: "acme/shop", number: 1, cloneUrl: "" }, changedFiles: [], diff: "", limitations: [] });
   store.advance(rev.id, "COLLECT_CONTEXT", "CONTEXT_PERSISTED");
   store.appendActivity(rev.id, "search_code", "\u001b]52;c;ZXZpbA==\u0007token");
   store.advanceFromCurrent(rev.id, "TERMINAL_ERROR", "model \u001b[2Kunavailable");
@@ -210,12 +212,39 @@ it("maps failure, manual retry and supersession, and sanitizes repository text",
     "run.superseded SUPERSEDED SUPERSEDED",
   ]);
   await c.waitFor((m) => m.type === "event" && m.eventType === "heartbeat");
+  // Each run event carries the attempt it happened in; the retry opened the second.
+  expect(c.events().filter((e) => e.eventType.startsWith("run.")).map((e) => (e.data as { attempt?: number }).attempt)).toEqual([1, 1, 2, 2]);
 
   c.send({ type: "snapshot.get", requestId: "s2" });
   const snapshot = await c.waitFor<Extract<ServerMessage, { type: "snapshot" }>>((m) => m.type === "snapshot" && m.requestId === "s2");
   expect(snapshot.prs[0]!.title).toBe("evil title");
+  expect(snapshot.runs.map((r) => r.attempt)).toEqual([2]);
   c.send({ type: "resume", requestId: "r", streamEpoch: "other", afterSequence: 1 });
   expect(await c.waitFor((m) => m.type === "resync.required")).toMatchObject({ requestId: "r" });
+});
+
+it("keeps a failed run's reason after its publication is reconciled", async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "ctl-reason-"));
+  const store = AppStore.open(join(dataDir, "app.sqlite"));
+  cleanup.push(() => store.close());
+  const prId = store.upsertPull(createFixture().pull);
+  const rev = store.ensureRevision({ prId, baseSha: "b".repeat(40), headSha: "h".repeat(40), policyVersion: "1", reviewerVersion: "m1+faux/reviewer" });
+  for (const event of ["CONTEXT_PERSISTED", "ROUTING_PERSISTED", "CANDIDATES_PERSISTED", "CANDIDATES_DISPOSED", "HEAD_VERIFIED"] as const) store.advanceFromCurrent(rev.id, event);
+  const outbox = store.ensureOutbox({ revisionId: rev.id, idempotencyKey: `${rev.id}:1`, payloadHash: "p", payloadJson: "{}" });
+  store.advanceOutbox(outbox.id, "SEND");
+  store.advanceFromCurrent(rev.id, "TERMINAL_ERROR", "GitHub timed out");
+  // Reconciliation finds nothing on GitHub: the outbox returns to pending, and the journal notes the publication failed.
+  store.advanceOutbox(outbox.id, "ABSENT");
+  expect(store.db.prepare("SELECT event, detail FROM audit_events WHERE revision_id = ? AND to_state = 'FAILED' ORDER BY seq").all(rev.id)).toEqual([
+    { event: "TERMINAL_ERROR", detail: "GitHub timed out" },
+    { event: "PUBLICATION_CHANGED", detail: "failed" },
+  ]);
+
+  const server = await daemon(dataDir);
+  const c = await attach(server.path);
+  c.send({ type: "snapshot.get", requestId: "s" });
+  const snapshot = await c.waitFor<Extract<ServerMessage, { type: "snapshot" }>>((m) => m.type === "snapshot");
+  expect(snapshot.runs.map((r) => [r.status, r.failureReason])).toEqual([["FAILED", "GitHub timed out"]]);
 });
 
 it("pages a diff by nextCursor, caps it per page, and gives binary files metadata only", async () => {

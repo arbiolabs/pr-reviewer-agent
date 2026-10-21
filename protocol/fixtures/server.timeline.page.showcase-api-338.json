@@ -1,0 +1,210 @@
+{
+  "type": "timeline.page",
+  "requestId": "req-tl",
+  "events": [
+    {
+      "type": "event",
+      "streamEpoch": "epoch-1",
+      "sequence": 39,
+      "prevSequence": 38,
+      "occurredAt": "2026-10-20T14:28:40Z",
+      "prId": "93da1c66980faac69f5b91a8afad6c2e",
+      "runId": "1c71d3ed584967adfb3a51cee84ec16a",
+      "eventType": "review.phase_changed",
+      "data": {
+        "from": "COLLECT_CONTEXT",
+        "to": "TRIAGE",
+        "event": "CONTEXT_PERSISTED",
+        "detail": null
+      }
+    },
+    {
+      "type": "event",
+      "streamEpoch": "epoch-1",
+      "sequence": 38,
+      "prevSequence": 37,
+      "occurredAt": "2026-10-20T14:28:25Z",
+      "prId": "93da1c66980faac69f5b91a8afad6c2e",
+      "runId": "1c71d3ed584967adfb3a51cee84ec16a",
+      "eventType": "run.started",
+      "data": {
+        "id": "1c71d3ed584967adfb3a51cee84ec16a",
+        "prId": "93da1c66980faac69f5b91a8afad6c2e",
+        "baseSha": "3d66d5d9375681285618d472c37645d41bd7d10b",
+        "headSha": "c2711bd4932dfe7d8c2f99dfed5215eeccdbcff9",
+        "phase": "COLLECT_CONTEXT",
+        "status": "RUNNING",
+        "model": "claude-opus-5-5",
+        "startedAt": "2026-10-20T14:28:25Z"
+      }
+    },
+    {
+      "type": "event",
+      "streamEpoch": "epoch-1",
+      "sequence": 37,
+      "prevSequence": 36,
+      "occurredAt": "2026-10-20T14:27:40Z",
+      "prId": "93da1c66980faac69f5b91a8afad6c2e",
+      "runId": "554ffb5bdeae41d386b08a9038dd6058",
+      "eventType": "run.superseded",
+      "data": {
+        "id": "554ffb5bdeae41d386b08a9038dd6058",
+        "prId": "93da1c66980faac69f5b91a8afad6c2e",
+        "baseSha": "3d66d5d9375681285618d472c37645d41bd7d10b",
+        "headSha": "3b9a99ce32db947502a0518d4169f63ff2d76109",
+        "phase": "SUPERSEDED",
+        "status": "SUPERSEDED",
+        "model": "claude-opus-5-5",
+        "startedAt": "2026-10-20T14:04:40Z",
+        "completedAt": "2026-10-20T14:27:40Z"
+      }
+    },
+    {
+      "type": "event",
+      "streamEpoch": "epoch-1",
+      "sequence": 36,
+      "prevSequence": 35,
+      "occurredAt": "2026-10-20T14:27:40Z",
+      "prId": "93da1c66980faac69f5b91a8afad6c2e",
+      "runId": "554ffb5bdeae41d386b08a9038dd6058",
+      "eventType": "review.phase_changed",
+      "data": {
+        "from": "VERIFY",
+        "to": "SUPERSEDED",
+        "event": "NEWER_HEAD",
+        "detail": null
+      }
+    },
+    {
+      "type": "event",
+      "streamEpoch": "epoch-1",
+      "sequence": 35,
+      "prevSequence": 34,
+      "occurredAt": "2026-10-20T14:27:38Z",
+      "prId": "93da1c66980faac69f5b91a8afad6c2e",
+      "eventType": "pr.updated",
+      "data": {
+        "id": "93da1c66980faac69f5b91a8afad6c2e",
+        "repository": "acme/api",
+        "number": 338,
+        "title": "Drain webhook workers on SIGTERM",
+        "author": "jdoyle",
+        "headSha": "c2711bd4932dfe7d8c2f99dfed5215eeccdbcff9",
+        "baseSha": "3d66d5d9375681285618d472c37645d41bd7d10b",
+        "lifecycle": "ACTIVE"
+      }
+    },
+    {
+      "type": "event",
+      "streamEpoch": "epoch-1",
+      "sequence": 29,
+      "prevSequence": 28,
+      "occurredAt": "2026-10-20T14:08:30Z",
+      "prId": "93da1c66980faac69f5b91a8afad6c2e",
+      "runId": "554ffb5bdeae41d386b08a9038dd6058",
+      "eventType": "finding.updated",
+      "data": {
+        "id": "a740a91f716286fea0e5881556791333",
+        "prId": "93da1c66980faac69f5b91a8afad6c2e",
+        "runId": "554ffb5bdeae41d386b08a9038dd6058",
+        "fingerprint": "b0080bbfb7456df3e727436d355ff33a",
+        "status": "DETECTED",
+        "evidenceCount": 2,
+        "stale": false,
+        "title": "Run returns before in-flight deliveries finish",
+        "category": "concurrency",
+        "severity": "high",
+        "confidence": 0.86,
+        "file": "internal/webhooks/dispatcher.go",
+        "line": 68
+      }
+    },
+    {
+      "type": "event",
+      "streamEpoch": "epoch-1",
+      "sequence": 28,
+      "prevSequence": 27,
+      "occurredAt": "2026-10-20T14:08:20Z",
+      "prId": "93da1c66980faac69f5b91a8afad6c2e",
+      "runId": "554ffb5bdeae41d386b08a9038dd6058",
+      "eventType": "review.phase_changed",
+      "data": {
+        "from": "ANALYZE",
+        "to": "VERIFY",
+        "event": "CANDIDATES_PERSISTED",
+        "detail": null
+      }
+    },
+    {
+      "type": "event",
+      "streamEpoch": "epoch-1",
+      "sequence": 27,
+      "prevSequence": 26,
+      "occurredAt": "2026-10-20T14:05:50Z",
+      "prId": "93da1c66980faac69f5b91a8afad6c2e",
+      "runId": "554ffb5bdeae41d386b08a9038dd6058",
+      "eventType": "review.phase_changed",
+      "data": {
+        "from": "TRIAGE",
+        "to": "ANALYZE",
+        "event": "ROUTING_PERSISTED",
+        "detail": null
+      }
+    },
+    {
+      "type": "event",
+      "streamEpoch": "epoch-1",
+      "sequence": 26,
+      "prevSequence": 25,
+      "occurredAt": "2026-10-20T14:05:00Z",
+      "prId": "93da1c66980faac69f5b91a8afad6c2e",
+      "runId": "554ffb5bdeae41d386b08a9038dd6058",
+      "eventType": "review.phase_changed",
+      "data": {
+        "from": "COLLECT_CONTEXT",
+        "to": "TRIAGE",
+        "event": "CONTEXT_PERSISTED",
+        "detail": null
+      }
+    },
+    {
+      "type": "event",
+      "streamEpoch": "epoch-1",
+      "sequence": 25,
+      "prevSequence": 24,
+      "occurredAt": "2026-10-20T14:04:40Z",
+      "prId": "93da1c66980faac69f5b91a8afad6c2e",
+      "runId": "554ffb5bdeae41d386b08a9038dd6058",
+      "eventType": "run.started",
+      "data": {
+        "id": "554ffb5bdeae41d386b08a9038dd6058",
+        "prId": "93da1c66980faac69f5b91a8afad6c2e",
+        "baseSha": "3d66d5d9375681285618d472c37645d41bd7d10b",
+        "headSha": "3b9a99ce32db947502a0518d4169f63ff2d76109",
+        "phase": "COLLECT_CONTEXT",
+        "status": "RUNNING",
+        "model": "claude-opus-5-5",
+        "startedAt": "2026-10-20T14:04:40Z"
+      }
+    },
+    {
+      "type": "event",
+      "streamEpoch": "epoch-1",
+      "sequence": 24,
+      "prevSequence": 23,
+      "occurredAt": "2026-10-20T14:04:20Z",
+      "prId": "93da1c66980faac69f5b91a8afad6c2e",
+      "eventType": "pr.updated",
+      "data": {
+        "id": "93da1c66980faac69f5b91a8afad6c2e",
+        "repository": "acme/api",
+        "number": 338,
+        "title": "Drain webhook workers on SIGTERM",
+        "author": "jdoyle",
+        "headSha": "3b9a99ce32db947502a0518d4169f63ff2d76109",
+        "baseSha": "3d66d5d9375681285618d472c37645d41bd7d10b",
+        "lifecycle": "ACTIVE"
+      }
+    }
+  ]
+}

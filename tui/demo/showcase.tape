@@ -1,7 +1,8 @@
 # Records tui/demo/showcase.gif from the showcase playback. From the repository root:
 #   cargo build --release --manifest-path tui/Cargo.toml && vhs tui/demo/showcase.tape
 # The playback clock starts when the client launches, so the sleeps below line up with its events:
-# #1291's review finds two issues at about 14 s and 15 s, and completes at about 18 s.
+# #1291's review finds two issues at about 14 s and 15 s, and parks for approval at about 18 s. Its publication
+# plays once the client sends review.publish. #338 runs until about 80 s unless cancelled.
 
 Output tui/demo/showcase.gif
 
@@ -37,10 +38,45 @@ Sleep 3.5s
 Escape
 Sleep 1.5s
 
-# w watches the running review on #1291 until it completes with two findings.
+# w watches the running review on #1291 until it parks, waiting for approval.
 Type "w"
 Sleep 10s
 
 # t opens #1291's timeline, oldest first under phase headings.
 Type "t"
 Sleep 6s
+
+# Esc goes back to #1291's review; p opens the exact review the approval would post, styled the way GitHub shows it.
+Escape
+Sleep 1.5s
+Type "p"
+Sleep 3.5s
+
+# m shows the same payload as the raw markdown that will be posted, and back.
+Type "m"
+Sleep 2.5s
+Type "m"
+Sleep 1s
+
+# y approves this preview: publishing, then published with the review on GitHub.
+Type "y"
+Sleep 4.5s
+
+# An action: s on #1296, which has never been reviewed, asks first, and y starts its first review, which runs
+# through every phase to done. s on a head already reviewed, like #1287's, is refused as the daemon refuses it.
+Escape
+Sleep 1s
+Type "hk"
+Sleep 1.5s
+Type "s"
+Sleep 2.5s
+Type "y"
+Sleep 16s
+
+# c on #338 asks to cancel its running review, and y cancels it.
+Type "k"
+Sleep 1s
+Type "c"
+Sleep 2.5s
+Type "y"
+Sleep 4s

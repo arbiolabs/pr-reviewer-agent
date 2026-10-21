@@ -4,7 +4,7 @@ use std::process::ExitCode;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use crossterm::event::{self, Event as TermEvent, MouseEventKind};
+use crossterm::event;
 use pr_review_tui::app::dispatch;
 use pr_review_tui::config::{self, Source};
 use pr_review_tui::model::Model;
@@ -22,9 +22,9 @@ const TICK: Duration = Duration::from_millis(125);
 
 fn main() -> ExitCode {
     let args = match config::parse_args(std::env::args().skip(1)) {
-        Ok(Some(a)) => a,
-        Ok(None) => {
-            println!("{}", config::USAGE);
+        Ok(config::Cli::Run(a)) => a,
+        Ok(config::Cli::Print(text)) => {
+            println!("{text}");
             return ExitCode::SUCCESS;
         }
         Err(e) => {
@@ -33,7 +33,7 @@ fn main() -> ExitCode {
         }
     };
     let no_color = std::env::var_os("NO_COLOR").is_some_and(|v| !v.is_empty());
-    let settings = match config::resolve(args, no_color) {
+    let settings = match config::resolve(args, no_color, pr_review_tui::terminal::detect_palette) {
         Ok(s) => s,
         Err(e) => {
             eprintln!("pr-review-tui: {e}");
@@ -106,18 +106,15 @@ async fn run(settings: config::Settings, script: Option<playback::Script>) -> st
     let size = guard.terminal.size()?;
     model.size = (size.width, size.height);
     let input = msg_tx.clone();
+    for k in pr_review_tui::terminal::typed_before_start() {
+        let _ = msg_tx.try_send(Msg::Key(k));
+    }
+    let opened = Instant::now();
     std::thread::spawn(move || {
+        let mut late = pr_review_tui::terminal::LateReply::after_query();
         loop {
-            let msg = match event::read() {
-                Ok(TermEvent::Key(k)) => Msg::Key(k),
-                // Motion events would wake the app on every cell the pointer crosses.
-                Ok(TermEvent::Mouse(e)) if !matches!(e.kind, MouseEventKind::Moved | MouseEventKind::Drag(_)) => {
-                    Msg::Mouse(e)
-                }
-                Ok(TermEvent::Resize(w, h)) => Msg::Resize(w, h),
-                Ok(_) => continue,
-                Err(_) => return,
-            };
+            let Ok(ev) = event::read() else { return };
+            let Some(msg) = pr_review_tui::terminal::input(ev, &mut late, opened.elapsed()) else { continue };
             if input.blocking_send(msg).is_err() {
                 return;
             }

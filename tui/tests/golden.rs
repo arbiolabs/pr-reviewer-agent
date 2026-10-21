@@ -3,122 +3,17 @@
 mod common;
 
 use common::*;
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use pr_review_tui::model::{Look, Model, Screen};
+use crossterm::event::{KeyCode, KeyModifiers, MouseEvent, MouseEventKind};
+use pr_review_tui::model::Look;
 use pr_review_tui::net::NetCmd;
-use pr_review_tui::playback;
-use pr_review_tui::protocol::{Event, PrId, SequencedEvent, ServerMessage};
-use pr_review_tui::text::width;
-use pr_review_tui::update::{Effect, Msg, NetEvent, update};
+use pr_review_tui::protocol::ServerMessage;
+use pr_review_tui::update::{Msg, NetEvent, update};
 use pr_review_tui::view::view;
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::style::Color;
 
-/// A model driven only through messages, answering its requests the way the playback driver does.
-struct Sim {
-    m: Model,
-    played: Vec<SequencedEvent>,
-}
-
-impl Sim {
-    fn new(look: Look) -> Sim {
-        let mut s = Sim {
-            m: Model::new("unix:/run/user/501/pr-review/reviewer.sock", look, Screen::Inbox, None),
-            played: vec![],
-        };
-        s.apply(Msg::Net(NetEvent::Opened));
-        s
-    }
-
-    fn apply(&mut self, msg: Msg) {
-        let fx = update(&mut self.m, msg);
-        for e in fx {
-            if let Effect::Send(req) = e {
-                let dir = protocol_dir().join("fixtures");
-                if let Some(reply) = playback::answer(&dir, &self.played, &req) {
-                    self.apply(Msg::Net(NetEvent::Message(reply)));
-                }
-            }
-        }
-    }
-
-    fn server(&mut self, msg: ServerMessage) {
-        if let ServerMessage::Event(Event::Sequenced(e)) = &msg {
-            self.played.push(e.clone());
-        }
-        self.apply(Msg::Net(NetEvent::Message(msg)));
-    }
-
-    fn play(mut self, name: &str, lines: usize) -> Sim {
-        for msg in script(name).into_iter().take(lines) {
-            self.server(msg);
-        }
-        self
-    }
-
-    fn key(mut self, code: KeyCode) -> Sim {
-        self.apply(Msg::Key(KeyEvent::new(code, KeyModifiers::NONE)));
-        self
-    }
-
-    /// A key whose requests stay unanswered, so the frame shows what the client does while it waits.
-    fn key_unanswered(mut self, code: KeyCode) -> Sim {
-        update(&mut self.m, Msg::Key(KeyEvent::new(code, KeyModifiers::NONE)));
-        self
-    }
-
-    fn select(mut self, pr: &str) -> Sim {
-        self = self.key(KeyCode::Char('g'));
-        for _ in 0..10 {
-            if self.m.ui.selected_pr == Some(PrId::new(pr)) {
-                return self;
-            }
-            self = self.key(KeyCode::Char('j'));
-        }
-        panic!("{pr} not reachable");
-    }
-}
-
-fn render(m: &mut Model, w: u16, h: u16) -> (String, Terminal<TestBackend>) {
-    update(m, Msg::Resize(w, h));
-    let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
-    term.draw(|f| view(m, f)).unwrap();
-    let buf = term.backend().buffer().clone();
-    let mut out = String::new();
-    for y in 0..h {
-        let mut line = String::new();
-        let mut skip = 0;
-        for x in 0..w {
-            let sym = buf[(x, y)].symbol();
-            if skip > 0 {
-                skip -= 1;
-                continue;
-            }
-            skip = width(sym).saturating_sub(1);
-            line.push_str(sym);
-        }
-        out.push_str(line.trim_end());
-        out.push('\n');
-    }
-    (out, term)
-}
-
 const SIZES: [(u16, u16); 4] = [(60, 16), (80, 24), (120, 38), (160, 45)];
-
-fn mid_review(look: Look) -> Sim {
-    // welcome, snapshot, tool activity, heartbeat, finding f-1: rev-184-a is in VERIFY.
-    Sim::new(look).play("normal", 5)
-}
-
-fn states(look: Look) -> Vec<(&'static str, Sim)> {
-    vec![
-        ("inbox", mid_review(look)),
-        ("review", mid_review(look).select("acme/shop#184").key(KeyCode::Enter)),
-        ("diff", mid_review(look).select("acme/shop#184").key(KeyCode::Enter).key(KeyCode::Char('d'))),
-        ("timeline", mid_review(look).select("acme/shop#184").key(KeyCode::Enter).key(KeyCode::Char('4'))),
-    ]
-}
 
 fn colorless(term: &Terminal<TestBackend>) -> bool {
     term.backend().buffer().content.iter().all(|c| c.fg == Color::Reset && c.bg == Color::Reset)
@@ -179,7 +74,7 @@ fn accounts_view() {
         assert!(ascii_text.is_ascii(), "accounts {w}x{h} --ascii frame has non-ASCII glyphs");
         let (mono_text, term) = render(&mut n.m, w, h);
         // Settings names the display mode; nothing else may change.
-        let mono_text = mono_text.replace("monochrome (NO_COLOR or theme = \"mono\")", "color");
+        let mono_text = mono_text.replace(&format!("{:<22}off", "color"), &format!("{:<22}on", "color"));
         assert_eq!(mono_text, text, "accounts {w}x{h}: NO_COLOR changed the text");
         assert!(colorless(&term));
     }
@@ -380,9 +275,14 @@ fn a_connection_error_on_a_long_path_keeps_its_reason_in_view() {
         let (settings, _) = render(&mut s.m, w, h);
         insta::assert_snapshot!(format!("state_long_path_error_settings_{w}x{h}"), settings);
         let shows = |frame: &str, prefix: &str| frame.lines().any(|l| l.contains(prefix));
-        assert!(shows(&inbox, "disconnected: socket directory does not exist: /pri"), "banner, {w} cols:\n{inbox}");
-        assert!(shows(&inbox, "unavailable: socket directory does not exist:"), "inbox, {w} cols:\n{inbox}");
-        assert!(inbox.matches("/private/tmp/claude-501/").count() >= 2, "inbox names the path, {w} cols:\n{inbox}");
+        // The banner stays short; the column carries the reason and the path.
+        assert!(shows(&inbox, "✗ disconnected · retry in 2s"), "banner, {w} cols:\n{inbox}");
+        assert!(shows(&inbox, "No daemon at"), "the copy leads with what to do, {w} cols:\n{inbox}");
+        assert!(inbox.contains("Start one with `pr-review daemon`."), "{w} cols:\n{inbox}");
+        let detail = inbox.lines().position(|l| l.contains("socket directory does not exist:"));
+        let lead = inbox.lines().position(|l| l.contains("No daemon at"));
+        assert!(detail > lead, "the OS error is the detail line under it, {w} cols:\n{inbox}");
+        assert!(inbox.contains("/private/tmp/claude-501/"), "inbox names the path, {w} cols:\n{inbox}");
         assert!(
             shows(&settings, "disconnected: socket directory does not exist: /"),
             "settings, {w} cols:\n{settings}"
@@ -463,7 +363,7 @@ fn reversed(term: &Terminal<TestBackend>) -> Vec<String> {
 }
 
 #[test]
-fn without_color_the_diff_cursor_and_a_selected_phase_heading_show_in_reverse_video() {
+fn without_color_the_diff_and_timeline_cursors_show_in_reverse_video() {
     let mono = Look { color: false, ..Look::default() };
     let (_, mut diff) = states(mono).remove(2);
     let (_, term) = render(&mut diff.m, 120, 38);
@@ -472,23 +372,12 @@ fn without_color_the_diff_cursor_and_a_selected_phase_heading_show_in_reverse_vi
         ["▌ ▲ booking.ts", "▌   src                     +2 -1", "▲        42 +     slot.held = true;"]
     );
 
-    let mut s = Sim::new(mono).play("showcase", 12).key(KeyCode::Char('w')).key(KeyCode::Char('t'));
-    let phase = |s: &Sim| {
-        let t = s.m.timeline.as_ref().unwrap();
-        let e = t.events.iter().find(|e| Some(e.sequence.get()) == t.selected).unwrap();
-        matches!(e.body, pr_review_tui::protocol::EventBody::PhaseChanged(_))
-    };
-    for _ in 0..20 {
-        if phase(&s) {
-            break;
-        }
-        s = s.key(KeyCode::Char('k'));
-    }
-    assert!(phase(&s), "a phase change is selected");
+    let mut s =
+        Sim::new(mono).play("showcase", 12).key(KeyCode::Char('w')).key(KeyCode::Char('t')).key(KeyCode::Char('k'));
     let (frame, term) = render(&mut s.m, 120, 38);
     let rows = reversed(&term);
     assert_eq!(rows.len(), 1, "{rows:?}\n{frame}");
-    assert!(rows[0].ends_with(|c: char| c.is_ascii_digit()) && rows[0].contains("───"), "{rows:?}");
+    assert!(rows[0].starts_with('▌') && !rows[0].contains("───"), "the cursor is on a row, never a heading: {rows:?}");
 }
 
 /// Every view, waiting on its replies and answered, at each step of the showcase playback: under `--ascii` no cell
@@ -541,18 +430,93 @@ fn the_pr_title_stays_in_view_while_the_live_log_pushes_the_open_card_down() {
     }
 }
 
-#[test]
-fn the_help_page_shows_every_key_at_80x24() {
+/// Every help frame from the top to the end of the page, scrolling with j.
+fn help_pages(w: u16, h: u16) -> Vec<String> {
     let mut s = mid_review(Look::default()).key(KeyCode::Char('?'));
-    let (frame, _) = render(&mut s.m, 80, 24);
+    let mut pages = vec![render(&mut s.m, w, h).0];
+    for _ in 0..200 {
+        s = s.key(KeyCode::Char('j'));
+        let (frame, _) = render(&mut s.m, w, h);
+        if Some(&frame) == pages.last() {
+            break;
+        }
+        pages.push(frame);
+    }
+    pages
+}
+
+#[test]
+fn below_100_columns_the_help_page_is_one_column_of_whole_descriptions() {
+    let rows = pr_review_tui::keymap::help_rows();
+    for (w, h) in [(80, 24), (60, 16)] {
+        let seen = help_pages(w, h).concat();
+        for (_, keys, what, _) in rows.iter().filter(|r| r.0 != pr_review_tui::keymap::Context::ConfirmModal) {
+            // One entry per line, its keys, a gap, and the description in full.
+            let whole = |l: &str| {
+                let l = l.trim();
+                l.strip_prefix(keys.as_str())
+                    .and_then(|rest| rest.strip_suffix(" (not offered)").unwrap_or(rest).strip_suffix(what))
+                    .is_some_and(|gap| !gap.is_empty() && gap.trim().is_empty())
+            };
+            assert!(seen.lines().any(whole), "{w}x{h}: no whole line for {keys} {what}:\n{seen}");
+        }
+    }
+}
+
+#[test]
+fn scrolling_the_help_page_to_its_end_shows_every_section_at_every_size() {
     use pr_review_tui::keymap::Context as C;
     let rows = pr_review_tui::keymap::help_rows();
-    // The confirmation panel names its own y and n.
-    for (_, keys, what) in rows.iter().filter(|r| matches!(r.0, C::Global | C::Review | C::Diff | C::Timeline)) {
-        // A long description may end in an ellipsis; its start must show beside its keys.
-        let row = format!("{keys:<11}{}", what.chars().take(12).collect::<String>());
-        assert!(frame.contains(&row), "{row} is missing:\n{frame}");
+    for (w, h) in [(60, 16), (80, 24), (120, 38)] {
+        let mut s = mid_review(Look::default()).key(KeyCode::Char('?'));
+        let (first, _) = render(&mut s.m, w, h);
+        let mut seen = first.clone();
+        let mut last = first.clone();
+        for _ in 0..200 {
+            s = s.key(KeyCode::Char('j'));
+            let (frame, _) = render(&mut s.m, w, h);
+            if frame == last {
+                break;
+            }
+            seen.push_str(&frame);
+            last = frame;
+        }
+        for (_, keys, what, _) in rows.iter().filter(|r| matches!(r.0, C::Global | C::Review | C::Diff | C::Timeline)) {
+            let row = format!("{keys:<11}{}", what.chars().take(5).collect::<String>());
+            assert!(seen.contains(&row), "{w}x{h}: {row} never shows:\n{seen}");
+        }
+        for text in [
+            "Glyphs",
+            "low",
+            "failed",
+            "findings published on GitHub",
+            "Mouse",
+            "line or event to select it.",
+            "Click a view in the footer.",
+            "The wheel scrolls the page under it.",
+            "Keys marked (not offered) are off on this daemon.",
+        ] {
+            assert!(last.contains(text), "{w}x{h}: the end of the page lacks {text}:\n{last}");
+        }
+        let overflows = first != last;
+        assert_eq!(first.contains("more below, j scrolls"), overflows, "{w}x{h}: the cue shows only on overflow");
+        assert!(!last.contains("more below"), "{w}x{h}: no cue at the end:\n{last}");
+        let mut k = s.key(KeyCode::Char('k'));
+        assert_eq!(render(&mut k.m, w, h).0 != last, overflows, "{w}x{h}: one k scrolls back from the end");
+        let mut paged = mid_review(Look::default()).key(KeyCode::Char('?'));
+        render(&mut paged.m, w, h);
+        for _ in 0..20 {
+            paged = paged.key(KeyCode::PageDown);
+        }
+        assert_eq!(render(&mut paged.m, w, h).0, last, "{w}x{h}: PgDn reaches the same end");
     }
+    let mut s = mid_review(Look::default()).key(KeyCode::Char('?'));
+    let (top, _) = render(&mut s.m, 80, 24);
+    let wheel = |kind| MouseEvent { kind, column: 10, row: 10, modifiers: KeyModifiers::NONE };
+    s.apply(Msg::Mouse(wheel(MouseEventKind::ScrollDown)));
+    assert_ne!(render(&mut s.m, 80, 24).0, top, "the wheel scrolls the help page");
+    s.apply(Msg::Mouse(wheel(MouseEventKind::ScrollUp)));
+    assert_eq!(render(&mut s.m, 80, 24).0, top, "and back");
 }
 
 #[test]
@@ -580,4 +544,62 @@ fn show_activity_false_hides_the_live_log_and_the_rates() {
     let off = frame(Look { show_activity: false, ..Look::default() });
     assert!(!off.contains("Reviewing now") && !off.contains("/s  "), "{off}");
     assert!(off.contains("Sign-in: send users back"), "the document still shows:\n{off}");
+}
+
+/// Rows at 60x16 that run into a right edge (the screen's, or the reading column's two columns in) and end on a
+/// token that the same state, drawn with room to spare, never shows whole: text cut instead of fitted with `…`.
+fn cut_rows(frame: &str, whole: &std::collections::BTreeSet<String>) -> Vec<String> {
+    frame
+        .lines()
+        .filter(|l| {
+            let n = l.chars().count();
+            let last = l.split_whitespace().last().unwrap_or("");
+            (n == 60 || n == 58) && last.chars().last().is_some_and(|c| c.is_alphanumeric()) && !whole.contains(last)
+        })
+        .map(String::from)
+        .collect()
+}
+
+#[test]
+fn at_60x16_no_row_is_cut_mid_word_without_an_ellipsis() {
+    let mut frames: Vec<(String, pr_review_tui::model::Model)> = Vec::new();
+    for (name, s) in states(Look::default()) {
+        frames.push((name.to_string(), s.m));
+    }
+    let mut help = mid_review(Look::default()).key(KeyCode::Char('?'));
+    let mut preview = parked(Look::default()).key(KeyCode::Char('p'));
+    let mut live = Sim::new(Look::default()).play("showcase", 30).key(KeyCode::Char('w'));
+    for i in 0..30 {
+        render(&mut help.m, 60, 16);
+        render(&mut preview.m, 60, 16);
+        frames.push((format!("help+{i}"), help.m.clone()));
+        frames.push((format!("preview+{i}"), preview.m.clone()));
+        help = help.key(KeyCode::Char('j'));
+        preview = preview.key(KeyCode::Char('j'));
+    }
+    render(&mut live.m, 60, 16);
+    frames.push(("live".into(), live.m.clone()));
+    let mut bad = Vec::new();
+    for (name, m) in &frames {
+        let mut wide = m.clone();
+        wide.ui.modals.iter_mut().for_each(|x| {
+            if let pr_review_tui::model::Modal::Help { scroll }
+            | pr_review_tui::model::Modal::Publication { scroll, .. } = x
+            {
+                *scroll = 0;
+            }
+        });
+        let whole: std::collections::BTreeSet<String> =
+            render(&mut wide, 200, 400).0.split_whitespace().map(String::from).collect();
+        let mut narrow = m.clone();
+        let (frame, _) = render(&mut narrow, 60, 16);
+        for row in frame.lines().filter(|l| l.trim_end().ends_with("closes without")) {
+            bad.push(format!("{name}: cut at a word: {row:?}"));
+        }
+        for row in cut_rows(&frame, &whole) {
+            bad.push(format!("{name}: {row:?}"));
+        }
+    }
+    bad.dedup();
+    assert!(bad.is_empty(), "{}", bad.join("\n"));
 }

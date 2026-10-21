@@ -2,7 +2,7 @@
 source: tests/golden.rs
 expression: text
 ---
-  pr-review · • reviewing #1 verify found: safeEVIL  tail               ● live
+  pr-review · ▘ reviewing #1 verify found: safeEVIL  tail               ● live
 
 
   acme/shop  #2
@@ -25,4 +25,4 @@ expression: text
 
 
 
-   j/k finding  Enter read  w watch live  d diff  J/K scroll  h pull requests
+   j/k finding  Enter read  d diff  h pull requests  ? help  q quit

@@ -3,7 +3,7 @@
 
 use ratatui::style::{Color, Modifier, Style};
 
-use crate::protocol::{FindingStatus, Phase, RunStatus, Severity};
+use crate::protocol::{FindingStatus, Phase, PublicationStatus, RunStatus, Severity};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Role {
@@ -42,8 +42,10 @@ pub enum Bg {
     Del,
 }
 
+type Table = &'static [(&'static str, u32, bool)];
+
 /// "Ink": the editorial palette. Every foreground reaches 4.5:1 on every background (see the test below).
-pub const PALETTE: &[(&str, u32, bool)] = &[
+const INK: Table = &[
     // backgrounds
     ("base", 0x171717, true),
     ("surface", 0x1b1e25, true),
@@ -68,8 +70,57 @@ pub const PALETTE: &[(&str, u32, bool)] = &[
     ("type", 0x7fd6c8, false),
 ];
 
-pub fn hex(name: &str) -> u32 {
-    PALETTE.iter().find(|p| p.0 == name).map_or(0xffffff, |p| p.1)
+/// "Paper": warm off-white with ink-dark text. Code sits on a darker stock, the selection is a pale blue wash, and
+/// every hue is deepened until it reaches 4.5:1 on the darkest of those grounds.
+const PAPER: Table = &[
+    // backgrounds
+    ("base", 0xfaf7f0, true),
+    ("surface", 0xf2eee4, true),
+    ("anchor", 0xe9e3d6, true),
+    ("select", 0xe2e8f3, true),
+    ("add", 0xe5f0df, true),
+    ("del", 0xf7e3e0, true),
+    // foregrounds
+    ("text", 0x24221e, false),
+    ("muted", 0x5c574e, false),
+    ("accent", 0x2952a8, false),
+    ("ok", 0x2a6a2c, false),
+    ("warn", 0x7f5300, false),
+    ("fail", 0xae2234, false),
+    ("crit", 0x9c1028, false),
+    ("high", 0x9e430a, false),
+    ("med", 0x6f5800, false),
+    ("low", 0x1b6283, false),
+    ("keyword", 0x6c3aae, false),
+    ("string", 0x3a6519, false),
+    ("number", 0x98430e, false),
+    ("type", 0x0d665e, false),
+];
+
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Palette {
+    #[default]
+    Dark,
+    Light,
+}
+
+impl Palette {
+    pub fn table(self) -> Table {
+        match self {
+            Palette::Dark => INK,
+            Palette::Light => PAPER,
+        }
+    }
+
+    pub fn hex(self, name: &str) -> u32 {
+        self.table().iter().find(|p| p.0 == name).map_or(0xffffff, |p| p.1)
+    }
+}
+
+/// WCAG relative luminance of an sRGB color with channels in 0..=1.
+pub fn relative_luminance([r, g, b]: [f64; 3]) -> f64 {
+    let ch = |c: f64| if c <= 0.03928 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) };
+    0.2126 * ch(r) + 0.7152 * ch(g) + 0.0722 * ch(b)
 }
 
 fn truecolor() -> bool {
@@ -117,7 +168,7 @@ pub struct Glyphs {
 
 const UNICODE: Glyphs = Glyphs {
     ok: "✓",
-    pending: "◐",
+    pending: "◔",
     fail: "✗",
     active: "●",
     idle: "·",
@@ -154,9 +205,14 @@ pub struct Theme {
     pub color: bool,
     pub ascii: bool,
     pub terminal_bg: bool,
+    pub palette: Palette,
 }
 
 impl Theme {
+    fn rgb(&self, name: &str) -> Color {
+        rgb(self.palette.hex(name))
+    }
+
     pub fn style(&self, role: Role) -> Style {
         let modifier = match role {
             Role::Selected if !self.color => Modifier::REVERSED,
@@ -182,9 +238,9 @@ impl Theme {
             Role::Str => "string",
             Role::Num => "number",
             Role::Normal | Role::Title => "text",
-            Role::Selected => return base.fg(rgb(hex("text"))).bg(rgb(hex("select"))),
+            Role::Selected => return base.fg(self.rgb("text")).bg(self.rgb("select")),
         };
-        base.fg(rgb(hex(name)))
+        base.fg(self.rgb(name))
     }
 
     /// A background fill. Without color only the selection shows, in reverse video. With `terminal_bg`, `Base` is the
@@ -205,7 +261,7 @@ impl Theme {
             Bg::Add => "add",
             Bg::Del => "del",
         };
-        Style::default().bg(rgb(hex(name)))
+        Style::default().bg(self.rgb(name))
     }
 
     pub fn g(&self) -> &'static Glyphs {
@@ -248,6 +304,18 @@ pub fn finding_status(s: FindingStatus) -> (&'static str, Role) {
     }
 }
 
+/// A publication's status in words. Only `published` reads as done.
+pub fn publication_status(s: PublicationStatus) -> (&'static str, Role) {
+    match s {
+        PublicationStatus::AwaitingApproval => ("awaiting your approval", Role::Pending),
+        PublicationStatus::Publishing => ("publishing", Role::Active),
+        PublicationStatus::Published => ("published", Role::Ok),
+        PublicationStatus::Uncertain => ("uncertain: the daemon is checking GitHub", Role::Pending),
+        PublicationStatus::Failed => ("failed", Role::Fail),
+        PublicationStatus::Unknown => ("unknown", Role::Muted),
+    }
+}
+
 pub fn phase_name(p: Phase) -> &'static str {
     match p {
         Phase::CollectContext => "COLLECT_CONTEXT",
@@ -255,6 +323,7 @@ pub fn phase_name(p: Phase) -> &'static str {
         Phase::Analyze => "ANALYZE",
         Phase::Verify => "VERIFY",
         Phase::PreparePublication => "PREPARE_PUBLICATION",
+        Phase::AwaitingApproval => "AWAITING_APPROVAL",
         Phase::Publish => "PUBLISH",
         Phase::Reconcile => "RECONCILE",
         Phase::Completed => "COMPLETED",
@@ -269,58 +338,75 @@ mod tests {
     use super::*;
 
     fn luminance(h: u32) -> f64 {
-        let ch = |s: u32| {
-            let c = ((h >> s) & 0xff) as f64 / 255.0;
-            if c <= 0.03928 { c / 12.92 } else { ((c + 0.055) / 1.055).powf(2.4) }
-        };
-        0.2126 * ch(16) + 0.7152 * ch(8) + 0.0722 * ch(0)
+        relative_luminance([16, 8, 0].map(|s| ((h >> s) & 0xff) as f64 / 255.0))
+    }
+
+    fn ratio(fg: u32, bg: u32) -> f64 {
+        let (a, b) = (luminance(fg), luminance(bg));
+        (a.max(b) + 0.05) / (a.min(b) + 0.05)
+    }
+
+    fn fgs(p: Palette) -> impl Iterator<Item = &'static (&'static str, u32, bool)> {
+        p.table().iter().filter(|e| !e.2)
+    }
+
+    /// The lowest-contrast foreground on `bg`.
+    fn worst_on(p: Palette, bg: u32) -> (f64, &'static str) {
+        fgs(p).map(|f| (ratio(f.1, bg), f.0)).fold((f64::MAX, ""), |a, b| if b.0 < a.0 { b } else { a })
     }
 
     #[test]
-    fn every_foreground_reaches_wcag_aa_on_every_background() {
-        let mut report = Vec::new();
-        let mut worst = f64::MAX;
-        for (fname, fg, _) in PALETTE.iter().filter(|p| !p.2) {
-            for (bname, bg, _) in PALETTE.iter().filter(|p| p.2) {
-                let (a, b) = (luminance(*fg), luminance(*bg));
-                let ratio = (a.max(b) + 0.05) / (a.min(b) + 0.05);
-                worst = worst.min(ratio);
-                report.push(format!("{fname:>8} on {bname:<8} {ratio:5.2}"));
-                assert!(ratio >= 4.5, "{fname} on {bname}: {ratio:.2} < 4.5");
+    fn every_foreground_reaches_wcag_aa_on_every_background_in_both_palettes() {
+        for p in [Palette::Dark, Palette::Light] {
+            assert_eq!(p.table().len(), Palette::Dark.table().len(), "{p:?} has every role");
+            let mut report = Vec::new();
+            let mut worst = (f64::MAX, String::new());
+            for (fname, fg, _) in fgs(p) {
+                for (bname, bg, _) in p.table().iter().filter(|e| e.2) {
+                    let r = ratio(*fg, *bg);
+                    if r < worst.0 {
+                        worst = (r, format!("{fname} on {bname}"));
+                    }
+                    report.push(format!("{fname:>8} on {bname:<8} {r:5.2}"));
+                    assert!(r >= 4.5, "{p:?}: {fname} on {bname}: {r:.2} < 4.5");
+                }
             }
+            println!(
+                "{p:?}\n{}\n{p:?} worst pair {:.2}:1 ({}) over {} pairs",
+                report.join("\n"),
+                worst.0,
+                worst.1,
+                report.len()
+            );
         }
-        println!("{}\nworst pair {worst:.2}:1 over {} pairs", report.join("\n"), report.len());
     }
 
-    /// `background = "terminal"` swaps `base` for the terminal's own background, which the client cannot see. Every
-    /// foreground must still reach 4.5:1 on the dark backgrounds terminals ship with. A light terminal is reported,
-    /// not asserted: code blocks, the selection and diff lines stay painted dark in both modes, so the text has to be
-    /// light, and light text cannot also reach 4.5:1 on white. The docs say `terminal` assumes a dark terminal.
+    /// `background = "terminal"` swaps `base` for the terminal's own background, which the client cannot see. Each
+    /// palette must still reach 4.5:1 on the terminal backgrounds it is meant for: dark on dark terminals, light on
+    /// white and light-grey ones. The mismatched pairs are reported, not asserted; `theme = "auto"` avoids them.
     #[test]
-    fn with_the_terminal_background_every_foreground_still_reaches_aa_on_a_dark_terminal() {
-        let ratio = |fg: u32, bg: u32| {
-            let (a, b) = (luminance(fg), luminance(bg));
-            (a.max(b) + 0.05) / (a.min(b) + 0.05)
-        };
-        let fgs: Vec<_> = PALETTE.iter().filter(|p| !p.2).collect();
-        for (name, bg) in [("black", 0x000000), ("dark gray", 0x1e1e1e), ("one dark", 0x282c34)] {
-            let (worst, fname) =
-                fgs.iter().map(|f| (ratio(f.1, bg), f.0)).fold((f64::MAX, ""), |a, b| if b.0 < a.0 { b } else { a });
-            println!("terminal {name:<9} worst {worst:5.2}:1 ({fname})");
-            assert!(worst >= 4.5, "{fname} on a {name} terminal: {worst:.2} < 4.5");
+    fn with_the_terminal_background_each_palette_still_reaches_aa_on_its_own_kind_of_terminal() {
+        let dark = [("black", 0x000000), ("dark gray", 0x1e1e1e), ("one dark", 0x282c34)];
+        let light = [("white", 0xffffff), ("light gray", 0xeeeeee), ("solarized", 0xfdf6e3)];
+        for (p, own, other) in [(Palette::Dark, dark, light), (Palette::Light, light, dark)] {
+            for (name, bg) in own {
+                let (worst, fname) = worst_on(p, bg);
+                println!("{p:?} on a {name:<10} terminal worst {worst:5.2}:1 ({fname})");
+                assert!(worst >= 4.5, "{p:?}: {fname} on a {name} terminal: {worst:.2} < 4.5");
+            }
+            let (name, bg) = other[0];
+            let (worst, fname) = worst_on(p, bg);
+            println!("{p:?} on a {name:<10} terminal worst {worst:5.2}:1 ({fname}): mismatched, not supported");
         }
-        let (worst, fname) =
-            fgs.iter().map(|f| (ratio(f.1, 0xffffff), f.0)).fold((f64::MAX, ""), |a, b| if b.0 < a.0 { b } else { a });
-        println!("terminal white     worst {worst:5.2}:1 ({fname}): unsupported, see the doc comment");
-        let t = Theme { color: true, ascii: false, terminal_bg: true };
+        let t = Theme { color: true, ascii: false, terminal_bg: true, palette: Palette::Light };
         assert_eq!(t.bg(Bg::Base).bg, Some(Color::Reset));
-        assert_eq!(t.bg(Bg::Surface).bg, Some(rgb(hex("surface"))), "surfaces stay painted");
+        assert_eq!(t.bg(Bg::Surface).bg, Some(rgb(0xf2eee4)), "surfaces stay painted");
     }
 
     #[test]
     fn every_severity_has_its_own_glyph_in_both_glyph_sets() {
         for ascii in [false, true] {
-            let t = Theme { color: false, ascii, terminal_bg: false };
+            let t = Theme { color: false, ascii, terminal_bg: false, palette: Palette::Dark };
             let glyphs: Vec<&str> =
                 [Severity::Critical, Severity::High, Severity::Medium, Severity::Low].map(|s| t.severity(s).0).to_vec();
             let expected = if ascii { vec!["!", "^", "*", "o"] } else { vec!["◆", "▲", "●", "○"] };

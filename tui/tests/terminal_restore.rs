@@ -67,3 +67,24 @@ fn mouse_false_leaves_the_terminals_own_drag_to_select_alone() {
     assert!(text.contains("\u{1b}[?1049h"), "the client drew: {text}");
     assert!(!text.contains("\u{1b}[?1000h"), "mouse reporting stays off");
 }
+
+/// script(1) relays the pty and answers no query, so `theme = "auto"` waits out its whole timeout.
+#[test]
+fn a_terminal_that_never_answers_the_background_query_costs_at_most_the_timeout() {
+    let run = |theme: &str| {
+        let started = std::time::Instant::now();
+        let text = pty(&format!(
+            r#"stty -a; PR_REVIEW_TUI_TEST_PANIC=1 "$BIN" --playback "$SCRIPT" --theme {theme}; echo EXIT=$?; stty -a"#
+        ));
+        (started.elapsed(), text)
+    };
+    let (fixed, plain) = run("dark");
+    let (auto, text) = run("auto");
+    assert!(!plain.contains("\u{1b}]11;?"), "a fixed theme never asks");
+    let asked = text.find("\u{1b}]11;?\u{7}\u{1b}[c").expect("auto asked for the background, then DA1");
+    assert!(asked < text.find("\u{1b}[?1049h").unwrap(), "it asks before the client draws");
+    assert_restored(&text);
+    assert!(text.contains("EXIT=101"), "{text}");
+    let extra = auto.saturating_sub(fixed);
+    assert!(extra < std::time::Duration::from_millis(100 + 250), "auto cost {extra:?} over a fixed theme");
+}

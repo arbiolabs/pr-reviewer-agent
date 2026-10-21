@@ -2,13 +2,13 @@
 source: tests/golden.rs
 expression: text
 ---
-  pr-review · 3 PRs tracked · nothing running                           ● live
+  pr-review · ▘ reviewing #184 verify                                   ● live
 
 
   acme/shop  #185
   Fix cache eviction
   bbbbbbb → 5555555 · claude-opus-5-5 · run rev-185-
-   ● Collect ● Triage ● Analyze ● Verify ● Prepare ● Publish            ✓ done
+  ● Collect ● Triage ● Analyze ● Verify ● Prepare ● Publish             ✓ done
 
   No findings
   ────────────────────────────────────────────────────────────────────────────
@@ -25,4 +25,4 @@ expression: text
 
 
 
-   j/k finding  Enter read  w watch live  d diff  J/K scroll  h pull requests
+   j/k finding  Enter read  d diff  h pull requests  ? help  q quit

@@ -37,13 +37,21 @@ Each review runs as a durable task with fixed phases: collect context, triage, a
 
 ## The terminal client
 
-![The terminal client lands on a critical finding, scrolls its explanation, opens the diff at its line, watches a review finish with two findings, and opens the timeline.](tui/demo/showcase.gif)
+![The terminal client lands on a critical finding, scrolls its explanation, opens the diff at its line, watches a review park with two findings, opens its timeline, previews the publication, approves it, starts the first review of a new PR and watches it finish, and cancels a running review.](tui/demo/showcase.gif)
 
 The client opens on the worst finding across the tracked PRs, and `w` follows a review while it runs. [The terminal client](docs/tui.md) covers its views, keys, and settings.
 
 ## Get started
 
 You need Node 22.19 or later, pnpm, and git. The terminal client also needs a Rust toolchain.
+
+To try the terminal client first, play the recorded showcase session. It needs no daemon, no credentials and no network:
+
+```bash
+(cd tui && cargo build --release) && ./tui/target/release/pr-review-tui --playback protocol/playback/showcase.ndjson
+```
+
+Press `?` for the keys and `q` to quit. To review your own PRs:
 
 1. Install the dependencies:
 
@@ -87,7 +95,8 @@ To post the review to the PR, add `--publish`. pr-review posts one `COMMENT` rev
 | `login [provider] [--api-key]` | Store a model credential in pi's auth file. |
 | `accounts [--json]` | List your `gh` accounts and show which one pr-review uses. |
 | `accounts use <login>` | Use that `gh` account for GitHub reads and publishing in this data directory. |
-| `daemon [--socket PATH] [--data DIR] [--fixture NAME]` | Serve review state to the terminal client over a Unix socket. |
+| `approve --revision <id> --preview <hash>` | Publish a review that waits for approval (`publish_mode: "approval"`), exactly the stored payload, once. |
+| `daemon [--socket PATH] [--data DIR] [--fixture NAME] [--allow-commands]` | Serve review state to the terminal client over a Unix socket, read-only by default; with `--allow-commands` it hosts the engine and runs the client's start, retry, cancel, and publish commands. |
 | `tui [args]` | Start the terminal client, `pr-review-tui`. |
 
 Run every command as `node bin/pr-review.mjs <command>`.
@@ -133,5 +142,5 @@ The Rust terminal client is in `tui/`. Migrations are in `migrations/`. Commits 
 
 - Verification is static. pr-review runs no tests against PR code, and no second model double-checks a finding.
 - Each commit gets a fresh review. Tracking a finding across commits, marking it resolved, and replying in review threads are not built yet.
-- The terminal client is read-only, apart from choosing a GitHub account. Starting, cancelling, and approving reviews from the TUI are not built yet.
+- The daemon accepts start, retry, cancel, and publish commands only when enabled, which is also when it takes the data directory itself.
 - There is no labeled benchmark yet, so precision and recall are not measured.

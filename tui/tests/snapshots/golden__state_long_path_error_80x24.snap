@@ -2,15 +2,15 @@
 source: tests/golden.rs
 expression: inbox
 ---
-  pr-review · 0 PRs tracked · nothing running                   ✗ disconnected
+  pr-review · not connected                                     ✗ disconnected
 
- ✗ disconnected: socket directory does not exist: /private/tmp/claude-501/xxxxx…
+ ✗ disconnected · retry in 2s
 
   PULL REQUESTS                                                              0
 
-  unavailable: socket directory does not exist: /private/tmp/claude-501/xxxxxxx…
-  is `pr-review daemon` running?
-
+  No daemon at /private/tmp/claude-501/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…
+  Start one with `pr-review daemon`.
+  socket directory does not exist: /private/tmp/claude-501/xxxxxxxxxxxxxxxxxxxx…
 
 
 

@@ -1,0 +1,24 @@
+{
+  "type": "publication.preview",
+  "requestId": "req-pub",
+  "runId": "d1ed7b3b7b96a280414a43f18864bd2b",
+  "previewId": "9bb0238395e401141dd3eae8077c361e72f49490875d59d67a122f0cb458e891",
+  "headSha": "f86859b05d854df42a7de7a71a80c0e600b546c6",
+  "body": "## Automated PR review\n\nReviewed commit: `f86859b05d854df42a7de7a71a80c0e600b546c6`\n\nFound 2 actionable issues.\n\n- High: Sign-in redirects to any URL passed in returnTo (`src/server/auth/callback.ts:18`)\n- Medium: Session id is no longer rotated at sign-in (`src/server/auth/callback.ts:15`)\n\nReview performed with isolated read-only tools. Human review is still required.\n<!-- durable-review:d1ed7b3b7b96a280414a43f18864bd2b:9bb0238395e401141dd3eae8077c361e72f49490875d59d67a122f0cb458e891 -->\n",
+  "comments": [
+    {
+      "path": "src/server/auth/callback.ts",
+      "line": 18,
+      "side": "RIGHT",
+      "body": "**High: Sign-in redirects to any URL passed in returnTo**\n\n/login stores `req.query.returnTo` in a cookie without checking it, and /auth/callback redirects to that cookie after a real sign-in. A link to https://shop.acme.com/login?returnTo=https://acme-shop.help/verify takes the customer through the genuine sign-in page and then to the attacker's site, which can ask them to re-enter their password or card. Browsers also treat //evil.example and /\\evil.example as absolute."
+    },
+    {
+      "path": "src/server/auth/callback.ts",
+      "line": 15,
+      "side": "RIGHT",
+      "body": "**Medium: Session id is no longer rotated at sign-in**\n\nThe PR deletes the `regenerateSession(req)` call that ran before the user id was written. Without it, the session id a visitor had before signing in stays valid afterwards. Anyone who planted that id, on a shared computer or through a cookie set on a sibling subdomain, is now signed in as the victim."
+    }
+  ],
+  "event": "COMMENT",
+  "status": "awaiting_approval"
+}

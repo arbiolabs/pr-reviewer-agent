@@ -178,6 +178,7 @@
                     "ANALYZE",
                     "VERIFY",
                     "PREPARE_PUBLICATION",
+                    "AWAITING_APPROVAL",
                     "PUBLISH",
                     "RECONCILE",
                     "COMPLETED",
@@ -206,6 +207,11 @@
                 },
                 "failureReason": {
                   "type": "string"
+                },
+                "attempt": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "1-based: each manual retry or approval opens the next attempt"
                 }
               }
             }
@@ -274,6 +280,7 @@
                     "ANALYZE",
                     "VERIFY",
                     "PREPARE_PUBLICATION",
+                    "AWAITING_APPROVAL",
                     "PUBLISH",
                     "RECONCILE",
                     "COMPLETED",
@@ -288,6 +295,7 @@
                     "ANALYZE",
                     "VERIFY",
                     "PREPARE_PUBLICATION",
+                    "AWAITING_APPROVAL",
                     "PUBLISH",
                     "RECONCILE",
                     "COMPLETED",
@@ -605,6 +613,7 @@
                     "ANALYZE",
                     "VERIFY",
                     "PREPARE_PUBLICATION",
+                    "AWAITING_APPROVAL",
                     "PUBLISH",
                     "RECONCILE",
                     "COMPLETED",
@@ -633,6 +642,11 @@
                 },
                 "failureReason": {
                   "type": "string"
+                },
+                "attempt": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "1-based: each manual retry or approval opens the next attempt"
                 }
               }
             }
@@ -721,6 +735,7 @@
                     "ANALYZE",
                     "VERIFY",
                     "PREPARE_PUBLICATION",
+                    "AWAITING_APPROVAL",
                     "PUBLISH",
                     "RECONCILE",
                     "COMPLETED",
@@ -749,6 +764,11 @@
                 },
                 "failureReason": {
                   "type": "string"
+                },
+                "attempt": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "1-based: each manual retry or approval opens the next attempt"
                 }
               }
             }
@@ -837,6 +857,7 @@
                     "ANALYZE",
                     "VERIFY",
                     "PREPARE_PUBLICATION",
+                    "AWAITING_APPROVAL",
                     "PUBLISH",
                     "RECONCILE",
                     "COMPLETED",
@@ -864,6 +885,90 @@
                   "description": "RFC 3339 UTC timestamp"
                 },
                 "failureReason": {
+                  "type": "string"
+                },
+                "attempt": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "1-based: each manual retry or approval opens the next attempt"
+                }
+              }
+            }
+          }
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "streamEpoch",
+            "sequence",
+            "prevSequence",
+            "occurredAt",
+            "prId",
+            "runId",
+            "eventType",
+            "data"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "event"
+            },
+            "streamEpoch": {
+              "type": "string",
+              "minLength": 1
+            },
+            "sequence": {
+              "type": "integer",
+              "minimum": 1
+            },
+            "prevSequence": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "sequence of the previous event this server emitted, or the snapshot's sequence"
+            },
+            "occurredAt": {
+              "type": "string",
+              "description": "RFC 3339 UTC timestamp"
+            },
+            "prId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "runId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "eventType": {
+              "type": "string",
+              "const": "review.publication_changed"
+            },
+            "data": {
+              "type": "object",
+              "required": [
+                "runId",
+                "status"
+              ],
+              "properties": {
+                "runId": {
+                  "type": "string",
+                  "minLength": 1
+                },
+                "status": {
+                  "enum": [
+                    "awaiting_approval",
+                    "publishing",
+                    "published",
+                    "uncertain",
+                    "failed"
+                  ]
+                },
+                "reviewId": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "description": "the GitHub review, once one is known"
+                },
+                "url": {
                   "type": "string"
                 }
               }
@@ -1052,6 +1157,7 @@
               "review.completed",
               "run.superseded",
               "run.failed",
+              "review.publication_changed",
               "accounts.updated",
               "heartbeat"
             ]

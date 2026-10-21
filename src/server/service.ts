@@ -7,8 +7,7 @@ import type { Config } from "../config/config.ts";
 import { Coordinator } from "../coordinator/coordinator.ts";
 import type { GitHubClient } from "../github/client.ts";
 import type { PullSource } from "../github/pulls.ts";
-import { reconcileOutbox } from "../publish/publisher.ts";
-import { type App, ensureTask, finishReview, publishes, startReview } from "../runtime/app.ts";
+import { type App, finishReview, recover, retryReview, startReview } from "../runtime/app.ts";
 import type { ReviewResult } from "../runtime/task.ts";
 import { createHttpServer } from "./http.ts";
 
@@ -57,15 +56,7 @@ export async function startService(options: ServiceOptions): Promise<Service> {
     if (taskId !== undefined) track(finishReview(app, { revision: store.revision(revisionId)!, taskId }));
   };
 
-  app.harness.resume();
-  for (const revision of store.unfinishedRevisions()) follow(revision.id, await ensureTask(app, revision, publishes(revision)));
-  for (const outbox of store.uncertainOutboxes()) {
-    const revision = store.revision(outbox.revision_id)!;
-    // An unfinished revision's own task reconciles in its PUBLISH or RECONCILE phase.
-    if (store.unfinishedRevisions(revision.pr_id).some((r) => r.id === revision.id)) continue;
-    const pr = store.pullById(revision.pr_id)!;
-    track(reconcileOutbox(store, options.github(pr.installation_id), { fullName: pr.repo_full_name, number: pr.number }, outbox));
-  }
+  await recover(app, options.github, track);
 
   // The worker loop's own GitHub reads never sit through a long rate-limit wait: the delivery backs off instead.
   const maxSleepMs = config.github.max_rate_limit_sleep_ms;
@@ -138,10 +129,9 @@ export async function startService(options: ServiceOptions): Promise<Service> {
       const revision = store.revision(revisionId);
       if (!revision) return { status: 404, body: { error: "no such revision" } };
       if (revision.state !== "FAILED") return { status: 409, body: { error: `MANUAL_RETRY is not legal in ${revision.state}` } };
-      const n = store.retryCount(revisionId) + 1;
-      store.advance(revisionId, "FAILED", "MANUAL_RETRY", `manual override: POST /reviews/${revisionId}/retry (retry ${n})`);
-      follow(revisionId, await ensureTask(app, store.revision(revisionId)!, publishes(revision)));
-      return { status: 202, body: { revisionId, state: store.revision(revisionId)!.state } };
+      const started = await retryReview(app, revision, `POST /reviews/${revisionId}/retry`);
+      follow(revisionId, started.taskId);
+      return { status: 202, body: { revisionId, state: started.revision.state } };
     },
   });
   await new Promise<void>((resolve) => server.listen(options.port, resolve));

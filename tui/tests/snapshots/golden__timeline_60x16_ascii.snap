@@ -7,7 +7,7 @@ expression: ascii_text
 
   acme/shop  #184  timeline
   Booking API
-  2 of 2 events, oldest first | the whole PR (f) | all ki~
+  2 events, oldest first | the whole PR (f) | all kinds (~
 
   VERIFY --------------------------------------- 13:00:11
     13:00:11    read_file     src/booking.ts:1-120
@@ -17,4 +17,4 @@ expression: ascii_text
 
 
 
-   j/k move  Enter detail  w watch live  f scope  v kind
+   j/k move  Enter detail  / filter  Esc back  ? help

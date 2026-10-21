@@ -8,18 +8,32 @@ use ratatui::widgets::{Clear, Paragraph};
 
 use super::Ctx;
 use super::code::rich;
-use super::doc::{column, filled};
+use super::doc::{filled, reading};
 use crate::keymap::{Context, help_rows};
-use crate::model::{ConfirmState, Link, Modal};
-use crate::protocol::{Account, AccountState};
+use crate::model::{ACCEPTED_QUIET_MS, ConfirmState, Link, Modal};
+use crate::protocol::{Account, AccountState, Command};
 use crate::theme::{Bg, Role};
 
 pub fn modal(c: &Ctx, f: &mut Frame, body: Rect, modal: &Modal) {
     match modal {
         Modal::Input { .. } => {}
-        Modal::Confirm { title, prompt, command, state } => confirm(c, f, body, title, prompt, command.name(), state),
-        Modal::Help => help(c, f, body),
-        Modal::Finding { id, scroll } => super::doc::finding_page(c, f, body, id, *scroll),
+        Modal::Confirm { prompt, command, state } => confirm(c, f, body, prompt, command, state),
+        Modal::Help { scroll } | Modal::Finding { scroll, .. } | Modal::Publication { scroll, .. } => {
+            scrolled(c, f, body, page_lines(c, body, modal).unwrap_or_default(), *scroll)
+        }
+    }
+}
+
+/// The lines of a scrolling page, the help, the finding reader or the publication preview, before scrolling.
+pub fn page_lines(c: &Ctx, body: Rect, modal: &Modal) -> Option<Vec<Line<'static>>> {
+    let w = reading(body).width as usize;
+    match modal {
+        Modal::Help { .. } => Some(help_lines(c, body)),
+        Modal::Finding { id, .. } => Some(super::doc::finding_lines(c, w, id)),
+        Modal::Publication { run_id, preview, publish, raw, .. } => {
+            Some(super::publish::lines(c, w, run_id, preview, publish, *raw))
+        }
+        Modal::Input { .. } | Modal::Confirm { .. } => None,
     }
 }
 
@@ -27,86 +41,122 @@ pub fn modal(c: &Ctx, f: &mut Frame, body: Rect, modal: &Modal) {
 fn page(c: &Ctx, f: &mut Frame, area: Rect, lines: Vec<Line<'static>>) {
     f.render_widget(Clear, area);
     f.render_widget(Paragraph::new("").style(c.t.bg(Bg::Base)), area);
-    f.render_widget(Paragraph::new(lines), column(area));
+    f.render_widget(Paragraph::new(lines), reading(area));
 }
 
 fn heading(c: &Ctx, text: &str) -> Line<'static> {
     Line::from(c.span(text.to_string(), Role::Focus))
 }
 
-/// The only place `y` acts: a surface panel with the accent bar, the question, the command it sends and its state.
-fn confirm(c: &Ctx, f: &mut Frame, body: Rect, title: &str, prompt: &str, command: &str, state: &ConfirmState) {
+/// The only place `y` acts: a page in the reading column, like the preview, asking the question in words, with the
+/// daemon command in a dim detail line and the answer wrapped in full.
+fn confirm(c: &Ctx, f: &mut Frame, body: Rect, prompt: &str, command: &Command, state: &ConfirmState) {
     let (status, role) = match state {
-        ConfirmState::Asking => ("y confirm   n / Esc cancel".to_string(), Role::Title),
+        ConfirmState::Asking => (format!("y confirms {} n or Esc cancels", c.t.g().sep), Role::Title),
         ConfirmState::Requested(_) => (format!("requested{} waiting for the server", c.t.g().ellipsis), Role::Pending),
-        ConfirmState::Accepted(op) => (format!("accepted ({op}); waiting for events to confirm it"), Role::Active),
-        ConfirmState::Failed(e) => (format!("rejected: {e}"), Role::Fail),
+        ConfirmState::Accepted { at_ms, .. } if c.m.now_ms.saturating_sub(*at_ms) >= ACCEPTED_QUIET_MS => (
+            "The daemon accepted this but nothing happened yet. Esc closes; the timeline will show it if it runs."
+                .to_string(),
+            Role::Pending,
+        ),
+        ConfirmState::Accepted { .. } => {
+            ("accepted; waiting for the event that shows it happened".to_string(), Role::Active)
+        }
+        ConfirmState::Refused { message, .. } => (format!("Can't {}: {message}", command.verb()), Role::Fail),
         ConfirmState::TimedOut => ("request timed out; y sends it again, r refreshes".to_string(), Role::Fail),
     };
-    let w = 64.min(body.width) as usize;
-    let surface = c.t.bg(Bg::Surface);
-    let inner = w.saturating_sub(4);
-    let bar = Span::styled(if c.t.ascii { "|" } else { "▌" }, c.s(Role::Accent).patch(surface));
-    let row = |spans: Vec<Span<'static>>| {
-        let mut s = vec![bar.clone(), Span::styled("  ", surface)];
-        s.extend(spans.into_iter().map(|x| x.patch_style(surface)));
-        Line::from(filled(s, w, surface))
-    };
-    let mut lines = vec![row(vec![]), row(vec![c.span(title.to_uppercase(), Role::Muted)])];
-    lines.extend(rich(c, prompt, inner, Role::Title).into_iter().map(row));
-    lines.push(row(vec![c.span(format!("sends {command}"), Role::Muted)]));
-    lines.push(row(vec![]));
-    lines.push(row(vec![c.span(c.fit(&status, inner), role)]));
-    lines.push(row(vec![]));
-    let h = (lines.len() as u16).min(body.height);
-    let area = Rect {
-        x: body.x + (body.width - w as u16) / 2,
-        y: body.y + body.height.saturating_sub(h) / 2,
-        width: w as u16,
-        height: h,
-    };
-    f.render_widget(Clear, area);
-    f.render_widget(Paragraph::new(lines), area);
+    let w = reading(body).width as usize;
+    let mut lines = vec![Line::raw("")];
+    lines.extend(rich(c, prompt, w, Role::Title).into_iter().map(Line::from));
+    lines.push(Line::from(c.span(c.fit(&super::publish::command_detail(c, command.name(), state), w), Role::Muted)));
+    lines.push(Line::raw(""));
+    lines.extend(rich(c, &status, w, role).into_iter().map(Line::from));
+    page(c, f, body, lines);
+}
+
+/// The largest scroll of a `len`-line page in `height` rows. An overflowing page keeps its last row for the cue.
+pub fn page_limit(len: usize, height: usize) -> usize {
+    if len <= height { 0 } else { len - height.saturating_sub(1) }
+}
+
+/// A page, scrolled, with a "more below" cue on its last row while it overflows.
+fn scrolled(c: &Ctx, f: &mut Frame, body: Rect, mut lines: Vec<Line<'static>>, scroll: u16) {
+    let (len, h) = (lines.len(), body.height as usize);
+    if len > h {
+        let start = (scroll as usize).min(page_limit(len, h));
+        let end = (start + h - 1).min(len);
+        lines = lines.drain(start..end).collect();
+        let below = len - end;
+        lines.push(if below > 0 {
+            Line::from(c.span(format!("  {} {below} more below, j scrolls", c.t.g().ellipsis), Role::Muted))
+        } else {
+            Line::raw("")
+        });
+    }
+    page(c, f, body, lines);
 }
 
 /// Every key by where it works, then what the glyphs mean.
-fn help(c: &Ctx, f: &mut Frame, body: Rect) {
+pub fn help_lines(c: &Ctx, body: Rect) -> Vec<Line<'static>> {
     let g = c.t.g();
-    let col = column(body);
-    let rows = help_rows();
-    let section = |ctx: Context, name: &str, w: usize| -> Vec<Line<'static>> {
+    let col = reading(body);
+    let rows: Vec<_> = help_rows().into_iter().filter(|r| r.0 != Context::ConfirmModal).collect();
+    // Two columns from 100 columns up; below that one column, its key column as narrow as the longest keys.
+    let two = body.width >= 100;
+    let half = if two { col.width as usize / 2 } else { col.width as usize };
+    let kw = if two { 11 } else { rows.iter().map(|r| crate::text::width(&r.1)).max().unwrap_or(0) + 2 };
+    let section = |ctx: Context, name: &str| -> Vec<Line<'static>> {
         let mut out = vec![heading(c, name)];
-        for (_, keys, what) in rows.iter().filter(|r| r.0 == ctx) {
+        for (_, keys, what, capability) in rows.iter().filter(|r| r.0 == ctx) {
+            // A write key the daemon does not grant shows dimmed and says so, even without color.
+            let offered = capability
+                .is_none_or(|cap| c.m.server.as_ref().is_none_or(|s| s.capabilities.iter().any(|x| x.as_str() == cap)));
+            let (what, key_role, role) = match offered {
+                true => (what.to_string(), Role::Accent, Role::Normal),
+                false => {
+                    // The short form fits a help column; the last lines carry the whole reason.
+                    let why = c.m.server.as_ref().and_then(|s| s.commands_off()).unwrap_or("not offered");
+                    let why = why.split(" (").next().unwrap_or(why);
+                    (format!("{what} ({why})"), Role::Muted, Role::Muted)
+                }
+            };
             out.push(Line::from(vec![
-                c.span(format!("  {}", c.pad(keys, 11)), Role::Accent),
-                c.span(c.fit(what, w.saturating_sub(14)), Role::Normal),
+                c.span(format!("  {}", c.pad(keys, kw)), key_role),
+                c.span(c.fit(&what, half.saturating_sub(kw + 3)), role),
             ]));
         }
         out.push(Line::raw(""));
         out
     };
-    let two = col.width >= 76;
-    let half = if two { col.width as usize / 2 } else { col.width as usize };
-    let mut all = Vec::new();
-    for (ctx, name) in [
+    let sections: Vec<Vec<Line<'static>>> = [
         (Context::Global, "Everywhere"),
         (Context::Review, "Review"),
         (Context::Diff, "Diff"),
         (Context::Timeline, "Timeline"),
-    ] {
-        all.extend(section(ctx, name, half));
+        (Context::FindingModal, "Finding reader"),
+        (Context::PublicationModal, "Publication preview"),
+    ]
+    .into_iter()
+    .map(|(ctx, name)| section(ctx, name))
+    .collect();
+    // Two columns split between sections, at the boundary that ends the page highest.
+    let total: usize = sections.iter().map(Vec::len).sum();
+    let split = (0..=sections.len())
+        .min_by_key(|&k| {
+            let left: usize = sections[..k].iter().map(Vec::len).sum();
+            left.max(total - left)
+        })
+        .unwrap_or(0);
+    let (left, right): (Vec<_>, Vec<_>) =
+        if two { (sections[..split].concat(), sections[split..].concat()) } else { (sections.concat(), Vec::new()) };
+    let mut lines = vec![Line::raw(""), Line::from(c.span("Keys", Role::Title)), Line::raw("")];
+    // Below 70 columns the subtitle would be cut; the page is the same without it.
+    if body.width >= 70 {
+        lines.insert(
+            2,
+            Line::from(c.span("Read from the keymap, so this page cannot drift from what the keys do.", Role::Muted)),
+        );
     }
-    // Two columns of equal height, so the page ends as high as it can.
-    let mut left = all;
-    let right = if two { left.split_off(left.len().div_ceil(2)) } else { Vec::new() };
-    let mut lines = vec![
-        Line::raw(""),
-        Line::from(c.span("Keys", Role::Title)),
-        Line::from(
-            c.span("Read from the keymap itself, so this page cannot drift from what the keys do.", Role::Muted),
-        ),
-        Line::raw(""),
-    ];
     if two {
         for i in 0..left.len().max(right.len()) {
             let mut spans: Vec<Span<'static>> = left.get(i).map_or(vec![], |l| l.spans.clone());
@@ -114,10 +164,8 @@ fn help(c: &Ctx, f: &mut Frame, body: Rect) {
             spans.extend(right.get(i).map_or(vec![], |l| l.spans.clone()));
             lines.push(Line::from(spans));
         }
-        lines.push(Line::raw(""));
     } else {
         lines.extend(left);
-        lines.extend(right);
     }
     lines.push(heading(c, "Glyphs"));
     let mut sev = vec![Span::raw("  ")];
@@ -133,21 +181,34 @@ fn help(c: &Ctx, f: &mut Frame, body: Rect) {
     }
     lines.push(Line::from(sev));
     lines.push(Line::from(vec![
-        c.span(format!("  {} ", super::doc::spinner(c)), Role::Accent),
+        // One still frame: a legend that animates reads as something happening.
+        c.span(if c.t.ascii { "  - " } else { "  ▘ " }, Role::Accent),
         c.span("reviewing   ", Role::Normal),
+        c.span(format!("{} ", g.pending), Role::Pending),
+        c.span("waiting for you   ", Role::Normal),
         c.span(format!("{} ", g.ok), Role::Ok),
         c.span("clean   ", Role::Normal),
         c.span(format!("{} ", g.fail), Role::Fail),
-        c.span("failed   ", Role::Normal),
-        c.span(format!("{}2 ", g.arrow), Role::Ok),
-        c.span("findings on GitHub", Role::Normal),
+        c.span("failed", Role::Normal),
+    ]));
+    lines.push(Line::from(vec![
+        c.span(format!("  {}2 ", g.arrow), Role::Ok),
+        c.span("findings published on GitHub", Role::Normal),
     ]));
     lines.push(Line::raw(""));
     lines.push(heading(c, "Mouse"));
+    lines.push(Line::from(c.span("  Click a PR, finding, file, line or event to select it.", Role::Normal)));
+    lines.push(Line::from(c.span("  Click it again to open it. Click a view in the footer.", Role::Normal)));
+    lines.push(Line::from(c.span("  The wheel scrolls the page under it.", Role::Normal)));
+    let off = c.m.server.as_ref().and_then(|s| s.commands_off());
+    lines.push(Line::from(c.span(
+        match off {
+            Some(why) => format!("  Write keys are off: {why}."),
+            None => "  Keys marked (not offered) are off on this daemon.".into(),
+        },
+        Role::Muted,
+    )));
     lines
-        .push(Line::from(c.span("  Click a pull request or a finding to select it; the wheel scrolls.", Role::Normal)));
-    lines.push(Line::from(c.span("  Write keys need a capability the server grants.", Role::Muted)));
-    page(c, f, body, lines);
 }
 
 /// The GitHub identity the daemon uses.
@@ -197,7 +258,7 @@ fn account_row(c: &Ctx, a: &Account, w: usize, cursor: bool) -> Line<'static> {
 
 pub fn settings(c: &Ctx, f: &mut Frame, area: Rect) {
     let m = c.m;
-    let col = column(area);
+    let col = reading(area);
     let w = col.width as usize;
     let tight = area.height < 30;
     let row = |k: &str, v: String, role: Role| {
@@ -211,7 +272,11 @@ pub fn settings(c: &Ctx, f: &mut Frame, area: Rect) {
     let age = |at: Option<u64>| {
         at.map_or("never".into(), |t| format!("{:.1}s ago", m.now_ms.saturating_sub(t) as f64 / 1000.0))
     };
-    let (status, role) = super::link_status(c);
+    let (mut status, role) = super::link_status(c);
+    // The banner stays short, so the reason a connection failed lives here.
+    if let Link::Disconnected { reason, .. } = &m.link {
+        status = format!("{status}: {reason}");
+    }
     let server = m.server.as_ref();
     let caps = server.map_or("-".into(), |s| {
         if s.capabilities.is_empty() {
@@ -222,7 +287,9 @@ pub fn settings(c: &Ctx, f: &mut Frame, area: Rect) {
     });
     let mut lines = vec![Line::raw("")];
     lines.push(Line::from(c.span("Settings", Role::Title)));
-    lines.push(Line::from(c.span(c.fit(&format!("connected through {}", m.diag.endpoint), w), Role::Muted)));
+    let state = if m.link.welcomed() { "connected" } else { "not connected" };
+    let socket = format!("socket {} {} {state}", m.diag.endpoint, c.t.g().sep);
+    lines.push(Line::from(c.span(c.fit(&socket, w), Role::Muted)));
     gap(&mut lines);
     lines.push(heading(c, "GitHub accounts"));
     let (who, who_role) = identity(c);
@@ -251,6 +318,17 @@ pub fn settings(c: &Ctx, f: &mut Frame, area: Rect) {
         row("session", server.map_or("-".into(), |s| s.session_id.to_string()), Role::Normal),
         row("capabilities", caps, Role::Normal),
     ]);
+    if let Some(s) = server {
+        use crate::protocol::DaemonMode;
+        let (mode, role) = match (s.mode, &s.read_only_reason) {
+            (Some(DaemonMode::Engine), _) => ("engine: runs reviews and takes commands".to_string(), Role::Ok),
+            (Some(DaemonMode::ReadOnly), Some(why)) => (format!("read-only: {why}"), Role::Pending),
+            (Some(DaemonMode::ReadOnly), None) => ("read-only".to_string(), Role::Pending),
+            (Some(DaemonMode::Unknown), _) => ("unknown to this client".to_string(), Role::Muted),
+            (None, _) => ("not reported by this daemon version".to_string(), Role::Muted),
+        };
+        lines.push(row("mode", mode, role));
+    }
     gap(&mut lines);
     lines.push(heading(c, "Stream"));
     lines.extend([
@@ -278,20 +356,11 @@ pub fn settings(c: &Ctx, f: &mut Frame, area: Rect) {
     gap(&mut lines);
     lines.push(heading(c, "Display"));
     let look = m.look;
-    lines.push(row(
-        "glyphs, color",
-        format!(
-            "{}, {}",
-            if look.ascii { "ascii" } else { "unicode" },
-            if look.color { "color" } else { "monochrome (NO_COLOR or theme = \"mono\")" }
-        ),
-        Role::Normal,
-    ));
-    lines.push(row(
-        "background",
-        if look.terminal_bg { "terminal: assumes a dark terminal".into() } else { "theme: painted ink".into() },
-        Role::Normal,
-    ));
+    lines.extend([
+        row("glyphs", if look.ascii { "ascii" } else { "unicode" }.into(), Role::Normal),
+        row("color", if look.color { "on" } else { "off" }.into(), Role::Normal),
+        row("background", if look.terminal_bg { "terminal" } else { "painted (theme)" }.into(), Role::Normal),
+    ]);
     gap(&mut lines);
     lines.push(heading(c, "Recent errors"));
     if let Link::Incompatible { message, .. } = &m.link {

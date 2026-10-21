@@ -5,6 +5,8 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use crate::protocol::*;
 
 pub const ACTIVITY_CAP: usize = 2_000;
+/// How long an accepted command may show nothing before the panel says so.
+pub const ACCEPTED_QUIET_MS: u64 = 15_000;
 const ERROR_CAP: usize = 20;
 
 /// The connection state machine. `Link::next` is the whole transition table.
@@ -23,6 +25,10 @@ pub enum Link {
     Live,
     /// A gap, an epoch change or `resync.required`: waiting for a fresh snapshot; events are dropped.
     Resyncing,
+    /// The snapshot a sync or resync asked for never came: events stay dropped until `r` asks again.
+    Stalled {
+        reason: Text,
+    },
     /// The server does not speak protocol v1. Terminal: the client stops reconnecting.
     Incompatible {
         supported: Vec<u32>,
@@ -42,6 +48,7 @@ pub enum LinkInput {
     Mismatch { supported: Vec<u32>, message: Text },
     Unusable { message: Text },
     SnapshotApplied,
+    SnapshotTimedOut,
     StreamBroken,
     Lost { reason: Text, retry_in_ms: Option<u64> },
 }
@@ -60,8 +67,11 @@ impl Link {
             (Negotiating, I::Mismatch { supported, message }) => Some(Incompatible { supported, message }),
             (Negotiating, I::Welcomed { resuming: true }) => Some(Live),
             (Negotiating, I::Welcomed { resuming: false }) => Some(Syncing),
-            (Negotiating | Syncing | Live | Resyncing, I::SnapshotApplied) => Some(Live),
-            (Live, I::StreamBroken) => Some(Resyncing),
+            (Negotiating | Syncing | Live | Resyncing | Stalled { .. }, I::SnapshotApplied) => Some(Live),
+            (Syncing | Resyncing, I::SnapshotTimedOut) => {
+                Some(Stalled { reason: Text::new("the snapshot did not arrive; r asks again") })
+            }
+            (Live | Stalled { .. }, I::StreamBroken) => Some(Resyncing),
             _ => None,
         }
     }
@@ -72,7 +82,7 @@ impl Link {
 
     /// The server has answered `hello` with `welcome`, so requests other than `hello` may go out.
     pub fn welcomed(&self) -> bool {
-        matches!(self, Link::Syncing | Link::Live | Link::Resyncing)
+        matches!(self, Link::Syncing | Link::Live | Link::Resyncing | Link::Stalled { .. })
     }
 }
 
@@ -88,6 +98,22 @@ pub struct ServerInfo {
     pub server_version: Text,
     pub session_id: Text,
     pub capabilities: Vec<Text>,
+    /// `None` from a daemon that predates engine mode.
+    pub mode: Option<DaemonMode>,
+    pub read_only_reason: Option<Text>,
+}
+
+impl ServerInfo {
+    /// Why a review command is not offered, for the `(not offered)` notes; `None` when the daemon gave no reason.
+    pub fn commands_off(&self) -> Option<&'static str> {
+        match (self.mode, &self.read_only_reason) {
+            (Some(DaemonMode::ReadOnly), Some(r)) if r.as_str().contains("--allow-commands") => {
+                Some("commands are off (start the daemon with --allow-commands)")
+            }
+            (Some(DaemonMode::ReadOnly), _) => Some("daemon is read-only"),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -115,6 +141,8 @@ pub struct DomainCache {
     pub findings: BTreeMap<FindingId, Finding>,
     /// In the daemon's order. `None` until a snapshot from a daemon that reports accounts.
     pub accounts: Option<Vec<Account>>,
+    /// The latest `review.publication_changed` per run. Snapshots carry none, so they keep these.
+    pub publications: BTreeMap<RunId, PublicationChanged>,
     pub activity: VecDeque<Activity>,
     pub tool_activity_count: u64,
 }
@@ -171,13 +199,20 @@ pub enum Pane {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum InputPurpose {
+    /// The PR list's fuzzy filter.
     Search,
     JumpTo,
+    /// Timeline events whose text contains the buffer.
+    TimelineFilter,
+    /// Diff lines whose text contains the buffer; `n`/`N` walk them.
+    DiffSearch,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Modal {
-    Help,
+    Help {
+        scroll: u16,
+    },
     Finding {
         id: FindingId,
         scroll: u16,
@@ -187,9 +222,19 @@ pub enum Modal {
         buffer: String,
         before: String,
     },
+    /// The publication preview of a parked run, full page. `y` here, and only here and in `Confirm`, sends
+    /// `review.publish`, naming the preview it shows.
+    Publication {
+        run_id: RunId,
+        scroll: u16,
+        preview: Preview,
+        /// `Asking` until `y` sends the approval.
+        publish: ConfirmState,
+        /// `m`: the markdown exactly as it will be posted, instead of styled.
+        raw: bool,
+    },
     /// The only place `y` acts. Generic over the command it confirms.
     Confirm {
-        title: String,
         prompt: String,
         command: Command,
         state: ConfirmState,
@@ -197,12 +242,26 @@ pub enum Modal {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+pub enum Preview {
+    Loading(RequestId),
+    Failed(Text),
+    Ready(Box<PublicationPreview>),
+}
+
+#[derive(Clone, Debug, PartialEq)]
 pub enum ConfirmState {
     Asking,
     Requested(RequestId),
-    /// Accepted is not completed: a later event confirms the effect.
-    Accepted(Text),
-    Failed(Text),
+    /// Accepted is not completed: a later event confirms the effect. `at_ms` starts `ACCEPTED_QUIET_MS`.
+    Accepted {
+        operation: Text,
+        at_ms: u64,
+    },
+    /// The daemon refused it: `message` is its sentence, `code` the detail beside the command name.
+    Refused {
+        code: ErrorCode,
+        message: Text,
+    },
     /// No reply in time; `y` sends the same command again, under the same idempotency key.
     TimedOut,
 }
@@ -228,6 +287,10 @@ pub struct DiffView {
     /// Which of the findings stacked on the cursor's line `Enter` opens; `n` walks the stack before the next line.
     pub stack: usize,
     pub anchor: Option<(Text, Option<u32>)>,
+    /// The text `/` searched for; while set, `n`/`N` walk its matches instead of the findings.
+    pub search: Option<String>,
+    /// `diff_matches` for `search` over these files, kept current by the reducer so a frame never rescans the diff.
+    pub matches: Vec<(usize, usize)>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -272,18 +335,20 @@ pub enum EventCategory {
     Finding,
     Tool,
     Account,
+    Publication,
     Other,
 }
 
 impl EventCategory {
+    /// The kinds `v` steps through. Phase changes are headings, not rows; `P` filters by phase.
     pub const CYCLE: [Option<EventCategory>; 8] = [
         None,
-        Some(EventCategory::Phase),
         Some(EventCategory::Tool),
         Some(EventCategory::Finding),
         Some(EventCategory::Run),
         Some(EventCategory::Pr),
         Some(EventCategory::Account),
+        Some(EventCategory::Publication),
         Some(EventCategory::Other),
     ];
     pub fn of(body: &EventBody) -> EventCategory {
@@ -294,6 +359,7 @@ impl EventCategory {
             EventBody::FindingUpdated(_) => EventCategory::Finding,
             EventBody::ToolActivity(_) => EventCategory::Tool,
             EventBody::AccountsUpdated(_) => EventCategory::Account,
+            EventBody::PublicationChanged(_) => EventCategory::Publication,
             EventBody::Other(_) => EventCategory::Other,
         }
     }
@@ -305,6 +371,7 @@ impl EventCategory {
             EventCategory::Finding => "finding",
             EventCategory::Tool => "tool",
             EventCategory::Account => "account",
+            EventCategory::Publication => "publication",
             EventCategory::Other => "other",
         }
     }
@@ -324,6 +391,8 @@ pub struct TimelineView {
     pub open: Option<u64>,
     pub category: Option<EventCategory>,
     pub phase: Option<Phase>,
+    /// Shows only events whose text contains this, ignoring case.
+    pub text: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -358,11 +427,12 @@ pub struct Look {
     pub show_activity: bool,
     /// `[ui] background = "terminal"`: the terminal's own background shows where the theme would paint `base`.
     pub terminal_bg: bool,
+    pub palette: crate::theme::Palette,
 }
 
 impl Default for Look {
     fn default() -> Self {
-        Look { ascii: false, color: true, show_activity: true, terminal_bg: false }
+        Look { ascii: false, color: true, show_activity: true, terminal_bg: false, palette: Default::default() }
     }
 }
 
@@ -392,6 +462,8 @@ pub struct Ui {
     pub modals: Vec<Modal>,
     pub selected_pr: Option<PrId>,
     pub selected_finding: Option<FindingId>,
+    /// The parked run whose "Ready to publish" line holds the cursor, above the findings; see `Model::on_ready_line`.
+    pub ready_line: Option<RunId>,
     /// Lines the reader scrolled the document past where the selection puts it; reset when the selection moves.
     pub doc_scroll: i32,
     pub pr_filter: String,
@@ -434,6 +506,9 @@ pub struct Model {
     /// The unanswered snapshot.get, and the ones it superseded, whose replies are ignored.
     pub snapshot_request: Option<RequestId>,
     pub stale_snapshots: BTreeSet<RequestId>,
+    /// Every command this client sent: a `command.result` for any other request is not this client's to show.
+    /// Each command request in flight, with the verb its refusal reads with.
+    pub commands_sent: BTreeMap<RequestId, &'static str>,
     pub dirty: bool,
 }
 
@@ -455,6 +530,7 @@ impl Model {
                 modals: Vec::new(),
                 selected_pr: None,
                 selected_finding: None,
+                ready_line: None,
                 doc_scroll: 0,
                 pr_filter: String::new(),
                 wanted_pr,
@@ -470,6 +546,7 @@ impl Model {
             request_timeout_ms: 15_000,
             snapshot_request: None,
             stale_snapshots: BTreeSet::new(),
+            commands_sent: BTreeMap::new(),
             dirty: true,
         }
     }
@@ -490,6 +567,18 @@ impl Model {
 
     pub fn selected_pr(&self) -> Option<&Pr> {
         self.ui.selected_pr.as_ref().and_then(|id| self.domain.prs.get(id))
+    }
+
+    /// The selected PR's latest run while it waits for approval.
+    pub fn parked_run(&self) -> Option<&Run> {
+        self.domain.latest_run(self.ui.selected_pr.as_ref()?).filter(|r| r.parked())
+    }
+
+    /// The cursor is on the ready line only while that run is still the selected PR's parked one.
+    pub fn on_ready_line(&self) -> bool {
+        self.ui.selected_finding.is_none()
+            && self.ui.ready_line.is_some()
+            && self.parked_run().map(|r| &r.id) == self.ui.ready_line.as_ref()
     }
 
     pub fn selected_finding(&self) -> Option<&Finding> {

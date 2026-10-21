@@ -16,7 +16,11 @@ use crate::protocol::{Finding, FindingStatus, Pr, RunStatus, Severity};
 use crate::text::width;
 use crate::theme::{Bg, Role};
 
-pub const RAIL_W: u16 = 34;
+/// The rail's width on a `width`-column terminal: 34 below 140 columns, then a column more for every four or so, up
+/// to 48 at 200.
+pub fn rail_w(width: u16) -> u16 {
+    (34 + width.saturating_sub(140) * 14 / 60).min(48)
+}
 /// Rows above the first PR: blank, heading, filter or blank.
 pub const RAIL_HEAD: u16 = 3;
 
@@ -27,7 +31,7 @@ pub fn empty_rail(c: &Ctx, total: usize) -> Vec<(String, Role)> {
     }
     let reason = match &c.m.link {
         Link::Disconnected { reason, .. } => reason,
-        Link::Unusable { message } | Link::Incompatible { message, .. } => {
+        Link::Unusable { message } | Link::Incompatible { message, .. } | Link::Stalled { reason: message } => {
             return vec![(format!("  unavailable: {message}"), Role::Fail)];
         }
         Link::Connecting { .. } | Link::Negotiating | Link::Syncing => {
@@ -35,7 +39,12 @@ pub fn empty_rail(c: &Ctx, total: usize) -> Vec<(String, Role)> {
         }
         Link::Live | Link::Resyncing => return vec![("  nothing tracked yet".into(), Role::Muted)],
     };
-    vec![(format!("  unavailable: {reason}"), Role::Fail), ("  is `pr-review daemon` running?".into(), Role::Muted)]
+    let path = c.m.diag.endpoint.strip_prefix("unix:").unwrap_or(&c.m.diag.endpoint);
+    vec![
+        (format!("  No daemon at {path}."), Role::Fail),
+        ("  Start one with `pr-review daemon`.".into(), Role::Normal),
+        (format!("  {reason}"), Role::Muted),
+    ]
 }
 
 /// Rows each PR takes; the spacer row goes when the list would not fit.
@@ -80,9 +89,9 @@ pub fn rail(c: &Ctx, f: &mut Frame, area: Rect, focused: bool) {
     }));
     if prs.is_empty() {
         let mut empty = empty_rail(c, total);
-        if area.width <= RAIL_W && empty[0].1 == Role::Fail {
+        if area.width < c.m.size.0 && empty[0].1 == Role::Fail {
             // Beside the reading column, which carries the reason in full.
-            empty = vec![("  unavailable".into(), Role::Fail)];
+            empty = vec![("  no daemon".into(), Role::Fail)];
         }
         for (text, role) in empty {
             lines.push(Line::from(filled(vec![Span::styled(c.fit(&text, w), c.s(role).patch(bg))], w, bg)));
@@ -133,10 +142,12 @@ fn pr_rows(c: &Ctx, pr: &Pr, w: usize, selected: bool, rh: usize) -> Vec<Line<'s
     let on = |role: Role| c.s(role).patch(row_bg);
     let marker = if selected { if c.t.ascii { ">" } else { "▌" } } else { " " };
     let run = c.m.domain.latest_run(&pr.id);
-    let running = run.is_some_and(|r| r.status == RunStatus::Running);
+    let running = run.is_some_and(|r| r.active());
+    let parked = run.is_some_and(|r| r.parked());
     let findings = current(c, pr);
     let (glyph, grole) = match findings.iter().map(|f| f.severity).min() {
         _ if running => (spinner(c), Role::Accent),
+        _ if parked => (g.pending, Role::Pending),
         Some(s) => {
             let (gl, _, r) = c.t.severity(s);
             (gl, r)
@@ -165,12 +176,13 @@ fn pr_rows(c: &Ctx, pr: &Pr, w: usize, selected: bool, rh: usize) -> Vec<Line<'s
         vec![Span::styled(marker.to_string(), on(Role::Accent)), Span::styled(format!("   {repo} "), on(Role::Muted))];
     let right: Vec<Span<'static>> = match run {
         None => vec![Span::styled("not reviewed ", on(Role::Muted))],
+        Some(r) if r.parked() => vec![Span::styled(format!("{} awaiting you ", g.pending), on(Role::Pending))],
         Some(r) if r.status == RunStatus::Running => {
             let rate = per_sec(c, Some(&pr.id));
             let mut s: Vec<Span<'static>> = stepper(c, r).into_iter().map(|s| s.patch_style(row_bg)).collect();
             if c.m.look.show_activity {
                 s.push(Span::styled(format!(" {}", rate_cell(c, rate)), on(Role::Accent)));
-                s.push(Span::styled(format!("{rate:>4.1}/s "), on(Role::Muted)));
+                s.push(Span::styled(format!("{:>4}/s ", super::live::rate_label(rate)), on(Role::Muted)));
             } else {
                 s.push(Span::styled(" ", row_bg));
             }

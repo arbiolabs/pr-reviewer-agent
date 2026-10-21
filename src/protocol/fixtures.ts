@@ -1,6 +1,6 @@
 // Source of protocol/fixtures and protocol/playback. Edit here, then run `pnpm protocol:emit`.
 import { sha256, stableId } from "../domain/types.ts";
-import type { Account, ClientMessage, DiffFile, Evidence, Finding, FindingDetail, Pr, Run, ServerMessage } from "./v1.ts";
+import { type Account, type ClientMessage, type DiffFile, type Evidence, type Finding, type FindingDetail, type Pr, type PublicationChange, REVIEW_COMMANDS, type Run, type ServerMessage } from "./v1.ts";
 
 const EPOCH = "epoch-1";
 const T0 = Date.parse("2026-10-20T13:00:00Z");
@@ -74,16 +74,25 @@ const findingUpdated = (s: Seq, f: Finding) => ev(s, "finding.updated", f, { prI
 const runEvent = (s: Seq, type: "run.started" | "review.completed" | "run.superseded" | "run.failed", r: Run) =>
   ev(s, type, r, { prId: r.prId, runId: r.id });
 
-const welcome = (latestSequence: number, epoch = EPOCH, capabilities: string[] = []): ServerMessage => ({
+const welcome = (latestSequence: number, epoch = EPOCH, capabilities: string[] = [], mode?: "engine" | "read-only", readOnlyReason?: string): ServerMessage => ({
   type: "welcome",
   requestId: "req-hello",
   protocolVersion: 1,
   serverVersion: "0.1.0",
   sessionId: "session-1",
   capabilities,
+  ...(mode ? { mode } : {}),
+  ...(readOnlyReason ? { readOnlyReason } : {}),
   streamEpoch: epoch,
   latestSequence,
 });
+const publicationChanged = (s: Seq, r: Run, status: PublicationChange["status"], reviewId?: number) =>
+  ev(
+    s,
+    "review.publication_changed",
+    { runId: r.id, status, ...(reviewId ? { reviewId, url: `https://github.com/${r.prId.split("#")[0]}/pull/${r.prId.split("#")[1]}#pullrequestreview-${reviewId}` } : {}) },
+    { prId: r.prId, runId: r.id },
+  );
 const snapshot = (sequence: number, prs: Pr[], runs: Run[], findings: Finding[], epoch = EPOCH, accounts?: Account[]): ServerMessage => ({
   type: "snapshot",
   requestId: "req-snapshot",
@@ -119,6 +128,25 @@ const personal = account("github.com", "diego-arbio-dev", { ghActive: true });
 const work = account("github.com", "octo-work", { scopes: ["repo"] });
 const expired = account("github.com", "old-bot", { state: "error", scopes: [] });
 const accountsUpdated = (s: Seq, accounts: Account[]) => ev(s, "accounts.updated", { accounts }, {});
+const PREVIEW_ID = sha256("payload of rev-184-a");
+const preview: ServerMessage = {
+  type: "publication.preview",
+  requestId: "req-pub",
+  runId: run1.id,
+  previewId: PREVIEW_ID,
+  headSha: pr1.headSha,
+  body: `## Automated PR review\n\nReviewed commit: \`${pr1.headSha}\`\n\nFound 1 actionable issue.\n\n- High: Finding f-1 (\`src/booking.ts:42\`)\n\nReview performed with isolated read-only tools. Human review is still required.\n<!-- durable-review:${run1.id}:${PREVIEW_ID} -->\n`,
+  comments: [{ path: "src/booking.ts", line: 42, side: "RIGHT", body: "**High: Finding f-1**\n\nTwo concurrent bookings can both observe `slot.free` before either sets `held`." }],
+  event: "COMMENT",
+  status: "awaiting_approval",
+};
+const publishCommand = {
+  type: "command" as const,
+  requestId: "req-cmd",
+  command: "review.publish" as const,
+  params: { runId: run1.id, previewId: PREVIEW_ID, expectedHeadSha: pr1.headSha },
+  idempotencyKey: `review.publish:${run1.id}:${PREVIEW_ID}`,
+};
 const selectCommand = (a: Account) => ({
   type: "command" as const,
   requestId: "req-cmd",
@@ -624,20 +652,165 @@ const ledgerRun = showRun(ledger, SHOW_OPEN - 610, {
     "Diff too large to review: 212 files and 18,406 changed lines exceed the 8,000-line budget. Most of it is migrations/0042_partition_ledger.sql. Exclude generated files or split the PR.",
 });
 
+// 6. acme/shop#1296: tracked, never reviewed. The showcase's s starts its first review, which runs to COMPLETED.
+const giftCards = showPr("acme/shop", 1296, "Gift cards: redeem a balance at checkout", "rsingh");
+const giftCardsRun = showRun(giftCards, SHOW_OPEN, { phase: "COLLECT_CONTEXT", status: "RUNNING" });
+const redeemTs = diffFile("src/server/checkout/giftCards.ts", [
+  hunk(12, 12, "export async function applyGiftCard(db: Db, cartId: string, code: string) {", `
+ export async function applyGiftCard(db: Db, cartId: string, code: string) {
+   const cart = await db.cart.findUniqueOrThrow({ where: { id: cartId } });
+-  throw new NotSupportedError("gift cards");
++  const card = await db.giftCard.findUnique({ where: { code } });
++  if (!card || card.balance <= 0) throw new InvalidGiftCardError(code);
++  const amount = Math.min(card.balance, cart.total);
++  await db.giftCard.update({ where: { code }, data: { balance: card.balance - amount } });
++  return db.cart.update({ where: { id: cartId }, data: { giftCardAmount: amount } });
+ }
+`),
+]);
+const doubleSpend = showDetail(giftCardsRun, SHOW_OPEN, {
+  title: "A gift card redeemed in two carts at once is spent twice",
+  category: "data_integrity",
+  severity: "high",
+  confidence: 0.83,
+  file: redeemTs.path,
+  line: lineOf(redeemTs, "data: { balance: card.balance - amount }"),
+  explanation:
+    "applyGiftCard reads the card's balance, then writes back `card.balance - amount` as an absolute value. Two checkouts using the same code can both read a balance of 50, both apply 50 to their carts, and both write 0. The card pays 100 out of a 50 balance.",
+  reasoningSummary:
+    "The read and the write are separate statements outside a transaction, and the write is not conditional on the balance it read. Gift card codes are shared by design (gifts), so concurrent use is expected, not an edge case.",
+  suggestedFix:
+    "Debit with a conditional decrement and check that it applied:\n\nconst debited = await db.giftCard.updateMany({ where: { code, balance: { gte: amount } }, data: { balance: { decrement: amount } } });\nif (debited.count === 0) throw new InvalidGiftCardError(code);",
+  evidence: [
+    cite(redeemTs, giftCards.headSha, "const card = await db.giftCard.findUnique({ where: { code } });", "await db.giftCard.update({ where: { code }, data: { balance: card.balance - amount } });"),
+    { kind: "scenario", text: "Two carts apply code GIFT-7Q2M (balance 50) 3 ms apart. Both read 50, both take 50 off their totals, both write balance 0." },
+  ],
+});
+
+const showPersonal = account("github.com", "dperalta", { ghActive: true });
 const showAccounts = [
-  account("github.com", "dperalta", { ghActive: true }),
+  showPersonal,
   account("github.com", "acme-review-bot", { selected: true, scopes: ["read:org", "repo"] }),
 ];
 
-const showDetails = [refundAuthz, oversell, historyN1, pagerOffByOne, openRedirect, sessionFixation, unDrained];
+const showDetails = [refundAuthz, oversell, historyN1, pagerOffByOne, openRedirect, sessionFixation, unDrained, doubleSpend];
 const showDiffs: [string, Pr, Run, DiffFile[]][] = [
   ["shop-1287", orders, ordersRun, [ordersRoute, reserve, history]],
   ["api-341", requestIds, requestIdsRun, [apiMain, requestIdGo]],
   ["shop-1291", signIn, signInRun, [signInTsx, callbackTs, loginTs]],
   ["api-338-old", drainOld, drainOldRun, [dispatcherOld]],
   ["api-338", drain, drainRun, [dispatcherNew]],
+  ["shop-1296", giftCards, giftCardsRun, [redeemTs]],
 ];
+// What the journal recorded before the session opens, one timeline page per snapshot PR. Sequences run up to the
+// snapshot's 40, in time order across PRs, so Timeline has a story for every PR before the script plays anything.
+type Recorded = [t: number, make: (s: Seq) => ServerMessage];
+const started = (r: Run): Run => ({ ...r, phase: "COLLECT_CONTEXT", status: "RUNNING", completedAt: undefined });
+const fullRun = (r: Run, t: number, tools: [number, string, string][], findings: [number, FindingDetail][]): Recorded[] => {
+  const end = Date.parse(r.completedAt!) / 1000 - T0 / 1000;
+  const steps: [Run["phase"], Run["phase"], string, number][] = [
+    ["COLLECT_CONTEXT", "TRIAGE", "CONTEXT_PERSISTED", t + 20],
+    ["TRIAGE", "ANALYZE", "ROUTING_PERSISTED", t + 45],
+    ["ANALYZE", "VERIFY", "CANDIDATES_PERSISTED", (findings[0]?.[0] ?? end - 40) - 10],
+    ["VERIFY", "PREPARE_PUBLICATION", "CANDIDATES_DISPOSED", end - 10],
+    ["PREPARE_PUBLICATION", "PUBLISH", "HEAD_VERIFIED", end - 6],
+    ["PUBLISH", "COMPLETED", "NO_PUBLICATION_RECORDED", end - 2],
+  ];
+  return [
+    [t, (s) => runEvent(s, "run.started", started(r))],
+    ...steps.map(([from, to, event, at]): Recorded => [at, (s) => phase(s, r, from, to, event)]),
+    ...tools.map(([at, tool, summary]): Recorded => [at, (s) => activity(s, r, tool, summary)]),
+    ...findings.map(([at, d]): Recorded => [at, (s) => findingUpdated(s, { ...findingOf(d), stale: false })]),
+    [end, (s) => runEvent(s, "review.completed", r)],
+  ];
+};
+const prOpened = (p: Pr, t: number): Recorded => [t, (s) => ev(s, "pr.updated", p, { prId: p.id })];
+const showHistory: [string, Recorded[]][] = [
+  [
+    "shop-1287",
+    [
+      prOpened(orders, SHOW_OPEN - 2490),
+      ...fullRun(
+        ordersRun,
+        SHOW_OPEN - 2460,
+        [[SHOW_OPEN - 2450, "read_diff", "3 files changed (+41 -6): src/server/routes/orders.ts, src/server/orders/reserve.ts, src/server/orders/history.ts"]],
+        [[ordersSeen, refundAuthz], [ordersSeen + 6, oversell], [ordersSeen + 11, historyN1], [ordersSeen + 14, pagerOffByOne]],
+      ),
+    ],
+  ],
+  ["api-341", [prOpened(requestIds, SHOW_OPEN - 5340), ...fullRun(requestIdsRun, SHOW_OPEN - 5320, [], [])]],
+  ["shop-1291", [prOpened(signIn, SHOW_OPEN - 30)]],
+  [
+    "api-338",
+    [
+      prOpened(drainOld, SHOW_OPEN - 1540),
+      [SHOW_OPEN - 1520, (s) => runEvent(s, "run.started", started(drainOldRun))],
+      [SHOW_OPEN - 1500, (s) => phase(s, drainOldRun, "COLLECT_CONTEXT", "TRIAGE", "CONTEXT_PERSISTED")],
+      [SHOW_OPEN - 1450, (s) => phase(s, drainOldRun, "TRIAGE", "ANALYZE", "ROUTING_PERSISTED")],
+      [SHOW_OPEN - 1300, (s) => phase(s, drainOldRun, "ANALYZE", "VERIFY", "CANDIDATES_PERSISTED")],
+      [SHOW_OPEN - 1290, (s) => findingUpdated(s, { ...findingOf(unDrained), stale: false })],
+      [SHOW_OPEN - 142, (s) => ev(s, "pr.updated", drain, { prId: drain.id })],
+      [SHOW_OPEN - 140, (s) => phase(s, drainOldRun, "VERIFY", "SUPERSEDED", "NEWER_HEAD")],
+      [SHOW_OPEN - 140, (s) => runEvent(s, "run.superseded", drainOldRun)],
+      [SHOW_OPEN - 95, (s) => runEvent(s, "run.started", started(drainRun))],
+      [SHOW_OPEN - 80, (s) => phase(s, drainRun, "COLLECT_CONTEXT", "TRIAGE", "CONTEXT_PERSISTED")],
+    ],
+  ],
+  [
+    "api-345",
+    [
+      prOpened(ledger, SHOW_OPEN - 620),
+      [SHOW_OPEN - 610, (s) => runEvent(s, "run.started", started(ledgerRun))],
+      [SHOW_OPEN - 588, (s) => phase(s, ledgerRun, "COLLECT_CONTEXT", "FAILED", "TERMINAL_ERROR")],
+      [SHOW_OPEN - 588, (s) => runEvent(s, "run.failed", ledgerRun)],
+    ],
+  ],
+  ["shop-1296", [prOpened(giftCards, SHOW_OPEN - 260)]],
+];
+const showTimelines = (): [string, ServerMessage][] => {
+  const all = showHistory.flatMap(([name, rows]) => rows.map(([t, make], k) => ({ name, t, k, make })));
+  all.sort((a, b) => a.t - b.t || a.k - b.k);
+  if (all.length > 40) throw new Error(`showcase history has ${all.length} events; the snapshot is at sequence 40`);
+  const events = all.map((e, i) => ({ name: e.name, message: e.make({ seq: 40 - all.length + i + 1, t: e.t }) }));
+  return showHistory.map(([name]): [string, ServerMessage] => [
+    `server.timeline.page.showcase-${name}`,
+    { type: "timeline.page", requestId: "req-tl", events: events.filter((e) => e.name === name).map((e) => e.message).reverse() as Sequenced[] },
+  ]);
+};
+
+// What approving #1291 posts: the publisher's summary (src/cli/report.ts renderSummary) and one comment per finding.
+const signInPreviewId = sha256(`payload of ${signInRun.id}`);
+const signInPreview: ServerMessage = {
+  type: "publication.preview",
+  requestId: "req-pub",
+  runId: signInRun.id,
+  previewId: signInPreviewId,
+  headSha: signIn.headSha,
+  body: [
+    "## Automated PR review",
+    "",
+    `Reviewed commit: \`${signIn.headSha}\``,
+    "",
+    "Found 2 actionable issues.",
+    "",
+    ...[openRedirect, sessionFixation].map((f) => `- ${f.severity.charAt(0).toUpperCase()}${f.severity.slice(1)}: ${f.title} (\`${f.file}:${f.line}\`)`),
+    "",
+    "Review performed with isolated read-only tools. Human review is still required.",
+    `<!-- durable-review:${signInRun.id}:${signInPreviewId} -->`,
+    "",
+  ].join("\n"),
+  comments: [openRedirect, sessionFixation].map((f) => ({
+    path: f.file,
+    line: f.line!,
+    side: "RIGHT" as const,
+    body: `**${f.severity.charAt(0).toUpperCase()}${f.severity.slice(1)}: ${f.title}**\n\n${f.explanation}`,
+  })),
+  event: "COMMENT",
+  status: "awaiting_approval",
+};
+
 const showcaseFixtures: Record<string, ServerMessage> = Object.fromEntries([
+  ...showTimelines(),
   ...showDiffs.map(([name, p, r, files]): [string, ServerMessage] => [
     `server.diff.page.showcase-${name}`,
     { type: "diff.page", requestId: "req-diff", prId: p.id, baseSha: r.baseSha, headSha: r.headSha, files, truncated: false },
@@ -646,11 +819,40 @@ const showcaseFixtures: Record<string, ServerMessage> = Object.fromEntries([
     `server.finding.detail.showcase-${i + 1}`,
     { type: "finding.detail", requestId: "req-finding", finding: d },
   ]),
+  ["server.publication.preview.showcase-shop-1291", signInPreview],
 ]);
 
 const signInActivity = (tool: string, summary: string) => (s: Seq) => activity(s, signInRun, tool, summary);
 const drainActivity = (tool: string, summary: string) => (s: Seq) => activity(s, drainRun, tool, summary);
-type ShowStep = [delayMs: number, make: ((s: Seq) => ServerMessage) | "heartbeat"];
+// A step with `after` waits until the client sends a command that gate names; playback accepts it (protocol/README.md).
+type ShowStep = [delayMs: number, make: ((s: Seq) => ServerMessage) | "heartbeat", after?: string];
+const signInPublication = (status: PublicationChange["status"], reviewId?: number) => (s: Seq) =>
+  ev(
+    s,
+    "review.publication_changed",
+    { runId: signInRun.id, status, ...(reviewId ? { reviewId, url: `https://github.com/${signIn.repository}/pull/${signIn.number}#pullrequestreview-${reviewId}` } : {}) },
+    { prId: signIn.id, runId: signInRun.id },
+  );
+const SIGNIN_REVIEW_ID = 2209184;
+const ledgerRetry: Run = { ...started(ledgerRun), failureReason: undefined, attempt: 2 };
+/** A run the reader started or retried, from its first tool call to COMPLETED in about 14 s, all behind `gate`. */
+const toTheEnd = (r: Run, gate: string, tool: [string, string], findings: FindingDetail[]): ShowStep[] => {
+  const steps: ShowStep[] = [
+    [900, (s) => activity(s, r, ...tool)],
+    [1600, (s) => phase(s, r, "COLLECT_CONTEXT", "TRIAGE", "CONTEXT_PERSISTED")],
+    [2200, (s) => phase(s, r, "TRIAGE", "ANALYZE", "ROUTING_PERSISTED")],
+    [3500, (s) => phase(s, r, "ANALYZE", "VERIFY", "CANDIDATES_PERSISTED")],
+    ...findings.map((d): ShowStep => [400, (s) => findingUpdated(s, { ...findingOf(d), runId: r.id, stale: false })]),
+    [2400, (s) => phase(s, r, "VERIFY", "PREPARE_PUBLICATION", "CANDIDATES_DISPOSED")],
+    [1200, (s) => phase(s, r, "PREPARE_PUBLICATION", "PUBLISH", "HEAD_VERIFIED")],
+    [900, (s) => phase(s, r, "PUBLISH", "COMPLETED", "NO_PUBLICATION_RECORDED")],
+  ];
+  // The run started 500 ms before these lines, when the reader's command played its run.started.
+  const took = (500 + steps.reduce((sum, [delay]) => sum + delay, 0)) / 1000;
+  const completed = { ...r, phase: "COMPLETED" as const, status: "COMPLETED" as const };
+  steps.push([40, (s) => runEvent(s, "review.completed", { ...completed, startedAt: at(s.t! - took), completedAt: at(s.t!) })]);
+  return steps.map(([delay, make]) => [delay, make, gate]);
+};
 const showSteps: ShowStep[] = [
   [600, (s) => runEvent(s, "run.started", signInRun)],
   [420, signInActivity("read_diff", "3 files changed (+6 -3): src/server/auth/callback.ts, src/server/auth/login.ts, src/client/pages/SignIn.tsx")],
@@ -689,13 +891,39 @@ const showSteps: ShowStep[] = [
   [380, (s) => findingUpdated(s, findingOf(openRedirect))],
   [580, signInActivity("git_history", "#1077 review thread: rotation required by the 2025 pen test (finding AC-14)")],
   [620, (s) => findingUpdated(s, findingOf(sessionFixation))],
-  [1100, (s) => phase(s, signInRun, "VERIFY", "PREPARE_PUBLICATION", "CANDIDATES_DISPOSED")],
-  [800, (s) => phase(s, signInRun, "PREPARE_PUBLICATION", "PUBLISH", "HEAD_VERIFIED")],
-  [900, (s) => phase(s, signInRun, "PUBLISH", "COMPLETED", "NO_PUBLICATION_RECORDED")],
-  [40, (s) => runEvent(s, "review.completed", { ...signInRun, phase: "COMPLETED", status: "COMPLETED", completedAt: at(s.t!) })],
+  [300, (s) => phase(s, drainRun, "ANALYZE", "VERIFY", "CANDIDATES_PERSISTED")],
+  [800, (s) => phase(s, signInRun, "VERIFY", "PREPARE_PUBLICATION", "CANDIDATES_DISPOSED")],
+  // Approval mode: the review is stored and parks until the reader approves the preview.
+  [800, (s) => phase(s, signInRun, "PREPARE_PUBLICATION", "AWAITING_APPROVAL", "APPROVAL_REQUIRED")],
+  [40, signInPublication("awaiting_approval")],
+  // #338 ends on its own about 80 s in, unless the reader cancels it first (the GIF does, after the start on #1296);
+  // playback drops a run's lines once it has ended.
+  [5000, drainActivity("read_file", "internal/webhooks/dispatcher_test.go:1-90")],
+  [30000, drainActivity("search_code", "\"WithoutCancel(\": 1 match, internal/webhooks/dispatcher.go:68")],
+  [25000, drainActivity("read_file", "internal/webhooks/deliver.go:1-74")],
+  [3000, (s) => phase(s, drainRun, "VERIFY", "PREPARE_PUBLICATION", "CANDIDATES_DISPOSED")],
+  [1500, (s) => phase(s, drainRun, "PREPARE_PUBLICATION", "PUBLISH", "HEAD_VERIFIED")],
+  [800, (s) => phase(s, drainRun, "PUBLISH", "COMPLETED", "NO_PUBLICATION_RECORDED")],
+  [40, (s) => runEvent(s, "review.completed", { ...drainRun, phase: "COMPLETED", status: "COMPLETED", completedAt: at(s.t!) })],
+  [600, (s) => phase(s, signInRun, "AWAITING_APPROVAL", "PUBLISH", "APPROVED"), "review.publish"],
+  [300, signInPublication("publishing"), "review.publish"],
+  [1200, signInPublication("published", SIGNIN_REVIEW_ID), "review.publish"],
+  [80, (s) => findingUpdated(s, { ...findingOf(openRedirect), status: "PUBLISHED" }), "review.publish"],
+  [60, (s) => findingUpdated(s, { ...findingOf(sessionFixation), status: "PUBLISHED" }), "review.publish"],
+  [400, (s) => phase(s, signInRun, "PUBLISH", "COMPLETED", "REVIEW_RECONCILED"), "review.publish"],
+  [40, (s) => runEvent(s, "review.completed", { ...signInRun, phase: "COMPLETED", status: "COMPLETED", completedAt: at(s.t!) }), "review.publish"],
   [4000, "heartbeat"],
   [4000, "heartbeat"],
+  // What s, c and R do in the showcase, each on the one target it scripts: they play whenever the reader sends them.
+  [500, (s) => runEvent(s, "run.started", { ...giftCardsRun, startedAt: at(s.t!) }), `review.start:${giftCards.id}:${giftCards.headSha}`],
+  ...toTheEnd(giftCardsRun, `review.start:${giftCards.id}:${giftCards.headSha}`, ["read_diff", "1 file changed (+5 -1): src/server/checkout/giftCards.ts"], [doubleSpend]),
+  [500, (s) => phase(s, drainRun, "ANALYZE", "FAILED", "CANCELLED"), `review.cancel:${drainRun.id}`],
+  [40, (s) => runEvent(s, "run.failed", { ...drainRun, phase: "FAILED", status: "FAILED", completedAt: at(s.t!), failureReason: "cancelled from the TUI" }), `review.cancel:${drainRun.id}`],
+  [500, (s) => runEvent(s, "run.started", { ...ledgerRetry, startedAt: at(s.t!) }), `review.retry:${ledgerRun.id}`],
+  ...toTheEnd(ledgerRetry, `review.retry:${ledgerRun.id}`, ["read_diff", "4 files changed (+96 -12) once migrations/ is excluded as generated"], []),
+  [300, (s) => accountsUpdated(s, showAccounts.map((a) => ({ ...a, selected: a.id === showPersonal.id }))), `account.select:${showPersonal.id}`],
 ];
+
 
 // ---------- message fixtures ----------
 
@@ -776,18 +1004,17 @@ export const fixtures: Record<string, ClientMessage | ServerMessage | Record<str
     params: { prId: pr1.id, expectedHeadSha: pr1.headSha },
     idempotencyKey: `review.start:${pr1.id}:${pr1.headSha}`,
   },
-  "client.command.review.cancel": { type: "command", requestId: "req-cmd", command: "review.cancel", params: { runId: run1.id }, idempotencyKey: "k1" },
-  "client.command.review.retry": { type: "command", requestId: "req-cmd", command: "review.retry", params: { runId: run1.id }, idempotencyKey: "k2" },
-  "client.command.review.publish": {
-    type: "command",
-    requestId: "req-cmd",
-    command: "review.publish",
-    params: { runId: run1.id, previewId: "preview-1", expectedHeadSha: pr1.headSha },
-    idempotencyKey: "k3",
-  },
+  "client.command.review.cancel": { type: "command", requestId: "req-cmd", command: "review.cancel", params: { runId: run1.id }, idempotencyKey: `review.cancel:${run1.id}` },
+  "client.command.review.retry": { type: "command", requestId: "req-cmd", command: "review.retry", params: { runId: run1.id }, idempotencyKey: `review.retry:${run1.id}` },
+  "client.command.review.publish": publishCommand,
   "client.command.account-select": selectCommand(work),
+  "client.publication.get": { type: "publication.get", requestId: "req-pub", runId: run1.id },
 
   "server.welcome": welcome(108),
+  "server.welcome.engine": welcome(108, EPOCH, ["account.select", ...REVIEW_COMMANDS], "engine"),
+  "server.welcome.read-only": welcome(108, EPOCH, ["account.select"], "read-only", "another pr-review is running on /srv/pr-review/.data"),
+  "server.publication.preview": preview,
+  "server.publication.preview.published": { ...preview, status: "published", reviewId: 3141, url: "https://github.com/acme/shop/pull/184#pullrequestreview-3141" },
   "server.snapshot": snapshot(108, [pr1, pr2, pr3], [run1, run2], [f1, f2]),
   "server.snapshot.accounts": snapshot(108, [pr1], [run1], [f1], EPOCH, [
     account("env", "GITHUB_TOKEN", { scopes: [] }),
@@ -810,9 +1037,13 @@ export const fixtures: Record<string, ClientMessage | ServerMessage | Record<str
     status: "FAILED",
     completedAt: at(109),
     failureReason: "aborted by operator",
+    attempt: 2,
   }),
   "server.event.accounts-updated": accountsUpdated({ seq: 109 }, [personal, { ...work, selected: true }]),
+  "server.event.review.publication_changed": publicationChanged({ seq: 109 }, run1, "awaiting_approval"),
+  "server.event.review.publication_changed.published": publicationChanged({ seq: 109 }, run1, "published", 3141),
   "server.event.heartbeat": { type: "event", eventType: "heartbeat", streamEpoch: EPOCH, occurredAt: at(110) },
+  // A reserved name (TUI_SPEC §3B's reinvestigation) stands in for whatever a newer server may emit.
   "server.event.unknown-type": {
     type: "event",
     streamEpoch: EPOCH,
@@ -820,7 +1051,7 @@ export const fixtures: Record<string, ClientMessage | ServerMessage | Record<str
     prevSequence: 108,
     occurredAt: at(109),
     prId: pr1.id,
-    eventType: "review.publication_changed",
+    eventType: "review.reinvestigation_requested",
     data: { state: "PENDING", whatever: [1, 2] },
   },
   "server.event.extra-fields": {
@@ -927,6 +1158,10 @@ export const invalidFixtures: Record<string, [unknown, string]> = {
     { type: "command.result", requestId: "r", status: "accepted" },
     "An accepted command names the operation that later events confirm.",
   ],
+  "server.event.publication.bad-status": [
+    { ...(fixtures["server.event.review.publication_changed"] as object), data: { runId: run1.id, status: "posted" } },
+    "Publication statuses are a closed list: awaiting_approval, publishing, published, uncertain, failed.",
+  ],
   "server.error.unknown-code": [{ type: "error", code: "TEAPOT", message: "m" }, "Error codes are a closed list."],
   "server.finding.line-zero": [
     { ...(fixtures["server.finding.detail"] as Record<string, unknown>), finding: { ...detail, line: 0 } },
@@ -936,7 +1171,8 @@ export const invalidFixtures: Record<string, [unknown, string]> = {
 
 // ---------- playback scripts ----------
 
-export type PlaybackLine = { delayMs: number; message: ServerMessage };
+/** `after`: the line waits until the client sends that command, then its delay runs (protocol/README.md). */
+export type PlaybackLine = { delayMs: number; after?: string; message: ServerMessage };
 export type Expect = {
   streamEpoch: string;
   lastSequence: number;
@@ -947,6 +1183,8 @@ export type Expect = {
   findings: { id: string; title: string; status: string; stale: boolean }[];
   /** Present only when the script's snapshot carries accounts. */
   accounts?: { id: string; state: string; ghActive: boolean; selected: boolean }[];
+  /** The latest `review.publication_changed` per run, sorted by `runId`; present only when the script carries one. */
+  publications?: { runId: string; status: string }[];
 };
 
 const lines = (delayMs: number, messages: ServerMessage[]): PlaybackLine[] => messages.map((message) => ({ delayMs, message }));
@@ -967,7 +1205,7 @@ const normal = lines(40, [
     sequence: 15,
     prevSequence: 14,
     occurredAt: at(15),
-    eventType: "review.publication_changed",
+    eventType: "review.reinvestigation_requested",
     data: { reserved: true },
   } as ServerMessage,
   phase({ seq: 16 }, run1, "PREPARE_PUBLICATION", "PUBLISH", "HEAD_VERIFIED"),
@@ -1044,22 +1282,43 @@ const accounts = lines(40, [
 ]);
 
 
+// Approval mode end to end: the run parks, the preview is shown, the approval is accepted, then the publisher's
+// own statuses arrive. The client never shows a publication as done on `accepted`, only on `published`.
+const approval = lines(40, [
+  welcome(10, EPOCH, ["account.select", ...REVIEW_COMMANDS], "engine"),
+  snapshot(10, [pr1, pr2, pr3], [run1, run2], [f1, f2], EPOCH, [personal, work]),
+  phase({ seq: 11 }, run1, "VERIFY", "PREPARE_PUBLICATION", "CANDIDATES_DISPOSED"),
+  phase({ seq: 12 }, run1, "PREPARE_PUBLICATION", "AWAITING_APPROVAL", "APPROVAL_REQUIRED"),
+  publicationChanged({ seq: 13 }, run1, "awaiting_approval"),
+  preview,
+]).concat(
+  // The approval plays once the reader sends it; playback answers the command itself, so the script carries no
+  // command.result for a request the client never made.
+  lines(40, [
+    phase({ seq: 14 }, run1, "AWAITING_APPROVAL", "PUBLISH", "APPROVED"),
+    publicationChanged({ seq: 15 }, run1, "publishing"),
+    publicationChanged({ seq: 16 }, run1, "published", 3141),
+    phase({ seq: 17 }, run1, "PUBLISH", "COMPLETED", "REVIEW_RECONCILED"),
+    runEvent({ seq: 18 }, "review.completed", { ...run1, phase: "COMPLETED", status: "COMPLETED", completedAt: at(18) }),
+  ]).map((l) => ({ ...l, after: "review.publish" })),
+);
+
 // Each step's occurredAt is the script clock, so the timestamps match the cadence the TUI plays at.
 const showcaseScript = (): PlaybackLine[] => {
   let [seq, clock] = [40, SHOW_OPEN];
-  const steps = showSteps.map(([delayMs, make]): PlaybackLine => {
+  const steps = showSteps.map(([delayMs, make, after]): PlaybackLine => {
     clock += delayMs / 1000;
     if (make === "heartbeat") return { delayMs, message: { type: "event", eventType: "heartbeat", streamEpoch: EPOCH, occurredAt: at(clock) } };
     seq += 1;
-    return { delayMs, message: make({ seq, t: clock }) };
+    return { delayMs, ...(after ? { after } : {}), message: make({ seq, t: clock }) };
   });
   return [
-    { delayMs: 0, message: welcome(40, EPOCH, ["account.select"]) },
+    { delayMs: 0, message: welcome(40, EPOCH, ["account.select", ...REVIEW_COMMANDS], "engine") },
     {
       delayMs: 0,
       message: snapshot(
         40,
-        [orders, requestIds, signIn, drain, ledger],
+        [orders, requestIds, signIn, drain, ledger, giftCards],
         [ordersRun, requestIdsRun, drainOldRun, drainRun, ledgerRun],
         [refundAuthz, oversell, historyN1, pagerOffByOne, unDrained].map(findingOf),
         EPOCH,
@@ -1162,24 +1421,42 @@ export const playback: Record<string, { script: PlaybackLine[]; expect: Expect }
     script: showcaseScript(),
     expect: {
       streamEpoch: EPOCH,
-      lastSequence: 80,
+      lastSequence: 116,
       resyncRequested: false,
-      toolActivityCount: 29,
-      prs: prRows(orders, requestIds, signIn, drain, ledger),
+      toolActivityCount: 34,
+      prs: prRows(orders, requestIds, signIn, drain, ledger, giftCards),
       runs: [
         runRow(ordersRun),
         runRow(requestIdsRun),
         runRow(signInRun, "COMPLETED", "COMPLETED"),
         runRow(drainOldRun),
-        runRow(drainRun, "ANALYZE", "RUNNING"),
-        runRow(ledgerRun),
+        runRow(drainRun, "FAILED", "FAILED"),
+        runRow(ledgerRun, "COMPLETED", "COMPLETED"),
+        runRow(giftCardsRun, "COMPLETED", "COMPLETED"),
       ],
-      findings: showDetails.map((f) => ({ id: f.id, title: f.title, status: "DETECTED", stale: f.stale })),
+      findings: showDetails.map((f) => ({ id: f.id, title: f.title, status: f.runId === signInRun.id ? "PUBLISHED" : "DETECTED", stale: f.stale })),
       accounts: [
-        { id: "github.com/acme-review-bot", state: "ok", ghActive: false, selected: true },
-        { id: "github.com/dperalta", state: "ok", ghActive: true, selected: false },
+        { id: "github.com/acme-review-bot", state: "ok", ghActive: false, selected: false },
+        { id: "github.com/dperalta", state: "ok", ghActive: true, selected: true },
       ],
+      publications: [{ runId: signInRun.id, status: "published" }],
     },
+  },
+  approval: {
+    script: approval,
+    expect: baseExpect({
+      lastSequence: 18,
+      runs: [runRow(run1, "COMPLETED", "COMPLETED"), runRow(run2)],
+      findings: [
+        { id: f1.id, title: f1.title, status: f1.status, stale: false },
+        { id: f2.id, title: f2.title, status: f2.status, stale: false },
+      ],
+      accounts: [
+        { id: personal.id, state: "ok", ghActive: true, selected: false },
+        { id: work.id, state: "ok", ghActive: false, selected: false },
+      ],
+      publications: [{ runId: run1.id, status: "published" }],
+    }),
   },
   burst: { script: burst, expect: baseExpect({ lastSequence: 5010, toolActivityCount: 5000 }) },
 };

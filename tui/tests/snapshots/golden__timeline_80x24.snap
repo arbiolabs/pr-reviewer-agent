@@ -2,12 +2,12 @@
 source: tests/golden.rs
 expression: text
 ---
-  pr-review · • reviewing #184 verify found: Finding f-1                ● live
+  pr-review · ▘ reviewing #184 verify found: Finding f-1                ● live
 
 
   acme/shop  #184  timeline
   Booking API
-  2 of 2 events, oldest first · the whole PR (f) · all kinds (v) · phase any …
+  2 events, oldest first · the whole PR (f) · all kinds (v) · phase any (P)
 
   VERIFY ─────────────────────────────────────────────────────────── 13:00:11
     13:00:11    read_file     src/booking.ts:1-120
@@ -25,4 +25,4 @@ expression: text
 
 
 
-   j/k move  Enter detail  w watch live  f scope  v kind  P phase  Esc back
+   j/k move  Enter detail  w watch live  / filter  f scope  Esc back  ? help

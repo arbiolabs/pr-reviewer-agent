@@ -2,12 +2,12 @@
 source: tests/golden.rs
 expression: text
 ---
-  pr-review · • reviewing #184 verify found: Finding f-1                ● live
+  pr-review · ▘ reviewing #184 verify found: Finding f-1                ● live
 
 
   acme/shop  #184  timeline
   Booking API
-  1 of 1 event, oldest first · "Finding f-1" (f) · all kinds (v) · phase any …
+  1 event, oldest first · "Finding f-1" (f) · all kinds (v) · phase any (P)
 
   VERIFY ─────────────────────────────────────────────────────────── 13:00:12
   ▌ 13:00:12  ▲ HIGH          Finding f-1  detected
@@ -25,4 +25,4 @@ expression: text
 
 
 
-   j/k move  Enter detail  w watch live  f scope  v kind  P phase  Esc back
+   j/k move  Enter detail  w watch live  / filter  f scope  Esc back  ? help

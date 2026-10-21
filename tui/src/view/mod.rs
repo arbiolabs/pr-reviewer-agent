@@ -6,6 +6,7 @@ mod diff;
 mod doc;
 mod live;
 mod modals;
+mod publish;
 mod rail;
 mod timeline;
 
@@ -14,7 +15,7 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
-use crate::model::{InputPurpose, Link, Modal, Model, Pane, Screen};
+use crate::model::{ConfirmState, InputPurpose, Link, Modal, Model, Pane, Screen};
 use crate::text::{fit, pad};
 use crate::theme::{Role, Theme};
 
@@ -76,12 +77,22 @@ pub(crate) fn window(len: usize, selected: Option<usize>, height: usize) -> std:
 pub enum Hit {
     Pr(crate::protocol::PrId),
     Finding(crate::protocol::FindingId),
+    /// A parked run's "Ready to publish" line.
+    Ready,
+    /// A file in the Diff screen's list, by path.
+    DiffFile(crate::protocol::Text),
+    /// A row of the selected file's patch: a hunk header, a line, or a finding written under it.
+    DiffRow(usize),
+    /// A timeline event's row, heading or open detail, by sequence.
+    Event(u64),
+    /// A view in the footer's list.
+    View(Screen),
 }
 
 fn ctx(m: &Model, width: u16) -> Ctx<'_> {
     Ctx {
         m,
-        t: Theme { color: m.look.color, ascii: m.look.ascii, terminal_bg: m.look.terminal_bg },
+        t: Theme { color: m.look.color, ascii: m.look.ascii, terminal_bg: m.look.terminal_bg, palette: m.look.palette },
         width: Width::of(width),
     }
 }
@@ -106,11 +117,42 @@ pub fn hit(m: &Model, x: u16, y: u16) -> Option<Hit> {
     if area.width < MIN_W || area.height < MIN_H || m.top_modal().is_some() {
         return None;
     }
-    let body = regions(&c, area)[3];
-    if !matches!(m.ui.screen, Screen::Inbox | Screen::Review) || y < body.y || y >= body.y + body.height {
+    let [.., body, footer] = regions(&c, area);
+    if y == footer.y {
+        return view_at(&c, footer, x).map(Hit::View);
+    }
+    if y < body.y || y >= body.y + body.height {
         return None;
     }
-    doc::hit(&c, body, x, y)
+    match m.ui.screen {
+        Screen::Inbox | Screen::Review => doc::hit(&c, body, x, y),
+        Screen::Diff => diff::hit(&c, body, x, y),
+        Screen::Timeline => timeline::hit(&c, body, y).map(Hit::Event),
+        Screen::Settings => None,
+    }
+}
+
+/// The view whose number or name in the footer's list covers column `x`.
+fn view_at(c: &Ctx, footer: Rect, x: u16) -> Option<Screen> {
+    let vw = views_w(c) as u16;
+    let mut at = (footer.x + footer.width.saturating_sub(vw)) as usize;
+    for (i, pair) in views_line(c).spans.chunks(2).enumerate() {
+        let w: usize = pair.iter().map(|s| crate::text::width(&s.content)).sum();
+        if vw > 0 && (at..at + w).contains(&(x as usize)) {
+            return Screen::ALL.get(i).copied();
+        }
+        at += w;
+    }
+    None
+}
+
+/// The largest useful scroll of the top page (help, finding reader, publication preview) at the current size.
+pub fn page_scroll_limit(m: &Model) -> u16 {
+    let area = Rect::new(0, 0, m.size.0, m.size.1);
+    let c = ctx(m, area.width);
+    let body = regions(&c, area)[3];
+    let len = m.top_modal().and_then(|x| modals::page_lines(&c, body, x)).map_or(0, |l| l.len());
+    modals::page_limit(len, body.height as usize) as u16
 }
 
 /// The largest useful `doc_scroll` at the current size, so J past the end does not pile up presses K must undo.
@@ -152,6 +194,31 @@ pub fn view(m: &Model, f: &mut Frame) {
     for modal in &m.ui.modals {
         modals::modal(&c, f, body, modal);
     }
+    toast(&c, f, footer, body);
+}
+
+/// A notice too long for the footer beside the views takes the whole footer and wraps upward over the body's last
+/// rows, instead of being cut.
+fn toast(c: &Ctx, f: &mut Frame, footer: Rect, body: Rect) {
+    let Some(n) = c.m.notice.as_ref().filter(|_| !matches!(c.m.top_modal(), Some(Modal::Input { .. }))) else {
+        return;
+    };
+    let room = footer.width.saturating_sub(views_w(c) as u16 + 3) as usize;
+    if crate::text::width(&n.text) <= room {
+        return;
+    }
+    let w = footer.width.saturating_sub(2) as usize;
+    let lines: Vec<Line> = code::rich(c, &n.text, w, Role::Pending)
+        .into_iter()
+        .map(|mut l| {
+            l.insert(0, Span::raw(" "));
+            Line::from(l)
+        })
+        .collect();
+    let h = (lines.len() as u16).min(body.height + 1);
+    let area = Rect { y: footer.y + 1 - h, height: h, ..footer };
+    f.render_widget(ratatui::widgets::Clear, area);
+    f.render_widget(Paragraph::new(lines).style(c.t.bg(crate::theme::Bg::Base)), area);
 }
 
 fn link_status(c: &Ctx) -> (String, Role) {
@@ -160,6 +227,7 @@ fn link_status(c: &Ctx) -> (String, Role) {
         Link::Live => (format!("{} live", g.active), Role::Ok),
         Link::Syncing => (format!("{} loading snapshot", g.pending), Role::Pending),
         Link::Resyncing => (format!("{} resyncing", g.pending), Role::Pending),
+        Link::Stalled { .. } => (format!("{} snapshot timed out", g.fail), Role::Fail),
         Link::Negotiating => (format!("{} negotiating", g.pending), Role::Pending),
         Link::Connecting { attempt } => (format!("{} connecting (attempt {attempt})", g.pending), Role::Pending),
         Link::Disconnected { .. } => (format!("{} disconnected", g.fail), Role::Fail),
@@ -175,29 +243,58 @@ fn status_line(c: &Ctx, width: u16) -> Line<'static> {
     let (link, link_role) = link_status(c);
     let right = vec![c.span(format!("{link}  "), link_role)];
     let mut left = vec![c.span("  pr-review", Role::Title), c.span(format!(" {} ", g.sep), Role::Muted)];
-    let running: Vec<_> =
-        c.m.domain.runs.values().filter(|r| r.status == crate::protocol::RunStatus::Running).collect();
-    let newest = c.m.domain.activity.iter().rev().find(|a| running.iter().any(|r| a.pr_id.as_ref() == Some(&r.pr_id)));
-    match (running.first(), newest) {
-        (Some(_), Some(a)) => {
-            let pr = a.pr_id.as_ref().and_then(|id| c.m.domain.prs.get(id));
-            let run = pr.and_then(|p| c.m.domain.latest_run(&p.id));
+    let mut active: Vec<_> = c.m.domain.runs.values().filter(|r| r.active()).collect();
+    active.sort_by_key(|r| c.m.domain.prs.get(&r.pr_id).map(|p| p.number));
+    let parked: Vec<_> = c.m.domain.runs.values().filter(|r| r.parked()).collect();
+    let newest = c.m.domain.activity.iter().rev().find(|a| active.iter().any(|r| a.pr_id.as_ref() == Some(&r.pr_id)));
+    // The review the line names: the one with the newest activity, else the first running one.
+    let named = newest.and_then(|a| active.iter().find(|r| a.pr_id.as_ref() == Some(&r.pr_id))).or(active.first());
+    let waiting = |n: usize| match n {
+        0 => String::new(),
+        n if w >= 100 => format!("  {} {n} awaiting you", g.pending),
+        n => format!("  {}{n}", g.pending),
+    };
+    match named {
+        // Off the stream, the cache is a photo: say how old it is rather than what it claims is running.
+        _ if c.m.link != Link::Live => {
+            let text = match (c.m.diag.last_snapshot_ms, &c.m.link) {
+                (Some(at), _) => format!("last known state, {}s old", c.m.now_ms.saturating_sub(at) / 1000),
+                (None, Link::Negotiating | Link::Syncing) => "waiting for the first snapshot".into(),
+                (None, _) => "not connected".into(),
+            };
+            left.push(c.span(text, Role::Muted));
+        }
+        Some(r) => {
+            let pr = c.m.domain.prs.get(&r.pr_id);
             left.push(c.span(format!("{} ", doc::spinner(c)), Role::Accent));
-            if let (Some(p), Some(r)) = (pr, run) {
+            if let Some(p) = pr {
                 left.push(c.span(format!("reviewing #{} ", p.number), Role::Normal));
-                left.push(c.span(format!("{} ", doc::phase_label(r.phase)), Role::Accent));
             }
-            let used: usize = left.iter().chain(&right).map(|s| crate::text::width(&s.content)).sum();
-            let more = match running.len() {
+            left.push(c.span(format!("{} ", doc::phase_label(r.phase)), Role::Accent));
+            let more = match active.len() {
                 1 => String::new(),
                 n if w >= 100 => format!("  +{} more running", n - 1),
                 n => format!("  +{}", n - 1),
             };
-            let room = w.saturating_sub(used + crate::text::width(&more) + 2);
-            left.push(c.span(whole(activity_words(&a.kind), room), Role::Muted));
+            let parked_note = waiting(parked.len());
+            let used: usize = left.iter().chain(&right).map(|s| crate::text::width(&s.content)).sum();
+            let room = w.saturating_sub(used + crate::text::width(&more) + crate::text::width(&parked_note) + 2);
+            let words = newest
+                .filter(|a| a.pr_id.as_ref() == Some(&r.pr_id))
+                .map_or(vec![], |a| activity_words(&a.kind, Some(r.phase)));
+            left.push(c.span(whole(words, room), Role::Muted));
             left.push(c.span(more, Role::Muted));
+            left.push(c.span(parked_note, Role::Pending));
         }
-        _ => {
+        // Nothing runs, but a review waits for the reader: amber, the one state that asks for them.
+        None if !parked.is_empty() => {
+            let mut numbers: Vec<u64> =
+                parked.iter().filter_map(|r| c.m.domain.prs.get(&r.pr_id).map(|p| p.number)).collect();
+            numbers.sort();
+            let list = numbers.iter().map(|n| format!("#{n}")).collect::<Vec<_>>().join(" ");
+            left.push(c.span(format!("{} {list} waiting for you {} p previews", g.pending, g.sep), Role::Pending));
+        }
+        None => {
             let n = c.m.domain.prs.len();
             let prs = if n == 1 { "PR" } else { "PRs" };
             left.push(c.span(format!("{n} {prs} tracked {} nothing running", g.sep), Role::Muted))
@@ -214,14 +311,16 @@ fn whole(options: Vec<String>, room: usize) -> String {
     options.into_iter().find(|o| crate::text::width(o) <= room).unwrap_or_default()
 }
 
-/// What one activity says in the status line, from the most to the least detailed.
-fn activity_words(kind: &crate::model::ActivityKind) -> Vec<String> {
+/// What one activity says in the status line, from the most to the least detailed. The line already names the run's
+/// phase, so entering that phase says nothing more.
+fn activity_words(kind: &crate::model::ActivityKind, phase: Option<crate::protocol::Phase>) -> Vec<String> {
     use crate::model::ActivityKind as K;
     match kind {
         K::Tool { tool, summary } => {
             let target = summary.as_str().split(": ").next().unwrap_or("");
             vec![format!("{tool} {summary}"), format!("{tool} {target}"), tool.to_string()]
         }
+        K::Phase { to, .. } if Some(*to) == phase => vec![],
         K::Phase { to, .. } => vec![format!("entered {}", crate::theme::phase_name(*to))],
         K::Finding { title, .. } => vec![format!("found: {title}"), "new finding".into()],
         K::Run { .. } => vec!["started".into()],
@@ -230,8 +329,10 @@ fn activity_words(kind: &crate::model::ActivityKind) -> Vec<String> {
 
 fn views_line(c: &Ctx) -> Line<'static> {
     let mut spans = Vec::new();
-    for (i, s) in Screen::ALL.iter().take(4).enumerate() {
-        let on = *s == c.m.ui.screen || (*s == Screen::Review && c.m.ui.screen == Screen::Inbox && false);
+    // Settings joins the list once the footer has room for it beside the hints.
+    let shown = if c.m.size.0 >= 120 { 5 } else { 4 };
+    for (i, s) in Screen::ALL.iter().take(shown).enumerate() {
+        let on = *s == c.m.ui.screen;
         spans.push(c.span(format!("{}", i + 1), Role::Muted));
         spans.push(c.span(format!(" {}  ", s.label().to_lowercase()), if on { Role::Focus } else { Role::Muted }));
     }
@@ -245,19 +346,20 @@ fn views_w(c: &Ctx) -> usize {
 fn banner(c: &Ctx, width: u16) -> Option<Line<'static>> {
     let g = c.t.g();
     let text = match &c.m.link {
-        Link::Disconnected { reason, retry_in_ms } => {
-            let retry =
-                retry_in_ms.map_or(String::new(), |ms| format!(" {} retrying in {:.1}s", g.sep, ms as f64 / 1000.0));
-            format!(
-                " {} disconnected: {reason}{retry} {} showing last known state {} writes disabled",
-                g.fail, g.sep, g.sep
-            )
+        // The reason is in the column and in Settings; the banner says only what the reader must know.
+        Link::Disconnected { retry_in_ms, .. } => {
+            let mut parts = vec![format!(" {} disconnected", g.fail)];
+            parts.extend(retry_in_ms.map(|ms| format!("retry in {}s", ms.div_ceil(1000))));
+            if c.m.diag.last_snapshot_ms.is_some() {
+                parts.push("last known state".into());
+            }
+            parts.join(&format!(" {} ", g.sep))
         }
         Link::Incompatible { supported, message } => format!(
             " {} protocol mismatch: {message}; server supports {supported:?}, this client speaks [1]. Upgrade the client or daemon.",
             g.fail
         ),
-        Link::Unusable { message } => format!(" {} {message}", g.fail),
+        Link::Unusable { message } | Link::Stalled { reason: message } => format!(" {} {message}", g.fail),
         Link::Resyncing => format!(" {} resyncing: fetching an authoritative snapshot; live events paused", g.pending),
         _ => return None,
     };
@@ -271,6 +373,8 @@ fn footer_line(c: &Ctx, width: u16) -> Line<'static> {
         let prompt = match purpose {
             InputPurpose::Search => " / search PRs: ",
             InputPurpose::JumpTo => " : jump to path[:line]: ",
+            InputPurpose::TimelineFilter => " / filter events: ",
+            InputPurpose::DiffSearch => " / search the diff: ",
         };
         let field = c.fit(&format!("{buffer}_"), w.saturating_sub(crate::text::width(prompt) + 22));
         return Line::from(vec![
@@ -283,9 +387,18 @@ fn footer_line(c: &Ctx, width: u16) -> Line<'static> {
         return Line::from(c.span(c.pad(&format!(" {}", n.text), w), Role::Pending));
     }
     let hints = match (c.m.top_modal(), c.m.ui.screen) {
-        (Some(Modal::Help), _) => "Esc close  q quit",
-        (Some(Modal::Finding { .. }), _) => "j/k scroll  d diff at anchor  t timeline  Esc close",
-        (Some(Modal::Confirm { .. }), _) => "y confirm  n/Esc cancel",
+        (Some(Modal::Help { .. }), _) => "j/k scroll  Esc close  q quit",
+        (Some(Modal::Finding { .. }), _) => "j/k scroll  n/N finding  d diff at anchor  t timeline  Esc close",
+        (Some(Modal::Confirm { state: ConfirmState::Asking | ConfirmState::TimedOut, .. }), _) => {
+            "y confirm  n/Esc cancel"
+        }
+        (Some(Modal::Confirm { .. }), _) => "Esc closes",
+        (Some(Modal::Publication { raw: false, .. }), _) => {
+            "j/k scroll  y publish  m raw markdown  o open on GitHub  Esc close"
+        }
+        (Some(Modal::Publication { raw: true, .. }), _) => {
+            "j/k scroll  y publish  m styled  o open on GitHub  Esc close"
+        }
         (_, Screen::Inbox) => "j/k pull request  Enter read  / search  ? help  q quit",
         (_, Screen::Review) if c.m.ui.focus == Pane::Sidebar => {
             "j/k pull request  Enter read  / search  l findings  ? help  q quit"
@@ -293,36 +406,61 @@ fn footer_line(c: &Ctx, width: u16) -> Line<'static> {
         (_, Screen::Review) => {
             "j/k finding  Enter read  d diff  J/K scroll  h pull requests  t timeline  ? help  q quit"
         }
-        (_, Screen::Diff) => "j/k line  n/N finding  Enter read  h files  : jump  Esc back  ? help",
-        (_, Screen::Timeline) if c.m.timeline.as_ref().is_some_and(|t| t.open.is_some()) => {
-            "j/k move  Enter fold or read  f scope  v kind  P phase  Esc fold  ? help"
+        (_, Screen::Diff) if c.m.ui.focus == Pane::Sidebar => "j/k file  Enter or l code  Esc back  ? help",
+        (_, Screen::Diff) if c.m.diff.as_ref().is_some_and(|d| d.search.is_some()) => {
+            "j/k line  n/N match  Enter read  h files  / search  Esc clear search  ? help"
         }
-        (_, Screen::Timeline) => "j/k move  Enter detail  f scope  v kind  P phase  Esc back  ? help",
-        (_, Screen::Settings) => "j/k account  Enter select account  r refresh  1-4 views  ? help  q quit",
+        (_, Screen::Diff) => "j/k line  n/N finding  Enter read  h files  / search  : jump  Esc back  ? help",
+        (_, Screen::Timeline) if c.m.timeline.as_ref().is_some_and(|t| t.open.is_some()) => {
+            "j/k move  Enter fold or read  / filter  f scope  v kind  P phase  Esc fold  ? help"
+        }
+        (_, Screen::Timeline) => "j/k move  Enter detail  / filter  f scope  v kind  P phase  Esc back  ? help",
+        (_, Screen::Settings) => "j/k account  Enter select account  r refresh  1-5 views  ? help  q quit",
     };
     let running = c.m.domain.runs.values().any(|r| r.status == crate::protocol::RunStatus::Running);
     let watch = running && c.m.top_modal().is_none();
+    let parked = c.m.selected_pr().and_then(|p| c.m.domain.latest_run(&p.id)).is_some_and(|r| r.parked());
     let mut hints: Vec<&str> = hints.split("  ").collect();
+    if let Some(Modal::Publication { run_id, preview, publish, .. }) = c.m.top_modal() {
+        let can_publish = matches!(publish, crate::model::ConfirmState::Asking | crate::model::ConfirmState::TimedOut)
+            && matches!(preview, crate::model::Preview::Ready(p) if crate::update::publish_block(c.m, p).is_none());
+        let url = crate::update::published_url(c.m, run_id).is_some();
+        hints.retain(|h| (*h != "y publish" || can_publish) && (*h != "o open on GitHub" || url));
+    }
     if watch {
         hints.insert(2.min(hints.len()), "w watch live");
     }
-    let mut out = String::from(" ");
-    for hint in hints {
-        if crate::text::width(&out) + crate::text::width(hint) + 2 <= w {
-            out.push_str("  ");
-            out.push_str(hint);
-        }
+    if parked && c.m.top_modal().is_none() {
+        hints.insert(1.min(hints.len()), "p preview & publish");
     }
-    Line::from(c.span(out, Role::Muted))
+    // Too wide: drop the least important hint, then the next, keeping the rest in order.
+    let line = |hints: &[&str]| format!("   {}", hints.join("  "));
+    while hints.len() > 1 && crate::text::width(&line(&hints)) > w {
+        let least = (0..hints.len()).min_by_key(|&i| (rank(hints[i]), std::cmp::Reverse(i))).unwrap_or(0);
+        hints.remove(least);
+    }
+    Line::from(c.span(c.fit(&line(&hints), w), Role::Muted))
+}
+
+/// How much a footer hint matters, by its key: moving, opening, going back and help outlast the shortcuts.
+fn rank(hint: &str) -> u8 {
+    match hint.split(' ').next().unwrap_or("") {
+        "j/k" | "Enter" | "Esc" | "?" => 4,
+        "h" | "l" | "y" | "n/Esc" => 3,
+        "q" | "n/N" | "/" | ":" | "d" | "m" => 2,
+        "t" | "w" | "f" | "1-5" => 1,
+        "p" => 3,
+        _ => 0,
+    }
 }
 
 fn minimal(c: &Ctx, f: &mut Frame, area: Rect) {
     let (status, role) = link_status(c);
     let lines = vec![
-        Line::from(vec![c.span("PR REVIEWER ", Role::Title), c.span(status, role)]),
+        Line::from(vec![c.span("pr-review ", Role::Title), c.span(status, role)]),
         Line::from(c.span(format!("Terminal is {}x{}.", area.width, area.height), Role::Normal)),
         Line::from(c.span(format!("Resize to at least {MIN_W}x{MIN_H}."), Role::Pending)),
-        Line::from(c.span("q quit  ? help", Role::Muted)),
+        Line::from(c.span("q quit", Role::Muted)),
     ];
     let lines: Vec<Line> = lines
         .into_iter()
@@ -347,9 +485,9 @@ mod tests {
             tool: Text::new("search_code"),
             summary: Text::new("\"returnTo\": 6 matches in 3 files"),
         };
-        assert_eq!(whole(activity_words(&kind), 80), "search_code \"returnTo\": 6 matches in 3 files");
-        assert_eq!(whole(activity_words(&kind), 30), "search_code \"returnTo\"");
-        assert_eq!(whole(activity_words(&kind), 12), "search_code");
-        assert_eq!(whole(activity_words(&kind), 5), "");
+        assert_eq!(whole(activity_words(&kind, None), 80), "search_code \"returnTo\": 6 matches in 3 files");
+        assert_eq!(whole(activity_words(&kind, None), 30), "search_code \"returnTo\"");
+        assert_eq!(whole(activity_words(&kind, None), 12), "search_code");
+        assert_eq!(whole(activity_words(&kind, None), 5), "");
     }
 }

@@ -16,6 +16,8 @@ pub enum Context {
     Help,
     FindingModal,
     ConfirmModal,
+    /// The publication page: `y` approves the preview it shows, `o` opens the published review.
+    PublicationModal,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -74,6 +76,8 @@ pub enum Action {
     InputSubmit,
     InputCancel,
     Confirm,
+    OpenUrl,
+    ToggleRaw,
 }
 
 const NONE: KeyModifiers = KeyModifiers::NONE;
@@ -141,20 +145,28 @@ const TABLE: &[(Context, KeyCode, KeyModifiers, Action)] = &[
     (C::Diff, K::Char('N'), NONE, A::PrevFinding),
     (C::Diff, K::Char(':'), NONE, A::JumpTo),
     (C::Diff, K::Char(':'), SHIFT, A::JumpTo),
-    (C::Diff, K::Char('/'), NONE, A::JumpTo),
+    (C::Diff, K::Char('/'), NONE, A::Search),
+    (C::Timeline, K::Char('/'), NONE, A::Search),
     (C::Timeline, K::Char('f'), NONE, A::CycleScope),
     (C::Timeline, K::Char('v'), NONE, A::CycleCategory),
     (C::Timeline, K::Char('P'), SHIFT, A::CyclePhase),
     (C::Timeline, K::Char('P'), NONE, A::CyclePhase),
+    (C::FindingModal, K::Char('n'), NONE, A::NextFinding),
+    (C::FindingModal, K::Char('N'), SHIFT, A::PrevFinding),
+    (C::FindingModal, K::Char('N'), NONE, A::PrevFinding),
     (C::ConfirmModal, K::Char('y'), NONE, A::Confirm),
+    (C::PublicationModal, K::Char('y'), NONE, A::Confirm),
+    (C::PublicationModal, K::Char('o'), NONE, A::OpenUrl),
+    (C::PublicationModal, K::Char('m'), NONE, A::ToggleRaw),
     (C::ConfirmModal, K::Char('n'), NONE, A::Back),
 ];
 
 pub fn context(screen: Screen, modal: Option<&Modal>) -> Context {
     match modal {
-        Some(Modal::Help) => C::Help,
+        Some(Modal::Help { .. }) => C::Help,
         Some(Modal::Finding { .. }) => C::FindingModal,
         Some(Modal::Confirm { .. }) => C::ConfirmModal,
+        Some(Modal::Publication { .. }) => C::PublicationModal,
         Some(Modal::Input { .. }) | None => match screen {
             Screen::Inbox => C::Inbox,
             Screen::Review => C::Review,
@@ -187,10 +199,13 @@ pub fn resolve(screen: Screen, modal: Option<&Modal>, key: KeyEvent) -> Option<A
     lookup(ctx).or_else(|| lookup(C::Global))
 }
 
-/// The help page's rows by context, read from the same table so help never drifts from behavior.
-pub fn help_rows() -> Vec<(Context, String, &'static str)> {
-    let describe = |a: Action| -> Option<&'static str> {
+/// The help page's rows by context, read from the same table so help never drifts from behavior: the context, its keys,
+/// what they do, and the capability the server must grant for them to act.
+pub fn help_rows() -> Vec<(Context, String, &'static str, Option<&'static str>)> {
+    let describe = |ctx: Context, a: Action| -> Option<&'static str> {
         Some(match a {
+            A::Search if ctx == C::Diff => "search the diff; n N walk matches",
+            A::Search if ctx == C::Timeline => "filter events by text",
             A::Quit => "quit; reviews keep running",
             A::Help => "this help",
             A::Back => "close / back",
@@ -208,18 +223,24 @@ pub fn help_rows() -> Vec<(Context, String, &'static str)> {
             A::ScrollDown | A::ScrollUp => "scroll the explanation",
             A::Refresh => "refresh snapshot",
             A::Accounts => "GitHub accounts (Settings)",
-            A::Mutation(_) => "start/retry/cancel/publish",
+            A::Mutation(Mutation::Start) => "start a review",
+            A::Mutation(Mutation::Retry) => "retry the run",
+            A::Mutation(Mutation::Cancel) => "cancel the run",
+            A::Mutation(Mutation::Publish) => "preview and publish",
             A::NextFinding | A::PrevFinding => "next / previous finding",
             A::JumpTo => "jump to path:line",
             A::CycleScope => "timeline scope",
             A::CycleCategory => "timeline category",
             A::CyclePhase => "timeline phase",
+            A::Confirm if ctx == C::PublicationModal => "publish this preview",
+            A::OpenUrl => "open the published review",
+            A::ToggleRaw => "raw markdown or styled",
             _ => return None,
         })
     };
-    let mut rows: Vec<(Context, String, &'static str)> = Vec::new();
+    let mut rows: Vec<(Context, String, &'static str, Option<&'static str>)> = Vec::new();
     for (ctx, code, mods, action) in TABLE {
-        let Some(text) = describe(*action) else { continue };
+        let Some(text) = describe(*ctx, *action) else { continue };
         let key = match code {
             K::Char(c) if mods.contains(CTRL) => format!("C-{c}"),
             K::Char(c) => c.to_string(),
@@ -229,10 +250,14 @@ pub fn help_rows() -> Vec<(Context, String, &'static str)> {
             K::Up | K::Down | K::Left | K::Right | K::BackTab | K::Home | K::End | K::PageUp | K::PageDown => continue,
             _ => continue,
         };
-        match rows.iter_mut().find(|(c, _, t)| c == ctx && *t == text) {
-            Some((_, keys, _)) if !keys.split(' ').any(|k| k == key) => keys.push_str(&format!(" {key}")),
+        let capability = match action {
+            A::Mutation(mu) => Some(mu.capability()),
+            _ => None,
+        };
+        match rows.iter_mut().find(|(c, _, t, _)| c == ctx && *t == text) {
+            Some((_, keys, _, _)) if !keys.split(' ').any(|k| k == key) => keys.push_str(&format!(" {key}")),
             Some(_) => {}
-            None => rows.push((*ctx, key, text)),
+            None => rows.push((*ctx, key, text, capability)),
         }
     }
     rows

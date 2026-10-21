@@ -31,15 +31,37 @@ pub fn fit_len(s: &str, cols: usize) -> usize {
     head.len()
 }
 
-/// One display line: newlines and tabs become spaces.
+/// Skin-tone modifiers, which some terminals draw as a second wide cell.
+fn is_skin_tone(c: char) -> bool {
+    ('\u{1f3fb}'..='\u{1f3ff}').contains(&c)
+}
+
+/// Emoji sequences cut to their first component: `👩‍💻` shows as `👩`, `👍🏽` as `👍`. Terminals that draw each code
+/// point on its own (tmux among them) would draw the whole sequence two or more cells wider than it measures.
+pub fn plain_emoji(s: &str) -> std::borrow::Cow<'_, str> {
+    if !s.chars().any(|c| c == '\u{200d}' || is_skin_tone(c)) {
+        return s.into();
+    }
+    let mut out = String::with_capacity(s.len());
+    for g in s.graphemes(true) {
+        match g.find(|c: char| c == '\u{200d}' || is_skin_tone(c)) {
+            Some(i) => out.push_str(&g[..i]),
+            None => out.push_str(g),
+        }
+    }
+    out.into()
+}
+
+/// One display line: newlines and tabs become spaces, emoji sequences their first component.
 pub fn one_line(s: &str) -> String {
-    s.chars().map(|c| if c == '\n' || c == '\r' || c == '\t' { ' ' } else { c }).collect()
+    plain_emoji(s).chars().map(|c| if c == '\n' || c == '\r' || c == '\t' { ' ' } else { c }).collect()
 }
 
 /// At most `max` columns, ending in `ellipsis` when cut.
 pub fn fit(s: &str, max: usize, ellipsis: &str) -> String {
-    let line = one_line(chars_prefix(s, max.saturating_mul(CHARS_PER_COL)));
-    if line.len() == s.len() && fit_len(&line, max) == line.len() {
+    let head = chars_prefix(s, max.saturating_mul(CHARS_PER_COL));
+    let line = one_line(head);
+    if head.len() == s.len() && fit_len(&line, max) == line.len() {
         return line;
     }
     let mut out = line[..fit_len(&line, max.saturating_sub(width(ellipsis)))].to_string();
@@ -78,11 +100,29 @@ mod tests {
         assert_eq!(fit("修复竞态条件", 5, "…"), "修复…");
         assert_eq!(width(&fit("修复竞态条件", 5, "…")), 5);
         assert_eq!(pad("修复竞态", 4, "…"), "修… ");
-        assert_eq!(fit("👩‍💻 dev", 3, "…"), "👩‍💻…");
+        assert_eq!(fit("👩‍💻 dev", 3, "…"), "👩…");
         assert_eq!(fit("short", 10, "…"), "short");
         assert_eq!(fit("abc", 0, "…"), "");
         assert_eq!(pad_left("42", 5), "   42");
         assert_eq!(fit("a\nb\tc", 10, "…"), "a b c");
+    }
+
+    /// Columns as a terminal that draws each code point on its own (tmux, older xterms) lays `s` out.
+    fn per_char_width(s: &str) -> usize {
+        s.chars().map(|c| unicode_width::UnicodeWidthChar::width(c).unwrap_or(0)).sum()
+    }
+
+    #[test]
+    fn zwj_sequences_and_skin_tones_fit_in_terminals_that_draw_each_code_point() {
+        for s in ["👩‍💻 dev", "👍🏽 ok", "🏳️‍🌈 pride", "🇺🇸 flag", "a👨‍👩‍👧b"] {
+            for cols in 1..10 {
+                let out = fit(s, cols, "…");
+                assert!(per_char_width(&out) <= cols, "{s:?} at {cols}: {out:?}");
+                assert!(per_char_width(&out) <= width(&out), "{s:?} at {cols}: {out:?} draws wider than measured");
+            }
+        }
+        assert_eq!(one_line("👩‍💻 👍🏽 🏳️‍🌈 🇺🇸"), "👩 👍 🏳️ 🇺🇸");
+        assert_eq!(fit("👩‍💻 dev", 10, "…"), "👩 dev");
     }
 
     #[test]

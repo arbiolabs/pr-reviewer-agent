@@ -100,6 +100,8 @@ pub enum Phase {
     Analyze,
     Verify,
     PreparePublication,
+    /// The review is stored and parked for a human: publish mode `approval`. Its run is still `RUNNING`.
+    AwaitingApproval,
     Publish,
     Reconcile,
     Completed,
@@ -132,6 +134,22 @@ pub enum Category {
     Other,
     #[serde(other)]
     Unknown,
+}
+
+impl Category {
+    /// How a finding card names it: `data integrity`.
+    pub fn label(self) -> &'static str {
+        match self {
+            Category::Security => "security",
+            Category::Concurrency => "concurrency",
+            Category::Correctness => "correctness",
+            Category::DataIntegrity => "data integrity",
+            Category::Performance => "performance",
+            Category::General => "general",
+            Category::Other => "other",
+            Category::Unknown => "unknown",
+        }
+    }
 }
 
 /// Declared most severe first, so `Ord` sorts a finding list by severity.
@@ -229,6 +247,68 @@ pub enum AccountState {
     Unknown,
 }
 
+/// `welcome.mode`: an engine daemon may grant the review commands; a read-only one (another pr-review holds the
+/// data dir) grants `account.select` only.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "kebab-case")]
+pub enum DaemonMode {
+    Engine,
+    ReadOnly,
+    #[serde(other)]
+    Unknown,
+}
+
+/// A run's publication as `review.publication_changed` and `publication.preview` report it. Only `Published` means
+/// the review is on GitHub; `command.result accepted` never does.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PublicationStatus {
+    AwaitingApproval,
+    Publishing,
+    Published,
+    Uncertain,
+    Failed,
+    #[serde(other)]
+    Unknown,
+}
+
+/// Data of a `review.publication_changed` event.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicationChanged {
+    pub run_id: RunId,
+    pub status: PublicationStatus,
+    pub review_id: Option<u64>,
+    pub url: Option<Text>,
+}
+
+/// One inline comment of the stored payload, exactly as it will be posted.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct ReviewComment {
+    pub path: Text,
+    pub line: NonZeroU32,
+    pub side: Text,
+    pub body: Text,
+}
+
+/// The `publication.preview` reply (TUI_SPEC §5.5): the exact summary and inline comments, the target SHA, and the
+/// `preview_id` a `review.publish` must name.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PublicationPreview {
+    pub request_id: Option<RequestId>,
+    pub run_id: RunId,
+    pub preview_id: Text,
+    pub head_sha: Sha,
+    pub body: Text,
+    pub comments: Vec<ReviewComment>,
+    pub event: Text,
+    pub status: PublicationStatus,
+    /// The GitHub review, once published: a client that lost the publication events to a resync gets it from here.
+    pub review_id: Option<u64>,
+    pub url: Option<Text>,
+}
+
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Account {
@@ -267,6 +347,19 @@ pub struct Run {
     pub started_at: Text,
     pub completed_at: Option<Text>,
     pub failure_reason: Option<Text>,
+    /// 1-based; absent from daemons that predate it.
+    pub attempt: Option<u32>,
+}
+
+impl Run {
+    /// Stored and waiting for a human to approve its publication: `RUNNING`, but nothing runs.
+    pub fn parked(&self) -> bool {
+        self.status == RunStatus::Running && self.phase == Phase::AwaitingApproval
+    }
+    /// The reviewer is working on it now.
+    pub fn active(&self) -> bool {
+        self.status == RunStatus::Running && !self.parked()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize)]
@@ -404,6 +497,12 @@ pub enum ServerMessage {
         server_version: Text,
         session_id: Text,
         capabilities: Vec<Text>,
+        /// `None` from a daemon that predates engine mode.
+        #[serde(default)]
+        mode: Option<DaemonMode>,
+        /// Why a read-only daemon is read-only, for display; `None` in engine mode and from older daemons.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        read_only_reason: Option<Text>,
         stream_epoch: Epoch,
         latest_sequence: u64,
     },
@@ -419,6 +518,8 @@ pub enum ServerMessage {
     FindingDetail { request_id: Option<RequestId>, finding: FindingDetail },
     #[serde(rename = "timeline.page", rename_all = "camelCase")]
     TimelinePage { request_id: Option<RequestId>, events: Vec<SequencedEvent>, next_before_sequence: Option<u64> },
+    #[serde(rename = "publication.preview")]
+    PublicationPreview(PublicationPreview),
     #[serde(rename = "command.result")]
     CommandResult(CommandResult),
     #[serde(rename = "error", rename_all = "camelCase")]
@@ -470,6 +571,7 @@ pub enum EventBody {
     FindingUpdated(Finding),
     ToolActivity(ToolActivity),
     AccountsUpdated(Vec<Account>),
+    PublicationChanged(PublicationChanged),
     /// An event type this client does not know. It carries nothing, but still advances `lastApplied`.
     Other(Text),
 }
@@ -566,6 +668,9 @@ impl TryFrom<RawEvent> for SequencedEvent {
                 let a: RawAccounts = from_value(data("accounts.updated")?)?;
                 EventBody::AccountsUpdated(a.accounts)
             }
+            "review.publication_changed" => {
+                EventBody::PublicationChanged(from_value(data("review.publication_changed")?)?)
+            }
             other => EventBody::Other(Text::new(other)),
         };
         Ok(SequencedEvent {
@@ -643,6 +748,8 @@ pub enum ClientMessage {
         before_sequence: Option<u64>,
         limit: Limit,
     },
+    #[serde(rename = "publication.get", rename_all = "camelCase")]
+    PublicationGet { request_id: RequestId, run_id: RunId },
     /// Sent only from the confirmation modal, and only for a capability the server granted.
     #[serde(rename = "command")]
     Command(CommandRequest),
@@ -656,7 +763,8 @@ impl ClientMessage {
             | ClientMessage::Resume { request_id, .. }
             | ClientMessage::DiffGet { request_id, .. }
             | ClientMessage::FindingGet { request_id, .. }
-            | ClientMessage::TimelineGet { request_id, .. } => request_id,
+            | ClientMessage::TimelineGet { request_id, .. }
+            | ClientMessage::PublicationGet { request_id, .. } => request_id,
             ClientMessage::Command(c) => &c.request_id,
         }
     }
@@ -689,6 +797,17 @@ impl Command {
             Command::Retry(_) => "review.retry",
             Command::Publish(_) => "review.publish",
             Command::SelectAccount(_) => "account.select",
+        }
+    }
+
+    /// What a refusal says cannot be done: `Can't start: …`.
+    pub fn verb(&self) -> &'static str {
+        match self {
+            Command::Start(_) => "start",
+            Command::Cancel(_) => "cancel",
+            Command::Retry(_) => "retry",
+            Command::Publish(_) => "publish",
+            Command::SelectAccount(_) => "switch accounts",
         }
     }
 

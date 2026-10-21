@@ -1,0 +1,20 @@
+---
+source: tests/golden.rs
+expression: text
+---
+  pr-review · ◔ #184 waiting for you · p previews   ● live
+
+
+  acme/shop #184 → publication preview
+
+  Publish this review?
+  acme/shop #184 at 4444444 · as event COMMENT · 1 inline…
+
+  y publishes exactly this to GitHub
+
+  Summary
+    Automated PR review
+
+    Reviewed commit:
+    … 29 more below, j scrolls
+   j/k scroll  y publish  m raw markdown  Esc close

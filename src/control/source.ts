@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PROTOCOL_DIR } from "../protocol/emit.ts";
 import { fixtures, type PlaybackLine } from "../protocol/fixtures.ts";
-import type { ClientMessage, ErrorCode, Finding, FindingDetail, SequencedEvent, ServerMessage } from "../protocol/v1.ts";
+import type { ClientMessage, ErrorCode, Finding, FindingDetail, PublicationPreview, ReviewCommand, SequencedEvent, ServerMessage } from "../protocol/v1.ts";
 import type { DiffPage } from "./diff.ts";
 
 export class ControlError extends Error {
@@ -35,7 +35,19 @@ export interface ControlSource {
   refreshAccounts?(maxAgeMs: number): Promise<void>;
   /** Journal the selection and return the operation id, or throw ControlError NOT_FOUND / CONFLICT. */
   selectAccount?(accountId: string): Promise<string>;
-  close(): void;
+  /** `welcome.mode`: engine sources host the review engine; read-only ones only read its database. */
+  mode?: "engine" | "read-only";
+  /** `welcome.readOnlyReason`: why a read-only source is read-only, as display text. */
+  readOnlyReason?: string;
+  /** The review commands this source grants now; `command` runs one of them (its key already checked and replayed). */
+  capabilities?(): string[];
+  /** Why a review command is not granted, as the CAPABILITY_DENIED message. */
+  unavailable?(command: string): string;
+  /** Run a granted review command and return its operation id, or throw ControlError. */
+  command?(request: ReviewCommand): Promise<string>;
+  /** The stored payload of a run, or throw ControlError NOT_FOUND. */
+  publication?(runId: string): Promise<PublicationPreview>;
+  close(): void | Promise<void>;
 }
 
 const isSequenced = (m: ServerMessage): m is SequencedEvent => m.type === "event" && "sequence" in m;
@@ -145,6 +157,16 @@ export class FixtureSource implements ControlSource {
 
   timeline(request: TimelineRequest): TimelinePage {
     return timelinePage(this.state().journal, request, (e) => (e.eventType === "finding.updated" ? (e.data as Finding).id : undefined));
+  }
+
+  unavailable(command: string): string {
+    return `${command} is not available from a fixture server`;
+  }
+
+  async publication(runId: string): Promise<PublicationPreview> {
+    const { type: _, requestId: __, ...scripted } = fixtures["server.publication.preview"] as Extract<ServerMessage, { type: "publication.preview" }>;
+    if (scripted.runId !== runId) throw new ControlError("NOT_FOUND", `no stored publication for run ${runId}`);
+    return scripted;
   }
 
   close(): void {}
