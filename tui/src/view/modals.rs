@@ -10,7 +10,7 @@ use super::Ctx;
 use super::code::rich;
 use super::doc::{column, filled};
 use crate::keymap::{Context, help_rows};
-use crate::model::{ConfirmState, Link, Modal};
+use crate::model::{ACCEPTED_QUIET_MS, ConfirmState, Link, Modal};
 use crate::protocol::{Account, AccountState};
 use crate::theme::{Bg, Role};
 
@@ -54,7 +54,12 @@ fn confirm(c: &Ctx, f: &mut Frame, body: Rect, prompt: &str, command: &str, stat
     let (status, role) = match state {
         ConfirmState::Asking => (format!("y confirms {} n or Esc cancels", c.t.g().sep), Role::Title),
         ConfirmState::Requested(_) => (format!("requested{} waiting for the server", c.t.g().ellipsis), Role::Pending),
-        ConfirmState::Accepted(_) => {
+        ConfirmState::Accepted { at_ms, .. } if c.m.now_ms.saturating_sub(*at_ms) >= ACCEPTED_QUIET_MS => (
+            "The daemon accepted this but nothing happened yet. Esc closes; the timeline will show it if it runs."
+                .to_string(),
+            Role::Pending,
+        ),
+        ConfirmState::Accepted { .. } => {
             ("accepted; waiting for the event that shows it happened".to_string(), Role::Active)
         }
         ConfirmState::Failed(e) => (format!("rejected: {e}"), Role::Fail),

@@ -88,7 +88,7 @@ fn start_names_the_pr_and_head_sends_only_on_y_and_settles_on_run_started_not_on
 
     let accepted = read("fixtures/server.command.result.accepted.json").replace("req-cmd", rid.as_str());
     send(&mut m, &accepted);
-    assert!(matches!(confirm_state(&m), ConfirmState::Accepted(_)), "accepted alone keeps the panel waiting");
+    assert!(matches!(confirm_state(&m), ConfirmState::Accepted { .. }), "accepted alone keeps the panel waiting");
     assert!(m.notice.is_none(), "{:?}", m.notice);
 
     let started = run_json("rev-186-a", "acme/shop#186", H186, "COLLECT_CONTEXT", "RUNNING");
@@ -609,4 +609,24 @@ fn a_resync_between_accepted_and_published_refetches_the_preview_and_takes_its_s
     assert_eq!(m.domain.publications[&run].status, pr_review_tui::protocol::PublicationStatus::Published);
     let f = frame(&mut m);
     assert!(f.contains("published on GitHub"), "{f}");
+}
+
+#[test]
+fn an_accepted_command_with_no_event_after_15_s_says_so_and_esc_closes() {
+    let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#186");
+    press(&mut m, KeyCode::Char('s'));
+    let rid = commands(&press(&mut m, KeyCode::Char('y')))[0].request_id.clone();
+    send(&mut m, &read("fixtures/server.command.result.accepted.json").replace("req-cmd", rid.as_str()));
+    let quiet = "The daemon accepted this but nothing happened yet. Esc closes; the timeline will show it if it runs.";
+    let t0 = m.now_ms;
+    update(&mut m, Msg::Tick(t0 + 14_000));
+    let (frame, _) = common::render(&mut m, 120, 38);
+    assert!(frame.contains("waiting for the event"), "{frame}");
+    m.dirty = false;
+    update(&mut m, Msg::Tick(t0 + 15_000));
+    assert!(m.dirty, "the deadline redraws");
+    let (frame, _) = common::render(&mut m, 120, 38);
+    assert!(frame.replace('\n', " ").split_whitespace().collect::<Vec<_>>().join(" ").contains(quiet), "{frame}");
+    press(&mut m, KeyCode::Esc);
+    assert_eq!(m.top_modal(), None);
 }

@@ -5,6 +5,8 @@ use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use crate::protocol::*;
 
 pub const ACTIVITY_CAP: usize = 2_000;
+/// How long an accepted command may show nothing before the panel says so.
+pub const ACCEPTED_QUIET_MS: u64 = 15_000;
 const ERROR_CAP: usize = 20;
 
 /// The connection state machine. `Link::next` is the whole transition table.
@@ -250,8 +252,11 @@ pub enum Preview {
 pub enum ConfirmState {
     Asking,
     Requested(RequestId),
-    /// Accepted is not completed: a later event confirms the effect.
-    Accepted(Text),
+    /// Accepted is not completed: a later event confirms the effect. `at_ms` starts `ACCEPTED_QUIET_MS`.
+    Accepted {
+        operation: Text,
+        at_ms: u64,
+    },
     Failed(Text),
     /// No reply in time; `y` sends the same command again, under the same idempotency key.
     TimedOut,

@@ -46,8 +46,21 @@ export async function startFromHead(
   if (live.headSha !== params.expectedHeadSha) throw new Refused("REVISION_STALE", `the head of ${live.fullName}#${live.number} is now ${live.headSha}`);
   if (live.state !== "open") throw new Refused("CONFLICT", `${live.fullName}#${live.number} is ${live.merged ? "merged" : "closed"}`);
   const started = await startReview(app, live, options.basePolicyVersion, { publish: options.publish });
-  if (started.taskId === undefined) throw new Refused("CONFLICT", `already reviewed: revision ${started.revision.id} is ${started.revision.state}`);
+  if (started.taskId === undefined) {
+    refuseReviewed(app, started.revision.id);
+    throw new Refused("CONFLICT", `${live.fullName}#${live.number} at ${live.headSha.slice(0, 7)} has a review in ${started.revision.state}`);
+  }
   return started;
+}
+
+/** A start names a head, so once that head's review has ended it is refused, whatever key it comes under. */
+export function refuseReviewed(app: App, revisionId: string): void {
+  const revision = app.store.revision(revisionId);
+  if (!revision || !TERMINAL_REVIEW_STATES.includes(revision.state)) return;
+  const pr = app.store.pullById(revision.pr_id);
+  const head = `#${pr?.number ?? revision.pr_id} at ${revision.head_sha.slice(0, 7)}`;
+  const why = { COMPLETED: "is already reviewed", FAILED: "failed its review; retry it instead", SUPERSEDED: "is superseded by a newer head" };
+  throw new Refused("CONFLICT", `${head} ${why[revision.state as keyof typeof why] ?? "is already reviewed"}`);
 }
 
 /** review.retry: only a FAILED revision reopens, through the audited MANUAL_RETRY override. */

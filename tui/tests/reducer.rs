@@ -375,7 +375,7 @@ fn account_select_waits_for_accounts_updated_before_showing_the_selection() {
     let accepted =
         r#"{"type":"command.result","requestId":"RID","status":"accepted","operationId":"account.select:11"}"#;
     send(&mut m, &accepted.replace("RID", c.request_id.as_str()));
-    assert!(matches!(m.top_modal(), Some(Modal::Confirm { state: ConfirmState::Accepted(_), .. })));
+    assert!(matches!(m.top_modal(), Some(Modal::Confirm { state: ConfirmState::Accepted { .. }, .. })));
     assert_eq!(identity(&m), "active github.com/diego-arbio-dev", "accepted alone changes nothing");
 
     let event = script("accounts").pop().unwrap();

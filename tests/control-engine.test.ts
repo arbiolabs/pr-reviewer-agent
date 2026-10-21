@@ -341,7 +341,11 @@ it("approves a review end to end over the socket: parked, previewed, published o
     { idempotency_key: `review.start:${prId}:${fixture.headSha}`, command: "review.start" },
     { idempotency_key: `review.publish:${runId}:${outbox.payload_hash}`, command: "review.publish" },
   ]);
-  expect(operation(await command(c, { command: "review.start", params: { prId, expectedHeadSha: fixture.headSha } }))).toEqual(operation(started));
+  // Once the head is reviewed, starting it again is refused in plain words, whether or not its key was recorded.
+  const reviewed = rejected("CONFLICT", `#1 at ${fixture.headSha.slice(0, 7)} is already reviewed`);
+  expect(await command(c, { command: "review.start", params: { prId, expectedHeadSha: fixture.headSha } })).toEqual(reviewed);
+  h.app.store.db.prepare("DELETE FROM control_commands WHERE command = 'review.start'").run();
+  expect(await command(c, { command: "review.start", params: { prId, expectedHeadSha: fixture.headSha } })).toEqual(reviewed);
   c.send({ type: "publication.get", requestId: "pub2", runId });
   // A client that lost the publication events to a resync gets the review back from the preview.
   expect(await c.waitFor((m) => m.type === "publication.preview" && m.requestId === "pub2")).toMatchObject({
@@ -370,8 +374,10 @@ it("supersedes a parked review when the head moves before approval, with nothing
   expect(c.events().map(describeEvent).slice(-2)).toEqual(["publication failed", "run.superseded SUPERSEDED"]);
   expect(await command(c, { command: "review.publish", params: { runId, previewId, expectedHeadSha: fixture.headSha } })).toEqual(rejected("INVALID_TRANSITION", "APPROVED is not legal in SUPERSEDED"));
   expect([fake.postAttempts, h.app.store.outboxForRevision(runId)!.status]).toEqual([0, "failed"]);
-  // The old head's start is a recorded key, so it replays; the new head starts a new run.
-  expect(operation(await command(c, { command: "review.start", params: { prId, expectedHeadSha: fixture.headSha } }))).toEqual(operation(started as Result));
+  // The old head's review has ended, so its recorded key no longer replays; the new head starts a new run.
+  expect(await command(c, { command: "review.start", params: { prId, expectedHeadSha: fixture.headSha } })).toEqual(
+    rejected("CONFLICT", `#1 at ${fixture.headSha.slice(0, 7)} is superseded by a newer head`),
+  );
   const next = await command(c, { command: "review.start", params: { prId, expectedHeadSha: "f".repeat(40) } });
   expect(next).toMatchObject({ status: "accepted", operationId: expect.stringMatching(/^review\.start:[0-9a-f]{32}$/) });
   expect((next as { operationId: string }).operationId).not.toBe(started.operationId);

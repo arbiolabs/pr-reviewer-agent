@@ -108,7 +108,14 @@ pub fn update(m: &mut Model, msg: Msg) -> Vec<Effect> {
             expire_requests(m);
             // Ages on the banner and the diagnostics screen tick.
             let running = m.domain.runs.values().any(|r| r.status == RunStatus::Running);
-            if m.ui.screen == Screen::Settings || !m.link.accepts_events() || running {
+            let accepted = m.ui.modals.iter().any(|x| {
+                matches!(
+                    x,
+                    Modal::Confirm { state: ConfirmState::Accepted { .. }, .. }
+                        | Modal::Publication { publish: ConfirmState::Accepted { .. }, .. }
+                )
+            });
+            if m.ui.screen == Screen::Settings || !m.link.accepts_events() || running || accepted {
                 m.dirty = true;
             }
             return fx;
@@ -396,9 +403,12 @@ fn server_message(m: &mut Model, msg: ServerMessage, fx: &mut Vec<Effect>) {
             if !m.commands_sent.contains(&r.request_id) {
                 return;
             }
+            let now = m.now_ms;
             if let Some(state) = waiting_confirm(m, &r.request_id) {
                 *state = match r.outcome {
-                    CommandOutcome::Accepted { operation_id } => ConfirmState::Accepted(operation_id),
+                    CommandOutcome::Accepted { operation_id } => {
+                        ConfirmState::Accepted { operation: operation_id, at_ms: now }
+                    }
                     CommandOutcome::Rejected { code, message } => {
                         ConfirmState::Failed(Text::new(&format!("{code}: {message}")))
                     }
@@ -619,7 +629,7 @@ fn apply_body(m: &mut Model, e: &SequencedEvent, fx: &mut Vec<Effect>) {
 fn settle_account_select(m: &mut Model, accounts: &[Account]) {
     let done = |modal: &Modal| match modal {
         Modal::Confirm { command: Command::SelectAccount(p), state, .. } => {
-            matches!(state, ConfirmState::Requested(_) | ConfirmState::Accepted(_) | ConfirmState::TimedOut)
+            matches!(state, ConfirmState::Requested(_) | ConfirmState::Accepted { .. } | ConfirmState::TimedOut)
                 && accounts.iter().any(|a| a.selected && a.id == p.account_id)
         }
         _ => false,

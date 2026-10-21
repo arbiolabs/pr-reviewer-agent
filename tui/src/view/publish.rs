@@ -202,7 +202,7 @@ fn state(c: &Ctx, w: usize, run_id: &RunId, p: &PublicationPreview, publish: &Co
         (_, ConfirmState::Requested(_)) => {
             out.push(line(format!("requested{} waiting for the daemon", g.ellipsis), Role::Pending))
         }
-        (_, ConfirmState::Accepted(_)) => out.push(line(
+        (_, ConfirmState::Accepted { .. }) => out.push(line(
             format!("Approved; publishing{}  not on GitHub until it says published", g.ellipsis),
             Role::Pending,
         )),
