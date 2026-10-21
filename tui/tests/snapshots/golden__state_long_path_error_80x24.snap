@@ -8,9 +8,9 @@ expression: inbox
 
   PULL REQUESTS                                                              0
 
-  unavailable: socket directory does not exist: /private/tmp/claude-501/xxxxxxx…
-  is `pr-review daemon` running?
-
+  No daemon at /private/tmp/claude-501/xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx…
+  Start one with `pr-review daemon`.
+  socket directory does not exist: /private/tmp/claude-501/xxxxxxxxxxxxxxxxxxxx…
 
 
 

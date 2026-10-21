@@ -39,7 +39,12 @@ pub fn empty_rail(c: &Ctx, total: usize) -> Vec<(String, Role)> {
         }
         Link::Live | Link::Resyncing => return vec![("  nothing tracked yet".into(), Role::Muted)],
     };
-    vec![(format!("  unavailable: {reason}"), Role::Fail), ("  is `pr-review daemon` running?".into(), Role::Muted)]
+    let path = c.m.diag.endpoint.strip_prefix("unix:").unwrap_or(&c.m.diag.endpoint);
+    vec![
+        (format!("  No daemon at {path}."), Role::Fail),
+        ("  Start one with `pr-review daemon`.".into(), Role::Normal),
+        (format!("  {reason}"), Role::Muted),
+    ]
 }
 
 /// Rows each PR takes; the spacer row goes when the list would not fit.
@@ -86,7 +91,7 @@ pub fn rail(c: &Ctx, f: &mut Frame, area: Rect, focused: bool) {
         let mut empty = empty_rail(c, total);
         if area.width < c.m.size.0 && empty[0].1 == Role::Fail {
             // Beside the reading column, which carries the reason in full.
-            empty = vec![("  unavailable".into(), Role::Fail)];
+            empty = vec![("  no daemon".into(), Role::Fail)];
         }
         for (text, role) in empty {
             lines.push(Line::from(filled(vec![Span::styled(c.fit(&text, w), c.s(role).patch(bg))], w, bg)));

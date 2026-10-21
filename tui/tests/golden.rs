@@ -277,7 +277,11 @@ fn a_connection_error_on_a_long_path_keeps_its_reason_in_view() {
         let shows = |frame: &str, prefix: &str| frame.lines().any(|l| l.contains(prefix));
         // The banner stays short; the column carries the reason and the path.
         assert!(shows(&inbox, "✗ disconnected · retry in 2s"), "banner, {w} cols:\n{inbox}");
-        assert!(shows(&inbox, "unavailable: socket directory does not exist:"), "inbox, {w} cols:\n{inbox}");
+        assert!(shows(&inbox, "No daemon at"), "the copy leads with what to do, {w} cols:\n{inbox}");
+        assert!(inbox.contains("Start one with `pr-review daemon`."), "{w} cols:\n{inbox}");
+        let detail = inbox.lines().position(|l| l.contains("socket directory does not exist:"));
+        let lead = inbox.lines().position(|l| l.contains("No daemon at"));
+        assert!(detail > lead, "the OS error is the detail line under it, {w} cols:\n{inbox}");
         assert!(inbox.contains("/private/tmp/claude-501/"), "inbox names the path, {w} cols:\n{inbox}");
         assert!(
             shows(&settings, "disconnected: socket directory does not exist: /"),

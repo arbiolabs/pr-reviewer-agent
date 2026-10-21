@@ -8,9 +8,9 @@ expression: text
 
   PULL REQUESTS                                                              0
 
-  unavailable: connection refused
-  is `pr-review daemon` running?
-
+  No daemon at /run/user/501/pr-review/reviewer.sock.
+  Start one with `pr-review daemon`.
+  connection refused
 
 
 
