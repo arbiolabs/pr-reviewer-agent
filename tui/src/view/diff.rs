@@ -311,20 +311,14 @@ fn row_lines(c: &Ctx, row: &DiffRow, hit: Option<&Finding>, w: usize, cursor: bo
                 Some((at, ctx)) => (format!("@@ {} @@", at.trim()), ctx.trim().to_string()),
                 None => (text.to_string(), String::new()),
             };
-            // The ranges, then the function name; a long name wraps under itself the way code does.
+            // The ranges, then the function name, on one row: a wrapped tail would sit alone at the top of the view.
             let room = w.saturating_sub(GUTTER - 1).max(1);
-            let head = vec![
-                Span::styled(format!("{at}  "), c.s(Role::Muted).patch(st)),
-                Span::styled(c.fit(&ctx, (room * WRAP_ROWS).saturating_sub(width(&at) + 2)), c.s(Role::Hunk).patch(st)),
+            let spans = vec![
+                Span::styled(" ".repeat(GUTTER - 1), st),
+                Span::styled(c.fit(&format!("{at}  "), room), c.s(Role::Muted).patch(st)),
+                Span::styled(c.fit(&ctx, room.saturating_sub(width(&at) + 2)), c.s(Role::Hunk).patch(st)),
             ];
-            wrap_spans(head, room)
-                .into_iter()
-                .map(|piece| {
-                    let mut spans = vec![Span::styled(" ".repeat(GUTTER - 1), st)];
-                    spans.extend(piece);
-                    Line::from(filled(spans, w, st))
-                })
-                .collect()
+            vec![Line::from(filled(spans, w, st))]
         }
         DiffRow::Line(l) => {
             let bg = match (cursor, hit.is_some(), l.kind) {

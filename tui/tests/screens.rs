@@ -288,13 +288,12 @@ fn an_open_tool_event_shows_its_whole_summary() {
 }
 
 #[test]
-fn a_long_hunk_header_wraps_like_the_code_under_it() {
+fn a_long_hunk_header_keeps_its_ranges_and_cuts_its_name_with_an_ellipsis() {
     use crossterm::event::KeyCode;
     let mut s = showcase(2).key(KeyCode::Enter).key(KeyCode::Char('d')).key(KeyCode::Char('g'));
     let (frame, _) = render(&mut s.m, 80, 24);
-    let joined: String = frame.split_whitespace().collect::<Vec<_>>().join(" ");
-    assert!(joined.contains("@@ -84,8 +85,26 @@"), "{frame}");
-    assert!(joined.contains("export function ordersRouter(db: Db, payments: Payments) {"), "{frame}");
+    let header = frame.lines().find(|l| l.contains("@@ -84,8 +85,26 @@")).unwrap_or_else(|| panic!("{frame}"));
+    assert!(header.contains("export function ordersRouter(") && header.ends_with('…'), "{frame}");
 }
 
 #[test]
@@ -592,4 +591,24 @@ fn diff_search_matches_are_kept_with_the_diff_not_recomputed_each_frame() {
     assert!(frame.contains(&format!("of {n} for \"slot\"")), "{frame}");
     s = s.key(KeyCode::Esc);
     assert!(s.m.diff.as_ref().unwrap().matches.is_empty(), "Esc clears the search and its matches");
+}
+
+#[test]
+fn a_long_hunk_header_takes_one_row_with_an_ellipsis_so_no_tail_is_stranded() {
+    use crossterm::event::KeyCode;
+    let s = showcase(2);
+    let pr = s.m.domain.prs.values().find(|p| p.number == 1287).unwrap().id.clone();
+    let mut s = s;
+    s.m.ui.selected_pr = Some(pr);
+    let mut s = s.key(KeyCode::Char('3'));
+    for (w, h) in [(100, 30), (120, 38)] {
+        for _ in 0..12 {
+            let (frame, _) = render(&mut s.m, w, h);
+            for l in frame.lines() {
+                assert!(!(l.contains("Payments) {") && !l.contains("@@")), "{w}x{h}: a stranded header tail:\n{frame}");
+            }
+            s = s.key(KeyCode::Char('j'));
+        }
+        s = s.key(KeyCode::Char('g'));
+    }
 }
