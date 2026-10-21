@@ -6,7 +6,7 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 ### Changed
 
-- **Spinners.** The terminal client marks running work (the PR rail, the live review, the status line and posting to GitHub) with ratatui-spinner's braille spinner (`⣾⣷⣯⣟⡿⢿⣽⣻`) instead of the turning quadrant. The phase steppers show the running phase as a filled dot instead of a spinner. In the live phase bar, the running phase's segment bounces an arc like ratatui-spinner's `BarSpinner` in its `Thick` style, instead of walking a highlight. `--ascii` keeps its glyphs.
+- **Spinners.** The terminal client marks running work (the PR rail, the live review, the status line and posting to GitHub) with ratatui-spinner's braille spinner (`⣾⣷⣯⣟⡿⢿⣽⣻`) instead of the turning quadrant. The phase steppers show the running phase as a filled dot instead of a spinner. In the live phase bar, the running phase's segment bounces an arc like ratatui-spinner's `BarSpinner` in its `Thick` style, instead of walking a highlight. `--ascii` keeps its glyphs (#13).
 
 ## [1.0.0] - 2026-10-21
 
