@@ -6,7 +6,7 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 ### Added
 
-- **Setup command.** `pr-review setup` checks git, the config file, the model, the GitHub account, Jev, and the terminal client, and offers to log in, pick a default model, and choose a publish mode. `setup --check [--json]` prints the same checks without prompting and exits 1 when a review cannot run. Saving the default model from the `review` picker now writes to `PR_REVIEW_CONFIG` when it is set (#TBD).
+- **Setup command.** `pr-review setup` checks git, the config file, the model, the GitHub account, Jev, and the terminal client, and offers to log in, pick a default model, and choose a publish mode. `setup --check [--json]` prints the same checks without prompting and exits 1 when a review cannot run. Saving the default model from the `review` picker now writes to `PR_REVIEW_CONFIG` when it is set (#19).
 
 ## [1.0.1] - 2026-10-21
 
