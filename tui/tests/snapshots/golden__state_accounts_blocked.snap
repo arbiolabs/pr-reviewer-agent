@@ -10,10 +10,10 @@ expression: text
 
     GitHub accounts
       publishes as          the daemon's GITHUB_TOKEN
-    ▌ GITHUB_TOKEN     env         ✓ ok                          set by the daemon env
-      diego-arbio-dev  github.com  ✓ ok      gh active           env token wins
-      octo-work        github.com  ✓ ok      selected            env token wins
-      old-bot          github.com  ✗ error                       run gh auth login
+    ▌ GITHUB_TOKEN     env         ✓ ok                            set by the daemon env
+      diego-arbio-dev  github.com  ✓ ok      gh active             env token wins
+      octo-work        github.com  ✓ ok      selected              env token wins
+      old-bot          github.com  ✗ error                         run gh auth login
 
     Connection
       state                 ● live

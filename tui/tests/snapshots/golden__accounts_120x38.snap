@@ -10,8 +10,8 @@ expression: text
 
     GitHub accounts
       publishes as          diego-arbio-dev on github.com
-      diego-arbio-dev  github.com  ✓ ok      gh active           Enter selects
-    ▌ octo-work        github.com  ✓ ok                          Enter selects
+      diego-arbio-dev  github.com  ✓ ok      gh active             Enter selects
+    ▌ octo-work        github.com  ✓ ok                            Enter selects
 
     Connection
       state                 ● live

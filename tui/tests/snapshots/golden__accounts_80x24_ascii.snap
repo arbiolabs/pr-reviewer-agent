@@ -9,8 +9,8 @@ expression: ascii_text
   socket unix:/run/user/501/pr-review/reviewer.sock | connected
   GitHub accounts
     publishes as          diego-arbio-dev on github.com
-    diego-arbio-dev  github.com  + ok      gh active           Enter selects
-  > octo-work        github.com  + ok                          Enter selects
+    diego-arbio-dev  github.com  + ok      gh active             Enter selects
+  > octo-work        github.com  + ok                            Enter selects
   Connection
     state                 * live
     protocol              client 1, server 1

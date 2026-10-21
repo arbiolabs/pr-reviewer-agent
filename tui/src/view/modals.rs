@@ -245,12 +245,14 @@ fn account_row(c: &Ctx, a: &Account, w: usize, cursor: bool) -> Line<'static> {
         Span::styled(c.pad(a.login.as_str(), 16), on(if block.is_none() { Role::Title } else { Role::Normal })),
         Span::styled(c.pad(&format!(" {}", a.host), 12), on(Role::Muted)),
         Span::styled(c.pad(&format!(" {state}"), 10), on(state_role)),
-        Span::styled(c.pad(&format!(" {marks}"), 20), on(Role::Active)),
+        Span::styled(c.pad(&format!(" {marks}"), 22), on(Role::Active)),
     ];
-    let used = 2 + 16 + 12 + 10 + 20;
+    let used = 2 + 16 + 12 + 10 + 22;
     let (why, role) = match block {
-        None => ("Enter selects".to_string(), Role::Accent),
-        Some(why) => (why.to_string(), Role::Pending),
+        None => ("Enter selects", Role::Accent),
+        // The marks already say so.
+        Some("already selected") => ("", Role::Pending),
+        Some(why) => (why, Role::Pending),
     };
     spans.push(Span::styled(c.fit(&format!(" {why}"), w.saturating_sub(used)), on(role)));
     Line::from(filled(spans, w, st))
