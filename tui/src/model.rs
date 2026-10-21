@@ -340,9 +340,9 @@ pub enum EventCategory {
 }
 
 impl EventCategory {
-    pub const CYCLE: [Option<EventCategory>; 9] = [
+    /// The kinds `v` steps through. Phase changes are headings, not rows; `P` filters by phase.
+    pub const CYCLE: [Option<EventCategory>; 8] = [
         None,
-        Some(EventCategory::Phase),
         Some(EventCategory::Tool),
         Some(EventCategory::Finding),
         Some(EventCategory::Run),

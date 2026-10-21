@@ -231,7 +231,7 @@ fn an_empty_timeline_says_whether_filters_hide_events() {
 
     // #184's events are a tool call, a finding and a phase change: no run event.
     let mut filtered = mid_review(Look::default()).select("acme/shop#184").key(KeyCode::Char('t'));
-    for _ in 0..4 {
+    for _ in 0..3 {
         filtered = filtered.key(KeyCode::Char('v'));
     }
     let (frame, _) = render(&mut filtered.m, 120, 38);

@@ -315,9 +315,9 @@ fn timeline_category_filter_hides_other_events() {
     };
     assert_eq!(shown(&m), [99, 100], "oldest first");
     press(&mut m, KeyCode::Char('v'));
-    assert_eq!(shown(&m), [100]);
+    assert_eq!(shown(&m), [99], "tool calls");
     press(&mut m, KeyCode::Char('v'));
-    assert_eq!(shown(&m), [99]);
+    assert_eq!(shown(&m), [] as [u64; 0], "findings");
 }
 
 #[test]
@@ -1002,6 +1002,18 @@ fn a_phase_with_no_rows_gets_no_heading_in_the_timeline() {
 }
 
 #[test]
+fn v_cycles_the_kinds_that_are_rows_and_never_phase_changes() {
+    let mut m = checkpoint_timeline();
+    let kinds: Vec<&str> = (0..9)
+        .map(|_| {
+            press(&mut m, KeyCode::Char('v'));
+            m.timeline.as_ref().unwrap().category.map_or("all", |c| c.label())
+        })
+        .collect();
+    assert_eq!(kinds, ["tool", "finding", "run", "pr", "account", "publication", "other", "all", "tool"]);
+}
+
+#[test]
 fn the_timeline_counts_the_events_it_shows_and_a_filter_counts_against_them() {
     let mut m = checkpoint_timeline();
     let count = |m: &mut Model| {
@@ -1009,8 +1021,6 @@ fn the_timeline_counts_the_events_it_shows_and_a_filter_counts_against_them() {
         frame.lines().find_map(|l| l.trim().split_once(", oldest first")).unwrap().0.to_string()
     };
     assert_eq!(count(&mut m), "2 events", "no filter: the heading VERIFY and the tool call");
-    press(&mut m, KeyCode::Char('v'));
-    assert_eq!(count(&mut m), "1 of 2 events", "phase changes");
     press(&mut m, KeyCode::Char('v'));
     assert_eq!(count(&mut m), "1 of 2 events", "tool calls");
 }
