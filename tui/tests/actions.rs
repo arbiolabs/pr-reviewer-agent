@@ -828,14 +828,16 @@ fn every_count_in_settings_agrees_with_its_noun() {
     m.ui.screen = pr_review_tui::model::Screen::Settings;
     let all = m.domain.activity.clone();
     for (n, want) in [
-        (0, "0 feed entries kept (cap 2000); 0 tool events applied"),
-        (1, "1 feed entry kept (cap 2000); 1 tool event applied"),
-        (2, "2 feed entries kept (cap 2000); 2 tool events applied"),
+        (0, "0 feed entries (cap 2000); 0 tool events applied"),
+        (1, "1 feed entry (cap 2000); 1 tool event applied"),
+        (12, "12 feed entries (cap 2000); 12 tool events applied"),
     ] {
-        m.domain.activity = all.iter().take(n).cloned().collect();
+        m.domain.activity = all.iter().cycle().take(n).cloned().collect();
         m.domain.tool_activity_count = n as u64;
-        let (f, _) = render(&mut m, 120, 38);
-        assert!(f.contains(want), "{n}: {f}");
+        for (w, h) in [(120, 38), (80, 24)] {
+            let (f, _) = render(&mut m, w, h);
+            assert!(f.contains(want), "{n} at {w}: {f}");
+        }
     }
 }
 

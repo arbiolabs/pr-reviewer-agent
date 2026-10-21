@@ -25,7 +25,7 @@ expression: ascii_text
       epoch, last sequence  epoch-1, 10
       snapshot, heartbeat   0.0s ago, never
       resyncs / reconnects  0 / 0
-      activity              0 feed entries kept (cap 2000); 0 tool events applied
+      activity              0 feed entries (cap 2000); 0 tool events applied
 
     Display
       glyphs                ascii
