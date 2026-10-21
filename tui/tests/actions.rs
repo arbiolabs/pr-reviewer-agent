@@ -542,3 +542,16 @@ fn each_timeline_event_sits_under_the_phase_its_run_was_in_when_it_happened() {
         ]
     );
 }
+
+#[test]
+fn enter_opens_the_preview_on_a_parked_pr_with_no_findings() {
+    let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#184");
+    m.domain.findings.retain(|_, f| f.pr_id.as_str() != "acme/shop#184");
+    let parked = run_json("rev-184-a", "acme/shop#184", H186, "AWAITING_APPROVAL", "RUNNING");
+    send(&mut m, &event(109, "acme/shop#184", "rev-184-a", "run.started", &parked));
+    m.ui.screen = pr_review_tui::model::Screen::Review;
+    m.ui.focus = pr_review_tui::model::Pane::Main;
+    press(&mut m, KeyCode::Char('j'));
+    press(&mut m, KeyCode::Enter);
+    assert!(matches!(m.top_modal(), Some(Modal::Publication { .. })), "{:?}", m.top_modal());
+}

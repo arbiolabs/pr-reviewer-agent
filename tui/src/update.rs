@@ -681,7 +681,8 @@ fn reselect(m: &mut Model) {
     let keep =
         m.on_ready_line() || m.ui.selected_finding.as_ref().is_some_and(|id| findings.iter().any(|f| &f.id == id));
     if !keep {
-        m.ui.ready_line = None;
+        // With no finding to hold it, the cursor rests on a parked run's ready line, so Enter opens the preview.
+        m.ui.ready_line = if findings.is_empty() { m.parked_run().map(|r| r.id.clone()) } else { None };
         m.ui.selected_finding = findings.first().map(|f| f.id.clone());
     }
 }
