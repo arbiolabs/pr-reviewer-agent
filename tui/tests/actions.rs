@@ -821,6 +821,32 @@ fn the_footer_offers_no_key_that_has_nothing_to_act_on() {
     m.ui.screen = pr_review_tui::model::Screen::Review;
     m.ui.focus = pr_review_tui::model::Pane::Main;
     let f = footer(&mut m);
-    assert!(f.contains("d diff") && f.contains("h pull requests"), "{f}");
+    assert!(f.contains("h pull requests") && f.contains("t timeline"), "{f}");
     assert!(!f.contains("j/k finding") && !f.contains("Enter read") && !f.contains("J/K"), "#186 has no findings: {f}");
+    assert!(!f.contains("d diff"), "#186 has no review, so no diff: {f}");
+}
+
+#[test]
+fn d_on_a_pr_with_no_review_says_there_is_no_diff_and_offers_only_the_way_back() {
+    let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#186");
+    m.ui.screen = pr_review_tui::model::Screen::Review;
+    m.ui.focus = pr_review_tui::model::Pane::Main;
+    m.ui.selected_finding = None;
+    let rid = press(&mut m, KeyCode::Char('d')).iter().find_map(|e| match e {
+        Effect::Send(ClientMessage::DiffGet { request_id, .. }) => Some(request_id.clone()),
+        _ => None,
+    });
+    assert_eq!(m.ui.screen, pr_review_tui::model::Screen::Diff);
+    if let Some(rid) = rid {
+        let empty = format!(
+            r#"{{"type":"diff.page","requestId":"{rid}","prId":"acme/shop#186","baseSha":"{}","headSha":"{H186}","files":[],"nextCursor":null,"truncated":false}}"#,
+            m.domain.prs[&pr_review_tui::protocol::PrId::new("acme/shop#186")].base_sha
+        );
+        send(&mut m, &empty);
+    }
+    let f = frame(&mut m);
+    assert!(f.contains("No review of #186 yet, so there is no diff to show. s starts one."), "{f}");
+    assert!(!f.contains("FILES"), "{f}");
+    let last = f.lines().last().unwrap().split("1 inbox").next().unwrap().trim().to_string();
+    assert_eq!(last, "Esc back  ? help  w watch live", "#184 runs, so w still acts");
 }

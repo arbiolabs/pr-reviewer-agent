@@ -434,7 +434,13 @@ fn footer_line(c: &Ctx, width: u16) -> Line<'static> {
         let list = c.m.ui.screen == Screen::Inbox || c.m.ui.screen == Screen::Review && c.m.ui.focus == Pane::Sidebar;
         let shown = c.m.inbox().len();
         let findings = c.m.selected_pr().map_or(0, |p| c.m.domain.pr_findings(&p.id).len());
+        let reviewed = c.m.selected_pr().is_some_and(|p| c.m.domain.latest_run(&p.id).is_some());
+        // A diff with no files, or none at all, has nothing to move through.
+        let no_diff = c.m.diff.as_ref().is_none_or(|d| d.files.is_empty() && d.pending.is_none());
         hints.retain(|h| match *h {
+            "d diff" if c.m.ui.screen == Screen::Review => reviewed,
+            "Esc back" | "? help" if c.m.ui.screen == Screen::Diff => true,
+            _ if c.m.ui.screen == Screen::Diff && no_diff => false,
             "j/k pull request" | "Enter read" if list => shown > 0,
             "/ search" if list => !c.m.domain.prs.is_empty(),
             "j/k finding" | "Enter read" | "J/K scroll" if c.m.ui.screen == Screen::Review => findings > 0,

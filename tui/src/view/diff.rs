@@ -25,6 +25,13 @@ pub fn diff(c: &Ctx, f: &mut Frame, area: Rect) {
         );
         return;
     };
+    if let Some(text) = nothing_to_show(c, d) {
+        f.render_widget(
+            Paragraph::new(vec![Line::raw(""), Line::from(c.span(format!("  {text}"), Role::Muted))]),
+            area,
+        );
+        return;
+    }
     let anchored = diff_findings(c.m, d);
     let tree_focus = c.focused(Pane::Sidebar);
     let (rail, body) = layout(c, area);
@@ -36,6 +43,20 @@ pub fn diff(c: &Ctx, f: &mut Frame, area: Rect) {
         f.render_widget(Paragraph::new(header(c, d, &anchored, b.width as usize)), head);
         hunks(c, f, listing(b), d, &anchored);
     }
+}
+
+/// The sentence in place of a diff that arrived with no files: a PR never reviewed has none to show.
+fn nothing_to_show(c: &Ctx, d: &DiffView) -> Option<String> {
+    if !d.files.is_empty() || d.pending.is_some() || d.error.is_some() {
+        return None;
+    }
+    let pr = c.m.domain.prs.get(&d.key.pr)?;
+    Some(match c.m.domain.latest_run(&pr.id) {
+        None => format!("No review of #{} yet, so there is no diff to show. s starts one.", pr.number),
+        Some(_) => {
+            format!("#{} changes no files between {} and {}.", pr.number, d.key.base.short(), d.key.head.short())
+        }
+    })
 }
 
 /// The file list and the patch areas. Below the wide layout the code needs every column; h shows the file list in
