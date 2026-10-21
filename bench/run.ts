@@ -29,7 +29,7 @@ type CaseResult = {
 };
 type TrackedStep = Review & Step;
 type TrackedResult = { id: string; steps: TrackedStep[] } & TrackScore;
-type Rates = Pick<TrackScore, "falseResolution" | "identityKept" | "duplicateComments" | "resolutionRecall" | "newFound">;
+type Rates = Omit<TrackScore, "outcomes">;
 type RunResult = { cases: CaseResult[]; tracked: TrackedResult[]; tracking: Rates; tp: number; fn: number; fp: number; precision: number | undefined; recall: number | undefined };
 
 /**
