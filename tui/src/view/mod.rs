@@ -225,11 +225,13 @@ fn link_status(c: &Ctx) -> (String, Role) {
     let g = c.t.g();
     match &c.m.link {
         Link::Live => (format!("{} live", g.active), Role::Ok),
-        Link::Syncing => (format!("{} loading snapshot", g.pending), Role::Pending),
-        Link::Resyncing => (format!("{} resyncing", g.pending), Role::Pending),
+        Link::Syncing => (format!("{} loading snapshot{}", g.pending, g.ellipsis), Role::Pending),
+        Link::Resyncing => (format!("{} resyncing{}", g.pending, g.ellipsis), Role::Pending),
         Link::Stalled { .. } => (format!("{} snapshot timed out", g.fail), Role::Fail),
-        Link::Negotiating => (format!("{} negotiating", g.pending), Role::Pending),
-        Link::Connecting { attempt } => (format!("{} connecting (attempt {attempt})", g.pending), Role::Pending),
+        Link::Negotiating => (format!("{} negotiating{}", g.pending, g.ellipsis), Role::Pending),
+        Link::Connecting { attempt } => {
+            (format!("{} connecting{} (attempt {attempt})", g.pending, g.ellipsis), Role::Pending)
+        }
         Link::Disconnected { .. } => (format!("{} disconnected", g.fail), Role::Fail),
         Link::Incompatible { .. } => (format!("{} incompatible", g.fail), Role::Fail),
         Link::Unusable { .. } => (format!("{} cannot connect", g.fail), Role::Fail),
@@ -259,7 +261,7 @@ fn status_line(c: &Ctx, width: u16) -> Line<'static> {
         _ if c.m.link != Link::Live => {
             let text = match (c.m.diag.last_snapshot_ms, &c.m.link) {
                 (Some(at), _) => format!("last known state, {}s old", c.m.now_ms.saturating_sub(at) / 1000),
-                (None, Link::Negotiating | Link::Syncing) => "waiting for the first snapshot".into(),
+                (None, Link::Negotiating | Link::Syncing) => format!("waiting for the first snapshot{}", g.ellipsis),
                 (None, _) => "not connected".into(),
             };
             left.push(c.span(text, Role::Muted));

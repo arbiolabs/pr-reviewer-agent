@@ -777,3 +777,16 @@ fn a_toast_is_a_sentence_and_one_still_under_way_ends_in_an_ellipsis() {
         .collect();
     assert_eq!(fragments, Vec::<&str>::new());
 }
+
+#[test]
+fn a_link_state_still_under_way_ends_in_an_ellipsis() {
+    let mut m = model();
+    update(&mut m, Msg::Net(NetEvent::Opened));
+    let (f, _) = render(&mut m, 80, 24);
+    let top = f.lines().next().unwrap().trim_end().to_string();
+    assert!(top.ends_with("◔ negotiating…"), "{top}");
+    assert!(top.contains("waiting for the first snapshot…"), "{top}");
+    send(&mut m, &read("fixtures/server.welcome.engine.json"));
+    let (f, _) = render(&mut m, 80, 24);
+    assert!(f.lines().next().unwrap().trim_end().ends_with("◔ loading snapshot…"), "{f}");
+}
