@@ -123,7 +123,7 @@ impl Player {
         let key = c.idempotency_key.clone();
         let opened: Vec<String> = self.gates.iter().filter(|g| opens(g, &key)).cloned().collect();
         let reviewed = match &c.command {
-            crate::protocol::Command::Start(p) if opened.is_empty() || self.sent.contains(&key) => self.reviewed(p),
+            crate::protocol::Command::Start(p) => self.reviewed(p),
             _ => None,
         };
         let outcome = if let Some(message) = reviewed {
@@ -170,7 +170,7 @@ impl Player {
         runs
     }
 
-    /// Why a start is refused, as the daemon says it (`#1287 at 647fb3b is already reviewed`), when the latest run of
+    /// Why a start is refused, as the daemon says it (`#1287 at 647fb3b is already reviewed`), every time, when the latest run of
     /// the start's PR, at its head, has ended.
     fn reviewed(&self, p: &crate::protocol::StartParams) -> Option<String> {
         let runs = self.runs();

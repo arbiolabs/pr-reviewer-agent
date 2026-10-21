@@ -1,0 +1,25 @@
+{
+  "type": "timeline.page",
+  "requestId": "req-tl",
+  "events": [
+    {
+      "type": "event",
+      "streamEpoch": "epoch-1",
+      "sequence": 34,
+      "prevSequence": 33,
+      "occurredAt": "2026-10-20T14:25:40Z",
+      "prId": "af0169e8e89241b47e6114e4f1939c53",
+      "eventType": "pr.updated",
+      "data": {
+        "id": "af0169e8e89241b47e6114e4f1939c53",
+        "repository": "acme/shop",
+        "number": 1296,
+        "title": "Gift cards: redeem a balance at checkout",
+        "author": "rsingh",
+        "headSha": "3799cf3add99e8b583f4c2c6883bba1ba8d89249",
+        "baseSha": "8d81a014d13e51fdf6be0d2fbf436afd2a8a5154",
+        "lifecycle": "ACTIVE"
+      }
+    }
+  ]
+}

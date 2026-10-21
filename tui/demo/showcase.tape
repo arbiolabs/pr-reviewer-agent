@@ -2,7 +2,7 @@
 #   cargo build --release --manifest-path tui/Cargo.toml && vhs tui/demo/showcase.tape
 # The playback clock starts when the client launches, so the sleeps below line up with its events:
 # #1291's review finds two issues at about 14 s and 15 s, and parks for approval at about 18 s. Its publication
-# plays once the client sends review.publish.
+# plays once the client sends review.publish. #338 runs until about 80 s unless cancelled.
 
 Output tui/demo/showcase.gif
 
@@ -62,12 +62,21 @@ Sleep 1s
 Type "y"
 Sleep 4.5s
 
-# An action: s on #1287 asks first, and y starts a new review that runs through every phase to done.
+# An action: s on #1296, which has never been reviewed, asks first, and y starts its first review, which runs
+# through every phase to done. s on a head already reviewed, like #1287's, is refused as the daemon refuses it.
 Escape
 Sleep 1s
-Type "hj"
+Type "hk"
 Sleep 1.5s
 Type "s"
 Sleep 2.5s
 Type "y"
-Sleep 19s
+Sleep 16s
+
+# c on #338 asks to cancel its running review, and y cancels it.
+Type "k"
+Sleep 1s
+Type "c"
+Sleep 2.5s
+Type "y"
+Sleep 4s

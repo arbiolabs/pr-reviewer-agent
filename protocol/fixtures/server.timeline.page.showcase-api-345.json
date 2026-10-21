@@ -5,8 +5,8 @@
     {
       "type": "event",
       "streamEpoch": "epoch-1",
-      "sequence": 34,
-      "prevSequence": 33,
+      "sequence": 33,
+      "prevSequence": 32,
       "occurredAt": "2026-10-20T14:20:12Z",
       "prId": "e217a9dd121ea441fc8611508c39a210",
       "runId": "e7451b06cf78ead5913962040f41cb76",
@@ -27,8 +27,8 @@
     {
       "type": "event",
       "streamEpoch": "epoch-1",
-      "sequence": 33,
-      "prevSequence": 32,
+      "sequence": 32,
+      "prevSequence": 31,
       "occurredAt": "2026-10-20T14:20:12Z",
       "prId": "e217a9dd121ea441fc8611508c39a210",
       "runId": "e7451b06cf78ead5913962040f41cb76",
@@ -43,8 +43,8 @@
     {
       "type": "event",
       "streamEpoch": "epoch-1",
-      "sequence": 32,
-      "prevSequence": 31,
+      "sequence": 31,
+      "prevSequence": 30,
       "occurredAt": "2026-10-20T14:19:50Z",
       "prId": "e217a9dd121ea441fc8611508c39a210",
       "runId": "e7451b06cf78ead5913962040f41cb76",
@@ -64,8 +64,8 @@
     {
       "type": "event",
       "streamEpoch": "epoch-1",
-      "sequence": 31,
-      "prevSequence": 30,
+      "sequence": 30,
+      "prevSequence": 29,
       "occurredAt": "2026-10-20T14:19:40Z",
       "prId": "e217a9dd121ea441fc8611508c39a210",
       "eventType": "pr.updated",

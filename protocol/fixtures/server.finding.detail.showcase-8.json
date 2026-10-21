@@ -1,0 +1,43 @@
+{
+  "type": "finding.detail",
+  "requestId": "req-finding",
+  "finding": {
+    "id": "d4ee96ff2509ee8bf02eb5c1cf5b2d29",
+    "prId": "af0169e8e89241b47e6114e4f1939c53",
+    "runId": "026c29bd51c925bec421a619dceedb17",
+    "fingerprint": "ea28f627b98539547c4898c4f5f01374",
+    "status": "DETECTED",
+    "evidenceCount": 2,
+    "stale": false,
+    "title": "A gift card redeemed in two carts at once is spent twice",
+    "category": "data_integrity",
+    "severity": "high",
+    "confidence": 0.83,
+    "file": "src/server/checkout/giftCards.ts",
+    "line": 17,
+    "explanation": "applyGiftCard reads the card's balance, then writes back `card.balance - amount` as an absolute value. Two checkouts using the same code can both read a balance of 50, both apply 50 to their carts, and both write 0. The card pays 100 out of a 50 balance.",
+    "reasoningSummary": "The read and the write are separate statements outside a transaction, and the write is not conditional on the balance it read. Gift card codes are shared by design (gifts), so concurrent use is expected, not an edge case.",
+    "suggestedFix": "Debit with a conditional decrement and check that it applied:\n\nconst debited = await db.giftCard.updateMany({ where: { code, balance: { gte: amount } }, data: { balance: { decrement: amount } } });\nif (debited.count === 0) throw new InvalidGiftCardError(code);",
+    "evidence": [
+      {
+        "kind": "code_ref",
+        "path": "src/server/checkout/giftCards.ts",
+        "start": 14,
+        "end": 17,
+        "refSha": "3799cf3add99e8b583f4c2c6883bba1ba8d89249",
+        "text": "  const card = await db.giftCard.findUnique({ where: { code } });\n  if (!card || card.balance <= 0) throw new InvalidGiftCardError(code);\n  const amount = Math.min(card.balance, cart.total);\n  await db.giftCard.update({ where: { code }, data: { balance: card.balance - amount } });"
+      },
+      {
+        "kind": "scenario",
+        "text": "Two carts apply code GIFT-7Q2M (balance 50) 3 ms apart. Both read 50, both take 50 off their totals, both write balance 0."
+      }
+    ],
+    "history": [
+      {
+        "runId": "026c29bd51c925bec421a619dceedb17",
+        "disposition": "DETECTED",
+        "at": "2026-10-20T14:30:00Z"
+      }
+    ]
+  }
+}

@@ -652,19 +652,55 @@ const ledgerRun = showRun(ledger, SHOW_OPEN - 610, {
     "Diff too large to review: 212 files and 18,406 changed lines exceed the 8,000-line budget. Most of it is migrations/0042_partition_ledger.sql. Exclude generated files or split the PR.",
 });
 
+// 6. acme/shop#1296: tracked, never reviewed. The showcase's s starts its first review, which runs to COMPLETED.
+const giftCards = showPr("acme/shop", 1296, "Gift cards: redeem a balance at checkout", "rsingh");
+const giftCardsRun = showRun(giftCards, SHOW_OPEN, { phase: "COLLECT_CONTEXT", status: "RUNNING" });
+const redeemTs = diffFile("src/server/checkout/giftCards.ts", [
+  hunk(12, 12, "export async function applyGiftCard(db: Db, cartId: string, code: string) {", `
+ export async function applyGiftCard(db: Db, cartId: string, code: string) {
+   const cart = await db.cart.findUniqueOrThrow({ where: { id: cartId } });
+-  throw new NotSupportedError("gift cards");
++  const card = await db.giftCard.findUnique({ where: { code } });
++  if (!card || card.balance <= 0) throw new InvalidGiftCardError(code);
++  const amount = Math.min(card.balance, cart.total);
++  await db.giftCard.update({ where: { code }, data: { balance: card.balance - amount } });
++  return db.cart.update({ where: { id: cartId }, data: { giftCardAmount: amount } });
+ }
+`),
+]);
+const doubleSpend = showDetail(giftCardsRun, SHOW_OPEN, {
+  title: "A gift card redeemed in two carts at once is spent twice",
+  category: "data_integrity",
+  severity: "high",
+  confidence: 0.83,
+  file: redeemTs.path,
+  line: lineOf(redeemTs, "data: { balance: card.balance - amount }"),
+  explanation:
+    "applyGiftCard reads the card's balance, then writes back `card.balance - amount` as an absolute value. Two checkouts using the same code can both read a balance of 50, both apply 50 to their carts, and both write 0. The card pays 100 out of a 50 balance.",
+  reasoningSummary:
+    "The read and the write are separate statements outside a transaction, and the write is not conditional on the balance it read. Gift card codes are shared by design (gifts), so concurrent use is expected, not an edge case.",
+  suggestedFix:
+    "Debit with a conditional decrement and check that it applied:\n\nconst debited = await db.giftCard.updateMany({ where: { code, balance: { gte: amount } }, data: { balance: { decrement: amount } } });\nif (debited.count === 0) throw new InvalidGiftCardError(code);",
+  evidence: [
+    cite(redeemTs, giftCards.headSha, "const card = await db.giftCard.findUnique({ where: { code } });", "await db.giftCard.update({ where: { code }, data: { balance: card.balance - amount } });"),
+    { kind: "scenario", text: "Two carts apply code GIFT-7Q2M (balance 50) 3 ms apart. Both read 50, both take 50 off their totals, both write balance 0." },
+  ],
+});
+
 const showPersonal = account("github.com", "dperalta", { ghActive: true });
 const showAccounts = [
   showPersonal,
   account("github.com", "acme-review-bot", { selected: true, scopes: ["read:org", "repo"] }),
 ];
 
-const showDetails = [refundAuthz, oversell, historyN1, pagerOffByOne, openRedirect, sessionFixation, unDrained];
+const showDetails = [refundAuthz, oversell, historyN1, pagerOffByOne, openRedirect, sessionFixation, unDrained, doubleSpend];
 const showDiffs: [string, Pr, Run, DiffFile[]][] = [
   ["shop-1287", orders, ordersRun, [ordersRoute, reserve, history]],
   ["api-341", requestIds, requestIdsRun, [apiMain, requestIdGo]],
   ["shop-1291", signIn, signInRun, [signInTsx, callbackTs, loginTs]],
   ["api-338-old", drainOld, drainOldRun, [dispatcherOld]],
   ["api-338", drain, drainRun, [dispatcherNew]],
+  ["shop-1296", giftCards, giftCardsRun, [redeemTs]],
 ];
 // What the journal recorded before the session opens, one timeline page per snapshot PR. Sequences run up to the
 // snapshot's 40, in time order across PRs, so Timeline has a story for every PR before the script plays anything.
@@ -729,6 +765,7 @@ const showHistory: [string, Recorded[]][] = [
       [SHOW_OPEN - 588, (s) => runEvent(s, "run.failed", ledgerRun)],
     ],
   ],
+  ["shop-1296", [prOpened(giftCards, SHOW_OPEN - 260)]],
 ];
 const showTimelines = (): [string, ServerMessage][] => {
   const all = showHistory.flatMap(([name, rows]) => rows.map(([t, make], k) => ({ name, t, k, make })));
@@ -797,8 +834,6 @@ const signInPublication = (status: PublicationChange["status"], reviewId?: numbe
     { prId: signIn.id, runId: signInRun.id },
   );
 const SIGNIN_REVIEW_ID = 2209184;
-const ordersRerunId = stableId("revision", orders.id, orders.headSha, "rerun");
-const ordersRerun: Run = { ...started(ordersRun), id: ordersRerunId };
 const ledgerRetry: Run = { ...started(ledgerRun), failureReason: undefined, attempt: 2 };
 /** A run the reader started or retried, from its first tool call to COMPLETED in about 14 s, all behind `gate`. */
 const toTheEnd = (r: Run, gate: string, tool: [string, string], findings: FindingDetail[]): ShowStep[] => {
@@ -861,8 +896,11 @@ const showSteps: ShowStep[] = [
   // Approval mode: the review is stored and parks until the reader approves the preview.
   [800, (s) => phase(s, signInRun, "PREPARE_PUBLICATION", "AWAITING_APPROVAL", "APPROVAL_REQUIRED")],
   [40, signInPublication("awaiting_approval")],
-  // #338 ends on its own unless the reader cancels it first; playback drops a run's lines once it has ended.
+  // #338 ends on its own about 80 s in, unless the reader cancels it first (the GIF does, after the start on #1296);
+  // playback drops a run's lines once it has ended.
   [5000, drainActivity("read_file", "internal/webhooks/dispatcher_test.go:1-90")],
+  [30000, drainActivity("search_code", "\"WithoutCancel(\": 1 match, internal/webhooks/dispatcher.go:68")],
+  [25000, drainActivity("read_file", "internal/webhooks/deliver.go:1-74")],
   [3000, (s) => phase(s, drainRun, "VERIFY", "PREPARE_PUBLICATION", "CANDIDATES_DISPOSED")],
   [1500, (s) => phase(s, drainRun, "PREPARE_PUBLICATION", "PUBLISH", "HEAD_VERIFIED")],
   [800, (s) => phase(s, drainRun, "PUBLISH", "COMPLETED", "NO_PUBLICATION_RECORDED")],
@@ -877,8 +915,8 @@ const showSteps: ShowStep[] = [
   [4000, "heartbeat"],
   [4000, "heartbeat"],
   // What s, c and R do in the showcase, each on the one target it scripts: they play whenever the reader sends them.
-  [500, (s) => runEvent(s, "run.started", { ...ordersRerun, startedAt: at(s.t!) }), `review.start:${orders.id}:${orders.headSha}`],
-  ...toTheEnd(ordersRerun, `review.start:${orders.id}:${orders.headSha}`, ["read_diff", "3 files changed (+41 -6): src/server/routes/orders.ts, src/server/orders/reserve.ts, src/server/orders/history.ts"], [refundAuthz, oversell, historyN1, pagerOffByOne]),
+  [500, (s) => runEvent(s, "run.started", { ...giftCardsRun, startedAt: at(s.t!) }), `review.start:${giftCards.id}:${giftCards.headSha}`],
+  ...toTheEnd(giftCardsRun, `review.start:${giftCards.id}:${giftCards.headSha}`, ["read_diff", "1 file changed (+5 -1): src/server/checkout/giftCards.ts"], [doubleSpend]),
   [500, (s) => phase(s, drainRun, "ANALYZE", "FAILED", "CANCELLED"), `review.cancel:${drainRun.id}`],
   [40, (s) => runEvent(s, "run.failed", { ...drainRun, phase: "FAILED", status: "FAILED", completedAt: at(s.t!), failureReason: "cancelled from the TUI" }), `review.cancel:${drainRun.id}`],
   [500, (s) => runEvent(s, "run.started", { ...ledgerRetry, startedAt: at(s.t!) }), `review.retry:${ledgerRun.id}`],
@@ -1280,7 +1318,7 @@ const showcaseScript = (): PlaybackLine[] => {
       delayMs: 0,
       message: snapshot(
         40,
-        [orders, requestIds, signIn, drain, ledger],
+        [orders, requestIds, signIn, drain, ledger, giftCards],
         [ordersRun, requestIdsRun, drainOldRun, drainRun, ledgerRun],
         [refundAuthz, oversell, historyN1, pagerOffByOne, unDrained].map(findingOf),
         EPOCH,
@@ -1383,10 +1421,10 @@ export const playback: Record<string, { script: PlaybackLine[]; expect: Expect }
     script: showcaseScript(),
     expect: {
       streamEpoch: EPOCH,
-      lastSequence: 117,
+      lastSequence: 116,
       resyncRequested: false,
-      toolActivityCount: 32,
-      prs: prRows(orders, requestIds, signIn, drain, ledger),
+      toolActivityCount: 34,
+      prs: prRows(orders, requestIds, signIn, drain, ledger, giftCards),
       runs: [
         runRow(ordersRun),
         runRow(requestIdsRun),
@@ -1394,7 +1432,7 @@ export const playback: Record<string, { script: PlaybackLine[]; expect: Expect }
         runRow(drainOldRun),
         runRow(drainRun, "FAILED", "FAILED"),
         runRow(ledgerRun, "COMPLETED", "COMPLETED"),
-        { id: ordersRerunId, phase: "COMPLETED", status: "COMPLETED" },
+        runRow(giftCardsRun, "COMPLETED", "COMPLETED"),
       ],
       findings: showDetails.map((f) => ({ id: f.id, title: f.title, status: f.runId === signInRun.id ? "PUBLISHED" : "DETECTED", stale: f.stale })),
       accounts: [
