@@ -677,12 +677,11 @@ fn enter_opens_an_events_detail_inline_and_esc_folds_it_before_leaving() {
     let [Effect::Send(ClientMessage::TimelineGet { request_id, .. })] = &fx[..] else { panic!("{fx:?}") };
     send(&mut m, &read("fixtures/server.timeline.page.json").replace("req-tl", request_id.as_str()));
     let open = |m: &Model| m.timeline.as_ref().and_then(|t| t.open);
-    assert_eq!(m.timeline.as_ref().and_then(|t| t.selected), Some(100), "lands on the newest, at the bottom");
+    assert_eq!(m.timeline.as_ref().and_then(|t| t.selected), Some(99), "lands on the newest row, not its heading");
     press(&mut m, KeyCode::Enter);
-    assert_eq!((open(&m), m.top_modal()), (Some(100), None));
+    assert_eq!((open(&m), m.top_modal()), (Some(99), None));
     press(&mut m, KeyCode::Enter);
     assert_eq!(open(&m), None, "Enter again folds a non-finding event");
-    press(&mut m, KeyCode::Char('k'));
     press(&mut m, KeyCode::Enter);
     assert_eq!(open(&m), Some(99));
     press(&mut m, KeyCode::Esc);
@@ -1046,4 +1045,37 @@ fn a_finished_run_with_no_findings_says_no_findings_and_only_a_running_one_says_
     assert_eq!(says(&mut m, RunStatus::Failed), "No findings", "cancelled or failed: nothing more will come");
     assert_eq!(says(&mut m, RunStatus::Completed), "No findings");
     assert_eq!(says(&mut m, RunStatus::Running), "No findings yet");
+}
+
+#[test]
+fn a_selected_row_that_a_live_phase_change_hides_hands_the_cursor_to_the_nearest_row() {
+    let mut m = review_184();
+    let fx = press(&mut m, KeyCode::Char('4'));
+    let [Effect::Send(ClientMessage::TimelineGet { request_id, .. })] = &fx[..] else { panic!("{fx:?}") };
+    let ev = |seq: u64, prev: u64, kind: &str, data: &str| {
+        format!(
+            r#"{{"type":"event","streamEpoch":"epoch-1","sequence":{seq},"prevSequence":{prev},"occurredAt":"2026-10-20T13:02:{:02}Z","prId":"acme/shop#184","runId":"rev-184-a","eventType":"{kind}","data":{data}}}"#,
+            seq % 60
+        )
+    };
+    let tool = |seq| ev(seq, seq - 1, "tool.activity", r#"{"tool":"read_diff","summary":"src/booking.ts"}"#);
+    let phase = |seq, prev, from: &str, to: &str| {
+        ev(seq, prev, "review.phase_changed", &format!(r#"{{"from":"{from}","to":"{to}","event":"E","detail":null}}"#))
+    };
+    let page = [
+        phase(14, 13, "VERIFY", "PREPARE_PUBLICATION"),
+        tool(13),
+        tool(12),
+        phase(11, 10, "ANALYZE", "VERIFY"),
+        tool(10),
+    ];
+    let page = format!(r#"{{"type":"timeline.page","requestId":"{request_id}","events":[{}]}}"#, page.join(","));
+    send(&mut m, &page);
+    send(&mut m, &phase(109, 108, "PREPARE_PUBLICATION", "AWAITING_APPROVAL"));
+    let selected = |m: &Model| m.timeline.as_ref().unwrap().selected;
+    assert_eq!(selected(&m), Some(13), "the newest row, nearest the hidden phase change");
+    let (frame, _) = common::render(&mut m, 120, 38);
+    assert_eq!(frame.lines().filter(|l| l.trim_start().starts_with('▌')).count(), 1, "{frame}");
+    press(&mut m, KeyCode::Char('k'));
+    assert_eq!(selected(&m), Some(12));
 }

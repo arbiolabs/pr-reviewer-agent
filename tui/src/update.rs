@@ -130,11 +130,34 @@ pub fn update(m: &mut Model, msg: Msg) -> Vec<Effect> {
         Msg::Net(e) => net(m, e, &mut fx),
     }
     prefetch(m, &mut fx);
+    settle_timeline_cursor(m);
     if !page_reloading(m) {
         clamp_page(m);
     }
     m.dirty = true;
     fx
+}
+
+/// A selected row a filter or a newer event hid (a phase change is a heading, not a row) hands the cursor to the
+/// nearest row still shown, so the cursor never vanishes or jumps to the top.
+fn settle_timeline_cursor(m: &mut Model) {
+    let Some(t) = &m.timeline else { return };
+    let Some(sel) = t.selected else { return };
+    let stops = timeline_stops(m, t);
+    if stops.is_empty() || stops.contains(&sel) {
+        return;
+    }
+    let at = t.events.iter().position(|e| e.sequence.get() == sel).unwrap_or(0);
+    let nearest = t
+        .events
+        .iter()
+        .enumerate()
+        .filter(|(_, e)| stops.contains(&e.sequence.get()))
+        .min_by_key(|(i, _)| i.abs_diff(at))
+        .map(|(_, e)| e.sequence.get());
+    if let Some(t) = &mut m.timeline {
+        t.selected = nearest;
+    }
 }
 
 /// The document shows every card's evidence, so the selected PR's details load as soon as it is selected.
