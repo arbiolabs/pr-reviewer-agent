@@ -17,14 +17,17 @@ use crate::theme::{Bg, Role, finding_status, phase_name};
 /// The reading column's widest: room for code and about 15 words of prose a line.
 pub const COLUMN: u16 = 112;
 
-/// A quadrant turning clockwise: no frame reads as the `·` separator or the `●` of a finished phase, and block
-/// elements are in every monospace font (braille and the half circles are missing from some, freeze's among them).
-/// The ASCII bar rocks between its slants: upright it is the ASCII separator `|`, and flat the stepper's `-`.
+/// A full braille cell with one dot missing, the gap turning clockwise (ratatui-spinner's `FluxFrames::BRAILLE`):
+/// no frame reads as the `·` separator or the `●` of a finished phase. Braille is missing from some monospace
+/// fonts, freeze's among them. The ASCII bar rocks between its slants: upright it is the ASCII separator `|`, and
+/// flat the stepper's `-`.
 pub fn spinner(c: &Ctx) -> &'static str {
-    const U: &[&str] = &["▘", "▝", "▗", "▖"];
+    const U: &[&str] = &["⣾", "⣷", "⣯", "⣟", "⡿", "⢿", "⣽", "⣻"];
     const A: &[&str] = &["/", "\\"];
-    let set = if c.t.ascii { A } else { U };
-    set[(c.m.now_ms / 125) as usize % set.len()]
+    if c.t.ascii {
+        return A[(c.m.now_ms / 125) as usize % A.len()];
+    }
+    U[(c.m.now_ms / 100) as usize % U.len()]
 }
 
 fn secs(at: &str) -> Option<i64> {
@@ -428,7 +431,7 @@ fn phase_line(c: &Ctx, run: Option<&Run>, w: usize) -> Line<'static> {
                 _ if cur == 7 => (todo, Role::Muted),
                 _ if i < cur => (done, Role::Ok),
                 _ if i == cur && run.parked() => (g.pending, Role::Pending),
-                _ if i == cur && run.status == RunStatus::Running => (spinner(c), Role::Accent),
+                _ if i == cur && run.status == RunStatus::Running => (done, Role::Accent),
                 _ if i == cur => (g.pending, Role::Pending),
                 _ => (todo, Role::Muted),
             };

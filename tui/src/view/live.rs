@@ -3,7 +3,6 @@
 use ratatui::text::Span;
 
 use super::Ctx;
-use super::doc::spinner;
 use crate::model::ActivityKind;
 use crate::protocol::{Phase, PrId, Run, RunStatus};
 use crate::theme::Role;
@@ -77,9 +76,9 @@ pub fn stepper(c: &Ctx, run: &Run) -> Vec<Span<'static>> {
         }
         let (glyph, role) = match cur {
             Some(k) if i < k => (done, Role::Ok),
-            // Parked before PUBLISH: waiting for the reader, so it holds still in amber instead of spinning.
+            // Parked before PUBLISH: waiting for the reader, so it shows amber instead of the accent.
             Some(k) if i == k && run.parked() => (c.t.g().pending, Role::Pending),
-            Some(k) if i == k && run.status == RunStatus::Running => (spinner(c), Role::Accent),
+            Some(k) if i == k && run.status == RunStatus::Running => (done, Role::Accent),
             _ => (todo, Role::Muted),
         };
         out.push(c.span(glyph, role));
@@ -87,7 +86,7 @@ pub fn stepper(c: &Ctx, run: &Run) -> Vec<Span<'static>> {
     out
 }
 
-/// Six `seg`-wide segments: done ones solid, the current one with a highlight that walks while the run is live.
+/// Six `seg`-wide segments: done ones solid, the current one with an arc that bounces while the run is live.
 pub fn phase_bar(c: &Ctx, run: &Run, seg: usize) -> Vec<Span<'static>> {
     let (full, rail) = if c.t.ascii { ("=", "-") } else { ("━", "─") };
     let cur = phase_index(run.phase);
@@ -99,12 +98,7 @@ pub fn phase_bar(c: &Ctx, run: &Run, seg: usize) -> Vec<Span<'static>> {
         match cur {
             Some(k) if i < k => out.push(c.span(full.repeat(seg), Role::Ok)),
             Some(k) if i == k && run.parked() => out.push(c.span(rail.repeat(seg), Role::Pending)),
-            Some(k) if i == k && run.status == RunStatus::Running => {
-                let hot = (c.m.now_ms / 250) as usize % seg.max(1);
-                for j in 0..seg {
-                    out.push(c.span(full, if j == hot { Role::Title } else { Role::Accent }));
-                }
-            }
+            Some(k) if i == k && run.status == RunStatus::Running => out.extend(bar_spinner(c, seg, full, rail)),
             None if run.status == RunStatus::Failed => out.push(c.span(rail.repeat(seg), Role::Fail)),
             _ => out.push(c.span(rail.repeat(seg), Role::Muted)),
         }
@@ -112,11 +106,44 @@ pub fn phase_bar(c: &Ctx, run: &Run, seg: usize) -> Vec<Span<'static>> {
     out
 }
 
+/// ratatui-spinner's `BarSpinner` in its `Thick` style: a `full` arc a third of the width bouncing over the `rail`.
+/// A function of the clock, so every frame is reproducible.
+fn bar_spinner(c: &Ctx, w: usize, full: &'static str, rail: &'static str) -> Vec<Span<'static>> {
+    let arc = w.div_ceil(3).max(4).min(w.saturating_sub(1));
+    let travel = w - arc;
+    let step = (c.m.now_ms / 80) as usize % (2 * travel).max(1);
+    let anchor = if step <= travel { step } else { 2 * travel - step };
+    (0..w)
+        .map(|j| match (anchor..anchor + arc).contains(&j) {
+            true => c.span(full, Role::Accent),
+            false => c.span(rail, Role::Muted),
+        })
+        .collect()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::model::{Look, Model, Screen};
     use crate::theme::Theme;
+
+    #[test]
+    fn the_bar_spinner_bounces_a_third_wide_arc_inside_its_segment() {
+        let mut m = Model::new("x", Look::default(), Screen::Review, None);
+        let t = Theme { color: false, ascii: true, terminal_bg: false, palette: Default::default() };
+        let frame = |m: &Model| -> String {
+            let c = Ctx { m, t, width: super::super::Width::Wide };
+            bar_spinner(&c, 12, "=", "-").iter().map(|s| s.content.to_string()).collect()
+        };
+        let at = |m: &mut Model, step: u64| {
+            m.now_ms = step * 80;
+            frame(m)
+        };
+        assert_eq!(at(&mut m, 0), "====--------");
+        assert_eq!(at(&mut m, 8), "--------====");
+        assert_eq!(at(&mut m, 9), "-------====-");
+        assert_eq!(at(&mut m, 16), "====--------");
+    }
 
     #[test]
     fn the_sparkline_scales_to_the_busiest_second_with_a_floor_of_three() {
