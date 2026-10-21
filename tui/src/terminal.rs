@@ -61,11 +61,13 @@ static TYPED: std::sync::Mutex<Vec<u8>> = std::sync::Mutex::new(Vec::new());
 /// The query gave up inside a reply: the rest of it is on its way to the key reader.
 static REPLY_CUT: std::sync::Mutex<Option<Tail>> = std::sync::Mutex::new(None);
 
-/// Which reply a cut left its tail in: the OSC 11 one (or just past an ESC, which could start either), or DA1.
+/// Which reply a cut left its tail in: the OSC 11 one, DA1, or none yet after a lone ESC, which a person may have
+/// typed as Esc. That ESC lets through anything but a plain `]` or `[`, the only ways a reply cut there continues.
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum Tail {
     Osc,
     Da1,
+    Esc,
 }
 
 /// Sends OSC 11 and then DA1, which every terminal answers, so the DA1 reply marks the end of whatever the terminal
@@ -107,15 +109,15 @@ fn query_background(timeout: Duration) -> Option<Vec<u8>> {
     Some(answers)
 }
 
-/// The keys typed before the terminal answered, as key events: printable ASCII, Enter, Tab and Backspace. An escape
-/// sequence (an arrow key's `ESC [ A`, Alt+x) drops whole, never as the plain keys inside it.
+/// The keys typed before the terminal answered, as key events: printable ASCII, Enter, Tab, Backspace and a bare Esc
+/// at the end. An escape sequence (an arrow key's `ESC [ A`, Alt+x) drops whole, never as the plain keys inside it.
 pub fn typed_before_start() -> Vec<crossterm::event::KeyEvent> {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     let typed = TYPED.lock().map(|mut t| std::mem::take(&mut *t)).unwrap_or_default();
     let mut plain = Vec::new();
     let mut bytes = typed.into_iter().peekable();
     while let Some(b) = bytes.next() {
-        if b != 0x1b {
+        if b != 0x1b || bytes.peek().is_none() {
             plain.push(b);
             continue;
         }
@@ -138,6 +140,7 @@ pub fn typed_before_start() -> Vec<crossterm::event::KeyEvent> {
             b'\r' | b'\n' => Some(KeyCode::Enter),
             b'\t' => Some(KeyCode::Tab),
             0x7f | 0x08 => Some(KeyCode::Backspace),
+            0x1b => Some(KeyCode::Esc),
             b' '..=b'~' => Some(KeyCode::Char(b as char)),
             _ => None,
         })
@@ -211,13 +214,19 @@ impl LateReply {
         if tail == Tail::Osc && (control && c == 'g' || alt && c == '\\') {
             return true;
         }
+        // A whole reply after a cut that was only the user's Esc.
+        if alt && c == ']' {
+            self.open = Some((since_start, 0, Tail::Osc));
+            return true;
+        }
         if key.modifiers.intersects(KeyModifiers::ALT | KeyModifiers::CONTROL) {
             return false;
         }
         // `ESC [ ? 62;22c`: DA1 ends at its `c`, and a plain `[` after a cut ESC starts it.
         let then = match (tail, c) {
             (Tail::Osc, '\\') | (Tail::Da1, 'c') => None,
-            (Tail::Osc, '[') => Some(Tail::Da1),
+            (Tail::Osc | Tail::Esc, '[') => Some(Tail::Da1),
+            (Tail::Esc, ']') => Some(Tail::Osc),
             (Tail::Osc, c) if c.is_ascii_hexdigit() || "]rgb:/;".contains(c) => Some(Tail::Osc),
             (Tail::Da1, c) if c.is_ascii_digit() || "?;".contains(c) => Some(Tail::Da1),
             _ => return false,
@@ -250,17 +259,17 @@ fn readable(timeout: Duration) -> bool {
     }
 }
 
-/// Where the deadline left the query's buffer: inside the OSC reply or just past an ESC, inside DA1 (`ESC [ ? 6`), or
+/// Where the deadline left the query's buffer: inside the OSC reply, inside DA1 (`ESC [ ? 6`), just past an ESC, or
 /// between replies.
 fn cut(buf: &[u8]) -> Option<Tail> {
-    let in_csi = buf
-        .windows(2)
-        .rposition(|w| w == b"\x1b[")
-        .is_some_and(|s| buf[s + 2..].iter().all(|b| b.is_ascii_digit() || b"?;".contains(b)));
-    if inside_osc(buf) || buf.last() == Some(&0x1b) {
+    let in_da1 = (buf.windows(3).rposition(|w| w == b"\x1b[?"))
+        .is_some_and(|s| buf[s + 3..].iter().all(|b| b.is_ascii_digit() || *b == b';'));
+    if inside_osc(buf) {
         Some(Tail::Osc)
-    } else if in_csi {
+    } else if in_da1 {
         Some(Tail::Da1)
+    } else if buf.last() == Some(&0x1b) {
+        Some(Tail::Esc)
     } else {
         None
     }
