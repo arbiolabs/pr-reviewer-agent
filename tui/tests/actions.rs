@@ -186,6 +186,24 @@ fn a_start_on_a_head_whose_review_ended_goes_to_the_daemon_which_may_start_it_un
     }
 }
 
+/// A daemon restarted in dry_run grants no review.publish, so it takes a start for the parked head in.
+#[test]
+fn a_start_on_a_parked_head_is_sent_when_the_daemon_grants_no_publish() {
+    let mut m = model();
+    update(&mut m, Msg::Net(NetEvent::Opened));
+    send(&mut m, &read("fixtures/server.welcome.engine.json").replace(",\n    \"review.publish\"", ""));
+    assert!(!m.may_write("review.publish"));
+    send(&mut m, &read("fixtures/server.snapshot.json"));
+    m.ui.selected_pr = Some(pr_review_tui::protocol::PrId::new("acme/shop#184"));
+    let parked = r#"{"from":"VERIFY","to":"AWAITING_APPROVAL","event":"PREVIEW_STORED","detail":null}"#;
+    send(&mut m, &event(109, "acme/shop#184", "rev-184-a", "review.phase_changed", parked));
+    press(&mut m, KeyCode::Char('s'));
+    assert_eq!(prompt(&m), "Start a review of #184 at 4444444?");
+    assert_eq!(confirm_state(&m), ConfirmState::Asking);
+    let sent = press(&mut m, KeyCode::Char('y'));
+    assert_eq!(commands(&sent).len(), 1, "the start goes to the daemon to decide");
+}
+
 #[test]
 fn a_start_on_a_running_head_attaches_to_its_review_and_on_a_parked_one_is_refused_before_sending() {
     let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#184");

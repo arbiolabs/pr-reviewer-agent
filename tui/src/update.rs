@@ -255,13 +255,15 @@ fn settle_replayed_start(m: &mut Model) {
     }
 }
 
-/// The run that makes the daemon refuse a start of `pr` for certain: a parked run on the same base and head. The
-/// daemon keys a revision on its policy and reviewer too, which the client does not know, so a start on any other
-/// head it has a run for goes to the daemon to decide; a running one it takes in.
+/// The run that makes the daemon refuse a start of `pr` for certain: a parked run on the same base and head, under a
+/// daemon that grants publishing. The daemon keys a revision on its policy and reviewer too, which the client does
+/// not know, so a start on any other head it has a run for goes to the daemon to decide; a running one it takes in.
+/// Without review.publish (a dry_run restart) its policy differs from the parked run's, so it starts a new one.
 fn parked_head<'a>(m: &'a Model, pr: &Pr) -> Option<&'a Run> {
     m.domain
         .runs
         .values()
+        .filter(|_| m.may_write("review.publish"))
         .find(|r| r.pr_id == pr.id && r.base_sha == pr.base_sha && r.head_sha == pr.head_sha && r.parked())
 }
 
