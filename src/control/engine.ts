@@ -5,7 +5,7 @@ import type { PullSource } from "../github/pulls.ts";
 import type { ReviewCommand } from "../protocol/v1.ts";
 import { type App, finishReview, recover, type StartedReview } from "../runtime/app.ts";
 import { StateConflict } from "../persistence/store.ts";
-import { approve, cancel, Refused, refuseReviewed, retry, startFromHead } from "../runtime/commands.ts";
+import { approve, cancel, Refused, retry, startFromHead } from "../runtime/commands.ts";
 import { AppDbSource } from "./appdb.ts";
 import { ControlError } from "./source.ts";
 
@@ -95,10 +95,9 @@ export class EngineSource extends AppDbSource {
     const replay = app.store.commandResult(key);
     const record = (operationId: string) => () => app.store.recordCommand(key, { command: request.command, operationId, attempt });
     try {
-      if (replay && replay.attempt === attempt) {
-        if (request.command === "review.start") refuseReviewed(app, replay.operationId.slice("review.start:".length));
-        return replay.operationId;
-      }
+      // A start replays only for the head its recorded run reviewed; otherwise it starts anew, which refuses a reviewed head.
+      const replays = request.command !== "review.start" || app.store.revision(replay?.operationId.slice("review.start:".length) ?? "")?.head_sha === request.params.expectedHeadSha;
+      if (replay && replay.attempt === attempt && replays) return replay.operationId;
       switch (request.command) {
         case "review.start": {
           const publish = options.config.review.publish_mode !== "dry_run";
