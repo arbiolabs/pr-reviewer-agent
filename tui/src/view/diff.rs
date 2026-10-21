@@ -45,18 +45,20 @@ pub fn diff(c: &Ctx, f: &mut Frame, area: Rect) {
     }
 }
 
-/// The sentence in place of a diff that arrived with no files: a PR never reviewed has none to show.
+/// The sentence in place of a diff with no files: a PR never reviewed has none to show, and the daemon answers its
+/// diff with NOT_FOUND.
 fn nothing_to_show(c: &Ctx, d: &DiffView) -> Option<String> {
-    if !d.files.is_empty() || d.pending.is_some() || d.error.is_some() {
+    if !d.files.is_empty() || d.pending.is_some() {
         return None;
     }
     let pr = c.m.domain.prs.get(&d.key.pr)?;
-    Some(match c.m.domain.latest_run(&pr.id) {
-        None => format!("No review of #{} yet, so there is no diff to show. s starts one.", pr.number),
-        Some(_) => {
-            format!("#{} changes no files between {} and {}.", pr.number, d.key.base.short(), d.key.head.short())
+    match c.m.domain.latest_run(&pr.id) {
+        None => Some(format!("No review of #{} yet, so there is no diff to show. s starts one.", pr.number)),
+        Some(_) if d.error.is_none() => {
+            Some(format!("#{} changes no files between {} and {}.", pr.number, d.key.base.short(), d.key.head.short()))
         }
-    })
+        Some(_) => None,
+    }
 }
 
 /// The file list and the patch areas. Below the wide layout the code needs every column; h shows the file list in
@@ -117,7 +119,9 @@ fn header(c: &Ctx, d: &DiffView, anchored: &[&Finding], w: usize) -> Vec<Line<'s
     if d.pending.is_some() {
         second.push(c.span(format!("   loading{}", g.ellipsis), Role::Pending));
     } else if let Some(e) = &d.error {
-        second.push(c.span(format!("   diff unavailable: {e}"), Role::Fail));
+        // Cut to the room left, never dropped: it is the only word on why the pane is empty.
+        let room = w.saturating_sub(super::doc::spans_w(&second));
+        second.push(c.span(c.fit(&format!("   diff unavailable: {e}"), room), Role::Fail));
     } else if let Some(q) = &d.search {
         let matches = &d.matches;
         let here = d.selected_file.as_ref().and_then(|p| d.files.iter().position(|f| &f.path == p));
