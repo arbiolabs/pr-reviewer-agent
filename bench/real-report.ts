@@ -4,6 +4,9 @@ import { parseArgs } from "node:util";
 import type { Disposition } from "../src/domain/types.ts";
 import { AppStore } from "../src/persistence/store.ts";
 import {
+  AGENT_REVIEW_MARKER,
+  agentFindings,
+  crossMatch,
   type DiscardedCandidate,
   discardKind,
   type GradeEntry,
@@ -17,6 +20,7 @@ import {
   type RunRecord,
   splitComments,
   stability,
+  type StoredReview,
   uniqueFindings,
 } from "./real-score.ts";
 import { LINE_TOLERANCE } from "./score.ts";
@@ -90,7 +94,7 @@ for (const r of results.records.filter((r) => r.state !== "COMPLETED")) console.
 console.log("Human-comment overlap (weak labels)");
 const considered = rows.reduce((n, r) => n + r.comments.considered.length, 0);
 const excl = (k: keyof PrRow["comments"]["excluded"]) => rows.reduce((n, r) => n + r.comments.excluded[k], 0);
-console.log(`  human inline comments used: ${considered}; excluded: ${excl("olderCommit")} on an older commit, ${excl("reply")} replies, ${excl("bot")} by bots, ${excl("noHeadLine")} with no head-side line`);
+console.log(`  human inline comments used: ${considered}; excluded: ${excl("agent")} by another AI reviewer, ${excl("olderCommit")} on an older commit, ${excl("reply")} replies, ${excl("bot")} by bots, ${excl("noHeadLine")} with no head-side line`);
 console.log(`  PRs with at least one usable human comment: ${rows.filter((r) => r.comments.considered.length > 0).length}/${rows.length}`);
 for (let run = 1; run <= runCount; run++) {
   const these = rows.flatMap((r) => r.runs.map((x, i) => ({ x, o: r.overlap[i]!, c: r.comments.considered.length })).filter(({ x }) => x.run === run && x.state === "COMPLETED"));
@@ -121,6 +125,21 @@ console.log("Verifier discards");
 const discards = completed.flatMap((r) => r.discarded);
 const candidates = discards.length + completed.reduce((n, r) => n + r.findings.length, 0);
 console.log(`  ${discards.length} discarded of ${candidates} candidates; reasons: ${tally(discards.map((d) => discardKind(d.reason))) || "none"}\n`);
+
+const agentOf = (n: number) => agentFindings(read<HumanComment[]>(n, "comments.json"), read<StoredReview[]>(n, "reviews.json"), prs.find((p) => p.number === n)!.headSha);
+const reviewedByAgent = prs.filter((p) => agentOf(p.number).length > 0 || read<StoredReview[]>(p.number, "reviews.json").some((r) => r.commit_id === p.headSha && r.body?.includes(AGENT_REVIEW_MARKER)));
+console.log("Other AI reviewer (vikrrantshah/pr-review-agent, from its reviews on the snapshot head)");
+console.log(`  PRs with its review or its comments on the snapshot head: ${reviewedByAgent.length}/${prs.length}`);
+if (reviewedByAgent.length > 0) {
+  const theirs = reviewedByAgent.map((p) => agentOf(p.number));
+  console.log(`  its findings: ${theirs.flat().length} (${tally(theirs.flat().map((f) => f.severity))})`);
+  for (let run = 1; run <= runCount; run++) {
+    const m = reviewedByAgent.map((p, i) => crossMatch(records(p.number).find((r) => r.run === run && r.state === "COMPLETED")?.findings ?? [], theirs[i]!));
+    const sum = (k: "both" | "oursOnly" | "theirsOnly") => m.reduce((n, x) => n + x[k], 0);
+    console.log(`  run ${run}, on those PRs: both ${sum("both")}, pr-review only ${sum("oursOnly")}, the other reviewer only ${sum("theirsOnly")}`);
+  }
+}
+console.log("  Its findings are unverified model output, so agreement with it is not correctness; grade both to compare.\n");
 
 console.log("Cost proxies");
 const secs = completed.map((r) => r.seconds);
@@ -158,6 +177,7 @@ if (values.labels) {
   const fresh = prs.flatMap((p) => [
     ...uniqueFindings(p.number, p.headSha, completedOf(p.number).map((r) => r.findings)),
     ...uniqueFindings(p.number, p.headSha, completedOf(p.number).map(discardedOf), LINE_TOLERANCE, "discarded"),
+    ...uniqueFindings(p.number, p.headSha, [agentOf(p.number)], LINE_TOLERANCE, "agent"),
   ]);
   const all = mergeSheet(fresh, existsSync(path) ? (JSON.parse(readFileSync(path, "utf8")) as GradeEntry[]) : []);
   writeFileSync(path, `${JSON.stringify(all, null, 2)}\n`);
@@ -165,9 +185,12 @@ if (values.labels) {
   const dropped = all.filter((e) => e.kind === "discarded");
   const g = gradedPrecision(sheet);
   const d = gradedPrecision(dropped);
+  const theirs = all.filter((e) => e.kind === "agent");
+  const a = gradedPrecision(theirs);
   console.log(`\nGraded precision (${path})`);
   console.log(`  ${sheet.length} unique findings, ${g.graded} graded: ${g.real} real, ${g.notReal} not real, ${g.unsure} unsure; precision over real and not real ${pct(g.precision)}`);
   console.log(`  ${dropped.length} unique discarded candidates, ${d.graded} graded: ${d.real} real, ${d.notReal} not real, ${d.unsure} unsure; real among graded discards ${pct(d.precision)} (what the verifier threw away)`);
+  console.log(`  ${theirs.length} unique findings by the other AI reviewer, ${a.graded} graded: ${a.real} real, ${a.notReal} not real, ${a.unsure} unsure; its precision over real and not real ${pct(a.precision)}`);
   if (g.graded > 0) {
     const real = sheet.filter((e) => e.verdict === "real");
     const commentsOf = (pr: number) => rows.find((r) => r.pr === pr)!.comments.considered;

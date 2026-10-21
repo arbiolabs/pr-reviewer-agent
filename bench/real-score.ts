@@ -43,23 +43,70 @@ export type HumanComment = {
 
 const near = (a: number | null, b: number | null, tol: number) => (a === null || b === null ? a === b : Math.abs(a - b) <= tol);
 
-export type CommentSplit = { considered: HumanComment[]; excluded: { bot: number; reply: number; olderCommit: number; noHeadLine: number } };
+export type CommentSplit = { considered: HumanComment[]; excluded: { bot: number; agent: number; reply: number; olderCommit: number; noHeadLine: number } };
+
+/** A GitHub review, as the snapshot stores it. */
+export type StoredReview = { id: number; user: { login: string; type: string }; state: string; commit_id: string; submitted_at: string; body: string | null };
 
 /**
- * The human comments a finding can agree with: top-level, written by a user, positioned on the snapshot head, on a
- * head-side line. Every other comment is counted under the first rule it fails.
+ * vikrrantshah/pr-review-agent posts from a person's account, so its output reads as human. Its reviews end with this
+ * marker. Its inline comments are its Critical and Important findings, written `Severity: text`.
+ */
+export const AGENT_REVIEW_MARKER = "<!-- pr-review-agent:";
+const AGENT_INLINE = /^(Critical|Important): (\S[\s\S]*)$/;
+const AGENT_BODY_LINE = /^- (Critical|Important|Suggestion) \(([^)]+)\): (.+)$/;
+
+/**
+ * The human comments a finding can agree with: top-level, written by a user, not another AI reviewer's, positioned on
+ * the snapshot head, on a head-side line. Every other comment is counted under the first rule it fails.
  */
 export function splitComments(comments: HumanComment[], headSha: string): CommentSplit {
-  const excluded = { bot: 0, reply: 0, olderCommit: 0, noHeadLine: 0 };
+  const excluded = { bot: 0, agent: 0, reply: 0, olderCommit: 0, noHeadLine: 0 };
   const considered: HumanComment[] = [];
   for (const c of comments) {
     if (c.user.type !== "User") excluded.bot++;
+    else if (AGENT_INLINE.test(c.body)) excluded.agent++;
     else if (c.in_reply_to_id !== null) excluded.reply++;
     else if (c.commit_id !== headSha) excluded.olderCommit++;
     else if (c.line === null || c.side !== "RIGHT") excluded.noHeadLine++;
     else considered.push(c);
   }
   return { considered, excluded };
+}
+
+/**
+ * The other AI reviewer's findings on the snapshot head: its inline comments there, plus the findings its marked
+ * reviews of that commit list in the body (unanchored ones and suggestions). Category is unknown, so it reads "agent".
+ */
+export function agentFindings(comments: HumanComment[], reviews: StoredReview[], headSha: string): EvalFinding[] {
+  const finding = (severity: string, file: string, line: number | null, text: string): EvalFinding => ({ file, line, severity: severity.toLowerCase(), category: "agent", title: text.split("\n")[0]!.slice(0, 120), explanation: text });
+  const inline = comments.flatMap((c) => {
+    const m = AGENT_INLINE.exec(c.body);
+    return m && c.commit_id === headSha && c.in_reply_to_id === null && c.side === "RIGHT" ? [finding(m[1]!, c.path, c.line, m[2]!)] : [];
+  });
+  const listed = reviews
+    .filter((r) => r.commit_id === headSha && r.body?.includes(AGENT_REVIEW_MARKER))
+    .flatMap((r) => r.body!.split("\n"))
+    .flatMap((l) => {
+      const m = AGENT_BODY_LINE.exec(l.trim());
+      if (!m) return [];
+      const at = /^(.+):(\d+)$/.exec(m[2]!);
+      return [finding(m[1]!, at ? at[1]! : m[2]!, at ? Number(at[2]) : null, m[3]!)];
+    });
+  return [...inline, ...listed];
+}
+
+/** Pairs two reviewers' findings one-to-one by path and line within `tol`, ignoring category: neither shares the other's. */
+export function crossMatch(ours: EvalFinding[], theirs: EvalFinding[], tol = LINE_TOLERANCE): { both: number; oursOnly: number; theirsOnly: number } {
+  const left = [...theirs];
+  let both = 0;
+  for (const f of ours) {
+    const i = left.findIndex((g) => g.file === f.file && f.line !== null && near(f.line, g.line, tol));
+    if (i === -1) continue;
+    left.splice(i, 1);
+    both++;
+  }
+  return { both, oursOnly: ours.length - both, theirsOnly: left.length };
 }
 
 /** Findings within `tol` lines of a considered comment on the same path, and comments with such a finding. Not one-to-one. */
@@ -100,8 +147,8 @@ export function stability(runs: EvalFinding[][], tol = LINE_TOLERANCE): number |
 export const mean = (xs: number[]) => (xs.length === 0 ? undefined : xs.reduce((a, b) => a + b, 0) / xs.length);
 
 export type Verdict = "real" | "not_real" | "unsure";
-/** `reported` reached the review; `discarded` is a candidate the verifier dropped, graded to see what the verifier costs. */
-export type GradeKind = "reported" | "discarded";
+/** `reported` reached the review; `discarded` is a candidate the verifier dropped; `agent` is another AI reviewer's finding, graded to compare. */
+export type GradeKind = "reported" | "discarded" | "agent";
 export type DiscardedCandidate = EvalFinding & { discardReason: string | null };
 /** One row of the grading sheet: a finding across runs, keyed so a regenerated sheet keeps its verdicts. */
 export type GradeEntry = EvalFinding & { id: string; kind: GradeKind; discardReason?: string | null; pr: number; runs: number[]; reference: string; verdict: Verdict | null };
@@ -114,7 +161,7 @@ export function uniqueFindings(pr: number, headSha: string, runs: (EvalFinding |
       const entry = entries.find((e) => same(e, f, tol) && !e.runs.includes(run + 1));
       if (entry) entry.runs.push(run + 1);
       else {
-        const id = `${kind === "discarded" ? "discarded:" : ""}${pr}:${f.file}:${f.line ?? "file"}:${f.category}`;
+        const id = `${kind === "reported" ? "" : `${kind}:`}${pr}:${f.file}:${f.line ?? "file"}:${f.category}`;
         entries.push({ id, kind, pr, ...f, runs: [run + 1], reference: `PR ${pr} at ${headSha.slice(0, 12)}, ${f.file}:${f.line ?? "file"}`, verdict: null });
       }
     }

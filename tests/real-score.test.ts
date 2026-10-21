@@ -13,6 +13,9 @@ import {
   routing,
   skipReason,
   splitComments,
+  agentFindings,
+  crossMatch,
+  type StoredReview,
   stability,
   uniqueFindings,
 } from "../bench/real-score.ts";
@@ -58,7 +61,7 @@ it("uses only top-level user comments on the head's right side and counts the re
   ];
   const { considered, excluded } = splitComments(comments, HEAD);
   expect(considered.map((c) => c.id)).toEqual([1]);
-  expect(excluded).toEqual({ bot: 1, reply: 1, olderCommit: 1, noHeadLine: 2 });
+  expect(excluded).toEqual({ bot: 1, agent: 0, reply: 1, olderCommit: 1, noHeadLine: 2 });
 });
 
 it("counts findings near a human comment and comments near a finding, on the same path within three lines", () => {
@@ -107,4 +110,25 @@ it("keeps discarded candidates apart from reported findings on the sheet, with t
   const sheet = uniqueFindings(7, HEAD, [[dropped], [dropped]], undefined, "discarded");
   expect(sheet.map((e) => [e.id, e.kind, e.discardReason, e.runs])).toEqual([["discarded:7:a.ts:10:correctness", "discarded", "evidence is suspected", [1, 2]]]);
   expect(uniqueFindings(7, HEAD, [[f("a.ts", 10)]])[0]!.kind).toBe("reported");
+});
+
+it("sets another AI reviewer's comments apart from the human ones and rebuilds its findings on the head", () => {
+  const agentInline = comment(1, "a.ts", 10, { body: "Critical: the refund skips the admin check" });
+  const human = comment(2, "a.ts", 12, { body: "Could this be a constant?" });
+  const older = comment(3, "b.ts", 4, { body: "Important: stale", commit_id: "b".repeat(40) });
+  expect(splitComments([agentInline, human, older], HEAD).excluded).toEqual({ bot: 0, agent: 2, reply: 0, olderCommit: 0, noHeadLine: 0 });
+  const reviews: StoredReview[] = [
+    { id: 9, user: { login: "x", type: "User" }, state: "COMMENTED", commit_id: HEAD, submitted_at: "", body: "LGTM 🚀\n\nSuggestions:\n- Suggestion (c.ts:7): extract this\n- Important (unanchored): no tests\n\n<!-- pr-review-agent:1:2 -->" },
+    { id: 8, user: { login: "y", type: "User" }, state: "COMMENTED", commit_id: HEAD, submitted_at: "", body: "- Suggestion (d.ts:1): not the agent" },
+  ];
+  expect(agentFindings([agentInline, human, older], reviews, HEAD).map((x) => [x.severity, x.file, x.line, x.title])).toEqual([
+    ["critical", "a.ts", 10, "the refund skips the admin check"],
+    ["suggestion", "c.ts", 7, "extract this"],
+    ["important", "unanchored", null, "no tests"],
+  ]);
+});
+
+it("pairs two reviewers' findings one-to-one by path and line, ignoring category", () => {
+  expect(crossMatch([f("a.ts", 10), f("a.ts", 11), f("b.ts", 1)], [f("a.ts", 12, "agent"), f("c.ts", 5, "agent")])).toEqual({ both: 1, oursOnly: 2, theirsOnly: 1 });
+  expect(crossMatch([], [f("a.ts", 1, "agent")])).toEqual({ both: 0, oursOnly: 0, theirsOnly: 1 });
 });
