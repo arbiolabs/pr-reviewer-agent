@@ -458,7 +458,7 @@ fn start_answer(
 }
 
 #[test]
-fn the_showcase_refuses_a_start_on_a_head_under_review_as_the_daemon_does() {
+fn the_showcase_answers_a_start_on_a_head_under_review_as_the_daemon_does() {
     use pr_review_tui::playback::{Player, load};
     use pr_review_tui::protocol::{CommandOutcome, ErrorCode, Event, EventBody, RunChange, ServerMessage, Text};
     let mut p = Player::new(load(&protocol_dir().join("playback/showcase.ndjson")).unwrap());
@@ -476,7 +476,7 @@ fn the_showcase_refuses_a_start_on_a_head_under_review_as_the_daemon_does() {
     let operation = Text::new(&format!("review.start:{}", run.id));
     assert_eq!(accepted, CommandOutcome::Accepted { operation_id: operation.clone() }, "the run it starts");
     let (outcome, _) = start_answer(&mut p, &m, 1296, None);
-    assert_eq!(outcome, CommandOutcome::Accepted { operation_id: operation }, "its own key replays");
-    let (outcome, head) = start_answer(&mut p, &m, 1296, Some("another client"));
-    assert_eq!(outcome, conflict(format!("#1296 at {head} is already being reviewed")));
+    assert_eq!(outcome, CommandOutcome::Accepted { operation_id: operation.clone() }, "its own key replays");
+    let (outcome, _) = start_answer(&mut p, &m, 1296, Some("another client"));
+    assert_eq!(outcome, CommandOutcome::Accepted { operation_id: operation }, "another key attaches to the run");
 }

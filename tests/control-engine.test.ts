@@ -421,6 +421,11 @@ it("binds each key to one attempt: cancel, retry and approve act again on a late
   const runId = started.operationId.slice("review.start:".length);
   let previewId = "";
   await inAnalyze;
+  // A start for the running head under a key that never started it attaches to the run: no second task.
+  const startKey = `review.start:${prId}:${fixture.headSha}`;
+  h.app.store.db.prepare("UPDATE control_commands SET idempotency_key = 'elsewhere' WHERE idempotency_key = ?").run(startKey);
+  expect(operation(await command(c, { command: "review.start", params: { prId, expectedHeadSha: fixture.headSha } }))).toEqual(operation(started as Result));
+  expect((await taskStatuses(h.app)).length).toBe(1);
   const cancelled = await cancel();
   expect(cancelled).toEqual({ type: "command.result", requestId: expect.any(String), status: "accepted", operationId: `review.cancel:${runId}` });
   await failed(1);
