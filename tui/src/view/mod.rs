@@ -403,6 +403,7 @@ fn footer_line(c: &Ctx, width: u16) -> Line<'static> {
         (_, Screen::Review) => {
             "j/k finding  Enter read  d diff  J/K scroll  h pull requests  t timeline  ? help  q quit"
         }
+        (_, Screen::Diff) if c.m.ui.focus == Pane::Sidebar => "j/k file  Enter or l code  Esc back  ? help",
         (_, Screen::Diff) if c.m.diff.as_ref().is_some_and(|d| d.search.is_some()) => {
             "j/k line  n/N match  Enter read  h files  / search  Esc clear search  ? help"
         }

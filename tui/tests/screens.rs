@@ -612,3 +612,20 @@ fn a_long_hunk_header_takes_one_row_with_an_ellipsis_so_no_tail_is_stranded() {
         s = s.key(KeyCode::Char('g'));
     }
 }
+
+#[test]
+fn a_diff_resized_narrow_shows_the_pane_its_footer_describes() {
+    use crossterm::event::KeyCode;
+    let mut s = mid_review(Look::default()).select("acme/shop#184").key(KeyCode::Enter).key(KeyCode::Char('d'));
+    let (wide, _) = render(&mut s.m, 120, 38);
+    assert!(wide.contains("FILES") && wide.contains("j/k line"), "{wide}");
+    let mut s = s.key(KeyCode::Char('h'));
+    let (narrow, _) = render(&mut s.m, 100, 30);
+    let footer = narrow.lines().rev().find(|l| !l.trim().is_empty()).unwrap();
+    assert!(narrow.contains("FILES"), "the file list has the focus:\n{narrow}");
+    assert!(footer.contains("j/k file") && !footer.contains("j/k line"), "{narrow}");
+    let mut s = s.key(KeyCode::Char('l'));
+    let (narrow, _) = render(&mut s.m, 100, 30);
+    let footer = narrow.lines().rev().find(|l| !l.trim().is_empty()).unwrap();
+    assert!(!narrow.contains("FILES") && footer.contains("j/k line"), "{narrow}");
+}
