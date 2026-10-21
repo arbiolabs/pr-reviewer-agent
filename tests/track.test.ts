@@ -75,6 +75,10 @@ beforeAll(async () => {
     write("src/a/orders.ts", ROUTES);
     write("src/b/orders.ts", ROUTES);
   });
+  scenario("colon", () => {
+    rmSync(join(repoDir, FILE));
+    write("src/we:ird/orders.ts", ROUTES);
+  });
   cache = mkdtempSync(join(tmpdir(), "track-cache-"));
   for (const sha of Object.values(heads)) git("update-ref", `refs/heads/keep-${sha.slice(0, 7)}`, sha);
 });
@@ -142,6 +146,18 @@ it("never relocates on a snippet too small to be distinctive, but still finds it
     location: { file: FILE, newLine: 11, headSha: heads.rewrite, evidence: [{ path: FILE, start: 7, end: 7, text: "}" }] },
   });
   expect(findSnippet("}", ["a", "}", "b", "}"], 4)).toBe(4);
+});
+
+it("lists tree-wide hits by path alone, so a path with a colon survives, and refuses a list cut at the cap", async () => {
+  const colon = { file: "src/we:ird/orders.ts", newLine: 11, headSha: heads.colon, evidence: [{ path: "src/we:ird/orders.ts", start: 9, end: 12, text: normalize(EVIDENCE_LINES) }] };
+  expect(await locate(location(), heads.colon!, { ...(await at("colon")), renamedTo: () => undefined })).toEqual({ kind: "same", location: colon });
+  const repo = new PinnedRepo(await syncRepo(cache, "acme/track", repoDir, 1), baseSha, heads.copies!);
+  expect(await repo.grepPaths('router.post("/orders/:id/refund"')).toEqual(["src/a/orders.ts", "src/b/orders.ts"]);
+  expect(await repo.grepPaths('router.post("/orders/:id/refund"', 16)).toBe(undefined);
+  expect(await repo.grepPaths("no such line anywhere")).toEqual([]);
+  // A cut list cannot show that exactly one file holds the text, so the finding stays where it was.
+  const cut = { ...(await at("rename")), renamedTo: () => undefined, grep: async () => undefined };
+  expect(await locate(location(), heads.rename!, cut)).toEqual({ kind: "file_gone" });
 });
 
 it("skips the tree-wide search when told to, so an already doubted finding costs one file read", async () => {

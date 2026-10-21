@@ -31,11 +31,11 @@ export type PriorFinding = {
 /** One observation per finding per revision: the states it walked and the candidate and location it ended with. */
 export type Observation = { findingId: string; path: FindingState[]; basis: Basis | null; candidate: CandidateFinding; location: ObservedLocation };
 
-/** Reads one head: file contents, the head path of a rename, and the paths whose text has a literal line. */
+/** Reads one head: file contents, the head path of a rename, and the paths whose text has a literal line (undefined when too many to list). */
 export type HeadReader = {
   read(path: string): Promise<string | undefined>;
   renamedTo(path: string): string | undefined;
-  grep(line: string): Promise<string[]>;
+  grep(line: string): Promise<string[] | undefined>;
 };
 
 /** The repository's head, with the renames the revision's diff reports (base to head, so a rename of a file the PR added is found by the tree-wide search instead). */
@@ -45,7 +45,7 @@ export function headReader(repo: PinnedRepo, changedFiles: ChangedFile[]): HeadR
   return {
     read: (path) => texts.get(path) ?? texts.set(path, repo.show(repo.headSha, path)).get(path)!,
     renamedTo: (path) => renames.get(path),
-    grep: async (line) => [...new Set((await repo.grep(line, undefined)).split("\n").filter((l) => l.includes(":")).map((l) => l.slice(0, l.indexOf(":"))))],
+    grep: (line) => repo.grepPaths(line),
   };
 }
 
@@ -133,8 +133,10 @@ export async function locate(location: ObservedLocation, headSha: string, head: 
     if (!substantial(item.text) || !options.treeWide) return undefined;
     const snippetLines = item.text.split("\n");
     const query = snippetLines.reduce((a, b) => (b.length > a.length ? b : a));
+    const paths = await head.grep(query);
+    if (paths === undefined) return undefined;
     const hits: { path: string; start: number }[] = [];
-    for (const path of await head.grep(query)) {
+    for (const path of paths) {
       if (path === own) continue;
       const start = findSnippet(item.text, (await linesOf(path)) ?? [], item.start);
       if (start !== undefined) hits.push({ path, start });

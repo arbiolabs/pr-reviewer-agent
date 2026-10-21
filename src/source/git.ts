@@ -146,6 +146,21 @@ export class PinnedRepo {
     }
   }
 
+  /**
+   * The head paths with a line that contains `query`, NUL-delimited by git so a colon in a path survives, or undefined
+   * when the list runs past `cap` bytes: that many files hold the line, so no caller can call one of them unique.
+   */
+  async grepPaths(query: string, cap = DEFAULT_OUTPUT_CAP): Promise<string[] | undefined> {
+    try {
+      const out = await git(this.dir, ["grep", "-l", "-z", "-I", "-F", "-e", query, this.headSha]);
+      if (Buffer.byteLength(out) > cap) return undefined;
+      return out.split("\0").filter((p) => p !== "").map((p) => p.slice(this.headSha.length + 1));
+    } catch (error) {
+      if ((error as { code?: number }).code === 1) return [];
+      throw error;
+    }
+  }
+
   log(path: string, limit: number): Promise<string> {
     return git(this.dir, ["log", `-n${limit}`, "--format=%h %ad %an%n  %s", "--date=short", this.headSha, "--", assertSafePath(path)]);
   }
