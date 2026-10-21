@@ -518,3 +518,16 @@ fn j_and_k_on_a_parked_review_are_offered_as_moves_not_findings() {
     assert_eq!(label(1291), "j/k move");
     assert_eq!(label(1287), "j/k finding");
 }
+
+/// The failed PR's Diff names its next step, and the key it names acts there.
+#[test]
+fn the_failed_prs_diff_says_r_retries_and_r_does() {
+    let mut m = showcase_after(345, "d");
+    let (frame, _) = render(&mut m, 120, 38);
+    assert!(frame.contains("The review failed before it read the diff. R retries the review."), "{frame}");
+    assert!(hints_of(&footer_row(&m)).contains(&"R retry".to_string()), "{frame}");
+    update(&mut m, Msg::Key(press('R')));
+    assert!(
+        matches!(m.top_modal(), Some(Modal::Confirm { prompt, .. }) if prompt.starts_with("Retry the failed review of #345"))
+    );
+}

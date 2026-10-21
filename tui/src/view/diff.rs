@@ -59,7 +59,10 @@ fn nothing_to_show(c: &Ctx, d: &DiffView) -> Option<String> {
     match (c.m.domain.latest_run(&pr.id), &d.error) {
         (None, _) => Some(format!("No review of #{} yet, so there is no diff to show.", pr.number)),
         // The daemon's errors arrive worded as sentences (`update::diff_error`); the client's own are fragments.
-        (_, Some(e)) if e.as_str().starts_with(char::is_uppercase) => Some(e.to_string()),
+        (_, Some(e)) if e.as_str().starts_with(char::is_uppercase) => {
+            let retry = crate::update::can_mutate(c.m, crate::keymap::Mutation::Retry);
+            Some(if retry { format!("{e} R retries the review.") } else { e.to_string() })
+        }
         (_, Some(e)) => Some(format!("Diff unavailable: {e}")),
         (_, None) => {
             Some(format!("#{} changes no files between {} and {}.", pr.number, d.key.base.short(), d.key.head.short()))

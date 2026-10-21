@@ -103,7 +103,10 @@ pub fn offered(m: &Model) -> Vec<Hint> {
             if page {
                 offer(u::can_mutate(m, Mutation::Publish), "p", "preview & publish");
                 offer(u::can_mutate(m, Mutation::Start), "s", if reviewed { "review again" } else { "start review" });
-                offer(u::can_mutate(m, Mutation::Retry), "R", "retry");
+            }
+            // A failed run's Diff has nothing to show, and says R retries it.
+            offer((page || screen == Screen::Diff) && u::can_mutate(m, Mutation::Retry), "R", "retry");
+            if page {
                 offer(u::can_mutate(m, Mutation::Cancel), "c", "cancel review");
                 offer(u::can_diff(m), "d", "diff");
                 offer(u::can_scroll_doc(m), "J/K", "scroll");

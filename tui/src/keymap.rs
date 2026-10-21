@@ -135,6 +135,8 @@ const TABLE: &[(Context, KeyCode, KeyModifiers, Action)] = &[
     (C::Review, K::Char('s'), NONE, A::Mutation(Mutation::Start)),
     (C::Review, K::Char('R'), SHIFT, A::Mutation(Mutation::Retry)),
     (C::Review, K::Char('R'), NONE, A::Mutation(Mutation::Retry)),
+    (C::Diff, K::Char('R'), SHIFT, A::Mutation(Mutation::Retry)),
+    (C::Diff, K::Char('R'), NONE, A::Mutation(Mutation::Retry)),
     (C::Review, K::Char('c'), NONE, A::Mutation(Mutation::Cancel)),
     (C::Review, K::Char('p'), NONE, A::Mutation(Mutation::Publish)),
     (C::Screens, K::Char('w'), NONE, A::Watch),
