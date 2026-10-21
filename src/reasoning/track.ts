@@ -22,7 +22,6 @@ export type Basis = "reverified" | "located" | "changed" | "file_gone";
 
 export type PriorFinding = {
   findingId: string;
-  fingerprint: string;
   status: FindingState;
   candidate: CandidateFinding;
   location: ObservedLocation;
@@ -42,8 +41,9 @@ export type HeadReader = {
 /** The repository's head, with the renames the revision's diff reports (base to head, so a rename of a file the PR added is found by the tree-wide search instead). */
 export function headReader(repo: PinnedRepo, changedFiles: ChangedFile[]): HeadReader {
   const renames = new Map(changedFiles.flatMap((f) => (f.from === undefined ? [] : [[f.from, f.path] as const])));
+  const texts = new Map<string, Promise<string | undefined>>();
   return {
-    read: (path) => repo.show(repo.headSha, path),
+    read: (path) => texts.get(path) ?? texts.set(path, repo.show(repo.headSha, path)).get(path)!,
     renamedTo: (path) => renames.get(path),
     grep: async (line) => [...new Set((await repo.grep(line, undefined)).split("\n").filter((l) => l.includes(":")).map((l) => l.slice(0, l.indexOf(":"))))],
   };
@@ -72,12 +72,15 @@ export function findSnippet(snippet: string, lines: string[], near: number): num
   return best;
 }
 
-/** True when one text is the other, or contains it on line boundaries and the shorter one is substantial. */
+/** A snippet below the floor (`}`, an empty line, one short statement) is no evidence of identity, however equal. */
+const substantial = (text: string) => text.split("\n").length >= MIN_LINES && text.length >= MIN_CHARS;
+
+/** True when the snippet's normalized lines sit at `start` in `lines`. */
+const foundAt = (snippet: string, lines: string[], start: number) => snippet.split("\n").every((line, k) => lines[start - 1 + k] !== undefined && normalizeLine(lines[start - 1 + k]!) === line);
+
+/** True when both texts are substantial and equal. A broad range that merely contains the other is not the same text. */
 export function sameText(a: string, b: string): boolean {
-  if (a === b) return true;
-  const [short, long] = a.length <= b.length ? [a, b] : [b, a];
-  if (short.split("\n").length < MIN_LINES || short.length < MIN_CHARS) return false;
-  return `\n${long}\n`.includes(`\n${short}\n`);
+  return substantial(a) && a === b;
 }
 
 /**
@@ -105,9 +108,10 @@ export async function evidenceTexts(candidate: CandidateFinding, headSha: string
  * Search a new head for a finding's evidence text: the same path, then the head path of its rename, then once across
  * the tree when the snippet is substantial and exactly one file holds it. Every item found is `same`, with the anchor
  * shifted by the same offset as the evidence that contains it. Otherwise the finding is `changed` while its file (or
- * rename) still exists, and `file_gone` when neither does.
+ * rename) still exists, and `file_gone` when neither does. `treeWide: false` skips the tree-wide search, for a finding
+ * whose text an earlier head already searched for and missed.
  */
-export async function locate(location: ObservedLocation, headSha: string, head: HeadReader): Promise<Located> {
+export async function locate(location: ObservedLocation, headSha: string, head: HeadReader, options: { treeWide: boolean } = { treeWide: true }): Promise<Located> {
   const files = new Map<string, string[] | undefined>();
   const linesOf = async (path: string) => {
     if (!files.has(path)) files.set(path, splitLines(await head.read(path)));
@@ -120,10 +124,12 @@ export async function locate(location: ObservedLocation, headSha: string, head: 
   };
   const findItem = async (item: EvidenceText): Promise<{ path: string; start: number } | undefined> => {
     const own = await present(item.path);
-    const inOwn = own === undefined ? undefined : findSnippet(item.text, (await linesOf(own))!, item.start);
+    const ownLines = own === undefined ? undefined : (await linesOf(own))!;
+    // A snippet below the floor is found only where it was: moving it would pin the finding to any `}` in the file.
+    const inOwn = ownLines === undefined ? undefined : substantial(item.text) ? findSnippet(item.text, ownLines, item.start) : foundAt(item.text, ownLines, item.start) ? item.start : undefined;
     if (own !== undefined && inOwn !== undefined) return { path: own, start: inOwn };
+    if (!substantial(item.text) || !options.treeWide) return undefined;
     const snippetLines = item.text.split("\n");
-    if (snippetLines.length < MIN_LINES || item.text.length < MIN_CHARS) return undefined;
     const query = snippetLines.reduce((a, b) => (b.length > a.length ? b : a));
     const hits: { path: string; start: number }[] = [];
     for (const path of await head.grep(query)) {
@@ -155,21 +161,53 @@ export const currentFile = (f: PriorFinding) => (f.located.kind === "same" ? f.l
 
 const overlaps = (a: EvidenceText[], b: EvidenceText[]) => a.some((x) => b.some((y) => x.path === y.path && x.start <= y.end && y.start <= x.end));
 
+type Fingerprint = (c: Pick<CandidateFinding, "category" | "file" | "title">) => string;
+type Report = { candidate: CandidateFinding; location: ObservedLocation };
+
 /**
- * The open finding a verified candidate is another report of, if any: its fingerprint after rename mapping, its cited
- * text, or its location (same file and category, anchor within LINK_DISTANCE or overlapping evidence ranges).
+ * How strongly a verified candidate reads as another report of an open finding, or undefined when it does not. Every
+ * link needs the candidate in the finding's file at this head (after the rename the diff reports) and in its category.
+ * 3: the fingerprint agrees, so the title names the same defect. 2: a cited text agrees (substantial and equal).
+ * 1: the anchor is within LINK_DISTANCE of the located anchor and the cited ranges overlap the located evidence.
+ * Two defects on neighbouring lines in one category are told apart by what they cite: a report that cites none of
+ * the finding's code is a new finding. That can duplicate a comment; it never hides a defect.
  */
-export function priorFor(candidate: CandidateFinding, location: ObservedLocation, fingerprintOf: (c: Pick<CandidateFinding, "category" | "file" | "title">) => string, prior: PriorFinding[]): PriorFinding | undefined {
-  return prior.find((f) => {
-    const file = currentFile(f);
-    if (fingerprintOf(candidate) === f.fingerprint) return true;
-    if (file === candidate.file && fingerprintOf({ ...candidate, file: f.location.file }) === f.fingerprint) return true;
-    if (location.evidence.some((e) => f.location.evidence.some((p) => sameText(e.text, p.text)))) return true;
-    if (f.located.kind !== "same" || file !== candidate.file || candidate.category !== f.candidate.category) return false;
-    const at = f.located.location;
-    const nearAnchor = candidate.newLine !== null && at.newLine !== null && Math.abs(candidate.newLine - at.newLine) <= LINK_DISTANCE;
-    return nearAnchor || overlaps(location.evidence, at.evidence);
-  });
+function linkScore(candidate: CandidateFinding, location: ObservedLocation, fingerprintOf: Fingerprint, f: PriorFinding): number | undefined {
+  const file = currentFile(f);
+  if (file !== candidate.file || candidate.category !== f.candidate.category) return undefined;
+  // The file is settled above, so the fingerprint is compared without it: the finding's own was built from its first path.
+  if (fingerprintOf({ ...candidate, file: "" }) === fingerprintOf({ ...f.candidate, file: "" })) return 3;
+  if (location.evidence.some((e) => f.location.evidence.some((p) => sameText(e.text, p.text)))) return 2;
+  if (f.located.kind !== "same") return undefined;
+  const at = f.located.location;
+  const nearAnchor = candidate.newLine !== null && at.newLine !== null && Math.abs(candidate.newLine - at.newLine) <= LINK_DISTANCE;
+  return nearAnchor && overlaps(location.evidence, at.evidence) ? 1 : undefined;
+}
+
+const anchorDistance = (candidate: CandidateFinding, f: PriorFinding) =>
+  f.located.kind === "same" && candidate.newLine !== null && f.located.location.newLine !== null ? Math.abs(candidate.newLine - f.located.location.newLine) : Number.POSITIVE_INFINITY;
+
+/**
+ * The open finding each verified candidate is another report of, if any, as a one-to-one assignment: the best-scoring
+ * pair links first, then the next pair whose candidate and finding are both unclaimed, and so on. A candidate left
+ * over is a new finding, never a duplicate of the one that claimed its prior.
+ */
+export function linkPriors(reports: Report[], fingerprintOf: Fingerprint, prior: PriorFinding[]): (PriorFinding | undefined)[] {
+  const pairs = reports.flatMap((r, i) =>
+    prior.flatMap((f) => {
+      const score = linkScore(r.candidate, r.location, fingerprintOf, f);
+      return score === undefined ? [] : [{ i, f, score, distance: anchorDistance(r.candidate, f) }];
+    }),
+  );
+  pairs.sort((a, b) => b.score - a.score || a.distance - b.distance || a.i - b.i);
+  const linked: (PriorFinding | undefined)[] = reports.map(() => undefined);
+  const claimed = new Set<string>();
+  for (const { i, f } of pairs) {
+    if (linked[i] !== undefined || claimed.has(f.findingId)) continue;
+    linked[i] = f;
+    claimed.add(f.findingId);
+  }
+  return linked;
 }
 
 const CARRY: Record<Located["kind"], [FindingEvent, Basis]> = {

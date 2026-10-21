@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { beforeAll, expect, it } from "vitest";
 import { DEFAULT_CONFIG } from "../src/config/config.ts";
 import type { CandidateFinding } from "../src/domain/types.ts";
+import { evidenceTexts, type ObservedLocation, type PriorFinding } from "../src/reasoning/track.ts";
 import { fingerprint, type VerifyContext, verifyCandidates } from "../src/reasoning/verify.ts";
 import { parseDiff } from "../src/source/diff.ts";
 import { PinnedRepo, syncRepo } from "../src/source/git.ts";
@@ -102,4 +103,17 @@ it("applies severity and confidence thresholds, and dedupes by fingerprint", asy
     ["c1", "VERIFIED", null],
     ["c2", "DISCARDED", "duplicate of candidate c1"],
   ]);
+});
+
+it("links one candidate to an open finding and keeps a second one at the same lines as a fresh finding, discarding neither", async () => {
+  const first = candidate({});
+  const location: ObservedLocation = { file: DEFECT.file, newLine: DEFECT.line, headSha: fixture.headSha, evidence: await evidenceTexts(first, fixture.headSha, ctx.read) };
+  const open: PriorFinding = { findingId: "f-open", status: "PUBLISHED", candidate: first, location, located: { kind: "same", location } };
+  const second = candidate({ id: "c2", title: "Deleting an order never checks who owns it" });
+  const { dispositions, verified } = await verifyCandidates([second, first], { ...ctx, prior: [open] });
+  expect(dispositions.map((d) => [d.candidateId, d.state, d.reason])).toEqual([
+    ["c2", "VERIFIED", null],
+    ["c1", "VERIFIED", null],
+  ]);
+  expect(verified.map((v) => v.findingId === "f-open")).toEqual([false, true]);
 });

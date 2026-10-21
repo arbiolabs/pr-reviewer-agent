@@ -113,15 +113,16 @@ type Observation = { findingId: string; path: FindingState[]; basis: "reverified
 
 The finding ID stays the key across revisions. New findings get `stableId("finding", prId, firstRevisionId, fingerprint)` in place of `stableId("finding", prId, fingerprint)` (`verify.ts:100`). Identity then comes from explicit linking, not from the ID's inputs. A defect that comes back after `RESOLVED` therefore gets a new finding instead of colliding with the terminal one. Existing IDs stay valid, because they are opaque strings.
 
-Code links a verified candidate to an open finding of the PR in this order, inside VERIFY:
+Code links a verified candidate to an open finding of the PR inside VERIFY. Every link needs the candidate in the finding's file at this head, after the rename the diff reports, and in the finding's category. Within that, from strongest to weakest:
 
-1. The candidate sets `priorFindingId`, a new optional schema field. Code accepts the link when the candidate's file is the finding's located file, and when its line is within a fixed distance of the located anchor or one of its evidence ranges overlaps the located evidence. Otherwise code treats the candidate as new.
-2. The candidate's fingerprint equals the finding's fingerprint after rename mapping, or its head-side evidence text equals the finding's.
-3. Otherwise the candidate is a new finding.
+1. The candidate sets `priorFindingId`, a new optional schema field (build step 4, not built yet). Code accepts the link when the candidate's line is within a fixed distance of the located anchor or one of its evidence ranges overlaps the located evidence. Otherwise code treats the candidate as new.
+2. The candidate's title words agree with the finding's: the fingerprint compared without the file, since the finding's own fingerprint was built from its first path.
+3. A cited text agrees. Both texts must be substantial, at least two lines and 40 characters, and equal. A broad range that merely contains the finding's text does not count, and neither does `}`, an empty line, or one short statement, however equal.
+4. The candidate's anchor is within three lines of the located anchor and its cited ranges overlap the finding's located evidence. Two defects on neighbouring lines in one category are told apart by what they cite: a report that cites none of the finding's code is a new finding.
 
-Two candidates that link to one finding make the second one a duplicate, as `verify.ts:93` already does for fingerprints.
+Linking is a one-to-one assignment per revision. The best-scoring pair links first, then the next pair whose candidate and finding are both unclaimed, and so on. A candidate left over is a new finding, never a duplicate of the one that claimed its prior. When unsure, a fresh finding is better than a hidden one: a possible duplicate comment is cheaper than a lost defect. Two candidates that get the same new ID, which means the same title words in one file, are one defect reported twice, and the second is a duplicate, as `verify.ts` always did for fingerprints.
 
-Locating searches the new head for each open finding's stored evidence text. It searches the same path first, then the head path of a rename (`git diff -M` already reports renames, `src/source/git.ts:112`), then the whole tree with the existing `grep` (`git.ts:143`). The tree-wide search runs only when the snippet has at least two lines and one match. A finding whose evidence cites only the base SHA uses the anchor line and two lines on each side. None of this needs the old head's objects, so a force-push does not break it.
+Locating searches the new head for each open finding's stored evidence text. It searches the same path first, then the head path of a rename (`git diff -M` already reports renames, `src/source/git.ts:112`), then the whole tree with the existing `grep` (`git.ts:143`). The tree-wide search runs only when the snippet is substantial and exactly one file holds it, and only for a finding not yet doubted: the head that doubted it already searched the tree, so a defect that comes back elsewhere is a new finding. A snippet below the floor is found only at its old line, never relocated. A finding whose evidence cites only the base SHA uses the anchor line and two lines on each side. None of this needs the old head's objects, so a force-push does not break it.
 
 ### Re-observation
 

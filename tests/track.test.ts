@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { beforeAll, expect, it } from "vitest";
 import type { CandidateFinding } from "../src/domain/types.ts";
-import { evidenceTexts, findSnippet, headReader, locate, normalize, type ObservedLocation, observe, type PriorFinding, priorFor, sameText } from "../src/reasoning/track.ts";
+import { evidenceTexts, findSnippet, headReader, linkPriors, locate, normalize, type ObservedLocation, observe, type PriorFinding, sameText } from "../src/reasoning/track.ts";
 import { fingerprint } from "../src/reasoning/verify.ts";
 import { PinnedRepo, syncRepo } from "../src/source/git.ts";
 
@@ -132,17 +132,34 @@ it("marks a finding outdated when its file is gone, and when its text now lives 
   expect(await locate(location(), heads.copies!, { ...(await at("copies")), renamedTo: () => undefined })).toEqual({ kind: "file_gone" });
 });
 
-it("never relocates on a snippet too small to be distinctive", async () => {
+it("never relocates on a snippet too small to be distinctive, but still finds it in place", async () => {
   const tiny: ObservedLocation = { ...location(), evidence: [{ path: FILE, start: 12, end: 12, text: "}" }] };
   expect(await locate(tiny, heads.delete!, await at("delete"))).toEqual({ kind: "file_gone" });
+  // The `}` at line 12 is at line 32 after the move, with another `}` at line 27: in place it is found, moved it is not.
+  expect(await locate(tiny, heads.move!, await at("move"))).toEqual({ kind: "changed", file: FILE });
+  expect(await locate({ ...tiny, evidence: [{ path: FILE, start: 7, end: 7, text: "}" }] }, heads.rewrite!, await at("rewrite"))).toEqual({
+    kind: "same",
+    location: { file: FILE, newLine: 11, headSha: heads.rewrite, evidence: [{ path: FILE, start: 7, end: 7, text: "}" }] },
+  });
   expect(findSnippet("}", ["a", "}", "b", "}"], 4)).toBe(4);
+});
+
+it("skips the tree-wide search when told to, so an already doubted finding costs one file read", async () => {
+  const head = { ...(await at("rename")), renamedTo: () => undefined, grep: () => Promise.reject(new Error("tree-wide search ran")) };
+  expect(await locate(location(), heads.rename!, head, { treeWide: false })).toEqual({ kind: "file_gone" });
+});
+
+it("calls two texts the same only when both are substantial and equal", () => {
+  expect(sameText("", "")).toBe(false);
+  expect(sameText("}", "}")).toBe(false);
+  expect(sameText("return res.json(user);", "return res.json(user);")).toBe(false);
   expect(sameText("}\n}", "x\n}\n}\ny")).toBe(false);
-  expect(sameText(normalize(EVIDENCE_LINES.slice(0, 2)), normalize(EVIDENCE_LINES))).toBe(true);
+  expect(sameText(normalize(EVIDENCE_LINES.slice(0, 2)), normalize(EVIDENCE_LINES))).toBe(false);
+  expect(sameText(normalize(EVIDENCE_LINES), normalize(EVIDENCE_LINES))).toBe(true);
 });
 
 const prior = (located: PriorFinding["located"], status: PriorFinding["status"] = "PUBLISHED"): PriorFinding => ({
   findingId: "f-1",
-  fingerprint: fingerprint(candidate),
   status,
   candidate,
   location: location(),
@@ -152,21 +169,46 @@ const same = (file = FILE, shift = 0): PriorFinding["located"] => ({
   kind: "same",
   location: { file, newLine: 11 + shift, headSha: "new", evidence: [{ path: file, start: 9 + shift, end: 12 + shift, text: normalize(EVIDENCE_LINES) }] },
 });
-const reported = (over: Partial<CandidateFinding>, evidence: ObservedLocation["evidence"] = []): [CandidateFinding, ObservedLocation] => {
+const reported = (over: Partial<CandidateFinding>, evidence: ObservedLocation["evidence"] = []): { candidate: CandidateFinding; location: ObservedLocation } => {
   const c = { ...candidate, ...over };
-  return [c, { file: c.file, newLine: c.newLine, headSha: "new", evidence }];
+  return { candidate: c, location: { file: c.file, newLine: c.newLine, headSha: "new", evidence } };
 };
+const linkOne = (report: ReturnType<typeof reported>, priors: PriorFinding[]) => linkPriors([report], fingerprint, priors)[0]?.findingId;
+const cites = (start: number, end: number, file = FILE) => [{ path: file, start, end, text: normalize(ROUTES.split("\n").slice(start - 1, end)) }];
 
-it("links a re-report by fingerprint, by fingerprint after a rename, by cited text, or by location with the same category", () => {
+it("links a re-report in the finding's file and category by title words, by its cited text, or by a nearby anchor citing the same lines", () => {
   const f = prior(same());
-  expect(priorFor(...reported({ title: "Refund route lacks requireAdmin" }), fingerprint, [f])?.findingId).toBe("f-1");
-  expect(priorFor(...reported({ title: "requireAdmin lacks on refund route", file: "src/routes/order-routes.ts" }), fingerprint, [prior(same("src/routes/order-routes.ts", 5))])?.findingId).toBe("f-1");
-  expect(priorFor(...reported({ title: "Anyone can refund", file: "x.ts", newLine: 1 }, [{ path: "x.ts", start: 1, end: 4, text: normalize(EVIDENCE_LINES) }]), fingerprint, [f])?.findingId).toBe("f-1");
-  expect(priorFor(...reported({ title: "Anyone can refund", newLine: 13 }), fingerprint, [f])?.findingId).toBe("f-1");
-  expect(priorFor(...reported({ title: "Anyone can refund", newLine: 30 }, [{ path: FILE, start: 12, end: 30, text: "t\nt" }]), fingerprint, [f])?.findingId).toBe("f-1");
-  expect(priorFor(...reported({ title: "Anyone can refund", newLine: 13, category: "correctness" }), fingerprint, [f])).toBe(undefined);
-  expect(priorFor(...reported({ title: "Anyone can refund", newLine: 40 }), fingerprint, [f])).toBe(undefined);
-  expect(priorFor(...reported({ title: "Anyone can refund", newLine: 11 }), fingerprint, [prior({ kind: "changed", file: FILE })])).toBe(undefined);
+  expect(linkOne(reported({ title: "Refund route lacks requireAdmin" }), [f])).toBe("f-1");
+  expect(linkOne(reported({ title: "requireAdmin lacks on refund route", file: "src/routes/order-routes.ts" }), [prior(same("src/routes/order-routes.ts", 5))])).toBe("f-1");
+  expect(linkOne(reported({ title: "Anyone can refund", newLine: 10 }, cites(9, 12)), [prior({ kind: "changed", file: FILE })])).toBe("f-1");
+  expect(linkOne(reported({ title: "Anyone can refund", newLine: 13 }, cites(11, 14)), [f])).toBe("f-1");
+  // Within LINK_DISTANCE but citing none of the finding's lines: a different defect that happens to sit nearby.
+  expect(linkOne(reported({ title: "Anyone can refund", newLine: 13 }, cites(13, 14)), [f])).toBe(undefined);
+  // Overlapping lines, but too far from the anchor: a broad citation alone does not link.
+  expect(linkOne(reported({ title: "Anyone can refund", newLine: 30 }, cites(12, 30)), [f])).toBe(undefined);
+  expect(linkOne(reported({ title: "Anyone can refund", newLine: 13, category: "correctness" }, cites(11, 14)), [f])).toBe(undefined);
+  expect(linkOne(reported({ title: "Anyone can refund", newLine: 40 }), [f])).toBe(undefined);
+  expect(linkOne(reported({ title: "Anyone can refund", newLine: 11 }, cites(11, 12)), [prior({ kind: "changed", file: FILE })])).toBe(undefined);
+});
+
+it("never links across files, even on the same text or the same title", () => {
+  const f = prior(same());
+  expect(linkOne(reported({ title: "Anyone can refund", file: "x.ts", newLine: 1 }, [{ path: "x.ts", start: 1, end: 4, text: normalize(EVIDENCE_LINES) }]), [f])).toBe(undefined);
+  expect(linkOne(reported({ title: "Anyone can refund", file: "x.ts", newLine: 1 }, [{ path: "x.ts", start: 1, end: 1, text: normalize([EVIDENCE_LINES[2]!]) }]), [f])).toBe(undefined);
+  expect(linkOne(reported({ file: "x.ts", newLine: 1 }, cites(9, 12, "x.ts")), [f])).toBe(undefined);
+});
+
+it("assigns each open finding to at most one candidate, the best-scoring one, and leaves the rest fresh", () => {
+  const f = prior(same());
+  const byTitle = reported({ id: "c-title", title: "Refund route lacks requireAdmin", newLine: 13 }, cites(13, 14));
+  const nearby = reported({ id: "c-near", title: "Anyone can refund", newLine: 11 }, cites(9, 12));
+  const far = reported({ id: "c-far", title: "Unrelated", newLine: 40 });
+  expect(linkPriors([nearby, byTitle, far], fingerprint, [f]).map((p) => p?.findingId)).toEqual([undefined, "f-1", undefined]);
+  // Two findings, two nearby candidates: the closer anchor takes each.
+  const g = { ...prior(same(FILE, 2)), findingId: "f-2" };
+  const atEleven = reported({ id: "c11", title: "A", newLine: 11 }, cites(9, 14));
+  const atThirteen = reported({ id: "c13", title: "B", newLine: 13 }, cites(9, 14));
+  expect(linkPriors([atThirteen, atEleven], fingerprint, [f, g]).map((p) => p?.findingId)).toEqual(["f-2", "f-1"]);
 });
 
 it("observes every open finding once: re-reported, located, changed or gone, and a candidate linked to nothing is new", () => {

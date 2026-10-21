@@ -206,14 +206,19 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
     if (settled.status !== "done") throw new Error(`analysis ${settled.status}: ${settled.reason}${settled.detail ? ` ${JSON.stringify(settled.detail)}` : ""}`);
   }
 
-  /** Every open finding of the PR, located at this revision's head. Rows from before migration 055 get their evidence text from the head they were seen on. */
+  /**
+   * Every open finding of the PR, located at this revision's head. Rows from before migration 055 get their evidence
+   * text from the head they were seen on. A finding already doubted was searched for tree-wide by the head that doubted
+   * it, so only its own file is read again: a defect that comes back elsewhere is a new finding.
+   */
   async function priorFindings(revision: RevisionRow, ws: Workspace): Promise<PriorFinding[]> {
     const read = (sha: string, path: string) => ws.repo.show(sha, path);
     const head = headReader(ws.repo, ws.snapshot.changedFiles);
     const prior: PriorFinding[] = [];
     for (const f of store.openFindings(revision.pr_id, revision.id)) {
       const location: ObservedLocation = "evidence" in f.location ? f.location : { ...f.location, headSha: f.observedAt, evidence: await evidenceTexts(f.candidate, f.observedAt, read) };
-      prior.push({ findingId: f.findingId, fingerprint: f.fingerprint, status: f.status, candidate: f.candidate, location, located: await locate(location, revision.head_sha, head) });
+      const treeWide = f.status !== "POTENTIALLY_RESOLVED" && f.status !== "OUTDATED";
+      prior.push({ findingId: f.findingId, status: f.status, candidate: f.candidate, location, located: await locate(location, revision.head_sha, head, { treeWide }) });
     }
     return prior;
   }
