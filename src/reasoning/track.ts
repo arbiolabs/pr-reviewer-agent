@@ -183,9 +183,11 @@ function ownEvidence(f: PriorFinding): EvidenceText[] {
 /**
  * How strongly a verified candidate reads as another report of an open finding, or undefined when it does not. Every
  * link needs the candidate in the finding's category and in its file at this head, after the rename the diff reports,
- * and reads only what each cites in its own file. 3: the fingerprint agrees, so the title names the same defect.
- * 2: a cited text agrees (substantial and equal). 1: the anchor is within LINK_DISTANCE of the located anchor and the
- * cited ranges overlap the located evidence.
+ * and reads only what each cites in its own file. 3: the fingerprint agrees, so the title names the same defect, and
+ * the report is where the finding was: its code is found in place, or the anchor is within LINK_DISTANCE of the
+ * finding's last anchor, or the cited ranges overlap its last evidence. A fixed defect and a second instance of it
+ * with the same title far down the file are two findings. 2: a cited text agrees (substantial and equal). 1: the
+ * anchor is within LINK_DISTANCE of the located anchor and the cited ranges overlap the located evidence.
  * When the finding's file is gone and the diff names no rename (a file the PR added shows as added, not renamed),
  * a substantial equal cited text is what says where the code went, so that link alone may cross files.
  * Two defects on neighbouring lines in one category are told apart by what they cite: a report that cites none of
@@ -199,13 +201,13 @@ function linkScore(candidate: CandidateFinding, location: ObservedLocation, fing
   const file = currentFile(f);
   if (file === undefined) return sameCitedText ? 2 : undefined;
   if (file !== candidate.file) return undefined;
+  const lastLine = f.located.kind === "same" ? f.located.location.newLine : f.location.newLine;
+  const nearAnchor = candidate.newLine !== null && lastLine !== null && Math.abs(candidate.newLine - lastLine) <= LINK_DISTANCE;
+  const sameLines = overlaps(cited, own);
   // The file is settled above, so the fingerprint is compared without it: the finding's own was built from its first path.
-  if (fingerprintOf({ ...candidate, file: "" }) === fingerprintOf({ ...f.candidate, file: "" })) return 3;
+  if ((f.located.kind === "same" || nearAnchor || sameLines) && fingerprintOf({ ...candidate, file: "" }) === fingerprintOf({ ...f.candidate, file: "" })) return 3;
   if (sameCitedText) return 2;
-  if (f.located.kind !== "same") return undefined;
-  const at = f.located.location;
-  const nearAnchor = candidate.newLine !== null && at.newLine !== null && Math.abs(candidate.newLine - at.newLine) <= LINK_DISTANCE;
-  return nearAnchor && overlaps(cited, own) ? 1 : undefined;
+  return f.located.kind === "same" && nearAnchor && sameLines ? 1 : undefined;
 }
 
 const anchorDistance = (candidate: CandidateFinding, f: PriorFinding) =>

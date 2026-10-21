@@ -220,6 +220,16 @@ it("reads a cited text only from the finding's own file, so two defects that cit
   expect(linkOne(reported({ title: "Anyone can refund", newLine: 10 }, cites(9, 12)), [changed])).toBe("f-1");
 });
 
+it("links by title words only where the finding was: in place, or near its last anchor or lines once its code changed", () => {
+  const changed = prior({ kind: "changed", file: FILE });
+  // The same title on a second instance far down the file, after the first was fixed, is a new finding.
+  expect(linkOne(reported({ newLine: 300 }, [{ path: FILE, start: 298, end: 302, text: "x" }]), [changed])).toBe(undefined);
+  expect(linkOne(reported({ newLine: 12 }, [{ path: FILE, start: 10, end: 14, text: "rewritten" }]), [changed])).toBe("f-1");
+  expect(linkOne(reported({ newLine: 14 }, [{ path: FILE, start: 20, end: 22, text: "x" }]), [changed])).toBe("f-1");
+  expect(linkOne(reported({ newLine: 40 }, [{ path: FILE, start: 9, end: 12, text: "x" }]), [changed])).toBe("f-1");
+  expect(linkOne(reported({ newLine: 300 }), [prior(same())])).toBe("f-1");
+});
+
 it("assigns each open finding to at most one candidate, the best-scoring one, and leaves the rest fresh", () => {
   const f = prior(same());
   const byTitle = reported({ id: "c-title", title: "Refund route lacks requireAdmin", newLine: 13 }, cites(13, 14));
