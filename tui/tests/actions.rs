@@ -246,13 +246,13 @@ fn y_sends_exactly_one_publish_naming_the_preview_and_only_published_reads_as_do
     assert!(f.contains("Approved; publishing…"), "{f}");
     assert!(!f.contains("published on GitHub"), "accepted is not published: {f}");
 
-    for msg in rest.into_iter().skip(7).take(2) {
+    for msg in rest.into_iter().skip(6).take(2) {
         server(&mut m, msg);
     }
     assert!(frame(&mut m).contains("publishing…"));
     assert_eq!(press(&mut m, KeyCode::Char('o')), [], "o does nothing before it is published");
 
-    server(&mut m, script("approval").remove(9));
+    server(&mut m, script("approval").remove(8));
     let f = frame(&mut m);
     assert!(f.contains("✓ published on GitHub as review 3141"), "{f}");
     assert!(f.contains("https://github.com/acme/shop/pull/184#pullrequestreview-3141"), "{f}");
@@ -446,13 +446,13 @@ fn the_preview_footer_offers_y_only_while_it_can_publish_and_o_only_once_there_i
 
     let rid = commands(&press(&mut m, KeyCode::Char('y')))[0].request_id.clone();
     send(&mut m, &read("fixtures/server.command.result.accepted.json").replace("req-cmd", rid.as_str()));
-    for msg in script("approval").into_iter().skip(7).take(2) {
+    for msg in script("approval").into_iter().skip(6).take(2) {
         server(&mut m, msg);
     }
     let f = footer(&mut m);
     assert!(!f.contains("y publish") && !f.contains("o open"), "publishing: {f}");
 
-    server(&mut m, script("approval").remove(9));
+    server(&mut m, script("approval").remove(8));
     let f = footer(&mut m);
     assert!(!f.contains("y publish") && f.contains("o open on GitHub"), "published: {f}");
 }

@@ -1223,13 +1223,17 @@ const approval = lines(40, [
   phase({ seq: 12 }, run1, "PREPARE_PUBLICATION", "AWAITING_APPROVAL", "APPROVAL_REQUIRED"),
   publicationChanged({ seq: 13 }, run1, "awaiting_approval"),
   preview,
-  { type: "command.result", requestId: "req-cmd", status: "accepted", operationId: `review.publish:${run1.id}` },
-  phase({ seq: 14 }, run1, "AWAITING_APPROVAL", "PUBLISH", "APPROVED"),
-  publicationChanged({ seq: 15 }, run1, "publishing"),
-  publicationChanged({ seq: 16 }, run1, "published", 3141),
-  phase({ seq: 17 }, run1, "PUBLISH", "COMPLETED", "REVIEW_RECONCILED"),
-  runEvent({ seq: 18 }, "review.completed", { ...run1, phase: "COMPLETED", status: "COMPLETED", completedAt: at(18) }),
-]);
+]).concat(
+  // The approval plays once the reader sends it; playback answers the command itself, so the script carries no
+  // command.result for a request the client never made.
+  lines(40, [
+    phase({ seq: 14 }, run1, "AWAITING_APPROVAL", "PUBLISH", "APPROVED"),
+    publicationChanged({ seq: 15 }, run1, "publishing"),
+    publicationChanged({ seq: 16 }, run1, "published", 3141),
+    phase({ seq: 17 }, run1, "PUBLISH", "COMPLETED", "REVIEW_RECONCILED"),
+    runEvent({ seq: 18 }, "review.completed", { ...run1, phase: "COMPLETED", status: "COMPLETED", completedAt: at(18) }),
+  ]).map((l) => ({ ...l, after: "review.publish" })),
+);
 
 // Each step's occurredAt is the script clock, so the timestamps match the cadence the TUI plays at.
 const showcaseScript = (): PlaybackLine[] => {

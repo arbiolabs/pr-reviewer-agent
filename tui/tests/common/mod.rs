@@ -169,7 +169,7 @@ pub fn states(look: Look) -> Vec<(&'static str, Sim)> {
         ("publication", parked(look).key(KeyCode::Char('p'))),
         ("published", {
             let mut s = parked(look).key(KeyCode::Char('p'));
-            for msg in script("approval").into_iter().skip(7).take(3) {
+            for msg in script("approval").into_iter().skip(6).take(3) {
                 s.server(msg);
             }
             s

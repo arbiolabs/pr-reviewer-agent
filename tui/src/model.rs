@@ -493,6 +493,8 @@ pub struct Model {
     /// The unanswered snapshot.get, and the ones it superseded, whose replies are ignored.
     pub snapshot_request: Option<RequestId>,
     pub stale_snapshots: BTreeSet<RequestId>,
+    /// Every command this client sent: a `command.result` for any other request is not this client's to show.
+    pub commands_sent: BTreeSet<RequestId>,
     pub dirty: bool,
 }
 
@@ -530,6 +532,7 @@ impl Model {
             request_timeout_ms: 15_000,
             snapshot_request: None,
             stale_snapshots: BTreeSet::new(),
+            commands_sent: BTreeSet::new(),
             dirty: true,
         }
     }

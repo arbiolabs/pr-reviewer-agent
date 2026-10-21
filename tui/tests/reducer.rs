@@ -800,3 +800,14 @@ fn a_snapshot_that_never_arrives_ends_the_resync_with_an_error_and_r_asks_again(
     send(&mut m, &read("fixtures/server.snapshot.json"));
     assert_eq!(m.link, Link::Live);
 }
+
+#[test]
+fn a_command_result_for_a_request_the_client_never_sent_is_ignored() {
+    let mut m = live();
+    send(&mut m, &read("fixtures/server.command.result.accepted.json"));
+    assert_eq!(m.notice, None);
+    let mut s = common::Sim::new(pr_review_tui::model::Look::default()).play("approval", 12);
+    assert_eq!(s.m.notice, None, "landing on approval.ndjson pops no toast");
+    let (frame, _) = common::render(&mut s.m, 120, 38);
+    assert!(!frame.contains("waiting for the daemon"), "{frame}");
+}

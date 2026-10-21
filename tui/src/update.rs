@@ -381,6 +381,9 @@ fn server_message(m: &mut Model, msg: ServerMessage, fx: &mut Vec<Effect>) {
             }
         }
         ServerMessage::CommandResult(r) => {
+            if !m.commands_sent.contains(&r.request_id) {
+                return;
+            }
             if let Some(state) = waiting_confirm(m, &r.request_id) {
                 *state = match r.outcome {
                     CommandOutcome::Accepted { operation_id } => ConfirmState::Accepted(operation_id),
@@ -1367,6 +1370,7 @@ fn send_confirmed(m: &mut Model, fx: &mut Vec<Effect>) {
     else {
         return;
     };
+    m.commands_sent.insert(request_id.clone());
     if let Some(Modal::Confirm { state, .. } | Modal::Publication { publish: state, .. }) = m.ui.modals.last_mut() {
         *state = ConfirmState::Requested(request_id);
     }
