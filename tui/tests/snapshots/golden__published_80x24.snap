@@ -25,4 +25,4 @@ expression: text
 
     Review performed with isolated read-only tools. Human review is still
     … 22 more below, j scrolls
-   j/k scroll  m raw markdown  o open on GitHub  Esc close
+   j/k scroll  m raw markdown  o open on GitHub  d diff  Esc close

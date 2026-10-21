@@ -25,4 +25,4 @@ expression: text
   ┃
   ┃ Enter  5 evidence items · the fix · the diff    d diff at this line
 
-   j/k finding  Enter read  d diff  h pull requests  ? help  q quit
+   Enter read  d diff  J/K scroll  h pull requests  / search  ? help  q quit

@@ -2,7 +2,7 @@
 source: tests/golden.rs
 expression: text
 ---
-  pr-review · ◔ #184 waiting for you · p previews                       ● live
+  pr-review · ◔ #184 waiting for you                                    ● live
 
 
   acme/shop #184 → publication preview
@@ -25,4 +25,4 @@ expression: text
     required.
     hidden marker  <!-- durable-review:rev-184-a:8984214f9b29fcaf2ced0509cf…
     … 20 more below, j scrolls
-   j/k scroll  y publish  m raw markdown  Esc close
+   y publish  j/k scroll  m raw markdown  d diff  Esc close

@@ -9,7 +9,7 @@ expression: ascii_text
   socket unix:/run/user/501/pr-review/reviewer.sock | connected
   GitHub accounts
     publishes as          diego-arbio-dev on github.com
-    diego-arbio-dev  github.com  + ok      gh active             Enter selects
+    diego-arbio-dev  github.com  + ok      gh active
   > octo-work        github.com  + ok                            Enter selects
   Connection
     state                 * live
@@ -25,4 +25,4 @@ expression: ascii_text
     activity              0 feed entries (cap 2000); 0 tool events applied
   Display
     glyphs                ascii
-   j/k account  Enter select account  w watch live  1-5 views  ? help  q quit
+   j/k account  Enter select account  w watch live  Esc back  ? help  q quit

@@ -10,7 +10,7 @@ expression: text
 
     GitHub accounts
       publishes as          diego-arbio-dev on github.com
-      diego-arbio-dev  github.com  ✓ ok      gh active             Enter selects
+      diego-arbio-dev  github.com  ✓ ok      gh active
     ▌ octo-work        github.com  ✓ ok                            Enter selects
 
     Connection
@@ -39,4 +39,4 @@ expression: text
 
 
 
-   j/k account  Enter select account  w watch live  ? help  q quit   1 inbox  2 review  3 diff  4 timeline  5 settings
+   j/k account  Enter select account  Esc back  ? help  q quit       1 inbox  2 review  3 diff  4 timeline  5 settings

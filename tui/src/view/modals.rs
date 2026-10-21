@@ -130,7 +130,8 @@ pub fn help_lines(c: &Ctx, body: Rect) -> Vec<Line<'static>> {
     };
     let sections: Vec<Vec<Line<'static>>> = [
         (Context::Global, "Everywhere"),
-        (Context::Review, "Review"),
+        (Context::Screens, "Every screen"),
+        (Context::Review, "Review and the PR list"),
         (Context::Diff, "Diff"),
         (Context::Timeline, "Timeline"),
         (Context::FindingModal, "Finding reader"),
@@ -249,7 +250,8 @@ fn account_row(c: &Ctx, a: &Account, w: usize, cursor: bool) -> Line<'static> {
     ];
     let used = 2 + 16 + 12 + 10 + 22;
     let (why, role) = match block {
-        None => ("Enter selects", Role::Accent),
+        None if cursor => ("Enter selects", Role::Accent),
+        None => ("", Role::Accent),
         // The marks already say so.
         Some("already selected") => ("", Role::Pending),
         Some(why) => (why, Role::Pending),

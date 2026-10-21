@@ -39,4 +39,4 @@ expression: ascii_text
         41 -   if (slot.free) {
         41 +   if (slot.free && !slot.held) {
       ~ 6 more below, j scrolls
-   j/k scroll  m raw markdown  o open on GitHub  Esc close           1 inbox  2 review  3 diff  4 timeline  5 settings
+   j/k scroll  m raw markdown  o open on GitHub  d diff  Esc close   1 inbox  2 review  3 diff  4 timeline  5 settings

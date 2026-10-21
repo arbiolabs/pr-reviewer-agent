@@ -414,12 +414,12 @@ fn a_confirm_panel_offers_y_only_while_y_can_send() {
     press(&mut m, KeyCode::Enter);
     assert_eq!(footer(&mut m), "y confirm  n/Esc cancel");
     let fx = press(&mut m, KeyCode::Char('y'));
-    assert_eq!(footer(&mut m), "Esc closes", "requested");
+    assert_eq!(footer(&mut m), "n/Esc close", "requested");
     let [Effect::Send(ClientMessage::Command(c))] = &fx[..] else { panic!("{fx:?}") };
     let rejected =
         r#"{"type":"command.result","requestId":"RID","status":"rejected","code":"NOT_FOUND","message":"no"}"#;
     send(&mut m, &rejected.replace("RID", c.request_id.as_str()));
-    assert_eq!(footer(&mut m), "Esc closes", "refused");
+    assert_eq!(footer(&mut m), "n/Esc close", "refused");
 }
 
 #[test]
@@ -1021,7 +1021,7 @@ fn the_timeline_counts_the_events_it_shows_and_a_filter_counts_against_them() {
     let mut m = checkpoint_timeline();
     let count = |m: &mut Model| {
         let (frame, _) = common::render(m, 120, 38);
-        frame.lines().find_map(|l| l.trim().split_once(", oldest first")).unwrap().0.to_string()
+        frame.lines().find_map(|l| l.trim().split_once(" · oldest first")).unwrap().0.to_string()
     };
     assert_eq!(count(&mut m), "1 event", "no filter: the tool call; VERIFY is a heading");
     for _ in 0..3 {

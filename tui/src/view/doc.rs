@@ -266,9 +266,12 @@ pub fn document(c: &Ctx, pr: &Pr, w: usize, height: usize) -> Doc {
 
     let findings = c.m.domain.pr_findings(&pr.id);
     let running = run.is_some_and(|r| r.active());
-    lines.push(summary_line(c, pr, &findings, w));
-    lines.push(Line::from(c.span(rule(c, w), Role::Muted)));
-    if !compact {
+    // An unreviewed PR says so in one sentence, with no count or rule under it.
+    if run.is_some() {
+        lines.push(summary_line(c, pr, &findings, w));
+        lines.push(Line::from(c.span(rule(c, w), Role::Muted)));
+    }
+    if !compact && run.is_some() {
         lines.push(Line::raw(""));
     }
 
@@ -392,7 +395,13 @@ fn summary_line(c: &Ctx, pr: &Pr, findings: &[&Finding], w: usize) -> Line<'stat
 /// `● Collect ── ● Triage ── ⠹ Analyze ── ○ Verify ...`, then how the run ended.
 fn phase_line(c: &Ctx, run: Option<&Run>, w: usize) -> Line<'static> {
     let g = c.t.g();
-    let Some(run) = run else { return Line::from(c.span("Not reviewed yet. s starts a review.", Role::Muted)) };
+    let Some(run) = run else {
+        // Not through `offer::offered`, whose J/K measures this page.
+        let start = c.m.top_modal().is_none() && crate::update::can_mutate(c.m, crate::keymap::Mutation::Start);
+        return Line::from(
+            c.span(if start { "Not reviewed yet. s starts a review." } else { "Not reviewed yet." }, Role::Muted),
+        );
+    };
     const NAMES: [&str; 6] = ["Collect", "Triage", "Analyze", "Verify", "Prepare", "Publish"];
     let cur = match run.phase {
         Phase::CollectContext => 0,

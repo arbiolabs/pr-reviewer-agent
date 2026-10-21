@@ -2,7 +2,7 @@
 source: tests/light.rs
 expression: frame
 ---
-  pr-review · ◔ #184 waiting for you · p previews                                                               ● live
+  pr-review · ◔ #184 waiting for you                                                                            ● live
 
 
     acme/shop #184 → publication preview
@@ -39,9 +39,9 @@ expression: frame
      ▶  42 +     slot.held = true;
         43     }
       … 4 more below, j scrolls
-   j/k scroll  y publish  m raw markdown  Esc close                  1 inbox  2 review  3 diff  4 timeline  5 settings
+   y publish  j/k scroll  m raw markdown  d diff  Esc close          1 inbox  2 review  3 diff  4 timeline  5 settings
 
-aabbbbbbbbbacadaddddadddddddadddadddadadaddddddddaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaeaeeeeaa
+aabbbbbbbbbacadaddddadddddddadddadddaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaeaeeeeaa
 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 aaaacccccccccaccccacafffffffffffafffffffaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
@@ -78,7 +78,7 @@ aaaattttuutvtttwwtxxxxxxxxxxtxxtxxxxxxxxxxxtxttttttttttttttttttttttttttttttttttt
 aaaayzyyAAyByyyyyAAAAAAAAAyAyCCCCAyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyaaaa
 aaaahhhhiihhhhhmhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhhaaaa
 aaaaaacacaccccaccccccacacccccccaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-aaacccaccccccaacacccccccaacacccaccccccccaacccacccccaaaaaaaaaaaaaaaaaacacccccaacaffffffaacaccccaacaccccccccaacaccccccccaa
+aaacacccccccaacccaccccccaacacccaccccccccaacaccccaacccacccccaaaaaaaaaacacccccaacaffffffaacaccccaacaccccccccaacaccccccccaa
 
 a - on base
 b text on base

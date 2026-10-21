@@ -385,7 +385,7 @@ fn clicks_select_diff_files_and_lines_timeline_events_and_footer_views() {
     click(&mut s, x + 20, y);
     assert_ne!(s.m.diff.as_ref().unwrap().cursor, before, "a click on a patch line moves the cursor there");
 
-    let mut s = s.key(KeyCode::Char('t'));
+    let mut s = s.key(KeyCode::Char('4'));
     let (frame, _) = render(&mut s.m, 120, 38);
     let (x, y) = cell_of(&frame, "review started");
     click(&mut s, x, y);

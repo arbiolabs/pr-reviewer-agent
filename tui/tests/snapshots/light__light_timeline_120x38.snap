@@ -7,7 +7,7 @@ expression: frame
 
     acme/shop  #184  timeline
     Booking API
-    2 events, oldest first · the whole PR (f) · all kinds (v) · phase any (P)
+    2 events · oldest first · the whole PR (f) · all kinds (v) · phase any (P)
 
     VERIFY ─────────────────────────────────────────────────────────────────────────────────────────────── 13:00:11
       13:00:11    read_file     src/booking.ts:1-120
@@ -39,14 +39,14 @@ expression: frame
 
 
 
-   j/k move  Enter detail  w watch live  / filter  Esc back  ? help  1 inbox  2 review  3 diff  4 timeline  5 settings
+   j/k move  Enter detail  / filter  Esc back  ? help  q quit        1 inbox  2 review  3 diff  4 timeline  5 settings
 
 aabbbbbbbbbacadabbbbbbbbbabbbbaddddddaccccccacccccccacccaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaeaeeeeaa
 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 aaaacccccccccaaddddaaccccccccaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 aaaabbbbbbbabbbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-aaaacacccccccaccccccacccccacacccacccccaccacccacacccacccccacccacacccccacccacccaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+aaaacaccccccacaccccccacccccacacccacccccaccacccacacccacccccacccacacccccacccacccaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 aaaaddddddacccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccaccccccccaaaaa
 aaaaaaccccccccaaaadddddddddaaaaabbbbbbbbbbbbbbbbbbbbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
@@ -78,7 +78,7 @@ aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-aaacccaccccaacccccaccccccaacacccccaccccaacaccccccaacccaccccaacaccccaacacccccaacaccccccaacaccccaacaddddddddaacaccccccccaa
+aaacccaccccaacccccaccccccaacaccccccaacccaccccaacaccccaacaccccaaaaaaaacacccccaacaccccccaacaccccaacaddddddddaacaccccccccaa
 
 a - on base
 b text on base

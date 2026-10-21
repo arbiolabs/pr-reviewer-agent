@@ -9,10 +9,10 @@ expression: text
                                     修复竞态条件 🔥 👩 ｗｉｄｅ!
 ▌ · #3 修复竞态条件 🔥 👩 ｗｉｄ…   bbbbbbb → 3333333
 ▌   shop 3333333     not reviewed
-                                    Not reviewed yet. s starts a review.
+                                    Not reviewed yet.
   · #2 Refactor booking Refactor…
-    shop 2222222     not reviewed   No findings yet
-                                    ──────────────────────────────────────────────────────────────────────────────────
+    shop 2222222     not reviewed
+
   ▘ #1 red click done
     shop      ●─●─●─▘─○─○ ▁ 0.2/s
 

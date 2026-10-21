@@ -260,22 +260,25 @@ fn page(c: &Ctx, t: &crate::model::TimelineView, col: Rect) -> (Vec<Line<'static
     if let Some(p) = pr {
         head.push(Line::from(c.span(c.fit(p.title.as_str(), w), Role::Title)));
     }
-    head.push(Line::from(c.span(
-        c.fit(
-            &format!(
-                "{count} {}, oldest first {} {scope} (f) {} {} (v) {} phase {} (P){}",
-                if total == 1 { "event" } else { "events" },
-                g.sep,
-                g.sep,
-                t.category.map_or("all kinds", |x| x.label()),
-                g.sep,
-                t.phase.map_or("any", phase_name),
-                if t.text.is_empty() { String::new() } else { format!(" {} \"{}\" (/)", g.sep, t.text) },
-            ),
-            w,
-        ),
-        Role::Muted,
-    )));
+    // Where the line is too narrow, the parts that say nothing is narrowed go first, so a filter stays in view.
+    let mut parts: Vec<(String, bool)> = vec![
+        (format!("{count} {}", if total == 1 { "event" } else { "events" }), false),
+        ("oldest first".into(), true),
+        (format!("{scope} (f)"), t.scope == TimelineScope::Pr),
+        (format!("{} (v)", t.category.map_or("all kinds", |x| x.label())), t.category.is_none()),
+        (format!("phase {} (P)", t.phase.map_or("any", phase_name)), t.phase.is_none()),
+    ];
+    if !t.text.is_empty() {
+        parts.push((format!("\"{}\" (/)", t.text), false));
+    }
+    let joined =
+        |parts: &[(String, bool)]| parts.iter().map(|p| p.0.as_str()).collect::<Vec<_>>().join(&format!(" {} ", g.sep));
+    while width(&joined(&parts)) > w
+        && let Some(i) = parts.iter().rposition(|p| p.1)
+    {
+        parts.remove(i);
+    }
+    head.push(Line::from(c.span(c.fit(&joined(&parts), w), Role::Muted)));
     head.push(Line::raw(""));
     if let Some(e) = &t.error {
         head.push(Line::from(c.span(c.fit(&format!("timeline unavailable: {e}"), w), Role::Fail)));

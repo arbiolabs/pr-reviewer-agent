@@ -15,7 +15,7 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
-use crate::model::{ConfirmState, InputPurpose, Link, Modal, Model, Pane, Screen};
+use crate::model::{InputPurpose, Link, Modal, Model, Pane, Screen};
 use crate::text::{fit, pad};
 use crate::theme::{Role, Theme};
 
@@ -304,7 +304,11 @@ fn status_line(c: &Ctx, width: u16) -> Line<'static> {
                 parked.iter().filter_map(|r| c.m.domain.prs.get(&r.pr_id).map(|p| p.number)).collect();
             numbers.sort();
             let list = numbers.iter().map(|n| format!("#{n}")).collect::<Vec<_>>().join(" ");
-            left.push(c.span(format!("{} {list} waiting for you {} p previews", g.pending, g.sep), Role::Pending));
+            // The key that gets the reader there from here, if one does.
+            let offered = crate::offer::offered(c.m);
+            let key = ["p previews", "w shows it"].into_iter().find(|k| offered.iter().any(|h| k.starts_with(h.keys)));
+            let key = key.map_or(String::new(), |k| format!(" {} {k}", g.sep));
+            left.push(c.span(format!("{} {list} waiting for you{key}", g.pending), Role::Pending));
         }
         None => {
             let n = c.m.domain.prs.len();
@@ -398,96 +402,8 @@ fn footer_line(c: &Ctx, width: u16) -> Line<'static> {
     if let Some(n) = &c.m.notice {
         return Line::from(c.span(c.pad(&format!(" {}", n.text), w), Role::Pending));
     }
-    let hints = match (c.m.top_modal(), c.m.ui.screen) {
-        (Some(Modal::Help { .. }), _) => "j/k scroll  Esc close  q quit",
-        (Some(Modal::Finding { .. }), _) => "j/k scroll  n/N finding  d diff at anchor  t timeline  Esc close",
-        (Some(Modal::Confirm { state: ConfirmState::Asking | ConfirmState::TimedOut, .. }), _) => {
-            "y confirm  n/Esc cancel"
-        }
-        (Some(Modal::Confirm { .. }), _) => "Esc closes",
-        (Some(Modal::Publication { raw: false, .. }), _) => {
-            "j/k scroll  y publish  m raw markdown  o open on GitHub  Esc close"
-        }
-        (Some(Modal::Publication { raw: true, .. }), _) => {
-            "j/k scroll  y publish  m styled  o open on GitHub  Esc close"
-        }
-        (_, Screen::Inbox) => "j/k pull request  Enter read  / search  ? help  q quit",
-        (_, Screen::Review) if c.m.ui.focus == Pane::Sidebar => {
-            "j/k pull request  Enter read  / search  l findings  ? help  q quit"
-        }
-        (_, Screen::Review) => {
-            "j/k finding  Enter read  d diff  J/K scroll  h pull requests  t timeline  ? help  q quit"
-        }
-        (_, Screen::Diff) if c.m.ui.focus == Pane::Sidebar => "j/k file  Enter or l code  Esc back  ? help",
-        (_, Screen::Diff) if c.m.diff.as_ref().is_some_and(|d| d.search.is_some()) => {
-            "j/k line  n/N match  Enter read  h files  / search  Esc clear search  ? help"
-        }
-        (_, Screen::Diff) => "j/k line  n/N finding  Enter read  h files  / search  : jump  Esc back  ? help",
-        (_, Screen::Timeline) if c.m.timeline.as_ref().is_some_and(|t| t.open.is_some()) => {
-            "j/k move  Enter fold or read  / filter  f scope  v kind  P phase  Esc fold  ? help"
-        }
-        (_, Screen::Timeline) => "j/k move  Enter detail  / filter  f scope  v kind  P phase  Esc back  ? help",
-        (_, Screen::Settings) => "j/k account  Enter select account  r refresh  1-5 views  ? help  q quit",
-    };
-    let running = c.m.domain.runs.values().any(|r| r.status == crate::protocol::RunStatus::Running);
-    let watch = running && c.m.top_modal().is_none();
-    let parked = c.m.selected_pr().and_then(|p| c.m.domain.latest_run(&p.id)).is_some_and(|r| r.parked());
-    let mut hints: Vec<&str> = hints.split("  ").collect();
-    if let Some(Modal::Publication { run_id, preview, publish, .. }) = c.m.top_modal() {
-        let can_publish = matches!(publish, crate::model::ConfirmState::Asking | crate::model::ConfirmState::TimedOut)
-            && matches!(preview, crate::model::Preview::Ready(p) if crate::update::publish_block(c.m, p).is_none());
-        let url = crate::update::published_url(c.m, run_id).is_some();
-        hints.retain(|h| (*h != "y publish" || can_publish) && (*h != "o open on GitHub" || url));
-    }
-    // A key with nothing to act on is not offered: no PR to move to or open, no finding to read, nothing to search.
-    if c.m.top_modal().is_none() {
-        let list = c.m.ui.screen == Screen::Inbox || c.m.ui.screen == Screen::Review && c.m.ui.focus == Pane::Sidebar;
-        let shown = c.m.inbox().len();
-        let findings = c.m.selected_pr().map_or(0, |p| c.m.domain.pr_findings(&p.id).len());
-        let reviewed = c.m.selected_pr().is_some_and(|p| c.m.domain.latest_run(&p.id).is_some());
-        // A diff with no files, or none at all, has nothing to move through.
-        let no_diff = c.m.diff.as_ref().is_none_or(|d| d.files.is_empty() && d.pending.is_none());
-        hints.retain(|h| match *h {
-            "d diff" if c.m.ui.screen == Screen::Review => reviewed,
-            "t timeline" | "l findings" if c.m.ui.screen == Screen::Review => c.m.selected_pr().is_some(),
-            "h pull requests" => !c.m.domain.prs.is_empty(),
-            "Esc back" | "? help" if matches!(c.m.ui.screen, Screen::Diff | Screen::Timeline) => true,
-            _ if c.m.ui.screen == Screen::Diff && no_diff => false,
-            _ if c.m.ui.screen == Screen::Timeline && c.m.timeline.is_none() => false,
-            "j/k move" | "Enter detail" | "Enter fold or read" if c.m.ui.screen == Screen::Timeline => {
-                c.m.timeline.as_ref().is_some_and(|t| !crate::update::timeline_shown(c.m, t).is_empty())
-            }
-            "j/k pull request" | "Enter read" if list => shown > 0,
-            "/ search" if list => !c.m.domain.prs.is_empty(),
-            "j/k finding" | "Enter read" | "J/K scroll" if c.m.ui.screen == Screen::Review => findings > 0,
-            _ => true,
-        });
-    }
-    if watch {
-        hints.insert(2.min(hints.len()), "w watch live");
-    }
-    if parked && c.m.top_modal().is_none() {
-        hints.insert(1.min(hints.len()), "p preview & publish");
-    }
-    // Too wide: drop the least important hint, then the next, keeping the rest in order.
-    let line = |hints: &[&str]| format!("   {}", hints.join("  "));
-    while hints.len() > 1 && crate::text::width(&line(&hints)) > w {
-        let least = (0..hints.len()).min_by_key(|&i| (rank(hints[i]), std::cmp::Reverse(i))).unwrap_or(0);
-        hints.remove(least);
-    }
-    Line::from(c.span(c.fit(&line(&hints), w), Role::Muted))
-}
-
-/// How much a footer hint matters, by its key: moving, opening, going back and help outlast the shortcuts.
-fn rank(hint: &str) -> u8 {
-    match hint.split(' ').next().unwrap_or("") {
-        "j/k" | "Enter" | "Esc" | "?" => 4,
-        "h" | "l" | "y" | "n/Esc" => 3,
-        "q" | "n/N" | "/" | ":" | "d" | "m" => 2,
-        "t" | "w" | "f" | "1-5" => 1,
-        "p" => 3,
-        _ => 0,
-    }
+    let hints = crate::offer::fit(crate::offer::offered(c.m), w);
+    Line::from(c.span(c.fit(&crate::offer::line(&hints), w), Role::Muted))
 }
 
 fn minimal(c: &Ctx, f: &mut Frame, area: Rect) {

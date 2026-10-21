@@ -6,6 +6,7 @@ pub mod config;
 pub mod keymap;
 pub mod model;
 pub mod net;
+pub mod offer;
 pub mod playback;
 pub mod protocol;
 pub mod sanitize;

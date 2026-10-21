@@ -68,6 +68,7 @@ pub fn summary(m: &Model) -> Value {
 }
 
 /// A model driven only through messages, answering its requests the way the playback driver does.
+#[derive(Clone)]
 pub struct Sim {
     pub m: Model,
     pub played: Vec<ServerMessage>,
