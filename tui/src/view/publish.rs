@@ -211,7 +211,7 @@ fn state(c: &Ctx, w: usize, run_id: &RunId, p: &PublicationPreview, publish: &Co
             }
         }
         (Some(PublicationStatus::Publishing), _) => {
-            out.push(line(format!("{} publishing{}", super::doc::spinner(c), g.ellipsis), Role::Active))
+            out.push(line(format!("{} posting to GitHub{}", super::doc::spinner(c), g.ellipsis), Role::Active))
         }
         (Some(s @ (PublicationStatus::Uncertain | PublicationStatus::Failed | PublicationStatus::Unknown)), _) => {
             let (word, role) = publication_status(s);
@@ -221,14 +221,14 @@ fn state(c: &Ctx, w: usize, run_id: &RunId, p: &PublicationPreview, publish: &Co
             }
         }
         (_, ConfirmState::Requested(_)) => {
-            out.push(line(format!("requested{} waiting for the daemon", g.ellipsis), Role::Pending))
+            out.push(line(format!("{} requested{} waiting for the daemon", g.pending, g.ellipsis), Role::Pending))
         }
         (_, ConfirmState::Accepted { .. }) => out.push(line(
-            format!("Approved; publishing{}  not on GitHub until it says published", g.ellipsis),
+            format!("{} approved{} not on GitHub until it says published", g.pending, g.ellipsis),
             Role::Pending,
         )),
         (_, ConfirmState::TimedOut) => {
-            out.push(line("request timed out; y sends the same approval again".into(), Role::Fail))
+            out.push(line(format!("{} request timed out; y sends the same approval again", g.fail), Role::Fail))
         }
         (_, ConfirmState::Asking | ConfirmState::Refused { .. }) => {}
     }

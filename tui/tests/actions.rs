@@ -86,9 +86,11 @@ fn start_names_the_pr_and_head_sends_only_on_y_and_settles_on_run_started_not_on
     let rid = c.request_id.clone();
     assert!(commands(&press(&mut m, KeyCode::Char('y'))).is_empty(), "a second y must not resend");
 
+    assert!(frame(&mut m).contains("requested… waiting for the daemon"), "the daemon, as the panel names it");
     let accepted = read("fixtures/server.command.result.accepted.json").replace("req-cmd", rid.as_str());
     send(&mut m, &accepted);
     assert!(matches!(confirm_state(&m), ConfirmState::Accepted { .. }), "accepted alone keeps the panel waiting");
+    assert!(frame(&mut m).contains("accepted… waiting for the event that shows it happened"));
     assert!(m.notice.is_none(), "{:?}", m.notice);
 
     let started = run_json("rev-186-a", "acme/shop#186", H186, "COLLECT_CONTEXT", "RUNNING");
@@ -344,13 +346,13 @@ fn y_sends_exactly_one_publish_naming_the_preview_and_only_published_reads_as_do
     assert_eq!(c.idempotency_key, format!("review.publish:rev-184-a:{}", p.preview_id));
     let rid = c.request_id.clone();
     assert!(commands(&press(&mut m, KeyCode::Char('y'))).is_empty(), "a second y must not resend");
-    assert!(frame(&mut m).contains("requested… waiting for the daemon"));
+    assert!(frame(&mut m).contains("◔ requested… waiting for the daemon"));
 
     let rest = script("approval");
     let accepted = read("fixtures/server.command.result.accepted.json").replace("req-cmd", rid.as_str());
     send(&mut m, &accepted);
     let f = frame(&mut m);
-    assert!(f.contains("Approved; publishing…"), "{f}");
+    assert!(f.contains("◔ approved… not on GitHub until it says published"), "{f}");
     assert!(!f.contains("published on GitHub"), "accepted is not published: {f}");
 
     for msg in rest.into_iter().skip(6).take(2) {
@@ -358,6 +360,10 @@ fn y_sends_exactly_one_publish_naming_the_preview_and_only_published_reads_as_do
     }
     let f = frame(&mut m);
     assert!(f.lines().any(|l| l.trim() == "Publishing…") && !f.contains("Publish this review?"), "{f}");
+    assert!(
+        f.contains(" posting to GitHub…") && !f.contains("publishing…"),
+        "the line under the heading adds to it: {f}"
+    );
     assert_eq!(press(&mut m, KeyCode::Char('o')), [], "o does nothing before it is published");
 
     server(&mut m, script("approval").remove(8));

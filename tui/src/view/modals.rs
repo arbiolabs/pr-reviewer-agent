@@ -53,14 +53,14 @@ fn heading(c: &Ctx, text: &str) -> Line<'static> {
 fn confirm(c: &Ctx, f: &mut Frame, body: Rect, prompt: &str, command: &Command, state: &ConfirmState) {
     let (status, role) = match state {
         ConfirmState::Asking => (format!("y confirms {} n or Esc cancels", c.t.g().sep), Role::Title),
-        ConfirmState::Requested(_) => (format!("requested{} waiting for the server", c.t.g().ellipsis), Role::Pending),
+        ConfirmState::Requested(_) => (format!("requested{} waiting for the daemon", c.t.g().ellipsis), Role::Pending),
         ConfirmState::Accepted { at_ms, .. } if c.m.now_ms.saturating_sub(*at_ms) >= ACCEPTED_QUIET_MS => (
             "The daemon accepted this but nothing happened yet. Esc closes; the timeline will show it if it runs."
                 .to_string(),
             Role::Pending,
         ),
         ConfirmState::Accepted { .. } => {
-            ("accepted; waiting for the event that shows it happened".to_string(), Role::Active)
+            (format!("accepted{} waiting for the event that shows it happened", c.t.g().ellipsis), Role::Active)
         }
         ConfirmState::Refused { message, .. } => (format!("Can't {}: {message}", command.verb()), Role::Fail),
         ConfirmState::TimedOut => ("request timed out; y sends it again, r refreshes".to_string(), Role::Fail),
