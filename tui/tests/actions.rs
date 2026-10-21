@@ -195,6 +195,16 @@ fn a_start_on_a_head_under_review_is_refused_before_sending_and_closes_if_the_da
 }
 
 #[test]
+fn a_start_on_a_head_whose_base_moved_under_its_running_review_goes_to_the_daemon() {
+    let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#184");
+    let pr = pr_review_tui::protocol::PrId::new("acme/shop#184");
+    m.domain.prs.get_mut(&pr).unwrap().base_sha = pr_review_tui::protocol::Sha::new(&"c".repeat(40));
+    assert!(commands(&press(&mut m, KeyCode::Char('s'))).is_empty());
+    assert_eq!(prompt(&m), "Start a review of #184 at 4444444?", "the daemon keys reviews on the base too");
+    assert_eq!(commands(&press(&mut m, KeyCode::Char('y'))).len(), 1);
+}
+
+#[test]
 fn cancel_and_retry_name_their_target_and_settle_on_the_run_ending_or_moving() {
     let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#184");
     press(&mut m, KeyCode::Char('R'));

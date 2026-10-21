@@ -241,13 +241,13 @@ fn settle_replayed_start(m: &mut Model) {
     else {
         return;
     };
-    let run = operation.as_str().strip_prefix("review.start:").map(RunId::new);
-    if let Some(why) = in_review(m, &p.pr_id, &p.expected_head_sha) {
+    let run = operation.as_str().strip_prefix("review.start:").and_then(|r| m.domain.runs.get(&RunId::new(r)));
+    if let Some(why) = run.and_then(|r| in_review(m, &r.pr_id, &r.base_sha, &r.head_sha)) {
         notice(m, format!("Can't start: {why}"));
         return;
     }
     // The daemon's words for a head whose review ended.
-    let why = match run.and_then(|r| m.domain.runs.get(&r)).map(|r| r.status) {
+    let why = match run.map(|r| r.status) {
         Some(RunStatus::Failed) => "failed its review; retry it instead",
         Some(RunStatus::Superseded) => "is superseded by a newer head",
         _ => "is already reviewed",
@@ -257,9 +257,13 @@ fn settle_replayed_start(m: &mut Model) {
 }
 
 /// Where a head's live review stands, as the daemon refuses a start for it: `#184 at 4444444 is already being reviewed`.
-fn in_review(m: &Model, pr: &PrId, head: &Sha) -> Option<String> {
-    let run =
-        m.domain.runs.values().find(|r| &r.pr_id == pr && &r.head_sha == head && r.status == RunStatus::Running)?;
+/// The daemon keys a review on the base too, so a run on another base says nothing and the start goes to it.
+fn in_review(m: &Model, pr: &PrId, base: &Sha, head: &Sha) -> Option<String> {
+    let run = m
+        .domain
+        .runs
+        .values()
+        .find(|r| &r.pr_id == pr && &r.base_sha == base && &r.head_sha == head && r.status == RunStatus::Running)?;
     let number = m.domain.prs.get(pr).map_or(pr.to_string(), |x| format!("#{}", x.number));
     let why = if run.parked() { "is waiting for your approval" } else { "is already being reviewed" };
     Some(format!("{number} at {} {why}", head.short()))
@@ -1407,7 +1411,7 @@ fn mutation(m: &mut Model, mu: Mutation, fx: &mut Vec<Effect>) {
         return;
     };
     if mu == Mutation::Start
-        && let Some(why) = in_review(m, &p.id, &p.head_sha)
+        && let Some(why) = in_review(m, &p.id, &p.base_sha, &p.head_sha)
     {
         notice(m, format!("Can't {verb}: {why}"));
         return;
