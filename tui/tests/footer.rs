@@ -14,6 +14,7 @@ use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use pr_review_tui::keymap;
 use pr_review_tui::model::{ConfirmState, Look, Modal, Model, Pane, Screen};
 use pr_review_tui::playback::{Player, load};
+use pr_review_tui::protocol::Phase;
 use pr_review_tui::update::{Effect, Msg, NetEvent, update};
 use pr_review_tui::view::view;
 use ratatui::Terminal;
@@ -426,12 +427,75 @@ fn states() -> Vec<(String, Model)> {
         update(&mut m, Msg::Tick(later));
         out.push((format!("showcase #{number} {key:?} y timed out"), m));
     }
+    // A daemon restarted in dry_run grants no review.publish: a start on the parked head goes to it.
+    let mut dry = Sim::new(Look::default());
+    for line in read("playback/approval.ndjson").lines() {
+        let line = line.replace(r#","review.publish""#, "");
+        let v: serde_json::Value = serde_json::from_str(&line).unwrap();
+        dry.server(serde_json::from_value(v["message"].clone()).unwrap());
+        for keys in ["", "\n", "h"] {
+            out.push((format!("dry_run approval {keys:?}"), sim_keys(&dry, keys).m));
+        }
+    }
+    // Pages that hold one entry with more behind them: j on the one file, k on the one event, loads the next.
+    let parked = Sim::new(Look::default()).play("approval", 5);
+    let mut one_file = sim_keys(&parked, "\n3h").m;
+    let d = one_file.diff.as_mut().unwrap();
+    (d.files, d.next_cursor, d.pending) =
+        (d.files[..1].to_vec(), Some(pr_review_tui::protocol::Text::new("c-2")), None);
+    d.selected_file = Some(d.files[0].path.clone());
+    out.push(("one-file diff page, more to load".into(), one_file));
+    let mut one_event = sim_keys(&parked, "\n4").m;
+    let t = one_event.timeline.as_mut().unwrap();
+    let last = t.events.iter().rposition(|e| !pr_review_tui::update::is_heading(e)).unwrap();
+    (t.events, t.next_before, t.pending) = (vec![t.events[last].clone()], Some(1), None);
+    t.selected = Some(t.events[0].sequence.get());
+    out.push(("one-event timeline page, older to load".into(), one_event));
+    // A preview whose PR moved on: y is off.
+    let mut stale = sim_keys(&parked, "\np").m;
+    let pr = stale.domain.prs.values_mut().next().unwrap();
+    pr.head_sha = pr_review_tui::protocol::Sha::new("9999999999999999999999999999999999999999");
+    out.push(("stale preview".into(), stale));
     let mut none = Sim::new(Look::default());
     none.apply(Msg::Net(NetEvent::Lost { reason: "connection refused".into(), retry_in_ms: Some(1000) }));
     for keys in ["", "\n", "2", "d", "t", "4", "5", "?", "s"] {
         out.push((format!("no daemon {keys:?}"), sim_keys(&none, keys).m));
     }
     out
+}
+
+/// Whether j/k has somewhere to go, from the model's data alone and not through the reducer's guard: another PR,
+/// another stop on the Review page, another file or a page of them to load, another event or older ones to load,
+/// another account. It answers only where the data says so for certain.
+fn room_to_move(m: &Model) -> bool {
+    if m.top_modal().is_some() {
+        return false;
+    }
+    match (m.ui.screen, m.ui.focus) {
+        (Screen::Inbox, _) | (Screen::Review, Pane::Sidebar) => m.inbox().len() > 1,
+        (Screen::Review, Pane::Main) => m
+            .selected_pr()
+            .is_some_and(|p| m.domain.pr_findings(&p.id).len() + usize::from(m.parked_run().is_some()) > 1),
+        (Screen::Diff, Pane::Sidebar) => {
+            m.diff.as_ref().is_some_and(|d| d.files.len() > 1 || d.next_cursor.is_some() && d.pending.is_none())
+        }
+        (Screen::Diff, Pane::Main) => false,
+        (Screen::Timeline, _) => m.timeline.as_ref().is_some_and(|t| t.next_before.is_some() && t.pending.is_none()),
+        (Screen::Settings, _) => m.domain.accounts.as_ref().is_some_and(|a| a.len() > 1),
+    }
+}
+
+/// Whether the daemon takes a start of the selected PR, from what it granted and what the client knows: it refuses
+/// for certain only a head parked under the same policy, and a daemon without review.publish runs another policy.
+fn daemon_takes_start(m: &Model) -> bool {
+    let Some(p) = m.selected_pr().filter(|_| m.top_modal().is_none()) else { return false };
+    let parked = m.domain.runs.values().any(|r| {
+        r.pr_id == p.id && r.head_sha == p.head_sha && r.base_sha == p.base_sha && r.phase == Phase::AwaitingApproval
+    });
+    matches!(m.ui.screen, Screen::Inbox | Screen::Review)
+        && m.link == pr_review_tui::model::Link::Live
+        && m.may_write("review.start")
+        && !(parked && m.may_write("review.publish"))
 }
 
 #[test]
@@ -471,6 +535,12 @@ fn the_footer_offers_a_key_exactly_when_it_acts() {
                 }
             }
             let offered: BTreeSet<String> = full.iter().flat_map(|h| hint_keys(h)).collect();
+            if room_to_move(&m) && !offered.contains("j") {
+                flag("oracle: somewhere to move, j/k not offered", screen.clone(), &at);
+            }
+            if daemon_takes_start(&m) && !offered.contains("s") {
+                flag("oracle: the daemon takes a start, s not offered", screen.clone(), &at);
+            }
             for (key, o) in &acts {
                 if *o == Outcome::Acts
                     && !GLOBAL.contains(&key.as_str())
