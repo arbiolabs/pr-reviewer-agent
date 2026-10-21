@@ -1,0 +1,13 @@
+{
+  "title": "Add Wallet.Withdraw",
+  "body": "Payouts need to take money out of a wallet. Withdraw refuses when the balance is too low.",
+  "labels": [
+    {
+      "file": "wallet/wallet.go",
+      "line_range": [30, 35],
+      "severity_at_least": "high",
+      "category": "concurrency",
+      "note": "Withdraw checks the balance through Balance(), which releases mu, and then takes mu again to subtract. Two concurrent withdrawals can both pass the check and drive the balance below zero. The check and the subtraction must happen under one lock."
+    }
+  ]
+}

@@ -1,0 +1,13 @@
+{
+  "title": "Retry charges on 5xx with an idempotency key",
+  "body": "The payments API returns transient 502s during their deploys. Retry up to 3 times with an Idempotency-Key so a retry never double-charges, and log each failed attempt so we can see it in Datadog.",
+  "labels": [
+    {
+      "file": "billing/client.py",
+      "line_range": [27, 27],
+      "severity_at_least": "medium",
+      "category": "security",
+      "note": "The retry warning logs the full request headers, which include Authorization: Bearer <PAYMENTS_API_KEY>. Every failed attempt writes the live payments key to the logs shipped to Datadog."
+    }
+  ]
+}

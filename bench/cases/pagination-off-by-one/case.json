@@ -1,0 +1,13 @@
+{
+  "title": "Add paginated order listing",
+  "body": "Adds GET /orders?page=N, 20 orders per page, newest first. The admin dashboard will call it.",
+  "labels": [
+    {
+      "file": "store/orders.go",
+      "line_range": [21, 22],
+      "severity_at_least": "medium",
+      "category": "correctness",
+      "note": "Pages are numbered from 1 and the handler defaults to page=1, but the offset is page * PageSize. Page 1 skips the 20 newest orders, which no page ever returns. The offset should be (page - 1) * PageSize."
+    }
+  ]
+}

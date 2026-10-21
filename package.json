@@ -13,6 +13,8 @@
     "typecheck": "tsc --noEmit",
     "test": "tsc --noEmit && vitest run",
     "pr-review": "node bin/pr-review.mjs",
+    "bench": "node bench/run.ts",
+    "bench:compare": "node bench/compare.ts",
     "protocol:emit": "node src/protocol/emit.ts"
   },
   "dependencies": {
