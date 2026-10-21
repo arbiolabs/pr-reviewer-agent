@@ -347,6 +347,15 @@ it("approves a review end to end over the socket: parked, previewed, published o
   // The start's own key replays its recorded result after the run finished: a true replay, not a new start.
   expect(operation(await command(c, { command: "review.start", params: { prId, expectedHeadSha: fixture.headSha } }))).toEqual(operation(started));
   expect(await taskStatuses(h.app)).toEqual(["terminal", "terminal"]);
+  // Once the base moves, the same key starts a new revision on it instead of replaying the reviewed one.
+  fake.setPull({ ...fixture.pull, baseSha: "e".repeat(40) });
+  const rebased = await command(c, { command: "review.start", params: { prId, expectedHeadSha: fixture.headSha } });
+  expect(rebased).toMatchObject({ status: "accepted", operationId: expect.stringMatching(/^review\.start:[0-9a-f]{32}$/) });
+  expect((rebased as { operationId: string }).operationId).not.toBe((started as { operationId: string }).operationId);
+  const rebasedId = (rebased as { operationId: string }).operationId.slice("review.start:".length);
+  expect(h.app.store.revision(rebasedId)?.base_sha).toBe("e".repeat(40));
+  expect(await command(c, { command: "review.cancel", params: { runId: rebasedId } })).toMatchObject({ status: "accepted" });
+  fake.setPull(fixture.pull);
   // A key that never started this revision (the head was reviewed some other way) is refused in plain words.
   h.app.store.db.prepare("DELETE FROM control_commands WHERE command = 'review.start'").run();
   expect(await command(c, { command: "review.start", params: { prId, expectedHeadSha: fixture.headSha } })).toEqual(

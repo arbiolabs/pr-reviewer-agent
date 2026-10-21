@@ -26,7 +26,7 @@ function revisionOf(app: App, revisionId: string): RevisionRow {
   return revision;
 }
 
-async function livePull(app: App, pulls: PullSource, prId: string) {
+export async function livePull(app: App, pulls: PullSource, prId: string) {
   const pr = app.store.pullById(prId);
   if (!pr) throw new Refused("NOT_FOUND", `no PR ${prId}`);
   const [owner, repo] = pr.repo_full_name.split("/") as [string, string];
