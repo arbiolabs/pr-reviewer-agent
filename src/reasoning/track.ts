@@ -217,7 +217,11 @@ export function findLongestRun(text: string, lines: string[]): Omit<EvidenceText
   const wanted = text.split("\n");
   const normalized = lines.map(normalizeLine);
   const positions = new Map<string, number[]>();
-  normalized.forEach((line, i) => positions.set(line, [...(positions.get(line) ?? []), i]));
+  normalized.forEach((line, i) => {
+    const at = positions.get(line);
+    if (at) at.push(i);
+    else positions.set(line, [i]);
+  });
   // Maximal runs only: a start that continues the previous line's run was found from there.
   const runs: { o: number; p: number; k: number }[] = [];
   for (let o = 0; o < wanted.length; o++) {
@@ -229,9 +233,12 @@ export function findLongestRun(text: string, lines: string[]): Omit<EvidenceText
     }
   }
   for (const run of runs.sort((a, b) => b.k - a.k)) {
-    const sub = wanted.slice(run.o, run.o + run.k).join("\n");
-    if (!substantial(sub)) break;
-    if (runs.filter((r) => r.o <= run.o && r.o + r.k >= run.o + run.k).length === 1) return { start: run.p + 1, end: run.p + run.k, text: sub };
+    const sub = wanted.slice(run.o, run.o + run.k);
+    const text = sub.join("\n");
+    if (!substantial(text)) break;
+    // Every occurrence of this run's text starts at a position of its first line.
+    const occurrences = (positions.get(sub[0]!) ?? []).filter((p) => sub.every((line, k) => normalized[p + k] === line)).length;
+    if (occurrences === 1) return { start: run.p + 1, end: run.p + run.k, text };
   }
   return undefined;
 }

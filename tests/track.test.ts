@@ -264,6 +264,16 @@ it("finds a finding's own text in the file a named candidate reports, by the lon
   expect(findLongestRun("}\n}", ["}", "}"])).toBe(undefined);
 });
 
+it("finds the longest run in time that grows with the file, not with its square", () => {
+  const text = "if (a) {\nfoo();\n}\n}\n}";
+  const lines = (n: number) => Array.from({ length: n }, (_, i) => (i % 2 ? "}" : `call(${i});`));
+  findLongestRun(text, lines(1_000));
+  const started = performance.now();
+  expect(findLongestRun(text, lines(80_000))).toBe(undefined);
+  // About 20 ms when linear; over a second when each line copied the position list of every `}` before it.
+  expect(performance.now() - started).toBeLessThan(400);
+});
+
 it("links a candidate that names its prior finding only where code sees the report: near the finding's anchor or on its lines at this head", () => {
   const named = { priorFindingId: "f-1", title: "Anyone can refund" };
   // The code was rewritten in place: the anchor drifted past LINK_DISTANCE, but the citation overlaps the lines last seen.
