@@ -62,12 +62,12 @@ Sleep 1s
 Type "y"
 Sleep 4.5s
 
-# An action: c on #338's running review asks first, and y cancels it.
+# An action: s on #1287 asks first, and y starts a new review that runs through every phase to done.
 Escape
 Sleep 1s
-Type "hk"
+Type "hj"
 Sleep 1.5s
-Type "c"
+Type "s"
 Sleep 2.5s
 Type "y"
-Sleep 3s
+Sleep 19s
