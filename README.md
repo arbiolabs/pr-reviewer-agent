@@ -118,6 +118,57 @@ Press `?` for the keys and `q` to quit. To review your own PRs:
 
 To post the review to the PR, add `--publish`. pr-review posts one `COMMENT` review with inline comments. It never approves, requests changes, or merges.
 
+### Configure it
+
+`pr-review.config.json` in the working directory is optional and overrides the defaults:
+
+```json
+{
+	"review": { "publish_mode": "approval" },
+	"models": { "default": "anthropic/claude-opus-5-5" }
+}
+```
+
+`review.publish_mode` decides what happens to a finished review:
+
+- `dry_run`, the default, records the review and posts nothing.
+- `comment` posts it to the PR.
+- `approval` holds it until you approve it in the terminal client or with `pr-review approve`.
+
+To run the terminal client against your own reviews, build it, then start the daemon and the client in two terminals:
+
+```bash
+(cd tui && cargo build --release)
+node bin/pr-review.mjs daemon --allow-commands   # terminal 1
+node bin/pr-review.mjs tui                       # terminal 2
+```
+
+To review PRs when webhooks arrive, run `pr-review serve` as a GitHub App. [Running the service](docs/service.md) covers the setup.
+
+### Set up Jev
+
+Jev classifies the risk of a change during triage. It can raise the review depth above standard, never lower it, so without Jev every review runs at standard depth.
+
+| Situation | What Jev uses |
+|---|---|
+| Public repository, no key | The free OpenCode Zen tier. Nothing to set up. |
+| `TYPESAFE_API_KEY` set | TypeSafe's API, for every repository, private ones included. |
+| Private repository, no key | Nothing. Jev is skipped with `jev_skipped_private_repo`, so the PR's diff never reaches the free tier. |
+
+To use Jev on private repositories, get an API key from TypeSafe and export it:
+
+```bash
+export TYPESAFE_API_KEY=...
+```
+
+To send private diffs to the free tier instead, set `"jev": { "allow_keyless_for_private": true }` in `pr-review.config.json`.
+
+`pr-review serve` and `pr-review daemon --allow-commands` share one Jev client across every repository. Without a key, and without `allow_keyless_for_private`, they skip Jev for public repositories too.
+
+To check what Jev decided, run `node bin/pr-review.mjs inspect --pr owner/repo#123`. Its `mode` line shows the review depth and the reasons, including why Jev was skipped. `--no-jev` skips Jev for one review.
+
+[Configuration](docs/configuration.md) lists every setting.
+
 ## Commands
 
 | Command | What it does |
