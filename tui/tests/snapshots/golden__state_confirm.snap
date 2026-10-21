@@ -5,19 +5,19 @@ expression: text
   pr-review · ▘ reviewing #184 verify                                   ● live
 
 
-  PULL REQUESTS                                                              3
+  Start a review of #186 at 6666666?
+  daemon command review.start
 
-▌ · #186 Bump deps
-▌   acme/shop · 6666666                                            not reviewed
+  y confirms · n or Esc cancels
 
-  ○ #185 Fix cache eviction
-    acme▌                                                                 ○1 →0
-        ▌  REVIEW.START
-  ▘ #184▌  Start a review of #186 at 6666666?
-    acme▌  sends review.start                                           ▁ 0.0/s
-        ▌
-        ▌  y confirm   n / Esc cancel
-        ▌
+
+
+
+
+
+
+
+
 
 
 

@@ -1286,7 +1286,7 @@ fn mutation(m: &mut Model, mu: Mutation, fx: &mut Vec<Effect>) {
             return;
         }
     };
-    confirm(m, cap, prompt, command);
+    confirm(m, prompt, command);
 }
 
 /// The publication page for a parked run: its stored payload, and the diff its comments sit on.
@@ -1323,8 +1323,8 @@ pub fn publish_block(m: &Model, p: &PublicationPreview) -> Option<String> {
 }
 
 /// Opens the generic confirmation modal; `y` inside it sends `command`.
-pub fn confirm(m: &mut Model, title: &str, prompt: String, command: Command) {
-    m.ui.modals.push(Modal::Confirm { title: title.into(), prompt, command, state: ConfirmState::Asking });
+pub fn confirm(m: &mut Model, prompt: String, command: Command) {
+    m.ui.modals.push(Modal::Confirm { prompt, command, state: ConfirmState::Asking });
 }
 
 /// The review's GitHub URL once it is published, and only an `https://github.com/` one.
@@ -1575,7 +1575,7 @@ fn select_account(m: &mut Model) {
         return;
     }
     let prompt = format!("Use {} on {} for GitHub reads and publishing?", a.login, a.host);
-    confirm(m, "account.select", prompt, Command::SelectAccount(AccountParams { account_id: a.id }));
+    confirm(m, prompt, Command::SelectAccount(AccountParams { account_id: a.id }));
 }
 
 /// `w`: the running review's document, one key from anywhere. Pressed again, it moves on to the next running PR.

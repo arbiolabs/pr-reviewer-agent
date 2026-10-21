@@ -17,7 +17,7 @@ use crate::theme::{Bg, Role};
 pub fn modal(c: &Ctx, f: &mut Frame, body: Rect, modal: &Modal) {
     match modal {
         Modal::Input { .. } => {}
-        Modal::Confirm { title, prompt, command, state } => confirm(c, f, body, title, prompt, command.name(), state),
+        Modal::Confirm { prompt, command, state } => confirm(c, f, body, prompt, command.name(), state),
         Modal::Help { scroll } | Modal::Finding { scroll, .. } | Modal::Publication { scroll, .. } => {
             scrolled(c, f, body, page_lines(c, body, modal).unwrap_or_default(), *scroll)
         }
@@ -48,39 +48,25 @@ fn heading(c: &Ctx, text: &str) -> Line<'static> {
     Line::from(c.span(text.to_string(), Role::Focus))
 }
 
-/// The only place `y` acts: a surface panel with the accent bar, the question, the command it sends and its state.
-fn confirm(c: &Ctx, f: &mut Frame, body: Rect, title: &str, prompt: &str, command: &str, state: &ConfirmState) {
+/// The only place `y` acts: a page in the reading column, like the preview, asking the question in words, with the
+/// daemon command in a dim detail line and the answer wrapped in full.
+fn confirm(c: &Ctx, f: &mut Frame, body: Rect, prompt: &str, command: &str, state: &ConfirmState) {
     let (status, role) = match state {
-        ConfirmState::Asking => ("y confirm   n / Esc cancel".to_string(), Role::Title),
+        ConfirmState::Asking => (format!("y confirms {} n or Esc cancels", c.t.g().sep), Role::Title),
         ConfirmState::Requested(_) => (format!("requested{} waiting for the server", c.t.g().ellipsis), Role::Pending),
-        ConfirmState::Accepted(op) => (format!("accepted ({op}); waiting for events to confirm it"), Role::Active),
+        ConfirmState::Accepted(_) => {
+            ("accepted; waiting for the event that shows it happened".to_string(), Role::Active)
+        }
         ConfirmState::Failed(e) => (format!("rejected: {e}"), Role::Fail),
         ConfirmState::TimedOut => ("request timed out; y sends it again, r refreshes".to_string(), Role::Fail),
     };
-    let w = 64.min(body.width) as usize;
-    let surface = c.t.bg(Bg::Surface);
-    let inner = w.saturating_sub(4);
-    let bar = Span::styled(if c.t.ascii { "|" } else { "▌" }, c.s(Role::Accent).patch(surface));
-    let row = |spans: Vec<Span<'static>>| {
-        let mut s = vec![bar.clone(), Span::styled("  ", surface)];
-        s.extend(spans.into_iter().map(|x| x.patch_style(surface)));
-        Line::from(filled(s, w, surface))
-    };
-    let mut lines = vec![row(vec![]), row(vec![c.span(title.to_uppercase(), Role::Muted)])];
-    lines.extend(rich(c, prompt, inner, Role::Title).into_iter().map(row));
-    lines.push(row(vec![c.span(format!("sends {command}"), Role::Muted)]));
-    lines.push(row(vec![]));
-    lines.push(row(vec![c.span(c.fit(&status, inner), role)]));
-    lines.push(row(vec![]));
-    let h = (lines.len() as u16).min(body.height);
-    let area = Rect {
-        x: body.x + (body.width - w as u16) / 2,
-        y: body.y + body.height.saturating_sub(h) / 2,
-        width: w as u16,
-        height: h,
-    };
-    f.render_widget(Clear, area);
-    f.render_widget(Paragraph::new(lines), area);
+    let w = column(body).width as usize;
+    let mut lines = vec![Line::raw("")];
+    lines.extend(rich(c, prompt, w, Role::Title).into_iter().map(Line::from));
+    lines.push(Line::from(c.span(c.fit(&format!("daemon command {command}"), w), Role::Muted)));
+    lines.push(Line::raw(""));
+    lines.extend(rich(c, &status, w, role).into_iter().map(Line::from));
+    page(c, f, body, lines);
 }
 
 /// The largest scroll of a `len`-line page in `height` rows. An overflowing page keeps its last row for the cue.

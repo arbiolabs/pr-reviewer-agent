@@ -231,7 +231,6 @@ pub enum Modal {
     },
     /// The only place `y` acts. Generic over the command it confirms.
     Confirm {
-        title: String,
         prompt: String,
         command: Command,
         state: ConfirmState,

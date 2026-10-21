@@ -459,3 +459,34 @@ fn the_preview_footer_offers_y_only_while_it_can_publish_and_o_only_once_there_i
     let f = footer(&mut m);
     assert!(!f.contains("y publish") && f.contains("o open on GitHub"), "published: {f}");
 }
+
+#[test]
+fn the_confirmation_is_a_page_with_a_human_title_and_wraps_its_result() {
+    for (w, h) in [(80, 24), (120, 38)] {
+        let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#186");
+        m.ui.screen = pr_review_tui::model::Screen::Review;
+        press(&mut m, KeyCode::Char('s'));
+        let (frame, _) = render(&mut m, w, h);
+        assert!(frame.contains("Start a review of #186 at 6666666?"), "{frame}");
+        assert!(!frame.contains("REVIEW.START") && !frame.contains("sends review.start"), "{frame}");
+        assert!(frame.contains("review.start"), "the command name stays in a detail line:\n{frame}");
+        let body: Vec<&str> = frame.lines().skip(2).take(h as usize - 3).collect();
+        assert!(
+            body.iter().all(|l| !l.contains("#185") && !l.contains("PULL REQUESTS")),
+            "the rail shows through:\n{frame}"
+        );
+        let fx = press(&mut m, KeyCode::Char('y'));
+        let rid = commands(&fx)[0].request_id.clone();
+        let long = "the head moved to 7777777 while the request was in flight, so the daemon refused to start a review of a revision that is no longer the head of this pull request";
+        send(
+            &mut m,
+            &format!(
+                r#"{{"type":"command.result","requestId":"{rid}","status":"rejected","code":"REVISION_STALE","message":"{long}"}}"#
+            ),
+        );
+        let (frame, _) = render(&mut m, w, h);
+        let text = frame.split_whitespace().collect::<Vec<_>>().join(" ");
+        assert!(text.contains("pull request"), "{w}x{h}: the rejection is cut:\n{frame}");
+        assert!(!frame.contains('…'), "{w}x{h}: {frame}");
+    }
+}
