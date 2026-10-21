@@ -824,6 +824,17 @@ fn the_footer_offers_no_key_that_has_nothing_to_act_on() {
     assert!(f.contains("h pull requests") && f.contains("t timeline"), "{f}");
     assert!(!f.contains("j/k finding") && !f.contains("Enter read") && !f.contains("J/K"), "#186 has no findings: {f}");
     assert!(!f.contains("d diff"), "#186 has no review, so no diff: {f}");
+
+    // No daemon and no PR: nothing to diff, list or show a timeline of, and h leaves no findings to go to.
+    let mut m = model();
+    update(&mut m, Msg::Net(NetEvent::Lost { reason: "no socket".into(), retry_in_ms: Some(2000) }));
+    m.ui.screen = pr_review_tui::model::Screen::Review;
+    m.ui.focus = pr_review_tui::model::Pane::Main;
+    assert_eq!(footer(&mut m), "? help  q quit");
+    press(&mut m, KeyCode::Char('h'));
+    assert_eq!(footer(&mut m), "? help  q quit", "no l findings");
+    m.ui.screen = pr_review_tui::model::Screen::Diff;
+    assert_eq!(footer(&mut m), "Esc back  ? help");
 }
 
 #[test]

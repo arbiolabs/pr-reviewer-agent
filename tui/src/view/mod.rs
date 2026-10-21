@@ -439,6 +439,8 @@ fn footer_line(c: &Ctx, width: u16) -> Line<'static> {
         let no_diff = c.m.diff.as_ref().is_none_or(|d| d.files.is_empty() && d.pending.is_none());
         hints.retain(|h| match *h {
             "d diff" if c.m.ui.screen == Screen::Review => reviewed,
+            "t timeline" | "l findings" if c.m.ui.screen == Screen::Review => c.m.selected_pr().is_some(),
+            "h pull requests" => !c.m.domain.prs.is_empty(),
             "Esc back" | "? help" if c.m.ui.screen == Screen::Diff => true,
             _ if c.m.ui.screen == Screen::Diff && no_diff => false,
             "j/k pull request" | "Enter read" if list => shown > 0,
