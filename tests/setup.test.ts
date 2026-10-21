@@ -95,3 +95,11 @@ it("saveConfig merges a nested patch and keeps every other key", () => {
     models: { preferred: ["openai/*"], default: "faux/reviewer" },
   });
 });
+
+it("fails when models.default is not available and points at setup instead of login", async () => {
+  writeFileSync(configPath, JSON.stringify({ models: { default: "openai/nope" } }));
+  const { code, lines } = await run(["--check"]);
+  expect(code).toBe(1);
+  expect(lines).toContain("  ✗ model   model openai/nope (from config) is not available; available: faux/reviewer");
+  expect(lines).toContain("            run `pr-review setup` to pick an available model");
+});

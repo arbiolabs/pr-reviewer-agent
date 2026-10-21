@@ -524,8 +524,8 @@ export async function gatherChecks(deps: CliDeps, dataDir: string, env: Env = pr
     const from = choice.source === "config" ? `from ${path}` : choice.source === "default" ? "first available" : `from ${choice.source}`;
     checks.push({ id: "model", status: "ok", detail: `${choice.ref} (${from})` });
   } else {
-    const detail = choice.kind === "error" && available.length > 0 ? choice.message : "no models available";
-    checks.push({ id: "model", status: "missing", detail, fix: "run `pr-review login anthropic`, or set ANTHROPIC_API_KEY" });
+    if (choice.kind === "error" && available.length > 0) checks.push({ id: "model", status: "missing", detail: choice.message, fix: "run `pr-review setup` to pick an available model" });
+    else checks.push({ id: "model", status: "missing", detail: "no models available", fix: "run `pr-review login anthropic`, or set ANTHROPIC_API_KEY" });
   }
 
   const detection = await detectGh(env);
@@ -580,7 +580,8 @@ async function setup(args: string[], deps: CliDeps, dataDir: string, out: Out, e
   if (status("model") === "missing" && (await available()).length === 0 && (await confirm("Log in to anthropic now?", true))) await login(["anthropic"], deps, out);
   if (config) {
     const models = await available();
-    if (models.length > 0 && !config.models.default && (await confirm(`No models.default in ${configPath()}. Pick one now?`, true))) saveConfig({ models: { default: await pickModel(models) } });
+    const why = !config.models.default ? `No models.default in ${configPath()}.` : status("model") === "missing" ? `models.default ${config.models.default} is not available.` : undefined;
+    if (models.length > 0 && why && (await confirm(`${why} Pick one now?`, true))) saveConfig({ models: { default: await pickModel(models) } });
     const current = config.review.publish_mode;
     let mode: Config["review"]["publish_mode"] | undefined;
     while (!mode) {
