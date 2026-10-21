@@ -281,9 +281,9 @@ async function reconcile(args: string[], deps: CliDeps, dataDir: string, out: Ou
 }
 
 /** One Jev engine serves every repository, so the keyless tier is used only when private diffs may go there. */
-function jevFromEnv(config: Config, deps: CliDeps): JevRoute {
+export function jevFromEnv(config: Config, deps: CliDeps): JevRoute {
   if (process.env.TYPESAFE_API_KEY) return deps.engine ?? new JevDecisionEngine(createTypeSafeClient());
-  return config.jev.allow_keyless_for_private ? (deps.engine ?? new JevDecisionEngine(createZenClient())) : { skipped: "jev_skipped_private_repo" };
+  return config.jev.allow_keyless_for_private ? (deps.engine ?? new JevDecisionEngine(createZenClient())) : { skipped: "jev_skipped_no_key" };
 }
 
 /**

@@ -165,7 +165,7 @@ export TYPESAFE_API_KEY=...
 
 To send private diffs to the free tier instead, set `"jev": { "allow_keyless_for_private": true }` in `pr-review.config.json`.
 
-`pr-review serve` and `pr-review daemon --allow-commands` share one Jev client across every repository. Without a key, and without `allow_keyless_for_private`, they skip Jev for public repositories too.
+`pr-review serve` and `pr-review daemon --allow-commands` share one Jev client across every repository. Without a key, and without `allow_keyless_for_private`, they skip Jev for public repositories too, with the reason `jev_skipped_no_key`.
 
 To check what Jev decided, run `node bin/pr-review.mjs inspect --pr owner/repo#123`. Its `mode` line shows the review depth and the reasons, including why Jev was skipped. `--no-jev` skips Jev for one review.
 
