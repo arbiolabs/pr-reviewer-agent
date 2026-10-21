@@ -4,7 +4,6 @@ expression: text
 ---
   pr-review · ▘ reviewing #184 publish              ● live
 
-
   acme/shop #184 → publication
 
   Published on GitHub
@@ -16,5 +15,6 @@ expression: text
 
   Summary
     Automated PR review
-    … 31 more below, j scrolls
+
+    … 30 more below, j scrolls
    j/k scroll  m raw markdown  d diff  Esc close

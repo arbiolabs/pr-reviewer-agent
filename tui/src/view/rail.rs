@@ -101,7 +101,7 @@ pub fn rail(c: &Ctx, f: &mut Frame, area: Rect, focused: bool) {
     let sel = c.m.ui.selected_pr.as_ref().and_then(|id| prs.iter().position(|p| &p.id == id));
     if range.start > 0 {
         lines.pop();
-        let more = format!("  {} {} more above", c.t.g().arrow, range.start);
+        let more = format!("  {} {} more above", c.t.g().up, range.start);
         lines.push(Line::from(filled(vec![Span::styled(more, c.s(Role::Muted).patch(bg))], w, bg)));
     }
     let below = prs.len() - range.end;
@@ -110,7 +110,7 @@ pub fn rail(c: &Ctx, f: &mut Frame, area: Rect, focused: bool) {
         lines.extend(pr_rows(c, pr, w, selected, rh));
     }
     if below > 0 {
-        let more = format!("  {} more below", below);
+        let more = format!("  {} {below} more below", c.t.g().down);
         let last = lines.len().min(area.height as usize) - 1;
         lines.truncate(last);
         lines.push(Line::from(filled(vec![Span::styled(more, c.s(Role::Muted).patch(bg))], w, bg)));

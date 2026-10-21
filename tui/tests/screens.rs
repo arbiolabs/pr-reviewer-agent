@@ -772,3 +772,19 @@ fn settings_lists_a_disconnect_that_repeats_on_every_retry_once_with_its_count()
     assert_eq!(rows.len(), 1, "{frame}");
     assert!(rows[0].contains("(×7)"), "{}", rows[0]);
 }
+
+#[test]
+fn below_twenty_rows_no_row_is_spent_on_the_spacer_and_the_rail_points_up_and_down() {
+    for ascii in [false, true] {
+        let mut s = Sim::new(Look { ascii, ..Look::default() }).play("showcase", usize::MAX);
+        let last = s.m.inbox().last().map(|p| p.id.clone());
+        s.m.ui.selected_pr = last;
+        let (frame, _) = render(&mut s.m, 60, 16);
+        let rows: Vec<&str> = frame.lines().collect();
+        assert!(!rows[1].trim().is_empty() || !rows[2].trim().is_empty(), "one blank row at most:\n{frame}");
+        let up = if ascii { "^ 1 more above" } else { "↑ 1 more above" };
+        assert!(frame.contains(up), "{frame}");
+        let (frame, _) = render(&mut s.m, 80, 24);
+        assert!(frame.lines().nth(1).unwrap().trim().is_empty(), "the spacer stays at 24 rows:\n{frame}");
+    }
+}

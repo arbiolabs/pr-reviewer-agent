@@ -4,7 +4,6 @@ expression: ascii_text
 ---
   pr-review | / reviewing #184 verify new finding   * live
 
-
   acme/shop  #184  timeline
   Booking API
   2 events | oldest first | the whole PR (f)
@@ -12,6 +11,7 @@ expression: ascii_text
   VERIFY --------------------------------------- 13:00:11
     13:00:11    read_file     src/booking.ts:1-120
   > 13:00:12  ^ HIGH          Finding f-1  detected
+
 
 
 

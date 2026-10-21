@@ -4,7 +4,6 @@ expression: ascii_text
 ---
   pr-review | ~ #184 waiting for you                * live
 
-
   acme/shop #184 -> publication preview
 
   Publish this review?
@@ -16,5 +15,6 @@ expression: ascii_text
     Automated PR review
 
     Reviewed commit:
-    ~ 29 more below, j scrolls
+    4444444444444444444444444444444444444444
+    ~ 28 more below, j scrolls
    y publish  j/k scroll  d diff  Esc close

@@ -97,12 +97,12 @@ fn ctx(m: &Model, width: u16) -> Ctx<'_> {
     }
 }
 
-/// The title, spacer, banner, body and footer rows.
+/// The title, spacer, banner, body and footer rows. Below 20 rows the spacer goes to the body.
 fn regions(c: &Ctx, area: Rect) -> [Rect; 5] {
     let banner = banner(c, area.width).is_some();
     Layout::vertical([
         Constraint::Length(1),
-        Constraint::Length(1),
+        Constraint::Length(u16::from(area.height >= 20)),
         Constraint::Length(u16::from(banner)),
         Constraint::Min(1),
         Constraint::Length(1),

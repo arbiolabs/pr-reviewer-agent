@@ -4,7 +4,6 @@ expression: text
 ---
   pr-review · ▘ reviewing #184 verify new finding   ● live
 
-
   PULL REQUESTS                                          3
 
   · #186 Bump deps
@@ -15,6 +14,7 @@ expression: text
 
   ▘ #184 Booking API
     acme/shop · by octocat · verify     ●─●─●─▘─○─○ ▁ 0.2/s
+
 
 
    j/k pull request  Enter read  d diff  ? help  q quit
