@@ -101,3 +101,10 @@ it("reads who raised the review depth from the routing reasons", () => {
   expect(routing(["Jev needs-deep-review probability 0.85 suggests deep", "mandatory deep path rule matched: db/migrations/1.sql"])).toEqual({ jevSuggested: "deep", jevFailed: false, pathRule: true });
   expect(routing(["Jev disabled by --no-jev; using standard"])).toEqual({ jevSuggested: null, jevFailed: true, pathRule: false });
 });
+
+it("keeps discarded candidates apart from reported findings on the sheet, with the verifier's reason", () => {
+  const dropped = { ...f("a.ts", 10), discardReason: "evidence is suspected" };
+  const sheet = uniqueFindings(7, HEAD, [[dropped], [dropped]], undefined, "discarded");
+  expect(sheet.map((e) => [e.id, e.kind, e.discardReason, e.runs])).toEqual([["discarded:7:a.ts:10:correctness", "discarded", "evidence is suspected", [1, 2]]]);
+  expect(uniqueFindings(7, HEAD, [[f("a.ts", 10)]])[0]!.kind).toBe("reported");
+});

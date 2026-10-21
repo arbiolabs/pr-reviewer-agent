@@ -100,17 +100,23 @@ export function stability(runs: EvalFinding[][], tol = LINE_TOLERANCE): number |
 export const mean = (xs: number[]) => (xs.length === 0 ? undefined : xs.reduce((a, b) => a + b, 0) / xs.length);
 
 export type Verdict = "real" | "not_real" | "unsure";
-/** One row of the grading sheet: a finding as reported across runs, keyed so a regenerated sheet keeps its verdicts. */
-export type GradeEntry = EvalFinding & { id: string; pr: number; runs: number[]; reference: string; verdict: Verdict | null };
+/** `reported` reached the review; `discarded` is a candidate the verifier dropped, graded to see what the verifier costs. */
+export type GradeKind = "reported" | "discarded";
+export type DiscardedCandidate = EvalFinding & { discardReason: string | null };
+/** One row of the grading sheet: a finding across runs, keyed so a regenerated sheet keeps its verdicts. */
+export type GradeEntry = EvalFinding & { id: string; kind: GradeKind; discardReason?: string | null; pr: number; runs: number[]; reference: string; verdict: Verdict | null };
 
 /** Groups one PR's findings across runs into unique findings: same path and category, line within `tol` of the first. */
-export function uniqueFindings(pr: number, headSha: string, runs: EvalFinding[][], tol = LINE_TOLERANCE): GradeEntry[] {
+export function uniqueFindings(pr: number, headSha: string, runs: (EvalFinding | DiscardedCandidate)[][], tol = LINE_TOLERANCE, kind: GradeKind = "reported"): GradeEntry[] {
   const entries: GradeEntry[] = [];
   for (const [run, findings] of runs.entries()) {
     for (const f of findings) {
       const entry = entries.find((e) => same(e, f, tol) && !e.runs.includes(run + 1));
       if (entry) entry.runs.push(run + 1);
-      else entries.push({ id: `${pr}:${f.file}:${f.line ?? "file"}:${f.category}`, pr, ...f, runs: [run + 1], reference: `PR ${pr} at ${headSha.slice(0, 12)}, ${f.file}:${f.line ?? "file"}`, verdict: null });
+      else {
+        const id = `${kind === "discarded" ? "discarded:" : ""}${pr}:${f.file}:${f.line ?? "file"}:${f.category}`;
+        entries.push({ id, kind, pr, ...f, runs: [run + 1], reference: `PR ${pr} at ${headSha.slice(0, 12)}, ${f.file}:${f.line ?? "file"}`, verdict: null });
+      }
     }
   }
   return entries;

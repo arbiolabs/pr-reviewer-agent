@@ -1,7 +1,10 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join, resolve } from "node:path";
 import { parseArgs } from "node:util";
+import type { Disposition } from "../src/domain/types.ts";
+import { AppStore } from "../src/persistence/store.ts";
 import {
+  type DiscardedCandidate,
   discardKind,
   type GradeEntry,
   gradedPrecision,
@@ -129,14 +132,42 @@ for (let run = 1; run <= runCount; run++) {
   console.log(`  run ${run}: ${findings} findings over ${lines} changed lines = ${fmt(lines ? (findings * 1000) / lines : undefined)} per 1k lines`);
 }
 
+/** The candidates the verifier dropped in one review, read from that review's store: results.json keeps only the reasons. */
+function discardedOf(r: RunRecord): DiscardedCandidate[] {
+  const db = join(dataset, "work", `pr-${r.pr}-run-${r.run}`, "app.sqlite");
+  if (!existsSync(db)) return [];
+  const store = AppStore.open(db);
+  try {
+    const row = store.db.prepare("SELECT candidates_json, dispositions_json FROM candidate_sets ORDER BY created_at DESC LIMIT 1").get() as { candidates_json: string; dispositions_json: string } | undefined;
+    if (!row) return [];
+    const candidates = JSON.parse(row.candidates_json) as { id: string; file: string; newLine: number | null; severity: string; category: string; title: string; explanation: string }[];
+    return (JSON.parse(row.dispositions_json) as Disposition[])
+      .filter((d) => d.state === "DISCARDED")
+      .flatMap((d) => {
+        const c = candidates.find((x) => x.id === d.candidateId);
+        return c ? [{ file: c.file, line: c.newLine, severity: c.severity, category: c.category, title: c.title, explanation: c.explanation, discardReason: d.reason }] : [];
+      });
+  } finally {
+    store.close();
+  }
+}
+
 if (values.labels) {
   const path = resolve(values.labels);
-  const fresh = prs.flatMap((p) => uniqueFindings(p.number, p.headSha, records(p.number).filter((r) => r.state === "COMPLETED").map((r) => r.findings)));
-  const sheet = mergeSheet(fresh, existsSync(path) ? (JSON.parse(readFileSync(path, "utf8")) as GradeEntry[]) : []);
-  writeFileSync(path, `${JSON.stringify(sheet, null, 2)}\n`);
+  const completedOf = (n: number) => records(n).filter((r) => r.state === "COMPLETED");
+  const fresh = prs.flatMap((p) => [
+    ...uniqueFindings(p.number, p.headSha, completedOf(p.number).map((r) => r.findings)),
+    ...uniqueFindings(p.number, p.headSha, completedOf(p.number).map(discardedOf), LINE_TOLERANCE, "discarded"),
+  ]);
+  const all = mergeSheet(fresh, existsSync(path) ? (JSON.parse(readFileSync(path, "utf8")) as GradeEntry[]) : []);
+  writeFileSync(path, `${JSON.stringify(all, null, 2)}\n`);
+  const sheet = all.filter((e) => e.kind === "reported");
+  const dropped = all.filter((e) => e.kind === "discarded");
   const g = gradedPrecision(sheet);
+  const d = gradedPrecision(dropped);
   console.log(`\nGraded precision (${path})`);
   console.log(`  ${sheet.length} unique findings, ${g.graded} graded: ${g.real} real, ${g.notReal} not real, ${g.unsure} unsure; precision over real and not real ${pct(g.precision)}`);
+  console.log(`  ${dropped.length} unique discarded candidates, ${d.graded} graded: ${d.real} real, ${d.notReal} not real, ${d.unsure} unsure; real among graded discards ${pct(d.precision)} (what the verifier threw away)`);
   if (g.graded > 0) {
     const real = sheet.filter((e) => e.verdict === "real");
     const commentsOf = (pr: number) => rows.find((r) => r.pr === pr)!.comments.considered;

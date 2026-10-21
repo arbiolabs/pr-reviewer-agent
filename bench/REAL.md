@@ -55,6 +55,8 @@ The report prints one row per pull and these sections:
 
 `--labels FILE` writes a grading sheet with one entry per unique finding: the pull, path, line, category, severity, title, explanation, the runs that reported it, a reference without a link, and `verdict: null`. Set each verdict to `real`, `not_real` or `unsure`, then run the report again. The rerun keeps every verdict whose finding is still in the results, and reports the precision over the findings graded `real` or `not_real`, and how the real findings agree with the human comments.
 
+The sheet also lists each unique candidate the verifier discarded, with `kind: "discarded"` and its `discardReason`. Reported findings have `kind: "reported"`. The report reads the discarded candidates from each review's own store under `work/`, because `results.json` keeps only the reasons. Grade them the same way: the report then prints the share of graded discards that were real, which is what the verifier's strictness costs. A discarded entry's id starts with `discarded:`, so it never collides with a reported finding.
+
 ## Limits
 
 - **Human comments are weak labels.** They cover what a reviewer chose to mention, on the lines they chose. A defect that no human commented on is not a false positive, and a comment about naming is not a missed defect.
