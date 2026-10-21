@@ -374,9 +374,13 @@ fn server_message(m: &mut Model, msg: ServerMessage, fx: &mut Vec<Effect>) {
         }
         ServerMessage::PublicationPreview(p) => {
             // Snapshots carry no publication status, so after a resync the preview is where it comes back from.
-            if m.domain.publications.get(&p.run_id).is_none_or(|x| x.status != p.status) {
-                let seeded =
-                    PublicationChanged { run_id: p.run_id.clone(), status: p.status, review_id: None, url: None };
+            if m.domain
+                .publications
+                .get(&p.run_id)
+                .is_none_or(|x| x.status != p.status || x.review_id.is_none() && p.review_id.is_some())
+            {
+                let (review_id, url) = (p.review_id, p.url.clone());
+                let seeded = PublicationChanged { run_id: p.run_id.clone(), status: p.status, review_id, url };
                 m.domain.publications.insert(p.run_id.clone(), seeded);
             }
             for x in &mut m.ui.modals {

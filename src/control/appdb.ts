@@ -277,6 +277,9 @@ export class AppDbSource implements ControlSource {
       const outbox = revision && this.outboxOf(runId);
       if (!revision || !outbox) throw new ControlError("NOT_FOUND", `no stored publication for run ${runId}`);
       const payload = JSON.parse(outbox.payload_json) as ReviewPayload;
+      // A reopened run reviewing again still holds its old payload, which waits for an approval it must re-earn.
+      const status = publicationStatus(revision.state, outbox.status) ?? "awaiting_approval";
+      const { reviewId, url } = this.publicationChange(revision, status);
       return {
         runId,
         previewId: outbox.payload_hash,
@@ -284,8 +287,8 @@ export class AppDbSource implements ControlSource {
         body: payload.body,
         comments: payload.comments,
         event: payload.event,
-        // A reopened run reviewing again still holds its old payload, which waits for an approval it must re-earn.
-        status: publicationStatus(revision.state, outbox.status) ?? "awaiting_approval",
+        status,
+        ...(reviewId === undefined ? {} : { reviewId, url }),
       };
     });
   }

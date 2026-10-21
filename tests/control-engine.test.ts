@@ -343,7 +343,12 @@ it("approves a review end to end over the socket: parked, previewed, published o
   ]);
   expect(operation(await command(c, { command: "review.start", params: { prId, expectedHeadSha: fixture.headSha } }))).toEqual(operation(started));
   c.send({ type: "publication.get", requestId: "pub2", runId });
-  expect(await c.waitFor((m) => m.type === "publication.preview" && m.requestId === "pub2")).toMatchObject({ status: "published" });
+  // A client that lost the publication events to a resync gets the review back from the preview.
+  expect(await c.waitFor((m) => m.type === "publication.preview" && m.requestId === "pub2")).toMatchObject({
+    status: "published",
+    reviewId: 1000,
+    url: "https://github.com/acme/shop/pull/1#pullrequestreview-1000",
+  });
 }, 60_000);
 
 it("supersedes a parked review when the head moves before approval, with nothing posted", async () => {

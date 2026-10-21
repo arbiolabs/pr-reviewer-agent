@@ -947,6 +947,7 @@ export const fixtures: Record<string, ClientMessage | ServerMessage | Record<str
   "server.welcome.engine": welcome(108, EPOCH, ["account.select", ...REVIEW_COMMANDS], "engine"),
   "server.welcome.read-only": welcome(108, EPOCH, ["account.select"], "read-only", "another pr-review is running on /srv/pr-review/.data"),
   "server.publication.preview": preview,
+  "server.publication.preview.published": { ...preview, status: "published", reviewId: 3141, url: "https://github.com/acme/shop/pull/184#pullrequestreview-3141" },
   "server.snapshot": snapshot(108, [pr1, pr2, pr3], [run1, run2], [f1, f2]),
   "server.snapshot.accounts": snapshot(108, [pr1], [run1], [f1], EPOCH, [
     account("env", "GITHUB_TOKEN", { scopes: [] }),

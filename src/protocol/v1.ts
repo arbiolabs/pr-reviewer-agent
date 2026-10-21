@@ -351,6 +351,8 @@ export const ServerMessage = Type.Union([
     comments: Type.Array(ReviewComment),
     event: Type.Literal("COMMENT"),
     status: oneOf(PUBLICATION_STATUSES),
+    reviewId: Type.Optional(Type.Integer({ minimum: 1, description: "the GitHub review, once published" })),
+    url: Type.Optional(Type.String()),
   }),
   reply("timeline.page", {
     events: Type.Array(Type.Union([KnownEvent, UnknownEvent]), { description: "newest first" }),

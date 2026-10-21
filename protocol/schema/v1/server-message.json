@@ -1978,6 +1978,14 @@
             "uncertain",
             "failed"
           ]
+        },
+        "reviewId": {
+          "type": "integer",
+          "minimum": 1,
+          "description": "the GitHub review, once published"
+        },
+        "url": {
+          "type": "string"
         }
       }
     },

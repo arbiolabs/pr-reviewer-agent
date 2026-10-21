@@ -288,6 +288,9 @@ pub struct PublicationPreview {
     pub comments: Vec<ReviewComment>,
     pub event: Text,
     pub status: PublicationStatus,
+    /// The GitHub review, once published: a client that lost the publication events to a resync gets it from here.
+    pub review_id: Option<u64>,
+    pub url: Option<Text>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize)]

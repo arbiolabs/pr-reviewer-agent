@@ -916,3 +916,15 @@ fn a_snapshot_keeps_the_previews_place_once_the_preview_is_back() {
     assert!(matches!(s.m.top_modal(), Some(Modal::Publication { .. })));
     assert_eq!(page_scroll(&s.m), 4);
 }
+
+#[test]
+fn a_preview_after_a_resync_mid_publish_brings_back_the_review_and_its_link() {
+    let mut s = common::parked(pr_review_tui::model::Look::default()).key(KeyCode::Char('p'));
+    let snapshot = s.played.iter().find(|m| matches!(m, ServerMessage::Snapshot(_))).unwrap().clone();
+    s.server(snapshot);
+    send(&mut s.m, &read("fixtures/server.publication.preview.published.json"));
+    let (frame, _) = common::render(&mut s.m, 120, 38);
+    assert!(frame.contains("published on GitHub as review 3141"), "{frame}");
+    let fx = press(&mut s.m, KeyCode::Char('o'));
+    assert_eq!(fx, [Effect::OpenUrl("https://github.com/acme/shop/pull/184#pullrequestreview-3141".into())]);
+}
