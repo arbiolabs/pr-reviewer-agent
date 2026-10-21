@@ -174,8 +174,11 @@ pub fn help_lines(c: &Ctx, body: Rect) -> Vec<Line<'static>> {
     }
     lines.push(Line::from(sev));
     lines.push(Line::from(vec![
-        c.span(format!("  {} ", super::doc::spinner(c)), Role::Accent),
+        // One still frame: a legend that animates reads as something happening.
+        c.span(if c.t.ascii { "  - " } else { "  ▘ " }, Role::Accent),
         c.span("reviewing   ", Role::Normal),
+        c.span(format!("{} ", g.pending), Role::Pending),
+        c.span("waiting for you   ", Role::Normal),
         c.span(format!("{} ", g.ok), Role::Ok),
         c.span("clean   ", Role::Normal),
         c.span(format!("{} ", g.fail), Role::Fail),

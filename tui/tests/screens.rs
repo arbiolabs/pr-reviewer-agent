@@ -559,3 +559,18 @@ fn settings_names_the_socket_and_whether_it_is_connected() {
     assert!(off.contains("socket unix:/run/user/501/pr-review/reviewer.sock · not connected"), "{off}");
     assert!(!off.contains("connected through"), "{off}");
 }
+
+#[test]
+fn the_help_glyphs_name_waiting_for_you_and_hold_still() {
+    use crossterm::event::KeyCode;
+    let mut s = showcase(6).key(KeyCode::Char('?'));
+    let mut glyphs = std::collections::BTreeSet::new();
+    for now in (0..1_000).step_by(125) {
+        s.apply(pr_review_tui::update::Msg::Tick(now));
+        let (frame, _) = render(&mut s.m, 120, 60);
+        let row = frame.lines().find(|l| l.contains("reviewing") && l.contains("clean")).unwrap().to_string();
+        assert!(frame.contains("◔ waiting for you"), "{frame}");
+        glyphs.insert(row);
+    }
+    assert_eq!(glyphs.len(), 1, "the legend's spinner moves: {glyphs:?}");
+}
