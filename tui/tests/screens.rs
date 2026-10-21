@@ -723,3 +723,18 @@ fn a_toast_raised_under_a_panel_shows_below_the_title_and_leaves_the_panel_its_k
     assert_eq!(lines[1].trim(), "Refreshing the snapshot…", "{frame}");
     assert!(lines.last().unwrap().contains("y confirm  n/Esc cancel"), "{frame}");
 }
+
+#[test]
+fn an_unreviewed_pr_says_so_in_one_sentence_and_offers_the_start_it_names() {
+    // The showcase up to the snapshot, where #1296 is tracked and never reviewed.
+    let mut s = showcase(2);
+    s.m.ui.screen = pr_review_tui::model::Screen::Review;
+    s.m.ui.selected_pr = s.m.domain.prs.values().find(|p| p.number == 1296).map(|p| p.id.clone());
+    assert!(s.m.domain.latest_run(s.m.ui.selected_pr.as_ref().unwrap()).is_none());
+    s.m.ui.focus = pr_review_tui::model::Pane::Main;
+    s.m.ui.selected_finding = None;
+    let (frame, _) = render(&mut s.m, 120, 38);
+    assert!(frame.contains("Not reviewed yet. s starts a review."), "{frame}");
+    assert!(!frame.contains("No findings"), "{frame}");
+    assert!(frame.lines().last().unwrap().contains("s start review"), "{frame}");
+}

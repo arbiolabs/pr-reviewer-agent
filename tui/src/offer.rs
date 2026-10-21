@@ -10,6 +10,8 @@ use crate::update as u;
 pub struct Hint {
     pub keys: &'static str,
     pub label: &'static str,
+    /// Its place in `RANK`: by its keys, or for a start on a reviewed head, `s again`.
+    rank: usize,
 }
 
 impl Hint {
@@ -20,9 +22,11 @@ impl Hint {
 
 /// Most important first. Where the footer runs out of room the last of these goes first: the keys that leave or
 /// explain a view, then the ones that act on what it shows, then the ones that move elsewhere or narrow it.
-pub const RANK: [&str; 26] = [
-    "?", "Esc", "n/Esc", "y", "Enter", "Enter/l", "j/k", "p", "R", "c", "d", "q", "n/N", "h", "s", "/", ":", "J/K",
-    "m", "o", "t", "w", "f", "v", "P", "r",
+/// A start on an unreviewed PR is the page's one action; on a reviewed head the daemon most likely refuses it, so it
+/// is `s again` and goes early.
+pub const RANK: [&str; 27] = [
+    "?", "Esc", "n/Esc", "y", "Enter", "Enter/l", "j/k", "p", "s", "R", "c", "d", "q", "n/N", "h", "/", ":", "J/K",
+    "m", "o", "t", "w", "f", "v", "P", "s again", "r",
 ];
 
 fn rank(keys: &str) -> usize {
@@ -35,9 +39,10 @@ pub fn offered(m: &Model) -> Vec<Hint> {
     let mut offer = |on: bool, keys: &'static str, label: &'static str| {
         debug_assert!(RANK.contains(&keys), "{keys} has no rank");
         if on {
-            out.push(Hint { keys, label });
+            out.push(Hint { keys, label, rank: rank(keys) });
         }
     };
+    let reviewed = m.selected_pr().is_some_and(|p| m.domain.latest_run(&p.id).is_some());
     match m.top_modal() {
         Some(Modal::Input { .. }) => {}
         Some(Modal::Confirm { .. }) => {
@@ -94,7 +99,7 @@ pub fn offered(m: &Model) -> Vec<Hint> {
             offer(turns && u::can_turn(m), "n/N", if search { "match" } else { "finding" });
             if page {
                 offer(u::can_mutate(m, Mutation::Publish), "p", "preview & publish");
-                offer(u::can_mutate(m, Mutation::Start), "s", "start review");
+                offer(u::can_mutate(m, Mutation::Start), "s", if reviewed { "review again" } else { "start review" });
                 offer(u::can_mutate(m, Mutation::Retry), "R", "retry");
                 offer(u::can_mutate(m, Mutation::Cancel), "c", "cancel review");
                 offer(u::can_diff(m), "d", "diff");
@@ -121,6 +126,9 @@ pub fn offered(m: &Model) -> Vec<Hint> {
             offer(true, "q", "quit");
         }
     }
+    if let Some(again) = out.iter_mut().find(|h| h.keys == "s" && reviewed) {
+        again.rank = rank("s again");
+    }
     out
 }
 
@@ -128,7 +136,7 @@ pub fn offered(m: &Model) -> Vec<Hint> {
 /// order.
 pub fn fit(mut hints: Vec<Hint>, width: usize) -> Vec<Hint> {
     while hints.len() > 1 && crate::text::width(&line(&hints)) > width {
-        let least = (0..hints.len()).max_by_key(|&i| rank(hints[i].keys)).unwrap_or(0);
+        let least = (0..hints.len()).max_by_key(|&i| hints[i].rank).unwrap_or(0);
         hints.remove(least);
     }
     hints
@@ -143,7 +151,7 @@ mod tests {
     use super::*;
 
     fn hint(keys: &'static str, label: &'static str) -> Hint {
-        Hint { keys, label }
+        Hint { keys, label, rank: rank(keys) }
     }
 
     #[test]
