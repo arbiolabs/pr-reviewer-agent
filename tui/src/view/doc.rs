@@ -540,7 +540,7 @@ fn card_head(c: &Ctx, f: &Finding, w: usize, selected: bool) -> Vec<Vec<Span<'st
     let g = c.t.g();
     let (glyph, _, role) = c.t.severity(f.severity);
     let (status, srole) = finding_status(f.status);
-    let cat = format!("{:?}", f.category).to_lowercase();
+    let cat = f.category.label();
     let left =
         vec![c.span(format!("{glyph} {}", sev_word(f.severity)), role), c.span(format!("   {cat}"), Role::Muted)];
     let right =

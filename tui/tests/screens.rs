@@ -657,3 +657,27 @@ fn at_200_columns_every_view_puts_the_reading_column_at_one_left_edge() {
         assert_eq!(edge(&frame, 0), left, "{name}:\n{frame}");
     }
 }
+
+#[test]
+fn a_two_word_category_reads_as_two_words() {
+    use crossterm::event::KeyCode;
+    use pr_review_tui::protocol::EventBody;
+    let s = showcase(usize::MAX);
+    let pr = s.m.domain.prs.values().find(|p| p.number == 1296).unwrap().id.to_string();
+    let mut s = s.select(&pr);
+    let (frame, _) = render(&mut s.m, 120, 38);
+    assert!(frame.contains("data integrity"), "{frame}");
+    let mut s = s.key(KeyCode::Char('4'));
+    s = s.key(KeyCode::Char('G'));
+    let t = s.m.timeline.as_ref().unwrap();
+    let finding = t.events.iter().find(|e| matches!(e.body, EventBody::FindingUpdated(_))).unwrap().sequence.get();
+    for _ in 0..10 {
+        if s.m.timeline.as_ref().unwrap().selected == Some(finding) {
+            break;
+        }
+        s = s.key(KeyCode::Char('k'));
+    }
+    s = s.key(KeyCode::Enter);
+    let (frame, _) = render(&mut s.m, 120, 38);
+    assert!(frame.contains("data integrity"), "the open timeline row:\n{frame}");
+}

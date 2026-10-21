@@ -136,6 +136,22 @@ pub enum Category {
     Unknown,
 }
 
+impl Category {
+    /// How a finding card names it: `data integrity`.
+    pub fn label(self) -> &'static str {
+        match self {
+            Category::Security => "security",
+            Category::Concurrency => "concurrency",
+            Category::Correctness => "correctness",
+            Category::DataIntegrity => "data integrity",
+            Category::Performance => "performance",
+            Category::General => "general",
+            Category::Other => "other",
+            Category::Unknown => "unknown",
+        }
+    }
+}
+
 /// Declared most severe first, so `Ord` sorts a finding list by severity.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

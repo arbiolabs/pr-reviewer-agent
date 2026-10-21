@@ -87,7 +87,7 @@ fn detail_block(c: &Ctx, e: &SequencedEvent, phase: Option<Phase>, w: usize) -> 
         EventBody::FindingUpdated(f) => {
             let (glyph, sev, role) = c.t.severity(f.severity);
             let (status, _) = finding_status(f.status);
-            let cat = format!("{:?}", f.category).to_lowercase();
+            let cat = f.category.label();
             lines.extend(text(f.title.as_str(), Role::Title));
             let head = format!("{glyph} {sev}  {cat}  {status} {} {:.0}% confident", g.sep, f.confidence * 100.0);
             lines.extend(text(&head, role));
