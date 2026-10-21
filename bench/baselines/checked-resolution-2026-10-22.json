@@ -1,0 +1,3482 @@
+{
+  "model": "anthropic/claude-opus-5-5",
+  "commit": "3ffbaed0f36361fa82f2145de321e61025678bfe",
+  "date": "2026-10-21T22:53:19.106Z",
+  "lineTolerance": 3,
+  "summary": {
+    "tracking": {
+      "falseResolution": {
+        "n": 0,
+        "of": 15
+      },
+      "identityKept": {
+        "n": 9,
+        "of": 9
+      },
+      "duplicateComments": {
+        "n": 0,
+        "of": 30
+      },
+      "resolutionRecall": {
+        "n": 6,
+        "of": 9
+      },
+      "newFound": {
+        "n": 6,
+        "of": 6
+      }
+    }
+  },
+  "runs": [
+    {
+      "cases": [],
+      "tracked": [
+        {
+          "id": "fix",
+          "steps": [
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 13,
+              "findings": [
+                {
+                  "findingId": "c57a399a5af51c5bacf6798e4b54c978",
+                  "fingerprint": "f8e5fd0eb87b6fc69c3e97f926ab3fac6986cc1f1b431e97d2c2b710addb0c30",
+                  "status": "PUBLISHED",
+                  "id": "c1",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund endpoint missing requireAdmin; any logged-in user can refund any paid order",
+                  "explanation": "The new POST /orders/:id/refund route only uses requireUser. The handler also does not check who owns the order. So any logged-in user can refund any paid order by its id, including other customers' orders, and this queues a real money refund through queueRefund. The PR says this is an admin action, and the sibling cancel route uses requireUser, requireAdmin.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 31,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 18,
+                      "end": 31,
+                      "refSha": "3c4c03be5220efc9725200c604ca6a766a2ab1c2"
+                    },
+                    {
+                      "path": "src/auth.ts",
+                      "start": 3,
+                      "end": 11,
+                      "refSha": "3c4c03be5220efc9725200c604ca6a766a2ab1c2"
+                    }
+                  ],
+                  "reasoningSummary": "The route registration leaves out the requireAdmin middleware, and refundOrder has no ownership or admin check.",
+                  "confidence": 0.95,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder);"
+                }
+              ],
+              "discarded": [],
+              "resolutions": [],
+              "outboxStatus": "published",
+              "statuses": {
+                "c57a399a5af51c5bacf6798e4b54c978": "PUBLISHED"
+              },
+              "comments": [
+                {
+                  "path": "src/routes/orders.ts",
+                  "line": 31
+                }
+              ]
+            },
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 12,
+              "findings": [
+                {
+                  "findingId": "c57a399a5af51c5bacf6798e4b54c978",
+                  "fingerprint": "f8e5fd0eb87b6fc69c3e97f926ab3fac6986cc1f1b431e97d2c2b710addb0c30",
+                  "status": "RESOLVED",
+                  "id": "c1",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund endpoint missing requireAdmin; any logged-in user can refund any paid order",
+                  "explanation": "The new POST /orders/:id/refund route only uses requireUser. The handler also does not check who owns the order. So any logged-in user can refund any paid order by its id, including other customers' orders, and this queues a real money refund through queueRefund. The PR says this is an admin action, and the sibling cancel route uses requireUser, requireAdmin.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 31,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 18,
+                      "end": 31,
+                      "refSha": "3c4c03be5220efc9725200c604ca6a766a2ab1c2"
+                    },
+                    {
+                      "path": "src/auth.ts",
+                      "start": 3,
+                      "end": 11,
+                      "refSha": "3c4c03be5220efc9725200c604ca6a766a2ab1c2"
+                    }
+                  ],
+                  "reasoningSummary": "The route registration leaves out the requireAdmin middleware, and refundOrder has no ownership or admin check.",
+                  "confidence": 0.95,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder);"
+                }
+              ],
+              "discarded": [],
+              "resolutions": [
+                {
+                  "findingId": "c57a399a5af51c5bacf6798e4b54c978",
+                  "state": "ACCEPTED",
+                  "reason": null
+                }
+              ],
+              "outboxStatus": "published",
+              "statuses": {
+                "c57a399a5af51c5bacf6798e4b54c978": "RESOLVED"
+              },
+              "comments": []
+            }
+          ],
+          "outcomes": [
+            {
+              "step": 1,
+              "label": "refund-auth",
+              "expected": "resolved",
+              "findingId": "c57a399a5af51c5bacf6798e4b54c978",
+              "status": "RESOLVED",
+              "ok": true
+            }
+          ],
+          "falseResolution": {
+            "n": 0,
+            "of": 0
+          },
+          "identityKept": {
+            "n": 0,
+            "of": 0
+          },
+          "duplicateComments": {
+            "n": 0,
+            "of": 1
+          },
+          "resolutionRecall": {
+            "n": 1,
+            "of": 1
+          },
+          "newFound": {
+            "n": 0,
+            "of": 0
+          }
+        },
+        {
+          "id": "leave",
+          "steps": [
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 9,
+              "findings": [
+                {
+                  "findingId": "c2218c1d008df919c7f27e227c94999d",
+                  "fingerprint": "b17af5d8f1dd78ae763b994dceb6787d18b03989ed1f39f4da5075df0607f6f6",
+                  "status": "PUBLISHED",
+                  "id": "c1",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund endpoint lacks requireAdmin: any logged-in user can refund any order",
+                  "explanation": "The PR says this route is for admins, but it is registered with only `requireUser`. The sibling admin route `/orders/:id/cancel` uses `requireUser, requireAdmin`. The handler doesn't check ownership or role either: it takes any order id, and if that order is paid it queues a refund for the remaining amount and marks the order refunded. So any authenticated user can trigger full refunds on any customer's paid order, including other people's. That means money lost and orders put into the wrong state.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 31,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 18,
+                      "end": 31,
+                      "refSha": "8b7e3c6017f39e34f5613c1554810c55457b2380"
+                    }
+                  ],
+                  "reasoningSummary": "Route registered with requireUser only. Compare the cancel route at line 30, which also has requireAdmin. The handler has no authorization check of its own.",
+                  "confidence": 0.93,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "Register as `router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder);`."
+                }
+              ],
+              "discarded": [],
+              "resolutions": [],
+              "outboxStatus": "published",
+              "statuses": {
+                "c2218c1d008df919c7f27e227c94999d": "PUBLISHED"
+              },
+              "comments": [
+                {
+                  "path": "src/routes/orders.ts",
+                  "line": 31
+                }
+              ]
+            },
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 17,
+              "findings": [
+                {
+                  "findingId": "c2218c1d008df919c7f27e227c94999d",
+                  "fingerprint": "b17af5d8f1dd78ae763b994dceb6787d18b03989ed1f39f4da5075df0607f6f6",
+                  "status": "STILL_PRESENT",
+                  "id": "c1",
+                  "priorFindingId": "c2218c1d008df919c7f27e227c94999d",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund endpoint lacks requireAdmin: any logged-in user can refund any order",
+                  "explanation": "POST /orders/:id/refund is registered with only requireUser. The neighboring cancel route also uses requireAdmin, and the PR says this is an admin action. refundOrder never checks that the caller is an admin or owns the order. So any authenticated user can queue a full refund for any paid order by its id and mark it refunded.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 31,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 18,
+                      "end": 31,
+                      "refSha": "fbf0cc4353bbaec15f75ad43285b1afb271ec1fe"
+                    }
+                  ],
+                  "reasoningSummary": "The route's middleware chain is requireUser only. requireAdmin is imported and used on the cancel route but not on refund, and the handler has no authorization check of its own.",
+                  "confidence": 0.95,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "Register as router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder)."
+                }
+              ],
+              "discarded": [],
+              "resolutions": [],
+              "outboxStatus": "published",
+              "statuses": {
+                "c2218c1d008df919c7f27e227c94999d": "STILL_PRESENT"
+              },
+              "comments": []
+            }
+          ],
+          "outcomes": [
+            {
+              "step": 1,
+              "label": "refund-auth",
+              "expected": "open",
+              "findingId": "c2218c1d008df919c7f27e227c94999d",
+              "status": "STILL_PRESENT",
+              "ok": true,
+              "idKept": true
+            }
+          ],
+          "falseResolution": {
+            "n": 0,
+            "of": 1
+          },
+          "identityKept": {
+            "n": 1,
+            "of": 1
+          },
+          "duplicateComments": {
+            "n": 0,
+            "of": 1
+          },
+          "resolutionRecall": {
+            "n": 0,
+            "of": 0
+          },
+          "newFound": {
+            "n": 0,
+            "of": 0
+          }
+        },
+        {
+          "id": "move",
+          "steps": [
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 8,
+              "findings": [
+                {
+                  "findingId": "ea3454ea78c96f3d8b0abf7ace8c7029",
+                  "fingerprint": "d76e34e8f70cc4a3764ff4c3468f65c7733e3509da29140b47b0b6f68aed425f",
+                  "status": "PUBLISHED",
+                  "id": "c1",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund endpoint is missing requireAdmin; any logged-in user can refund any order",
+                  "explanation": "The PR says this is an admin-only refund, but POST /orders/:id/refund only has requireUser. The cancel route next to it uses requireUser, requireAdmin. refundOrder also never checks that the order belongs to the caller (getOrder does check order.userId). So any logged-in user can refund any paid order by id: queueRefund is called for the full remaining amount and the order is marked refunded. That is a direct money-loss / authorization bypass.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 31,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 18,
+                      "end": 31,
+                      "refSha": "77a0df575507764fe96561f54e3d6388aa6bef02"
+                    }
+                  ],
+                  "reasoningSummary": "The route registration leaves out requireAdmin, which the cancel route uses, and the handler has no ownership or role check.",
+                  "confidence": 0.95,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "Register the route as router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder)."
+                }
+              ],
+              "discarded": [],
+              "resolutions": [],
+              "outboxStatus": "published",
+              "statuses": {
+                "ea3454ea78c96f3d8b0abf7ace8c7029": "PUBLISHED"
+              },
+              "comments": [
+                {
+                  "path": "src/routes/orders.ts",
+                  "line": 31
+                }
+              ]
+            },
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 10,
+              "findings": [
+                {
+                  "findingId": "ea3454ea78c96f3d8b0abf7ace8c7029",
+                  "fingerprint": "d76e34e8f70cc4a3764ff4c3468f65c7733e3509da29140b47b0b6f68aed425f",
+                  "status": "STILL_PRESENT",
+                  "id": "c1",
+                  "priorFindingId": "ea3454ea78c96f3d8b0abf7ace8c7029",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund endpoint is missing requireAdmin; any logged-in user can refund any order",
+                  "explanation": "POST /orders/:id/refund is registered with only requireUser. refundOrder does not check ownership or admin status, so any authenticated user can refund any paid order. queueRefund is then called for the full remaining amount and the order is marked refunded. The PR says this endpoint is for admins, and the sibling cancel route has requireAdmin. The file was moved from orders.ts to order-routes.ts, but the defect was not fixed.",
+                  "file": "src/routes/order-routes.ts",
+                  "newLine": 55,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/order-routes.ts",
+                      "start": 41,
+                      "end": 49,
+                      "refSha": "3bd67fae5a710c9765a7b2104be8bcba9110ba79"
+                    },
+                    {
+                      "path": "src/routes/order-routes.ts",
+                      "start": 51,
+                      "end": 56,
+                      "refSha": "3bd67fae5a710c9765a7b2104be8bcba9110ba79"
+                    }
+                  ],
+                  "reasoningSummary": "The refund route's middleware chain lacks requireAdmin, and the handler has no authorization check of its own.",
+                  "confidence": 0.95,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "Register as router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder)."
+                }
+              ],
+              "discarded": [],
+              "resolutions": [],
+              "outboxStatus": "published",
+              "statuses": {
+                "ea3454ea78c96f3d8b0abf7ace8c7029": "STILL_PRESENT"
+              },
+              "comments": []
+            }
+          ],
+          "outcomes": [
+            {
+              "step": 1,
+              "label": "refund-auth",
+              "expected": "open",
+              "findingId": "ea3454ea78c96f3d8b0abf7ace8c7029",
+              "status": "STILL_PRESENT",
+              "ok": true,
+              "idKept": true
+            }
+          ],
+          "falseResolution": {
+            "n": 0,
+            "of": 1
+          },
+          "identityKept": {
+            "n": 1,
+            "of": 1
+          },
+          "duplicateComments": {
+            "n": 0,
+            "of": 1
+          },
+          "resolutionRecall": {
+            "n": 0,
+            "of": 0
+          },
+          "newFound": {
+            "n": 0,
+            "of": 0
+          }
+        },
+        {
+          "id": "rewrite-still-buggy",
+          "steps": [
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 13,
+              "findings": [
+                {
+                  "findingId": "652628185a4eb38991daf5e8d1f2e11e",
+                  "fingerprint": "26a52c2dcb1a166cfd43c802e3bb4eb0c32e56d4b1a126e3b6c512ea8f2af0f9",
+                  "status": "PUBLISHED",
+                  "id": "c1",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund route lacks requireAdmin: any logged-in user can refund any order",
+                  "explanation": "The new POST /orders/:id/refund route is registered with only `requireUser`, unlike the comparable admin action `/orders/:id/cancel` which chains `requireUser, requireAdmin`. `refundOrder` also performs no ownership or role check: it loads the order by id from the URL, and if it is `paid` it calls `queueRefund` for the full remaining amount and marks it refunded. As a result any authenticated non-admin user can trigger real refunds on any paid order, including other customers' orders, by guessing or enumerating ids. The PR says this endpoint is meant for admins/support only.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 31,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 18,
+                      "end": 26,
+                      "refSha": "071b077d54bdb146e658cd6d1277ee81ee5f2db5"
+                    },
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 28,
+                      "end": 32,
+                      "refSha": "071b077d54bdb146e658cd6d1277ee81ee5f2db5"
+                    }
+                  ],
+                  "reasoningSummary": "Route registration omits requireAdmin (present on the sibling cancel route), and the handler has no auth check of its own, so any user can issue monetary refunds on arbitrary orders.",
+                  "confidence": 0.95,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "Register as `router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder);`."
+                }
+              ],
+              "discarded": [],
+              "resolutions": [],
+              "outboxStatus": "published",
+              "statuses": {
+                "652628185a4eb38991daf5e8d1f2e11e": "PUBLISHED"
+              },
+              "comments": [
+                {
+                  "path": "src/routes/orders.ts",
+                  "line": 31
+                }
+              ]
+            },
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 14,
+              "findings": [
+                {
+                  "findingId": "652628185a4eb38991daf5e8d1f2e11e",
+                  "fingerprint": "26a52c2dcb1a166cfd43c802e3bb4eb0c32e56d4b1a126e3b6c512ea8f2af0f9",
+                  "status": "STILL_PRESENT",
+                  "id": "c1",
+                  "priorFindingId": "652628185a4eb38991daf5e8d1f2e11e",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund route lacks requireAdmin: any logged-in user can refund any order",
+                  "explanation": "POST /orders/:id/refund is registered with only requireUser, unlike the cancel route which also uses requireAdmin. refundOrder never checks who owns the order or whether the caller is an admin. The getOrder handler checks ownership, but this one does not. So any authenticated user can refund any paid order by ID, which sends money out through queueRefund. The PR says this endpoint is meant for admins/support only.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 35,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 19,
+                      "end": 30,
+                      "refSha": "873d193e629d1cdf7f88a2d9a2e7eebda212d3a7"
+                    },
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 32,
+                      "end": 36,
+                      "refSha": "873d193e629d1cdf7f88a2d9a2e7eebda212d3a7"
+                    }
+                  ],
+                  "reasoningSummary": "Route registration at line 35 has no requireAdmin, and the handler does no authorization check of its own. The cancel route at line 34 shows the intended pattern.",
+                  "confidence": 0.95,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "Register the route as router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder)."
+                }
+              ],
+              "discarded": [],
+              "resolutions": [],
+              "outboxStatus": "published",
+              "statuses": {
+                "652628185a4eb38991daf5e8d1f2e11e": "STILL_PRESENT"
+              },
+              "comments": []
+            }
+          ],
+          "outcomes": [
+            {
+              "step": 1,
+              "label": "refund-auth",
+              "expected": "not_resolved",
+              "findingId": "652628185a4eb38991daf5e8d1f2e11e",
+              "status": "STILL_PRESENT",
+              "ok": true
+            }
+          ],
+          "falseResolution": {
+            "n": 0,
+            "of": 1
+          },
+          "identityKept": {
+            "n": 0,
+            "of": 0
+          },
+          "duplicateComments": {
+            "n": 0,
+            "of": 1
+          },
+          "resolutionRecall": {
+            "n": 0,
+            "of": 0
+          },
+          "newFound": {
+            "n": 0,
+            "of": 0
+          }
+        },
+        {
+          "id": "partial-fix",
+          "steps": [
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 16,
+              "findings": [
+                {
+                  "findingId": "0a47dbb5bb968b92683df1774cd52c7c",
+                  "fingerprint": "7bccfecda9aafc3907eccbbb438aa403922564cd6ce905eed94c0b26903861d5",
+                  "status": "PUBLISHED",
+                  "id": "c1",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund routes lack requireAdmin: any logged-in user can refund any paid order",
+                  "explanation": "The PR says only admins should be able to refund, but both new routes, POST /orders/:id/refund (line 31) and the alias POST /refunds/:id (line 32), only use requireUser. They never call requireAdmin, which is what the cancel route uses (line 30) and what checks `req.user?.isAdmin` (auth.ts:9). refundOrder also never checks who owns the order, unlike getOrder at line 7. So any logged-in non-admin can send a request with any order id and trigger queueRefund for the whole remaining amount. The order is then marked refunded. That is a direct financial loss and lets one user change another user's order.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 31,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 18,
+                      "end": 32,
+                      "refSha": "6098de109f7a720f3c376c7981076b5258b98cd6"
+                    },
+                    {
+                      "path": "src/auth.ts",
+                      "start": 3,
+                      "end": 11,
+                      "refSha": "6098de109f7a720f3c376c7981076b5258b98cd6"
+                    }
+                  ],
+                  "reasoningSummary": "Both refund routes use requireUser only. requireAdmin is the only admin check in the code, and the handler does no ownership or role check of its own.",
+                  "confidence": 0.95,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "Register both routes with `requireUser, requireAdmin, refundOrder`, so the /refunds/:id alias is covered too."
+                }
+              ],
+              "discarded": [],
+              "resolutions": [],
+              "outboxStatus": "published",
+              "statuses": {
+                "0a47dbb5bb968b92683df1774cd52c7c": "PUBLISHED"
+              },
+              "comments": [
+                {
+                  "path": "src/routes/orders.ts",
+                  "line": 31
+                }
+              ]
+            },
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 11,
+              "findings": [
+                {
+                  "findingId": "0a47dbb5bb968b92683df1774cd52c7c",
+                  "fingerprint": "7bccfecda9aafc3907eccbbb438aa403922564cd6ce905eed94c0b26903861d5",
+                  "status": "STILL_PRESENT",
+                  "id": "c1",
+                  "priorFindingId": "0a47dbb5bb968b92683df1774cd52c7c",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "/refunds/:id alias lacks requireAdmin: any logged-in user can refund any paid order",
+                  "explanation": "The fix added requireAdmin to POST /orders/:id/refund (line 31), but the alias POST /refunds/:id (line 32) still runs refundOrder behind only requireUser. requireUser (auth.ts:3-6) only checks that a user is logged in. refundOrder (lines 18-26) does not check ownership or admin status. It queues a full refund through queueRefund and marks the order refunded. Any authenticated non-admin can therefore refund any paid order by its id through the alias. The admin guard on the new path does nothing to stop this.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 32,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 18,
+                      "end": 32,
+                      "refSha": "8f38dbfa3f9bbb0bff0137c7ec7638db19656448"
+                    },
+                    {
+                      "path": "src/auth.ts",
+                      "start": 3,
+                      "end": 11,
+                      "refSha": "8f38dbfa3f9bbb0bff0137c7ec7638db19656448"
+                    }
+                  ],
+                  "reasoningSummary": "The prior finding is only partly fixed. The new route has requireAdmin, but the /refunds/:id alias still only has requireUser, and the handler does no authorization checks of its own.",
+                  "confidence": 0.95,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "Add requireAdmin to the alias: router.post(\"/refunds/:id\", requireUser, requireAdmin, refundOrder);"
+                }
+              ],
+              "discarded": [],
+              "resolutions": [],
+              "outboxStatus": "published",
+              "statuses": {
+                "0a47dbb5bb968b92683df1774cd52c7c": "STILL_PRESENT"
+              },
+              "comments": []
+            }
+          ],
+          "outcomes": [
+            {
+              "step": 1,
+              "label": "refund-auth",
+              "expected": "not_resolved",
+              "findingId": "0a47dbb5bb968b92683df1774cd52c7c",
+              "status": "STILL_PRESENT",
+              "ok": true
+            }
+          ],
+          "falseResolution": {
+            "n": 0,
+            "of": 1
+          },
+          "identityKept": {
+            "n": 0,
+            "of": 0
+          },
+          "duplicateComments": {
+            "n": 0,
+            "of": 1
+          },
+          "resolutionRecall": {
+            "n": 0,
+            "of": 0
+          },
+          "newFound": {
+            "n": 0,
+            "of": 0
+          }
+        },
+        {
+          "id": "worse",
+          "steps": [
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 12,
+              "findings": [
+                {
+                  "findingId": "0e47c7706f0e885e547afbcfd7682be0",
+                  "fingerprint": "b17af5d8f1dd78ae763b994dceb6787d18b03989ed1f39f4da5075df0607f6f6",
+                  "status": "PUBLISHED",
+                  "id": "c1",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund endpoint lacks requireAdmin; any logged-in user can refund any order",
+                  "explanation": "The new POST /orders/:id/refund route only uses requireUser. The sibling admin action (cancel) on line 30 chains requireAdmin, and refundOrder does no ownership or role check of its own. It also skips the userId check that getOrder does. Any authenticated user can refund any paid order by ID, including other users' orders, and that triggers real money movement through queueRefund. The PR says this feature is meant for admins/support only.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 31,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 18,
+                      "end": 31,
+                      "refSha": "a819fd3e511fcbb933f144bb48fb8320957a5f01"
+                    },
+                    {
+                      "path": "src/auth.ts",
+                      "start": 3,
+                      "end": 11,
+                      "refSha": "a819fd3e511fcbb933f144bb48fb8320957a5f01"
+                    }
+                  ],
+                  "reasoningSummary": "The route is registered with requireUser only. requireAdmin exists and is used on cancel, and the handler checks neither role nor ownership.",
+                  "confidence": 0.95,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder);"
+                }
+              ],
+              "discarded": [],
+              "resolutions": [],
+              "outboxStatus": "published",
+              "statuses": {
+                "0e47c7706f0e885e547afbcfd7682be0": "PUBLISHED"
+              },
+              "comments": [
+                {
+                  "path": "src/routes/orders.ts",
+                  "line": 31
+                }
+              ]
+            },
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 19,
+              "findings": [
+                {
+                  "findingId": "0e47c7706f0e885e547afbcfd7682be0",
+                  "fingerprint": "b17af5d8f1dd78ae763b994dceb6787d18b03989ed1f39f4da5075df0607f6f6",
+                  "status": "STILL_PRESENT",
+                  "id": "c1",
+                  "priorFindingId": "0e47c7706f0e885e547afbcfd7682be0",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund endpoint lacks requireAdmin; any logged-in user can refund any order",
+                  "explanation": "POST /orders/:id/refund is registered with only requireUser. refundOrder never checks admin status or ownership (unlike getOrder, which compares order.userId), so any authenticated user can trigger a full refund via queueRefund on any paid order by ID. The PR says it is meant for admins/support, and the sibling cancel route does use requireAdmin.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 31,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 18,
+                      "end": 31,
+                      "refSha": "91ac02e98f17ec1029fdd863ec75f6fa1954b61b"
+                    },
+                    {
+                      "path": "src/auth.ts",
+                      "start": 3,
+                      "end": 11,
+                      "refSha": "91ac02e98f17ec1029fdd863ec75f6fa1954b61b"
+                    }
+                  ],
+                  "reasoningSummary": "Route at line 31 has requireUser only; handler has no authz check; queueRefund issues real money movement.",
+                  "confidence": 0.95,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "Register as router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder)."
+                },
+                {
+                  "findingId": "7fdf26fdfb0360a28ac6d0c666fbabd0",
+                  "fingerprint": "434d5ffc9403eca2d00c9f7013d62ebce78478282db7d2dba96cbf2aea78003a",
+                  "status": "PUBLISHED",
+                  "id": "c2",
+                  "category": "security",
+                  "severity": "high",
+                  "title": "Support reopen endpoint lacks requireAdmin; any user can reopen any cancelled order",
+                  "explanation": "POST /support/orders/:id/reopen is registered with only requireUser, and reopenOrder does not check admin status or ownership. Any logged-in user can change any cancelled order to \"paid\" so it ships again. This undoes the admin-only cancel action. cancelOrder also accepts orders that are already refunded, so a refunded order that was later cancelled can be reopened to \"paid\" with refundedCents === totalCents. That order would then ship even though it was fully refunded.",
+                  "file": "src/routes/support.ts",
+                  "newLine": 15,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/support.ts",
+                      "start": 6,
+                      "end": 16,
+                      "refSha": "91ac02e98f17ec1029fdd863ec75f6fa1954b61b"
+                    },
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 11,
+                      "end": 16,
+                      "refSha": "91ac02e98f17ec1029fdd863ec75f6fa1954b61b"
+                    },
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 30,
+                      "end": 30,
+                      "refSha": "91ac02e98f17ec1029fdd863ec75f6fa1954b61b"
+                    }
+                  ],
+                  "reasoningSummary": "New support route has requireUser only, while the cancel action it reverses requires admin; handler has no authz check.",
+                  "confidence": 0.85,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "Add requireAdmin (or a support-role check) to the reopen route. Also reject reopening orders with refundedCents > 0."
+                }
+              ],
+              "discarded": [],
+              "resolutions": [],
+              "outboxStatus": "published",
+              "statuses": {
+                "0e47c7706f0e885e547afbcfd7682be0": "STILL_PRESENT",
+                "7fdf26fdfb0360a28ac6d0c666fbabd0": "PUBLISHED"
+              },
+              "comments": [
+                {
+                  "path": "src/routes/support.ts",
+                  "line": 15
+                }
+              ]
+            }
+          ],
+          "outcomes": [
+            {
+              "step": 1,
+              "label": "refund-auth",
+              "expected": "open",
+              "findingId": "0e47c7706f0e885e547afbcfd7682be0",
+              "status": "STILL_PRESENT",
+              "ok": true,
+              "idKept": true
+            }
+          ],
+          "falseResolution": {
+            "n": 0,
+            "of": 1
+          },
+          "identityKept": {
+            "n": 1,
+            "of": 1
+          },
+          "duplicateComments": {
+            "n": 0,
+            "of": 2
+          },
+          "resolutionRecall": {
+            "n": 0,
+            "of": 0
+          },
+          "newFound": {
+            "n": 1,
+            "of": 1
+          }
+        },
+        {
+          "id": "fix-elsewhere",
+          "steps": [
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 19,
+              "findings": [
+                {
+                  "findingId": "eb957a8565847cc262754c63aaab018a",
+                  "fingerprint": "f8e5fd0eb87b6fc69c3e97f926ab3fac6986cc1f1b431e97d2c2b710addb0c30",
+                  "status": "PUBLISHED",
+                  "id": "c1",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund endpoint is missing requireAdmin, so any logged-in user can refund any paid order",
+                  "explanation": "The new route is registered as `router.post(\"/orders/:id/refund\", requireUser, refundOrder)`. It only requires authentication, not the admin role. `refundOrder` does no ownership or role check: it looks up any order by id and, if the order is paid, calls `queueRefund` for the full remaining amount and marks the order refunded. So any authenticated non-admin user can trigger real money refunds on any customer's paid order, including other users' orders, by guessing or enumerating ids. The PR says the endpoint is for admins only, and the sibling `/cancel` route applies `requireAdmin`. Nothing else enforces admin access: there is no `router.use` middleware anywhere in the repo, and `requireAdmin` is only used on the cancel route.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 31,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 18,
+                      "end": 31,
+                      "refSha": "1f4755bcd450412c1854b5223d52ab173f3941d0"
+                    },
+                    {
+                      "path": "src/auth.ts",
+                      "start": 8,
+                      "end": 11,
+                      "refSha": "1f4755bcd450412c1854b5223d52ab173f3941d0"
+                    }
+                  ],
+                  "reasoningSummary": "The route chain has requireUser but no requireAdmin. The handler has no role or ownership check, and no router-level middleware exists. So any user can queue refunds on arbitrary orders.",
+                  "confidence": 0.95,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "Register the route as `router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder);`."
+                }
+              ],
+              "discarded": [],
+              "resolutions": [],
+              "outboxStatus": "published",
+              "statuses": {
+                "eb957a8565847cc262754c63aaab018a": "PUBLISHED"
+              },
+              "comments": [
+                {
+                  "path": "src/routes/orders.ts",
+                  "line": 31
+                }
+              ]
+            },
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 14,
+              "findings": [
+                {
+                  "findingId": "eb957a8565847cc262754c63aaab018a",
+                  "fingerprint": "f8e5fd0eb87b6fc69c3e97f926ab3fac6986cc1f1b431e97d2c2b710addb0c30",
+                  "status": "STILL_PRESENT",
+                  "id": "c1",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund endpoint is missing requireAdmin, so any logged-in user can refund any paid order",
+                  "explanation": "The new route is registered as `router.post(\"/orders/:id/refund\", requireUser, refundOrder)`. It only requires authentication, not the admin role. `refundOrder` does no ownership or role check: it looks up any order by id and, if the order is paid, calls `queueRefund` for the full remaining amount and marks the order refunded. So any authenticated non-admin user can trigger real money refunds on any customer's paid order, including other users' orders, by guessing or enumerating ids. The PR says the endpoint is for admins only, and the sibling `/cancel` route applies `requireAdmin`. Nothing else enforces admin access: there is no `router.use` middleware anywhere in the repo, and `requireAdmin` is only used on the cancel route.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 31,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 18,
+                      "end": 31,
+                      "refSha": "8db076403802f47fdec172887acc94c29da2bc47"
+                    },
+                    {
+                      "path": "src/auth.ts",
+                      "start": 8,
+                      "end": 11,
+                      "refSha": "8db076403802f47fdec172887acc94c29da2bc47"
+                    }
+                  ],
+                  "reasoningSummary": "The route chain has requireUser but no requireAdmin. The handler has no role or ownership check, and no router-level middleware exists. So any user can queue refunds on arbitrary orders.",
+                  "confidence": 0.95,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "Register the route as `router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder);`."
+                }
+              ],
+              "discarded": [],
+              "resolutions": [
+                {
+                  "findingId": "eb957a8565847cc262754c63aaab018a",
+                  "state": "REFUSED",
+                  "reason": "its cited code is unchanged at src/routes/orders.ts:31"
+                }
+              ],
+              "outboxStatus": "published",
+              "statuses": {
+                "eb957a8565847cc262754c63aaab018a": "STILL_PRESENT"
+              },
+              "comments": []
+            }
+          ],
+          "outcomes": [
+            {
+              "step": 1,
+              "label": "refund-auth",
+              "expected": "resolved",
+              "findingId": "eb957a8565847cc262754c63aaab018a",
+              "status": "STILL_PRESENT",
+              "ok": false
+            }
+          ],
+          "falseResolution": {
+            "n": 0,
+            "of": 0
+          },
+          "identityKept": {
+            "n": 0,
+            "of": 0
+          },
+          "duplicateComments": {
+            "n": 0,
+            "of": 1
+          },
+          "resolutionRecall": {
+            "n": 0,
+            "of": 1
+          },
+          "newFound": {
+            "n": 0,
+            "of": 0
+          }
+        },
+        {
+          "id": "regress",
+          "steps": [
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 11,
+              "findings": [
+                {
+                  "findingId": "bab1394eac7aee1c70d4a4db8aff68a8",
+                  "fingerprint": "991db3b3fe08c2cb0ff01c4bbe29ed31665a11b8edc6bbec14fa70de84d4eed1",
+                  "status": "PUBLISHED",
+                  "id": "c1",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund route missing requireAdmin: any logged-in user can refund any paid order",
+                  "explanation": "The PR says this endpoint is for admins/support, but POST /orders/:id/refund is registered with only `requireUser`, unlike the sibling admin action `/orders/:id/cancel`, which uses `requireUser, requireAdmin`. refundOrder also does no ownership check (compare getOrder line 7). So any authenticated user can send POST /orders/<any id>/refund for any paid order, including other customers' orders. That calls queueRefund for the full outstanding amount and marks the order refunded. The result is real money movement that no one authorized, and unauthorized changes to other users' orders.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 31,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 18,
+                      "end": 26,
+                      "refSha": "3c57b3ce307106777271a5310dd4cb0393daa3e0"
+                    },
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 28,
+                      "end": 32,
+                      "refSha": "3c57b3ce307106777271a5310dd4cb0393daa3e0"
+                    }
+                  ],
+                  "reasoningSummary": "Route registration at line 31 omits requireAdmin, which line 30 uses for the comparable admin action. The handler checks neither role nor ownership before calling queueRefund.",
+                  "confidence": 0.93,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "Register as `router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder);`."
+                }
+              ],
+              "discarded": [],
+              "resolutions": [],
+              "outboxStatus": "published",
+              "statuses": {
+                "bab1394eac7aee1c70d4a4db8aff68a8": "PUBLISHED"
+              },
+              "comments": [
+                {
+                  "path": "src/routes/orders.ts",
+                  "line": 31
+                }
+              ]
+            },
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 18,
+              "findings": [
+                {
+                  "findingId": "bab1394eac7aee1c70d4a4db8aff68a8",
+                  "fingerprint": "991db3b3fe08c2cb0ff01c4bbe29ed31665a11b8edc6bbec14fa70de84d4eed1",
+                  "status": "RESOLVED",
+                  "id": "c1",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund route missing requireAdmin: any logged-in user can refund any paid order",
+                  "explanation": "The PR says this endpoint is for admins/support, but POST /orders/:id/refund is registered with only `requireUser`, unlike the sibling admin action `/orders/:id/cancel`, which uses `requireUser, requireAdmin`. refundOrder also does no ownership check (compare getOrder line 7). So any authenticated user can send POST /orders/<any id>/refund for any paid order, including other customers' orders. That calls queueRefund for the full outstanding amount and marks the order refunded. The result is real money movement that no one authorized, and unauthorized changes to other users' orders.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 31,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 18,
+                      "end": 26,
+                      "refSha": "3c57b3ce307106777271a5310dd4cb0393daa3e0"
+                    },
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 28,
+                      "end": 32,
+                      "refSha": "3c57b3ce307106777271a5310dd4cb0393daa3e0"
+                    }
+                  ],
+                  "reasoningSummary": "Route registration at line 31 omits requireAdmin, which line 30 uses for the comparable admin action. The handler checks neither role nor ownership before calling queueRefund.",
+                  "confidence": 0.93,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "Register as `router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder);`."
+                }
+              ],
+              "discarded": [],
+              "resolutions": [
+                {
+                  "findingId": "bab1394eac7aee1c70d4a4db8aff68a8",
+                  "state": "ACCEPTED",
+                  "reason": null
+                }
+              ],
+              "outboxStatus": "published",
+              "statuses": {
+                "bab1394eac7aee1c70d4a4db8aff68a8": "RESOLVED"
+              },
+              "comments": []
+            },
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 15,
+              "findings": [
+                {
+                  "findingId": "b453cd1c6e9a92e9cb8b18c75df1bfa6",
+                  "fingerprint": "991db3b3fe08c2cb0ff01c4bbe29ed31665a11b8edc6bbec14fa70de84d4eed1",
+                  "status": "PUBLISHED",
+                  "id": "c1",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund route missing requireAdmin: any logged-in user can refund any paid order",
+                  "explanation": "The new POST /orders/:id/refund route is registered with only `requireUser`, unlike the sibling admin action `/orders/:id/cancel`, which also chains `requireAdmin`. `refundOrder` does no admin or ownership check of its own (compare getOrder, which checks `order.userId !== req.user!.id`). So any authenticated non-admin user can call this route with any order id. The handler then runs `queueRefund` for the full remaining amount and sets the order status to \"refunded\". That means a normal user can trigger real money refunds on other users' paid orders, which breaks the PR's stated intent of \"Let admins refund an order\". An earlier review recorded this same defect (bab1394eac7aee1c70d4a4db8aff68a8) and marked it RESOLVED, but at this head the route still has no requireAdmin.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 31,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 18,
+                      "end": 31,
+                      "refSha": "8592dc33d8b2747189031728062051228d9a447e"
+                    },
+                    {
+                      "path": "src/auth.ts",
+                      "start": 3,
+                      "end": 11,
+                      "refSha": "8592dc33d8b2747189031728062051228d9a447e"
+                    }
+                  ],
+                  "reasoningSummary": "The route is registered as `requireUser, refundOrder` with no requireAdmin. requireUser only checks that a user is logged in, and the handler never checks isAdmin or who owns the order.",
+                  "confidence": 0.95,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "Register the route as `router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder);`."
+                }
+              ],
+              "discarded": [],
+              "resolutions": [],
+              "outboxStatus": "published",
+              "statuses": {
+                "bab1394eac7aee1c70d4a4db8aff68a8": "RESOLVED",
+                "b453cd1c6e9a92e9cb8b18c75df1bfa6": "PUBLISHED"
+              },
+              "comments": [
+                {
+                  "path": "src/routes/orders.ts",
+                  "line": 31
+                }
+              ]
+            }
+          ],
+          "outcomes": [
+            {
+              "step": 1,
+              "label": "refund-auth",
+              "expected": "resolved",
+              "findingId": "bab1394eac7aee1c70d4a4db8aff68a8",
+              "status": "RESOLVED",
+              "ok": true
+            }
+          ],
+          "falseResolution": {
+            "n": 0,
+            "of": 0
+          },
+          "identityKept": {
+            "n": 0,
+            "of": 0
+          },
+          "duplicateComments": {
+            "n": 0,
+            "of": 2
+          },
+          "resolutionRecall": {
+            "n": 1,
+            "of": 1
+          },
+          "newFound": {
+            "n": 1,
+            "of": 1
+          }
+        }
+      ],
+      "tracking": {
+        "falseResolution": {
+          "n": 0,
+          "of": 5
+        },
+        "identityKept": {
+          "n": 3,
+          "of": 3
+        },
+        "duplicateComments": {
+          "n": 0,
+          "of": 10
+        },
+        "resolutionRecall": {
+          "n": 2,
+          "of": 3
+        },
+        "newFound": {
+          "n": 2,
+          "of": 2
+        }
+      },
+      "tp": 0,
+      "fn": 0,
+      "fp": 0
+    },
+    {
+      "cases": [],
+      "tracked": [
+        {
+          "id": "fix",
+          "steps": [
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 18,
+              "findings": [
+                {
+                  "findingId": "07a02a43a2e815a0810d916fa9290d63",
+                  "fingerprint": "26a52c2dcb1a166cfd43c802e3bb4eb0c32e56d4b1a126e3b6c512ea8f2af0f9",
+                  "status": "PUBLISHED",
+                  "id": "c1",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund route lacks requireAdmin; any logged-in user can refund any order",
+                  "explanation": "POST /orders/:id/refund is registered with only requireUser, unlike the admin-only cancel route on line 30. refundOrder doesn't check who owns the order or what role the caller has either. So any authenticated user can refund any paid order by its id, including other customers' orders. That queues a real refund through queueRefund and marks the order refunded. The PR says the feature is for admins/support only.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 31,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 18,
+                      "end": 31,
+                      "refSha": "9e96e3ef298acf15b6e8f56cfa350fec078e98eb"
+                    }
+                  ],
+                  "reasoningSummary": "The route's middleware chain leaves out requireAdmin, and the handler has no ownership or role check.",
+                  "confidence": 0.95,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder);"
+                }
+              ],
+              "discarded": [],
+              "resolutions": [],
+              "outboxStatus": "published",
+              "statuses": {
+                "07a02a43a2e815a0810d916fa9290d63": "PUBLISHED"
+              },
+              "comments": [
+                {
+                  "path": "src/routes/orders.ts",
+                  "line": 31
+                }
+              ]
+            },
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 19,
+              "findings": [
+                {
+                  "findingId": "07a02a43a2e815a0810d916fa9290d63",
+                  "fingerprint": "26a52c2dcb1a166cfd43c802e3bb4eb0c32e56d4b1a126e3b6c512ea8f2af0f9",
+                  "status": "RESOLVED",
+                  "id": "c1",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund route lacks requireAdmin; any logged-in user can refund any order",
+                  "explanation": "POST /orders/:id/refund is registered with only requireUser, unlike the admin-only cancel route on line 30. refundOrder doesn't check who owns the order or what role the caller has either. So any authenticated user can refund any paid order by its id, including other customers' orders. That queues a real refund through queueRefund and marks the order refunded. The PR says the feature is for admins/support only.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 31,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 18,
+                      "end": 31,
+                      "refSha": "9e96e3ef298acf15b6e8f56cfa350fec078e98eb"
+                    }
+                  ],
+                  "reasoningSummary": "The route's middleware chain leaves out requireAdmin, and the handler has no ownership or role check.",
+                  "confidence": 0.95,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder);"
+                }
+              ],
+              "discarded": [],
+              "resolutions": [
+                {
+                  "findingId": "07a02a43a2e815a0810d916fa9290d63",
+                  "state": "ACCEPTED",
+                  "reason": null
+                }
+              ],
+              "outboxStatus": "published",
+              "statuses": {
+                "07a02a43a2e815a0810d916fa9290d63": "RESOLVED"
+              },
+              "comments": []
+            }
+          ],
+          "outcomes": [
+            {
+              "step": 1,
+              "label": "refund-auth",
+              "expected": "resolved",
+              "findingId": "07a02a43a2e815a0810d916fa9290d63",
+              "status": "RESOLVED",
+              "ok": true
+            }
+          ],
+          "falseResolution": {
+            "n": 0,
+            "of": 0
+          },
+          "identityKept": {
+            "n": 0,
+            "of": 0
+          },
+          "duplicateComments": {
+            "n": 0,
+            "of": 1
+          },
+          "resolutionRecall": {
+            "n": 1,
+            "of": 1
+          },
+          "newFound": {
+            "n": 0,
+            "of": 0
+          }
+        },
+        {
+          "id": "leave",
+          "steps": [
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 13,
+              "findings": [
+                {
+                  "findingId": "9089d9001f41b6483f2c287ab8adba4b",
+                  "fingerprint": "f59b518c86e028479f244c98226414d61604db657d9d04ae2f8ad469cba53f0a",
+                  "status": "PUBLISHED",
+                  "id": "c1",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund endpoint skips the admin check, so any logged-in user can refund any paid order",
+                  "explanation": "The new route is registered as `router.post(\"/orders/:id/refund\", requireUser, refundOrder)`, without the `requireAdmin` middleware. The PR says the endpoint is for admins, and the sibling `/cancel` route uses `requireUser, requireAdmin`. `refundOrder` does not check the caller's role or ownership either; unlike `getOrder`, it never compares `order.userId` with `req.user`. As a result, any logged-in user can POST to /orders/<any id>/refund and refund any paid order, including other customers' orders. This calls `queueRefund` for the remaining balance, which moves real money, and marks the order as refunded.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 31,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 18,
+                      "end": 26,
+                      "refSha": "4c57304d37761036223a194d4aac3e1e65b2ba9f"
+                    },
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 28,
+                      "end": 32,
+                      "refSha": "4c57304d37761036223a194d4aac3e1e65b2ba9f"
+                    }
+                  ],
+                  "reasoningSummary": "The route registration has requireUser but not requireAdmin, and the handler does no role or ownership check, so any authenticated user can trigger a refund on any order.",
+                  "confidence": 0.93,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "Register the route as `router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder);`."
+                }
+              ],
+              "discarded": [],
+              "resolutions": [],
+              "outboxStatus": "published",
+              "statuses": {
+                "9089d9001f41b6483f2c287ab8adba4b": "PUBLISHED"
+              },
+              "comments": [
+                {
+                  "path": "src/routes/orders.ts",
+                  "line": 31
+                }
+              ]
+            },
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 14,
+              "findings": [
+                {
+                  "findingId": "9089d9001f41b6483f2c287ab8adba4b",
+                  "fingerprint": "f59b518c86e028479f244c98226414d61604db657d9d04ae2f8ad469cba53f0a",
+                  "status": "STILL_PRESENT",
+                  "id": "c1",
+                  "priorFindingId": "9089d9001f41b6483f2c287ab8adba4b",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund endpoint skips the admin check, so any logged-in user can refund any paid order",
+                  "explanation": "POST /orders/:id/refund is registered with only requireUser, but the PR intends it for admins/support. The sibling cancel route uses requireUser, requireAdmin. refundOrder does no ownership or role check, so any authenticated user can trigger queueRefund for the full remaining amount of any paid order by id, marking it refunded.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 31,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 18,
+                      "end": 26,
+                      "refSha": "1c5b4b6884240792a61c5cd49eedd6def40c91fc"
+                    },
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 28,
+                      "end": 32,
+                      "refSha": "1c5b4b6884240792a61c5cd49eedd6def40c91fc"
+                    }
+                  ],
+                  "reasoningSummary": "Route registration lacks requireAdmin unlike cancel; handler has no authz check; any user can refund any order.",
+                  "suggestedFix": "Register as router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder).",
+                  "confidence": 0.95,
+                  "evidenceKind": "confirmed_by_static_trace"
+                }
+              ],
+              "discarded": [],
+              "resolutions": [],
+              "outboxStatus": "published",
+              "statuses": {
+                "9089d9001f41b6483f2c287ab8adba4b": "STILL_PRESENT"
+              },
+              "comments": []
+            }
+          ],
+          "outcomes": [
+            {
+              "step": 1,
+              "label": "refund-auth",
+              "expected": "open",
+              "findingId": "9089d9001f41b6483f2c287ab8adba4b",
+              "status": "STILL_PRESENT",
+              "ok": true,
+              "idKept": true
+            }
+          ],
+          "falseResolution": {
+            "n": 0,
+            "of": 1
+          },
+          "identityKept": {
+            "n": 1,
+            "of": 1
+          },
+          "duplicateComments": {
+            "n": 0,
+            "of": 1
+          },
+          "resolutionRecall": {
+            "n": 0,
+            "of": 0
+          },
+          "newFound": {
+            "n": 0,
+            "of": 0
+          }
+        },
+        {
+          "id": "move",
+          "steps": [
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 13,
+              "findings": [
+                {
+                  "findingId": "223eb89d2e0361965b1cee5118ac8f16",
+                  "fingerprint": "adc767e6d2f496780abeca48b6057c7ade3c6ce44af6df4610ce518cbe7a3c25",
+                  "status": "PUBLISHED",
+                  "id": "c1",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund endpoint missing requireAdmin: any authenticated user can refund any paid order",
+                  "explanation": "The PR says this endpoint is for admins/support, but the route is registered with only `requireUser`. The sibling admin action `/orders/:id/cancel` uses `requireUser, requireAdmin`. `refundOrder` doesn't check who owns the order or what role the caller has either, so it is not like `getOrder`, which checks `order.userId !== req.user!.id`. As a result, any logged-in user can POST /orders/<any id>/refund. That queues a real refund through `queueRefund` for any paid order, including other customers' orders, and marks the order refunded.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 31,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 18,
+                      "end": 31,
+                      "refSha": "26cd38d05a0ba782ee568189169e063434a1f449"
+                    }
+                  ],
+                  "reasoningSummary": "Route at line 31 lacks requireAdmin, unlike cancel at line 30; the handler has no authorization check of its own.",
+                  "confidence": 0.95,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "Register as `router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder);`"
+                }
+              ],
+              "discarded": [],
+              "resolutions": [],
+              "outboxStatus": "published",
+              "statuses": {
+                "223eb89d2e0361965b1cee5118ac8f16": "PUBLISHED"
+              },
+              "comments": [
+                {
+                  "path": "src/routes/orders.ts",
+                  "line": 31
+                }
+              ]
+            },
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 15,
+              "findings": [
+                {
+                  "findingId": "223eb89d2e0361965b1cee5118ac8f16",
+                  "fingerprint": "adc767e6d2f496780abeca48b6057c7ade3c6ce44af6df4610ce518cbe7a3c25",
+                  "status": "STILL_PRESENT",
+                  "id": "c1",
+                  "priorFindingId": "223eb89d2e0361965b1cee5118ac8f16",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund endpoint missing requireAdmin: any authenticated user can refund any paid order",
+                  "explanation": "POST /orders/:id/refund is registered with only requireUser, unlike /cancel which also requires requireAdmin. refundOrder does not check ownership or admin role either, so any logged-in user can trigger a full refund (queueRefund) for any paid order by ID, including other users' orders. The PR's stated intent is admin-only refunds.",
+                  "file": "src/routes/order-routes.ts",
+                  "newLine": 55,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/order-routes.ts",
+                      "start": 41,
+                      "end": 49,
+                      "refSha": "a479a912a5cf97f717d428bac4d27db89a464fe1"
+                    },
+                    {
+                      "path": "src/routes/order-routes.ts",
+                      "start": 54,
+                      "end": 55,
+                      "refSha": "a479a912a5cf97f717d428bac4d27db89a464fe1"
+                    }
+                  ],
+                  "reasoningSummary": "Route registration for refund lacks requireAdmin; handler has no auth/ownership check; moved from orders.ts to order-routes.ts unchanged.",
+                  "confidence": 0.95,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder);"
+                }
+              ],
+              "discarded": [],
+              "resolutions": [],
+              "outboxStatus": "published",
+              "statuses": {
+                "223eb89d2e0361965b1cee5118ac8f16": "STILL_PRESENT"
+              },
+              "comments": []
+            }
+          ],
+          "outcomes": [
+            {
+              "step": 1,
+              "label": "refund-auth",
+              "expected": "open",
+              "findingId": "223eb89d2e0361965b1cee5118ac8f16",
+              "status": "STILL_PRESENT",
+              "ok": true,
+              "idKept": true
+            }
+          ],
+          "falseResolution": {
+            "n": 0,
+            "of": 1
+          },
+          "identityKept": {
+            "n": 1,
+            "of": 1
+          },
+          "duplicateComments": {
+            "n": 0,
+            "of": 1
+          },
+          "resolutionRecall": {
+            "n": 0,
+            "of": 0
+          },
+          "newFound": {
+            "n": 0,
+            "of": 0
+          }
+        },
+        {
+          "id": "rewrite-still-buggy",
+          "steps": [
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 13,
+              "findings": [
+                {
+                  "findingId": "6cabb79bc5b56ca12e59a2d81e03cd26",
+                  "fingerprint": "b17af5d8f1dd78ae763b994dceb6787d18b03989ed1f39f4da5075df0607f6f6",
+                  "status": "PUBLISHED",
+                  "id": "c1",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund endpoint lacks requireAdmin: any logged-in user can refund any order",
+                  "explanation": "The new POST /orders/:id/refund route is registered with only `requireUser`, unlike the sibling admin action `/orders/:id/cancel`, which also uses `requireAdmin`. `refundOrder` does no admin or ownership check of its own (it doesn't compare order.userId either). So any authenticated non-admin user can refund any paid order by ID, including other customers' orders. That calls `queueRefund` with the full remaining amount, which the payment provider retries until it accepts, and marks the order refunded. The PR says this endpoint is meant for admins/support only.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 31,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 18,
+                      "end": 31,
+                      "refSha": "22a234c77247f6694c7ff64dfd9bc43c92fe5384"
+                    },
+                    {
+                      "path": "src/auth.ts",
+                      "start": 3,
+                      "end": 11,
+                      "refSha": "22a234c77247f6694c7ff64dfd9bc43c92fe5384"
+                    }
+                  ],
+                  "reasoningSummary": "The route chain has requireUser only. requireUser checks just that req.user exists, and the handler never checks isAdmin. Any user can trigger real refunds on any order.",
+                  "confidence": 0.95,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "Register the route as `router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder);`."
+                }
+              ],
+              "discarded": [],
+              "resolutions": [],
+              "outboxStatus": "published",
+              "statuses": {
+                "6cabb79bc5b56ca12e59a2d81e03cd26": "PUBLISHED"
+              },
+              "comments": [
+                {
+                  "path": "src/routes/orders.ts",
+                  "line": 31
+                }
+              ]
+            },
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 24,
+              "findings": [
+                {
+                  "findingId": "6cabb79bc5b56ca12e59a2d81e03cd26",
+                  "fingerprint": "b17af5d8f1dd78ae763b994dceb6787d18b03989ed1f39f4da5075df0607f6f6",
+                  "status": "STILL_PRESENT",
+                  "id": "c1",
+                  "priorFindingId": "6cabb79bc5b56ca12e59a2d81e03cd26",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund endpoint lacks requireAdmin: any logged-in user can refund any order",
+                  "explanation": "The refund route is registered with only `requireUser`, unlike `/cancel` which also chains `requireAdmin`. refundOrder itself performs no admin or ownership check (it doesn't even compare order.userId like getOrder does). Any authenticated user can POST /orders/<any id>/refund and queue a refund for any paid order, full or partial. The PR states this is meant to be admin-only (\"Let admins refund an order\").",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 35,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 19,
+                      "end": 35,
+                      "refSha": "88ae0f7dd0d49fb9b2a7b0bb7685678cb1e0c764"
+                    }
+                  ],
+                  "reasoningSummary": "Route at line 35 uses only requireUser; handler at 19-30 has no authorization check; compare line 34 which adds requireAdmin.",
+                  "confidence": 0.95,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "Register as `router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder);`"
+                }
+              ],
+              "discarded": [],
+              "resolutions": [],
+              "outboxStatus": "published",
+              "statuses": {
+                "6cabb79bc5b56ca12e59a2d81e03cd26": "STILL_PRESENT"
+              },
+              "comments": []
+            }
+          ],
+          "outcomes": [
+            {
+              "step": 1,
+              "label": "refund-auth",
+              "expected": "not_resolved",
+              "findingId": "6cabb79bc5b56ca12e59a2d81e03cd26",
+              "status": "STILL_PRESENT",
+              "ok": true
+            }
+          ],
+          "falseResolution": {
+            "n": 0,
+            "of": 1
+          },
+          "identityKept": {
+            "n": 0,
+            "of": 0
+          },
+          "duplicateComments": {
+            "n": 0,
+            "of": 1
+          },
+          "resolutionRecall": {
+            "n": 0,
+            "of": 0
+          },
+          "newFound": {
+            "n": 0,
+            "of": 0
+          }
+        },
+        {
+          "id": "partial-fix",
+          "steps": [
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 18,
+              "findings": [
+                {
+                  "findingId": "9852875d6a66bb0a2a7d6d2f9660c493",
+                  "fingerprint": "c902c370abcd6dd570ead994b4b669c41facb66240f8a0cec3e8545cb9a7c49b",
+                  "status": "PUBLISHED",
+                  "id": "c1",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund routes missing requireAdmin: any logged-in user can refund any paid order",
+                  "explanation": "The PR says this is an admin-only refund, but both POST /orders/:id/refund and the alias POST /refunds/:id are registered with only requireUser. The cancel route next to them uses requireUser, requireAdmin. refundOrder also never checks who owns the order (getOrder checks order.userId, refundOrder does not). So any authenticated user can refund any paid order by ID: queueRefund sends real money back and the order is marked refunded.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 31,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 18,
+                      "end": 26,
+                      "refSha": "d197676fdef2634dce15204428666caca6ee342b"
+                    },
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 28,
+                      "end": 33,
+                      "refSha": "d197676fdef2634dce15204428666caca6ee342b"
+                    }
+                  ],
+                  "reasoningSummary": "Lines 31-32 register refundOrder with only requireUser. Line 30 shows the admin pattern this code base uses (requireAdmin), and refundOrder has no ownership or role check.",
+                  "confidence": 0.93,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "Register both routes as router.post(path, requireUser, requireAdmin, refundOrder)."
+                }
+              ],
+              "discarded": [],
+              "resolutions": [],
+              "outboxStatus": "published",
+              "statuses": {
+                "9852875d6a66bb0a2a7d6d2f9660c493": "PUBLISHED"
+              },
+              "comments": [
+                {
+                  "path": "src/routes/orders.ts",
+                  "line": 31
+                }
+              ]
+            },
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 18,
+              "findings": [
+                {
+                  "findingId": "9852875d6a66bb0a2a7d6d2f9660c493",
+                  "fingerprint": "c902c370abcd6dd570ead994b4b669c41facb66240f8a0cec3e8545cb9a7c49b",
+                  "status": "STILL_PRESENT",
+                  "id": "c1",
+                  "priorFindingId": "9852875d6a66bb0a2a7d6d2f9660c493",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "/refunds/:id alias missing requireAdmin: any logged-in user can refund any paid order",
+                  "explanation": "POST /orders/:id/refund now has requireAdmin, but the alias POST /refunds/:id (line 32) is still registered with only requireUser. refundOrder doesn't check ownership or role: it looks up any order by id, calls queueRefund for the remaining amount and marks the order refunded. So any authenticated user can trigger a full refund on any paid order, including other users' orders, by posting to /refunds/:id. The authorization bypass from the earlier finding is still there through the alias.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 32,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 18,
+                      "end": 26,
+                      "refSha": "0c87162b77c5aa3570d7ee10fabbb8482d665c7f"
+                    },
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 31,
+                      "end": 32,
+                      "refSha": "0c87162b77c5aa3570d7ee10fabbb8482d665c7f"
+                    }
+                  ],
+                  "reasoningSummary": "Only the new route got requireAdmin. The alias still reaches the same handler, which has no auth check of its own.",
+                  "confidence": 0.95,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "Register the alias as router.post(\"/refunds/:id\", requireUser, requireAdmin, refundOrder), or add a role check inside refundOrder so every route that reaches it is protected."
+                }
+              ],
+              "discarded": [],
+              "resolutions": [],
+              "outboxStatus": "published",
+              "statuses": {
+                "9852875d6a66bb0a2a7d6d2f9660c493": "STILL_PRESENT"
+              },
+              "comments": []
+            }
+          ],
+          "outcomes": [
+            {
+              "step": 1,
+              "label": "refund-auth",
+              "expected": "not_resolved",
+              "findingId": "9852875d6a66bb0a2a7d6d2f9660c493",
+              "status": "STILL_PRESENT",
+              "ok": true
+            }
+          ],
+          "falseResolution": {
+            "n": 0,
+            "of": 1
+          },
+          "identityKept": {
+            "n": 0,
+            "of": 0
+          },
+          "duplicateComments": {
+            "n": 0,
+            "of": 1
+          },
+          "resolutionRecall": {
+            "n": 0,
+            "of": 0
+          },
+          "newFound": {
+            "n": 0,
+            "of": 0
+          }
+        },
+        {
+          "id": "worse",
+          "steps": [
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 21,
+              "findings": [
+                {
+                  "findingId": "6a6661e474606ce6577448635b96fde3",
+                  "fingerprint": "e5b028c04a05b2610a01d35b416ede88318fbeb9e6d51e010d117d6e2efe8ea3",
+                  "status": "PUBLISHED",
+                  "id": "c1",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund endpoint lacks requireAdmin: any logged-in user can refund any paid order",
+                  "explanation": "The new route is registered as `router.post(\"/orders/:id/refund\", requireUser, refundOrder)`. Unlike the sibling admin action `/orders/:id/cancel`, which chains `requireAdmin`, it only requires authentication. `refundOrder` also does not check `order.userId` against `req.user`. So any authenticated non-admin user can POST to /orders/<any id>/refund and trigger `queueRefund` for the full remaining amount of any paid order, including other users' orders. The order is then marked refunded. The PR says this feature is for admins/support only, so this is a broken authorization check with direct financial impact.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 31,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 18,
+                      "end": 31,
+                      "refSha": "8780a761a97883cdc556e7ec82c6657e07dc765e"
+                    },
+                    {
+                      "path": "src/auth.ts",
+                      "start": 3,
+                      "end": 11,
+                      "refSha": "8780a761a97883cdc556e7ec82c6657e07dc765e"
+                    }
+                  ],
+                  "reasoningSummary": "Route middleware chain omits requireAdmin (compare line 30), and the handler has no ownership or role check, so any user can issue refunds on arbitrary orders.",
+                  "confidence": 0.95,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "Register the route as `router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder);`."
+                }
+              ],
+              "discarded": [],
+              "resolutions": [],
+              "outboxStatus": "published",
+              "statuses": {
+                "6a6661e474606ce6577448635b96fde3": "PUBLISHED"
+              },
+              "comments": [
+                {
+                  "path": "src/routes/orders.ts",
+                  "line": 31
+                }
+              ]
+            },
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 20,
+              "findings": [
+                {
+                  "findingId": "6a6661e474606ce6577448635b96fde3",
+                  "fingerprint": "e5b028c04a05b2610a01d35b416ede88318fbeb9e6d51e010d117d6e2efe8ea3",
+                  "status": "STILL_PRESENT",
+                  "id": "c1",
+                  "priorFindingId": "6a6661e474606ce6577448635b96fde3",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund endpoint lacks requireAdmin: any logged-in user can refund any paid order",
+                  "explanation": "POST /orders/:id/refund is registered with only requireUser. refundOrder doesn't check ownership or admin status, so any authenticated user can call it on any order id. It queues a real refund with the payment provider for the full remaining amount and marks the order refunded. The PR says this endpoint is meant for admins, and the sibling cancel route uses requireAdmin.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 31,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 18,
+                      "end": 31,
+                      "refSha": "b90b1b311975f62b05ec6c505b13edcca43ec7bd"
+                    },
+                    {
+                      "path": "src/auth.ts",
+                      "start": 3,
+                      "end": 11,
+                      "refSha": "b90b1b311975f62b05ec6c505b13edcca43ec7bd"
+                    }
+                  ],
+                  "reasoningSummary": "Route at line 31 uses only requireUser. The handler has no isAdmin or owner check, and it calls queueRefund.",
+                  "confidence": 0.95,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder);"
+                },
+                {
+                  "findingId": "34e5cf7a414690a91ae56b63c787d89b",
+                  "fingerprint": "a132b431d9892e390a81c72d46a59c854515be44ae0365758e7a045530318697",
+                  "status": "PUBLISHED",
+                  "id": "c2",
+                  "category": "security",
+                  "severity": "high",
+                  "title": "Support reopen endpoint lacks requireAdmin: any logged-in user can reopen any cancelled order",
+                  "explanation": "POST /support/orders/:id/reopen is registered with only requireUser, and reopenOrder doesn't check admin or ownership. Any authenticated user can switch any cancelled order (cancelling is admin-only) back to \"paid\", so it ships again. That also undoes the admin's cancel and makes the order eligible for the refund endpoint again. The route is meant for support staff, but it is open to every user.",
+                  "file": "src/routes/support.ts",
+                  "newLine": 15,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/support.ts",
+                      "start": 6,
+                      "end": 16,
+                      "refSha": "b90b1b311975f62b05ec6c505b13edcca43ec7bd"
+                    },
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 30,
+                      "end": 30,
+                      "refSha": "b90b1b311975f62b05ec6c505b13edcca43ec7bd"
+                    }
+                  ],
+                  "reasoningSummary": "The new support route is guarded only by requireUser, yet it reverses an admin-only state change (cancel) on any order.",
+                  "confidence": 0.85,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "router.post(\"/support/orders/:id/reopen\", requireUser, requireAdmin, reopenOrder);"
+                }
+              ],
+              "discarded": [],
+              "resolutions": [],
+              "outboxStatus": "published",
+              "statuses": {
+                "6a6661e474606ce6577448635b96fde3": "STILL_PRESENT",
+                "34e5cf7a414690a91ae56b63c787d89b": "PUBLISHED"
+              },
+              "comments": [
+                {
+                  "path": "src/routes/support.ts",
+                  "line": 15
+                }
+              ]
+            }
+          ],
+          "outcomes": [
+            {
+              "step": 1,
+              "label": "refund-auth",
+              "expected": "open",
+              "findingId": "6a6661e474606ce6577448635b96fde3",
+              "status": "STILL_PRESENT",
+              "ok": true,
+              "idKept": true
+            }
+          ],
+          "falseResolution": {
+            "n": 0,
+            "of": 1
+          },
+          "identityKept": {
+            "n": 1,
+            "of": 1
+          },
+          "duplicateComments": {
+            "n": 0,
+            "of": 2
+          },
+          "resolutionRecall": {
+            "n": 0,
+            "of": 0
+          },
+          "newFound": {
+            "n": 1,
+            "of": 1
+          }
+        },
+        {
+          "id": "fix-elsewhere",
+          "steps": [
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 21,
+              "findings": [
+                {
+                  "findingId": "7c2465e84ee0c22ee9146215ff99ec86",
+                  "fingerprint": "f8e5fd0eb87b6fc69c3e97f926ab3fac6986cc1f1b431e97d2c2b710addb0c30",
+                  "status": "PUBLISHED",
+                  "id": "c1",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund endpoint missing requireAdmin: any logged-in user can refund any paid order",
+                  "explanation": "The PR says this route is for admins, but `POST /orders/:id/refund` is registered with only `requireUser` (line 31). The sibling admin route `/orders/:id/cancel` (line 30) also has `requireAdmin`. `refundOrder` doesn't check `req.user.isAdmin` or who owns the order (lines 18-26). Nothing else adds an admin check: `src/app.ts` just calls `registerOrderRoutes(router)`, and the only admin guard in the codebase is the `requireAdmin` middleware in `src/auth.ts`. So any logged-in non-admin user can refund any paid order, including other users' orders, by its id. That calls `queueRefund` with the payment provider, which moves real money, and marks the order refunded.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 31,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 18,
+                      "end": 31,
+                      "refSha": "426c116cd1c2d3d76e72177f270508918524a662"
+                    },
+                    {
+                      "path": "src/auth.ts",
+                      "start": 3,
+                      "end": 11,
+                      "refSha": "426c116cd1c2d3d76e72177f270508918524a662"
+                    },
+                    {
+                      "path": "src/app.ts",
+                      "start": 5,
+                      "end": 8,
+                      "refSha": "426c116cd1c2d3d76e72177f270508918524a662"
+                    }
+                  ],
+                  "reasoningSummary": "The route is registered without requireAdmin, unlike the cancel route. The handler has no authorization check, and no global admin guard exists.",
+                  "confidence": 0.95,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "Register it as `router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder);`."
+                }
+              ],
+              "discarded": [],
+              "resolutions": [],
+              "outboxStatus": "published",
+              "statuses": {
+                "7c2465e84ee0c22ee9146215ff99ec86": "PUBLISHED"
+              },
+              "comments": [
+                {
+                  "path": "src/routes/orders.ts",
+                  "line": 31
+                }
+              ]
+            },
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 12,
+              "findings": [
+                {
+                  "findingId": "7c2465e84ee0c22ee9146215ff99ec86",
+                  "fingerprint": "f8e5fd0eb87b6fc69c3e97f926ab3fac6986cc1f1b431e97d2c2b710addb0c30",
+                  "status": "POTENTIALLY_RESOLVED",
+                  "id": "c1",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund endpoint missing requireAdmin: any logged-in user can refund any paid order",
+                  "explanation": "The PR says this route is for admins, but `POST /orders/:id/refund` is registered with only `requireUser` (line 31). The sibling admin route `/orders/:id/cancel` (line 30) also has `requireAdmin`. `refundOrder` doesn't check `req.user.isAdmin` or who owns the order (lines 18-26). Nothing else adds an admin check: `src/app.ts` just calls `registerOrderRoutes(router)`, and the only admin guard in the codebase is the `requireAdmin` middleware in `src/auth.ts`. So any logged-in non-admin user can refund any paid order, including other users' orders, by its id. That calls `queueRefund` with the payment provider, which moves real money, and marks the order refunded.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 31,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 18,
+                      "end": 31,
+                      "refSha": "426c116cd1c2d3d76e72177f270508918524a662"
+                    },
+                    {
+                      "path": "src/auth.ts",
+                      "start": 3,
+                      "end": 11,
+                      "refSha": "426c116cd1c2d3d76e72177f270508918524a662"
+                    },
+                    {
+                      "path": "src/app.ts",
+                      "start": 5,
+                      "end": 8,
+                      "refSha": "426c116cd1c2d3d76e72177f270508918524a662"
+                    }
+                  ],
+                  "reasoningSummary": "The route is registered without requireAdmin, unlike the cancel route. The handler has no authorization check, and no global admin guard exists.",
+                  "confidence": 0.95,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "Register it as `router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder);`."
+                }
+              ],
+              "discarded": [],
+              "resolutions": [
+                {
+                  "findingId": "7c2465e84ee0c22ee9146215ff99ec86",
+                  "state": "REFUSED",
+                  "reason": "no evidence in src/routes/orders.ts"
+                }
+              ],
+              "outboxStatus": "published",
+              "statuses": {
+                "7c2465e84ee0c22ee9146215ff99ec86": "POTENTIALLY_RESOLVED"
+              },
+              "comments": []
+            }
+          ],
+          "outcomes": [
+            {
+              "step": 1,
+              "label": "refund-auth",
+              "expected": "resolved",
+              "findingId": "7c2465e84ee0c22ee9146215ff99ec86",
+              "status": "POTENTIALLY_RESOLVED",
+              "ok": false
+            }
+          ],
+          "falseResolution": {
+            "n": 0,
+            "of": 0
+          },
+          "identityKept": {
+            "n": 0,
+            "of": 0
+          },
+          "duplicateComments": {
+            "n": 0,
+            "of": 1
+          },
+          "resolutionRecall": {
+            "n": 0,
+            "of": 1
+          },
+          "newFound": {
+            "n": 0,
+            "of": 0
+          }
+        },
+        {
+          "id": "regress",
+          "steps": [
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 17,
+              "findings": [
+                {
+                  "findingId": "ae3a5789d5b5e94581e53a020b9cbfba",
+                  "fingerprint": "f8e5fd0eb87b6fc69c3e97f926ab3fac6986cc1f1b431e97d2c2b710addb0c30",
+                  "status": "PUBLISHED",
+                  "id": "c1",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund endpoint missing requireAdmin: any logged-in user can refund any paid order",
+                  "explanation": "POST /orders/:id/refund is registered with only `requireUser`, unlike the sibling admin action `/orders/:id/cancel` which chains `requireAdmin`. refundOrder does no ownership or admin check either. It just looks up the order by id, so any authenticated non-admin user can refund any paid order, including other users' orders. That calls queueRefund for the full remaining amount and marks the order refunded. The PR states this is an admin/support feature.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 31,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 18,
+                      "end": 31,
+                      "refSha": "9637453eef748968e92fb9c77e382bfa3b9dfd3e"
+                    },
+                    {
+                      "path": "src/auth.ts",
+                      "start": 3,
+                      "end": 11,
+                      "refSha": "9637453eef748968e92fb9c77e382bfa3b9dfd3e"
+                    }
+                  ],
+                  "reasoningSummary": "The route chain lacks requireAdmin. requireUser only checks that a user is logged in, and the handler performs no authorization, so any user can trigger a financial refund on any order.",
+                  "confidence": 0.95,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "Register as `router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder);`."
+                }
+              ],
+              "discarded": [],
+              "resolutions": [],
+              "outboxStatus": "published",
+              "statuses": {
+                "ae3a5789d5b5e94581e53a020b9cbfba": "PUBLISHED"
+              },
+              "comments": [
+                {
+                  "path": "src/routes/orders.ts",
+                  "line": 31
+                }
+              ]
+            },
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 9,
+              "findings": [
+                {
+                  "findingId": "ae3a5789d5b5e94581e53a020b9cbfba",
+                  "fingerprint": "f8e5fd0eb87b6fc69c3e97f926ab3fac6986cc1f1b431e97d2c2b710addb0c30",
+                  "status": "RESOLVED",
+                  "id": "c1",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund endpoint missing requireAdmin: any logged-in user can refund any paid order",
+                  "explanation": "POST /orders/:id/refund is registered with only `requireUser`, unlike the sibling admin action `/orders/:id/cancel` which chains `requireAdmin`. refundOrder does no ownership or admin check either. It just looks up the order by id, so any authenticated non-admin user can refund any paid order, including other users' orders. That calls queueRefund for the full remaining amount and marks the order refunded. The PR states this is an admin/support feature.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 31,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 18,
+                      "end": 31,
+                      "refSha": "9637453eef748968e92fb9c77e382bfa3b9dfd3e"
+                    },
+                    {
+                      "path": "src/auth.ts",
+                      "start": 3,
+                      "end": 11,
+                      "refSha": "9637453eef748968e92fb9c77e382bfa3b9dfd3e"
+                    }
+                  ],
+                  "reasoningSummary": "The route chain lacks requireAdmin. requireUser only checks that a user is logged in, and the handler performs no authorization, so any user can trigger a financial refund on any order.",
+                  "confidence": 0.95,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "Register as `router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder);`."
+                }
+              ],
+              "discarded": [],
+              "resolutions": [
+                {
+                  "findingId": "ae3a5789d5b5e94581e53a020b9cbfba",
+                  "state": "ACCEPTED",
+                  "reason": null
+                }
+              ],
+              "outboxStatus": "published",
+              "statuses": {
+                "ae3a5789d5b5e94581e53a020b9cbfba": "RESOLVED"
+              },
+              "comments": []
+            },
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 10,
+              "findings": [
+                {
+                  "findingId": "c4fa53e9adc5f3a9f67579674f4d71aa",
+                  "fingerprint": "43094b197ca2f0c00d2033ac0cccb89174e95712ffa289d37b1af2e54392e70b",
+                  "status": "PUBLISHED",
+                  "id": "c1",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund route missing requireAdmin: any logged-in user can refund any order",
+                  "explanation": "The new POST /orders/:id/refund route is registered with only `requireUser`, unlike the comparable admin action `/orders/:id/cancel` which also chains `requireAdmin`. `refundOrder` performs no ownership or role check either (it looks up the order by id and refunds it). So any authenticated user can trigger a full refund (queueRefund) of any paid order, including other users' orders, by guessing/enumerating ids. The PR intent is admin-only refunds.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 31,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 18,
+                      "end": 31,
+                      "refSha": "b52e7793515605a232cea25de58cd6ede03a3c4a"
+                    }
+                  ],
+                  "reasoningSummary": "Route lacks requireAdmin middleware present on the sibling cancel route; handler has no authorization check, so any user can issue refunds on arbitrary orders.",
+                  "confidence": 0.95,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder);"
+                }
+              ],
+              "discarded": [],
+              "resolutions": [],
+              "outboxStatus": "published",
+              "statuses": {
+                "ae3a5789d5b5e94581e53a020b9cbfba": "RESOLVED",
+                "c4fa53e9adc5f3a9f67579674f4d71aa": "PUBLISHED"
+              },
+              "comments": [
+                {
+                  "path": "src/routes/orders.ts",
+                  "line": 31
+                }
+              ]
+            }
+          ],
+          "outcomes": [
+            {
+              "step": 1,
+              "label": "refund-auth",
+              "expected": "resolved",
+              "findingId": "ae3a5789d5b5e94581e53a020b9cbfba",
+              "status": "RESOLVED",
+              "ok": true
+            }
+          ],
+          "falseResolution": {
+            "n": 0,
+            "of": 0
+          },
+          "identityKept": {
+            "n": 0,
+            "of": 0
+          },
+          "duplicateComments": {
+            "n": 0,
+            "of": 2
+          },
+          "resolutionRecall": {
+            "n": 1,
+            "of": 1
+          },
+          "newFound": {
+            "n": 1,
+            "of": 1
+          }
+        }
+      ],
+      "tracking": {
+        "falseResolution": {
+          "n": 0,
+          "of": 5
+        },
+        "identityKept": {
+          "n": 3,
+          "of": 3
+        },
+        "duplicateComments": {
+          "n": 0,
+          "of": 10
+        },
+        "resolutionRecall": {
+          "n": 2,
+          "of": 3
+        },
+        "newFound": {
+          "n": 2,
+          "of": 2
+        }
+      },
+      "tp": 0,
+      "fn": 0,
+      "fp": 0
+    },
+    {
+      "cases": [],
+      "tracked": [
+        {
+          "id": "fix",
+          "steps": [
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 12,
+              "findings": [
+                {
+                  "findingId": "b7fd112fca8120089f9eb8cfc08d6e92",
+                  "fingerprint": "560e1ba573705e40ebf298d39f945cc74acae43269f0a12876841fe0e79c48f2",
+                  "status": "PUBLISHED",
+                  "id": "c1",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund endpoint lacks requireAdmin: any authenticated user can refund any order",
+                  "explanation": "POST /orders/:id/refund is registered with only requireUser. The admin-only cancel route next to it uses requireUser, requireAdmin. refundOrder also never checks order ownership (compare getOrder, which checks order.userId !== req.user.id). So any logged-in user can call queueRefund for the remaining balance of any paid order and set it to 'refunded'. They can refund other users' orders by ID, or refund their own paid orders and get the money back without going through support. The PR says this is an admin feature.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 31,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 18,
+                      "end": 31,
+                      "refSha": "cbb07d076a387632b65611ca580113236e2f056f"
+                    }
+                  ],
+                  "reasoningSummary": "The route is missing the requireAdmin middleware that the sibling admin route has, and the handler has no ownership or role check.",
+                  "confidence": 0.95,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "Register the route as router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder)."
+                }
+              ],
+              "discarded": [],
+              "resolutions": [],
+              "outboxStatus": "published",
+              "statuses": {
+                "b7fd112fca8120089f9eb8cfc08d6e92": "PUBLISHED"
+              },
+              "comments": [
+                {
+                  "path": "src/routes/orders.ts",
+                  "line": 31
+                }
+              ]
+            },
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 19,
+              "findings": [
+                {
+                  "findingId": "b7fd112fca8120089f9eb8cfc08d6e92",
+                  "fingerprint": "560e1ba573705e40ebf298d39f945cc74acae43269f0a12876841fe0e79c48f2",
+                  "status": "RESOLVED",
+                  "id": "c1",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund endpoint lacks requireAdmin: any authenticated user can refund any order",
+                  "explanation": "POST /orders/:id/refund is registered with only requireUser. The admin-only cancel route next to it uses requireUser, requireAdmin. refundOrder also never checks order ownership (compare getOrder, which checks order.userId !== req.user.id). So any logged-in user can call queueRefund for the remaining balance of any paid order and set it to 'refunded'. They can refund other users' orders by ID, or refund their own paid orders and get the money back without going through support. The PR says this is an admin feature.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 31,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 18,
+                      "end": 31,
+                      "refSha": "cbb07d076a387632b65611ca580113236e2f056f"
+                    }
+                  ],
+                  "reasoningSummary": "The route is missing the requireAdmin middleware that the sibling admin route has, and the handler has no ownership or role check.",
+                  "confidence": 0.95,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "Register the route as router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder)."
+                }
+              ],
+              "discarded": [],
+              "resolutions": [
+                {
+                  "findingId": "b7fd112fca8120089f9eb8cfc08d6e92",
+                  "state": "ACCEPTED",
+                  "reason": null
+                }
+              ],
+              "outboxStatus": "published",
+              "statuses": {
+                "b7fd112fca8120089f9eb8cfc08d6e92": "RESOLVED"
+              },
+              "comments": []
+            }
+          ],
+          "outcomes": [
+            {
+              "step": 1,
+              "label": "refund-auth",
+              "expected": "resolved",
+              "findingId": "b7fd112fca8120089f9eb8cfc08d6e92",
+              "status": "RESOLVED",
+              "ok": true
+            }
+          ],
+          "falseResolution": {
+            "n": 0,
+            "of": 0
+          },
+          "identityKept": {
+            "n": 0,
+            "of": 0
+          },
+          "duplicateComments": {
+            "n": 0,
+            "of": 1
+          },
+          "resolutionRecall": {
+            "n": 1,
+            "of": 1
+          },
+          "newFound": {
+            "n": 0,
+            "of": 0
+          }
+        },
+        {
+          "id": "leave",
+          "steps": [
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 15,
+              "findings": [
+                {
+                  "findingId": "ec5c2eec8571b874f92a493796e69e71",
+                  "fingerprint": "52d8e8a042cb35edde72ae7132d12b91bba605aa7af3909b5a4cf721c895ea73",
+                  "status": "PUBLISHED",
+                  "id": "c1",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund route lacks requireAdmin; any authenticated user can refund any order",
+                  "explanation": "The new POST /orders/:id/refund is registered with only requireUser, unlike the admin-only cancel route which uses requireUser, requireAdmin. refundOrder also does not check order ownership (unlike getOrder). So any logged-in user can trigger a full refund (queueRefund) on any paid order by ID, including other users' orders. The feature is meant to be admin/support-only.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 31,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 18,
+                      "end": 31,
+                      "refSha": "ea2ce66d0e54e94594c57bb3721812cc273f3d10"
+                    }
+                  ],
+                  "reasoningSummary": "Route registration omits requireAdmin middleware that the sibling admin route uses; handler has no ownership/role check.",
+                  "confidence": 0.93,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder);"
+                }
+              ],
+              "discarded": [],
+              "resolutions": [],
+              "outboxStatus": "published",
+              "statuses": {
+                "ec5c2eec8571b874f92a493796e69e71": "PUBLISHED"
+              },
+              "comments": [
+                {
+                  "path": "src/routes/orders.ts",
+                  "line": 31
+                }
+              ]
+            },
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 15,
+              "findings": [
+                {
+                  "findingId": "ec5c2eec8571b874f92a493796e69e71",
+                  "fingerprint": "52d8e8a042cb35edde72ae7132d12b91bba605aa7af3909b5a4cf721c895ea73",
+                  "status": "STILL_PRESENT",
+                  "id": "c1",
+                  "priorFindingId": "ec5c2eec8571b874f92a493796e69e71",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund route lacks requireAdmin; any authenticated user can refund any order",
+                  "explanation": "POST /orders/:id/refund is registered with only requireUser. The PR says it is an admin/support action, and the cancel route next to it uses requireAdmin, but refundOrder does not check the caller's role or whether the caller owns the order. Any logged-in user can send the id of any paid order and trigger a full refund through queueRefund. The order then becomes 'refunded', which causes financial loss and corrupts order data.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 31,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 18,
+                      "end": 31,
+                      "refSha": "e0d90905e13d6629f38e8310496be9ed3c8d7b0c"
+                    }
+                  ],
+                  "reasoningSummary": "The route at line 31 has only requireUser. The handler has no role or owner check. The sibling admin route at line 30 does use requireAdmin.",
+                  "confidence": 0.95,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "Register the route as router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder);"
+                }
+              ],
+              "discarded": [],
+              "resolutions": [],
+              "outboxStatus": "published",
+              "statuses": {
+                "ec5c2eec8571b874f92a493796e69e71": "STILL_PRESENT"
+              },
+              "comments": []
+            }
+          ],
+          "outcomes": [
+            {
+              "step": 1,
+              "label": "refund-auth",
+              "expected": "open",
+              "findingId": "ec5c2eec8571b874f92a493796e69e71",
+              "status": "STILL_PRESENT",
+              "ok": true,
+              "idKept": true
+            }
+          ],
+          "falseResolution": {
+            "n": 0,
+            "of": 1
+          },
+          "identityKept": {
+            "n": 1,
+            "of": 1
+          },
+          "duplicateComments": {
+            "n": 0,
+            "of": 1
+          },
+          "resolutionRecall": {
+            "n": 0,
+            "of": 0
+          },
+          "newFound": {
+            "n": 0,
+            "of": 0
+          }
+        },
+        {
+          "id": "move",
+          "steps": [
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 13,
+              "findings": [
+                {
+                  "findingId": "70e9aed82d90babea4fd3feee6918ce2",
+                  "fingerprint": "752b78d1b68adee70b0b6cba31f950be72064e6dc271e3a9412726e02aa1d71b",
+                  "status": "PUBLISHED",
+                  "id": "c1",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund route lacks requireAdmin: any logged-in user can refund any paid order",
+                  "explanation": "The new POST /orders/:id/refund is registered with only `requireUser`, unlike the sibling admin action `/orders/:id/cancel` which chains `requireAdmin`. refundOrder also performs no ownership check (contrast getOrder line 7). So any authenticated user can trigger a full refund (queueRefund with real money) for any order id that is in 'paid' status, including other users' orders. The PR states the feature is for admins/support only.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 31,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 28,
+                      "end": 32,
+                      "refSha": "50ed9514ba7396197f6267259f403fc763f2023f"
+                    },
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 18,
+                      "end": 26,
+                      "refSha": "50ed9514ba7396197f6267259f403fc763f2023f"
+                    }
+                  ],
+                  "reasoningSummary": "Route registration omits requireAdmin middleware which the cancel route uses; handler has no authorization check, so any user can refund arbitrary paid orders.",
+                  "confidence": 0.95,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder);"
+                }
+              ],
+              "discarded": [],
+              "resolutions": [],
+              "outboxStatus": "published",
+              "statuses": {
+                "70e9aed82d90babea4fd3feee6918ce2": "PUBLISHED"
+              },
+              "comments": [
+                {
+                  "path": "src/routes/orders.ts",
+                  "line": 31
+                }
+              ]
+            },
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 12,
+              "findings": [
+                {
+                  "findingId": "70e9aed82d90babea4fd3feee6918ce2",
+                  "fingerprint": "752b78d1b68adee70b0b6cba31f950be72064e6dc271e3a9412726e02aa1d71b",
+                  "status": "STILL_PRESENT",
+                  "id": "c1",
+                  "priorFindingId": "70e9aed82d90babea4fd3feee6918ce2",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund route lacks requireAdmin: any logged-in user can refund any paid order",
+                  "explanation": "The refund route was moved into src/routes/order-routes.ts. It is registered with only `requireUser` (line 55). The sibling admin action, cancel, also uses `requireAdmin` (line 54). refundOrder (lines 41-49) does not check ownership or role. It loads any order by id, queues a refund for the remaining amount, and marks the order refunded. So any authenticated user can refund any paid order, including other customers' orders. The PR says this endpoint is meant for admins only.",
+                  "file": "src/routes/order-routes.ts",
+                  "newLine": 55,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/order-routes.ts",
+                      "start": 41,
+                      "end": 49,
+                      "refSha": "bf253d5ef4a23244e5aea6358b2221f0fef91b79"
+                    },
+                    {
+                      "path": "src/routes/order-routes.ts",
+                      "start": 51,
+                      "end": 56,
+                      "refSha": "bf253d5ef4a23244e5aea6358b2221f0fef91b79"
+                    }
+                  ],
+                  "reasoningSummary": "Route registration at line 55 omits requireAdmin, and the handler has no role or ownership check, so any user can trigger refunds on arbitrary orders.",
+                  "confidence": 0.95,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "Register as router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder)."
+                }
+              ],
+              "discarded": [],
+              "resolutions": [],
+              "outboxStatus": "published",
+              "statuses": {
+                "70e9aed82d90babea4fd3feee6918ce2": "STILL_PRESENT"
+              },
+              "comments": []
+            }
+          ],
+          "outcomes": [
+            {
+              "step": 1,
+              "label": "refund-auth",
+              "expected": "open",
+              "findingId": "70e9aed82d90babea4fd3feee6918ce2",
+              "status": "STILL_PRESENT",
+              "ok": true,
+              "idKept": true
+            }
+          ],
+          "falseResolution": {
+            "n": 0,
+            "of": 1
+          },
+          "identityKept": {
+            "n": 1,
+            "of": 1
+          },
+          "duplicateComments": {
+            "n": 0,
+            "of": 1
+          },
+          "resolutionRecall": {
+            "n": 0,
+            "of": 0
+          },
+          "newFound": {
+            "n": 0,
+            "of": 0
+          }
+        },
+        {
+          "id": "rewrite-still-buggy",
+          "steps": [
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 13,
+              "findings": [
+                {
+                  "findingId": "2825e53453cb585201f10e6471fec296",
+                  "fingerprint": "752b78d1b68adee70b0b6cba31f950be72064e6dc271e3a9412726e02aa1d71b",
+                  "status": "PUBLISHED",
+                  "id": "c1",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund route lacks requireAdmin: any logged-in user can refund any paid order",
+                  "explanation": "The PR says the endpoint is for admins/support, and the sibling cancel route is gated by `requireUser, requireAdmin`. The refund route is registered with only `requireUser`. refundOrder also never checks `order.userId` against `req.user`. So any authenticated user can POST /orders/<any id>/refund and trigger `queueRefund` for the full remaining amount on any paid order, including orders that belong to other users. That moves real money and marks the order refunded.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 31,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 18,
+                      "end": 26,
+                      "refSha": "54673c3710a2c03654cf4e4c279ecbea62c334e5"
+                    },
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 28,
+                      "end": 32,
+                      "refSha": "54673c3710a2c03654cf4e4c279ecbea62c334e5"
+                    }
+                  ],
+                  "reasoningSummary": "The cancel route uses requireAdmin, but the new refund route leaves it out, and the handler has no ownership or role check.",
+                  "confidence": 0.95,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "Register the route as `router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder);`"
+                }
+              ],
+              "discarded": [],
+              "resolutions": [],
+              "outboxStatus": "published",
+              "statuses": {
+                "2825e53453cb585201f10e6471fec296": "PUBLISHED"
+              },
+              "comments": [
+                {
+                  "path": "src/routes/orders.ts",
+                  "line": 31
+                }
+              ]
+            },
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 16,
+              "findings": [
+                {
+                  "findingId": "2825e53453cb585201f10e6471fec296",
+                  "fingerprint": "752b78d1b68adee70b0b6cba31f950be72064e6dc271e3a9412726e02aa1d71b",
+                  "status": "STILL_PRESENT",
+                  "id": "c1",
+                  "priorFindingId": "2825e53453cb585201f10e6471fec296",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund route lacks requireAdmin: any logged-in user can refund any paid order",
+                  "explanation": "POST /orders/:id/refund is registered with only requireUser, unlike the cancel route which also uses requireAdmin. refundOrder does not check ownership or admin role either. So any authenticated user can refund any paid order (by id), including orders of other users, triggering queueRefund and mutating refundedCents/status. The PR intent is admin-only refunds.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 35,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 19,
+                      "end": 30,
+                      "refSha": "48372df446bb89d3ab47a2c0a3716eff52a8ce8d"
+                    },
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 32,
+                      "end": 36,
+                      "refSha": "48372df446bb89d3ab47a2c0a3716eff52a8ce8d"
+                    }
+                  ],
+                  "reasoningSummary": "Route at line 35 has requireUser but not requireAdmin; handler performs no authorization check.",
+                  "confidence": 0.95,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder);"
+                }
+              ],
+              "discarded": [],
+              "resolutions": [],
+              "outboxStatus": "published",
+              "statuses": {
+                "2825e53453cb585201f10e6471fec296": "STILL_PRESENT"
+              },
+              "comments": []
+            }
+          ],
+          "outcomes": [
+            {
+              "step": 1,
+              "label": "refund-auth",
+              "expected": "not_resolved",
+              "findingId": "2825e53453cb585201f10e6471fec296",
+              "status": "STILL_PRESENT",
+              "ok": true
+            }
+          ],
+          "falseResolution": {
+            "n": 0,
+            "of": 1
+          },
+          "identityKept": {
+            "n": 0,
+            "of": 0
+          },
+          "duplicateComments": {
+            "n": 0,
+            "of": 1
+          },
+          "resolutionRecall": {
+            "n": 0,
+            "of": 0
+          },
+          "newFound": {
+            "n": 0,
+            "of": 0
+          }
+        },
+        {
+          "id": "partial-fix",
+          "steps": [
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 9,
+              "findings": [
+                {
+                  "findingId": "dda63f6fd184aa96e8aba600c71ce0a3",
+                  "fingerprint": "d59e4177d172cca91ce745327066b60f5d5f87a68973be30a4476a5e076fb896",
+                  "status": "PUBLISHED",
+                  "id": "c1",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund routes lack requireAdmin; any logged-in user can refund any order",
+                  "explanation": "The PR says the refund endpoint is for admins, but both POST /orders/:id/refund and the alias POST /refunds/:id use only requireUser. The cancel route next to them uses requireAdmin. refundOrder never checks ownership or role. It loads any order by id, queues a refund for the remaining amount, and marks the order refunded. So any authenticated user can refund any paid order, including other users' orders, and trigger real money movement.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 31,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 18,
+                      "end": 32,
+                      "refSha": "ee64614ef6d055be0b80c9561d63b79b02643ea2"
+                    }
+                  ],
+                  "reasoningSummary": "Both new routes are registered with requireUser only, and the handler has no role or ownership check. Compare line 30, where cancel uses requireAdmin.",
+                  "confidence": 0.93,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "Add requireAdmin to both routes: router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder); router.post(\"/refunds/:id\", requireUser, requireAdmin, refundOrder);"
+                }
+              ],
+              "discarded": [],
+              "resolutions": [],
+              "outboxStatus": "published",
+              "statuses": {
+                "dda63f6fd184aa96e8aba600c71ce0a3": "PUBLISHED"
+              },
+              "comments": [
+                {
+                  "path": "src/routes/orders.ts",
+                  "line": 31
+                }
+              ]
+            },
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 12,
+              "findings": [
+                {
+                  "findingId": "dda63f6fd184aa96e8aba600c71ce0a3",
+                  "fingerprint": "d59e4177d172cca91ce745327066b60f5d5f87a68973be30a4476a5e076fb896",
+                  "status": "STILL_PRESENT",
+                  "id": "c1",
+                  "priorFindingId": "dda63f6fd184aa96e8aba600c71ce0a3",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund alias /refunds/:id still lacks requireAdmin; any logged-in user can refund any order",
+                  "explanation": "The head adds requireAdmin to POST /orders/:id/refund (line 31), but the alias POST /refunds/:id (line 32) still uses only requireUser before refundOrder. refundOrder (lines 18-26) never checks ownership or role: it looks up any order by id, calls queueRefund for the remaining balance, and marks it refunded. So any authenticated non-admin user can POST /refunds/<any order id> and trigger a full refund of any paid order, including other users' orders. The admin check on the new path does nothing because the same handler is reachable through the unguarded alias.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 32,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 18,
+                      "end": 26,
+                      "refSha": "97613bcde6c898872f2d79809d08b80e87bdda57"
+                    },
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 31,
+                      "end": 32,
+                      "refSha": "97613bcde6c898872f2d79809d08b80e87bdda57"
+                    }
+                  ],
+                  "reasoningSummary": "Only one of the two refund routes got requireAdmin; the alias still exposes the same unchecked handler to any logged-in user.",
+                  "confidence": 0.95,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "Register the alias as router.post(\"/refunds/:id\", requireUser, requireAdmin, refundOrder), or put the admin check inside refundOrder so every route that reaches it is covered."
+                }
+              ],
+              "discarded": [],
+              "resolutions": [],
+              "outboxStatus": "published",
+              "statuses": {
+                "dda63f6fd184aa96e8aba600c71ce0a3": "STILL_PRESENT"
+              },
+              "comments": []
+            }
+          ],
+          "outcomes": [
+            {
+              "step": 1,
+              "label": "refund-auth",
+              "expected": "not_resolved",
+              "findingId": "dda63f6fd184aa96e8aba600c71ce0a3",
+              "status": "STILL_PRESENT",
+              "ok": true
+            }
+          ],
+          "falseResolution": {
+            "n": 0,
+            "of": 1
+          },
+          "identityKept": {
+            "n": 0,
+            "of": 0
+          },
+          "duplicateComments": {
+            "n": 0,
+            "of": 1
+          },
+          "resolutionRecall": {
+            "n": 0,
+            "of": 0
+          },
+          "newFound": {
+            "n": 0,
+            "of": 0
+          }
+        },
+        {
+          "id": "worse",
+          "steps": [
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 17,
+              "findings": [
+                {
+                  "findingId": "48357fa6dee0b6aa737d68c9679dbc23",
+                  "fingerprint": "752b78d1b68adee70b0b6cba31f950be72064e6dc271e3a9412726e02aa1d71b",
+                  "status": "PUBLISHED",
+                  "id": "c1",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund route lacks requireAdmin: any logged-in user can refund any paid order",
+                  "explanation": "The new POST /orders/:id/refund route only has requireUser in front of it. The sibling admin action, cancel, also has requireAdmin. refundOrder never checks who owns the order or what role the caller has. It looks up the order by id alone, calls queueRefund for the remaining balance, and marks the order refunded. So any authenticated user can trigger a full refund on any paid order, their own or someone else's, just by knowing or guessing its id. That means real money moves and order state changes. The PR describes this as an admin/support feature.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 31,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 28,
+                      "end": 32,
+                      "refSha": "4d6a27ede0404568429aac3fb81834e1024873d0"
+                    },
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 18,
+                      "end": 26,
+                      "refSha": "4d6a27ede0404568429aac3fb81834e1024873d0"
+                    }
+                  ],
+                  "reasoningSummary": "The route registration leaves out the requireAdmin middleware that the cancel route uses, and the handler does no authorization check of its own before queueing a refund.",
+                  "confidence": 0.95,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "Register it as router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder)."
+                }
+              ],
+              "discarded": [],
+              "resolutions": [],
+              "outboxStatus": "published",
+              "statuses": {
+                "48357fa6dee0b6aa737d68c9679dbc23": "PUBLISHED"
+              },
+              "comments": [
+                {
+                  "path": "src/routes/orders.ts",
+                  "line": 31
+                }
+              ]
+            },
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 17,
+              "findings": [
+                {
+                  "findingId": "48357fa6dee0b6aa737d68c9679dbc23",
+                  "fingerprint": "752b78d1b68adee70b0b6cba31f950be72064e6dc271e3a9412726e02aa1d71b",
+                  "status": "STILL_PRESENT",
+                  "id": "c1",
+                  "priorFindingId": "48357fa6dee0b6aa737d68c9679dbc23",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund route lacks requireAdmin: any logged-in user can refund any paid order",
+                  "explanation": "POST /orders/:id/refund is registered with only requireUser. refundOrder never checks admin status or ownership (order.userId). So any authenticated user can refund any paid order by ID: queueRefund is called for the remaining amount and the order is marked refunded. The PR says this is meant for admins/support, and the sibling cancel route uses requireAdmin.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 31,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 18,
+                      "end": 31,
+                      "refSha": "8cb231a0e04175578217b14a67383e4a01acd960"
+                    },
+                    {
+                      "path": "src/auth.ts",
+                      "start": 3,
+                      "end": 11,
+                      "refSha": "8cb231a0e04175578217b14a67383e4a01acd960"
+                    }
+                  ],
+                  "reasoningSummary": "The route middleware is only requireUser, and the handler has no isAdmin or ownership check, unlike the cancel route.",
+                  "confidence": 0.95,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "Register as router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder)."
+                },
+                {
+                  "findingId": "3ca66bc07074f1ca07667c2bdd93513a",
+                  "fingerprint": "32b1038dbe0d518f7584098ca9eeca55c29cd989dfd51c76302868003cac16fb",
+                  "status": "PUBLISHED",
+                  "id": "c2",
+                  "category": "security",
+                  "severity": "high",
+                  "title": "Support reopen route lacks requireAdmin: any logged-in user can move any cancelled order back to paid",
+                  "explanation": "POST /support/orders/:id/reopen is registered with only requireUser, and reopenOrder never checks isAdmin or order ownership. Any authenticated user can flip any cancelled order (theirs or someone else's) back to status \"paid\". The doc comment says this action is for support. Cancelling is admin-only (requireAdmin on /orders/:id/cancel), so this lets ordinary users undo an admin cancellation and put an order back in a shippable \"paid\" state. A reopened order is also eligible for the refund route again.",
+                  "file": "src/routes/support.ts",
+                  "newLine": 15,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/support.ts",
+                      "start": 6,
+                      "end": 16,
+                      "refSha": "8cb231a0e04175578217b14a67383e4a01acd960"
+                    },
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 30,
+                      "end": 30,
+                      "refSha": "8cb231a0e04175578217b14a67383e4a01acd960"
+                    }
+                  ],
+                  "reasoningSummary": "The new route uses only requireUser, and the handler changes order state with no admin or ownership check, which bypasses the admin-only cancel workflow.",
+                  "confidence": 0.85,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "Add requireAdmin (or a support role check): router.post(\"/support/orders/:id/reopen\", requireUser, requireAdmin, reopenOrder)."
+                }
+              ],
+              "discarded": [],
+              "resolutions": [],
+              "outboxStatus": "published",
+              "statuses": {
+                "48357fa6dee0b6aa737d68c9679dbc23": "STILL_PRESENT",
+                "3ca66bc07074f1ca07667c2bdd93513a": "PUBLISHED"
+              },
+              "comments": [
+                {
+                  "path": "src/routes/support.ts",
+                  "line": 15
+                }
+              ]
+            }
+          ],
+          "outcomes": [
+            {
+              "step": 1,
+              "label": "refund-auth",
+              "expected": "open",
+              "findingId": "48357fa6dee0b6aa737d68c9679dbc23",
+              "status": "STILL_PRESENT",
+              "ok": true,
+              "idKept": true
+            }
+          ],
+          "falseResolution": {
+            "n": 0,
+            "of": 1
+          },
+          "identityKept": {
+            "n": 1,
+            "of": 1
+          },
+          "duplicateComments": {
+            "n": 0,
+            "of": 2
+          },
+          "resolutionRecall": {
+            "n": 0,
+            "of": 0
+          },
+          "newFound": {
+            "n": 1,
+            "of": 1
+          }
+        },
+        {
+          "id": "fix-elsewhere",
+          "steps": [
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 14,
+              "findings": [
+                {
+                  "findingId": "2488653a5053b35864586bac82d61fe5",
+                  "fingerprint": "560e1ba573705e40ebf298d39f945cc74acae43269f0a12876841fe0e79c48f2",
+                  "status": "PUBLISHED",
+                  "id": "c1",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund endpoint lacks requireAdmin: any authenticated user can refund any order",
+                  "explanation": "POST /orders/:id/refund is registered with only requireUser (line 31), unlike the admin-only cancel route (line 30) which also chains requireAdmin. refundOrder (lines 18-26) does no admin or ownership check either; it looks up any order by id, queues a refund of the remaining amount, and marks it refunded. So any logged-in non-admin user can trigger full refunds on any paid order, including other customers' orders. The PR says this feature is meant for admins/support only.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 31,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 18,
+                      "end": 31,
+                      "refSha": "370c184fc1054b2965b40190b62b45cabc4419f9"
+                    },
+                    {
+                      "path": "src/auth.ts",
+                      "start": 3,
+                      "end": 11,
+                      "refSha": "370c184fc1054b2965b40190b62b45cabc4419f9"
+                    }
+                  ],
+                  "reasoningSummary": "Route registration omits requireAdmin middleware; handler has no authorization check; requireUser only checks that req.user exists.",
+                  "confidence": 0.95,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder);"
+                }
+              ],
+              "discarded": [],
+              "resolutions": [],
+              "outboxStatus": "published",
+              "statuses": {
+                "2488653a5053b35864586bac82d61fe5": "PUBLISHED"
+              },
+              "comments": [
+                {
+                  "path": "src/routes/orders.ts",
+                  "line": 31
+                }
+              ]
+            },
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 15,
+              "findings": [
+                {
+                  "findingId": "2488653a5053b35864586bac82d61fe5",
+                  "fingerprint": "560e1ba573705e40ebf298d39f945cc74acae43269f0a12876841fe0e79c48f2",
+                  "status": "STILL_PRESENT",
+                  "id": "c1",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund endpoint lacks requireAdmin: any authenticated user can refund any order",
+                  "explanation": "POST /orders/:id/refund is registered with only requireUser (line 31), unlike the admin-only cancel route (line 30) which also chains requireAdmin. refundOrder (lines 18-26) does no admin or ownership check either; it looks up any order by id, queues a refund of the remaining amount, and marks it refunded. So any logged-in non-admin user can trigger full refunds on any paid order, including other customers' orders. The PR says this feature is meant for admins/support only.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 31,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 18,
+                      "end": 31,
+                      "refSha": "31ae1cd59b3d3aee17fdaf38aaa75bd126f4cfdd"
+                    },
+                    {
+                      "path": "src/auth.ts",
+                      "start": 3,
+                      "end": 11,
+                      "refSha": "31ae1cd59b3d3aee17fdaf38aaa75bd126f4cfdd"
+                    }
+                  ],
+                  "reasoningSummary": "Route registration omits requireAdmin middleware; handler has no authorization check; requireUser only checks that req.user exists.",
+                  "confidence": 0.95,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder);"
+                }
+              ],
+              "discarded": [],
+              "resolutions": [
+                {
+                  "findingId": "2488653a5053b35864586bac82d61fe5",
+                  "state": "REFUSED",
+                  "reason": "its cited code is unchanged at src/routes/orders.ts:31"
+                }
+              ],
+              "outboxStatus": "published",
+              "statuses": {
+                "2488653a5053b35864586bac82d61fe5": "STILL_PRESENT"
+              },
+              "comments": []
+            }
+          ],
+          "outcomes": [
+            {
+              "step": 1,
+              "label": "refund-auth",
+              "expected": "resolved",
+              "findingId": "2488653a5053b35864586bac82d61fe5",
+              "status": "STILL_PRESENT",
+              "ok": false
+            }
+          ],
+          "falseResolution": {
+            "n": 0,
+            "of": 0
+          },
+          "identityKept": {
+            "n": 0,
+            "of": 0
+          },
+          "duplicateComments": {
+            "n": 0,
+            "of": 1
+          },
+          "resolutionRecall": {
+            "n": 0,
+            "of": 1
+          },
+          "newFound": {
+            "n": 0,
+            "of": 0
+          }
+        },
+        {
+          "id": "regress",
+          "steps": [
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 12,
+              "findings": [
+                {
+                  "findingId": "f0c6c026dedf8328d08d460d87f89fa1",
+                  "fingerprint": "26a52c2dcb1a166cfd43c802e3bb4eb0c32e56d4b1a126e3b6c512ea8f2af0f9",
+                  "status": "PUBLISHED",
+                  "id": "c1",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund route lacks requireAdmin: any logged-in user can refund any order",
+                  "explanation": "The PR describes an admin-only refund endpoint, but `/orders/:id/refund` is registered with only `requireUser` (line 31), unlike the sibling admin action `/orders/:id/cancel` which chains `requireAdmin` (line 30). `refundOrder` (lines 18-26) also performs no ownership or role check: it looks up the order by id from the URL, and if it is `paid` it calls `queueRefund` for the full remaining amount and marks it refunded. As a result, any authenticated non-admin user can trigger real payment-provider refunds on any paid order, including other users' orders, simply by POSTing to `/orders/<id>/refund`. `queueRefund` retries until the provider accepts it (db.ts line 9), so the money movement cannot easily be undone.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 31,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 18,
+                      "end": 31,
+                      "refSha": "403f5834918bd32345463c0ab3c6d24cc5d559cb"
+                    },
+                    {
+                      "path": "src/auth.ts",
+                      "start": 3,
+                      "end": 11,
+                      "refSha": "403f5834918bd32345463c0ab3c6d24cc5d559cb"
+                    },
+                    {
+                      "path": "src/db.ts",
+                      "start": 9,
+                      "end": 10,
+                      "refSha": "403f5834918bd32345463c0ab3c6d24cc5d559cb"
+                    }
+                  ],
+                  "reasoningSummary": "Route registration omits requireAdmin while the cancel route includes it; handler has no auth check of its own; requireUser only checks that a user is logged in.",
+                  "confidence": 0.95,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "Register as `router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder);`."
+                }
+              ],
+              "discarded": [],
+              "resolutions": [],
+              "outboxStatus": "published",
+              "statuses": {
+                "f0c6c026dedf8328d08d460d87f89fa1": "PUBLISHED"
+              },
+              "comments": [
+                {
+                  "path": "src/routes/orders.ts",
+                  "line": 31
+                }
+              ]
+            },
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 13,
+              "findings": [
+                {
+                  "findingId": "f0c6c026dedf8328d08d460d87f89fa1",
+                  "fingerprint": "26a52c2dcb1a166cfd43c802e3bb4eb0c32e56d4b1a126e3b6c512ea8f2af0f9",
+                  "status": "RESOLVED",
+                  "id": "c1",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund route lacks requireAdmin: any logged-in user can refund any order",
+                  "explanation": "The PR describes an admin-only refund endpoint, but `/orders/:id/refund` is registered with only `requireUser` (line 31), unlike the sibling admin action `/orders/:id/cancel` which chains `requireAdmin` (line 30). `refundOrder` (lines 18-26) also performs no ownership or role check: it looks up the order by id from the URL, and if it is `paid` it calls `queueRefund` for the full remaining amount and marks it refunded. As a result, any authenticated non-admin user can trigger real payment-provider refunds on any paid order, including other users' orders, simply by POSTing to `/orders/<id>/refund`. `queueRefund` retries until the provider accepts it (db.ts line 9), so the money movement cannot easily be undone.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 31,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 18,
+                      "end": 31,
+                      "refSha": "403f5834918bd32345463c0ab3c6d24cc5d559cb"
+                    },
+                    {
+                      "path": "src/auth.ts",
+                      "start": 3,
+                      "end": 11,
+                      "refSha": "403f5834918bd32345463c0ab3c6d24cc5d559cb"
+                    },
+                    {
+                      "path": "src/db.ts",
+                      "start": 9,
+                      "end": 10,
+                      "refSha": "403f5834918bd32345463c0ab3c6d24cc5d559cb"
+                    }
+                  ],
+                  "reasoningSummary": "Route registration omits requireAdmin while the cancel route includes it; handler has no auth check of its own; requireUser only checks that a user is logged in.",
+                  "confidence": 0.95,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "Register as `router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder);`."
+                }
+              ],
+              "discarded": [],
+              "resolutions": [
+                {
+                  "findingId": "f0c6c026dedf8328d08d460d87f89fa1",
+                  "state": "ACCEPTED",
+                  "reason": null
+                }
+              ],
+              "outboxStatus": "published",
+              "statuses": {
+                "f0c6c026dedf8328d08d460d87f89fa1": "RESOLVED"
+              },
+              "comments": []
+            },
+            {
+              "state": "COMPLETED",
+              "error": null,
+              "seconds": 11,
+              "findings": [
+                {
+                  "findingId": "f9dc198bc7208c1da0f31da7346f8afa",
+                  "fingerprint": "d76e34e8f70cc4a3764ff4c3468f65c7733e3509da29140b47b0b6f68aed425f",
+                  "status": "PUBLISHED",
+                  "id": "c1",
+                  "category": "security",
+                  "severity": "critical",
+                  "title": "Refund endpoint is missing requireAdmin, so any logged-in user can refund any order",
+                  "explanation": "The PR says this endpoint is for admins and support, but the route only uses `requireUser`. The sibling admin action `/orders/:id/cancel` uses `requireUser, requireAdmin`. `refundOrder` also never checks that the order belongs to the caller (getOrder does check `order.userId !== req.user!.id`). So any authenticated user can POST /orders/<any id>/refund on any paid order, theirs or someone else's. That calls `queueRefund` for the full remaining amount and marks the order refunded. A user can refund their own purchase and keep the goods, or refund other customers' orders. This causes real financial loss.",
+                  "file": "src/routes/orders.ts",
+                  "newLine": 31,
+                  "codeEvidence": [
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 28,
+                      "end": 32,
+                      "refSha": "e159f6c07c744517804df6b28ce017265477cead"
+                    },
+                    {
+                      "path": "src/routes/orders.ts",
+                      "start": 18,
+                      "end": 26,
+                      "refSha": "e159f6c07c744517804df6b28ce017265477cead"
+                    }
+                  ],
+                  "reasoningSummary": "The new refund route has requireUser only, while the cancel route next to it has requireAdmin. The handler checks neither ownership nor role before queueing a money refund.",
+                  "confidence": 0.93,
+                  "evidenceKind": "confirmed_by_static_trace",
+                  "suggestedFix": "Register the route as `router.post(\"/orders/:id/refund\", requireUser, requireAdmin, refundOrder);`."
+                }
+              ],
+              "discarded": [],
+              "resolutions": [],
+              "outboxStatus": "published",
+              "statuses": {
+                "f0c6c026dedf8328d08d460d87f89fa1": "RESOLVED",
+                "f9dc198bc7208c1da0f31da7346f8afa": "PUBLISHED"
+              },
+              "comments": [
+                {
+                  "path": "src/routes/orders.ts",
+                  "line": 31
+                }
+              ]
+            }
+          ],
+          "outcomes": [
+            {
+              "step": 1,
+              "label": "refund-auth",
+              "expected": "resolved",
+              "findingId": "f0c6c026dedf8328d08d460d87f89fa1",
+              "status": "RESOLVED",
+              "ok": true
+            }
+          ],
+          "falseResolution": {
+            "n": 0,
+            "of": 0
+          },
+          "identityKept": {
+            "n": 0,
+            "of": 0
+          },
+          "duplicateComments": {
+            "n": 0,
+            "of": 2
+          },
+          "resolutionRecall": {
+            "n": 1,
+            "of": 1
+          },
+          "newFound": {
+            "n": 1,
+            "of": 1
+          }
+        }
+      ],
+      "tracking": {
+        "falseResolution": {
+          "n": 0,
+          "of": 5
+        },
+        "identityKept": {
+          "n": 3,
+          "of": 3
+        },
+        "duplicateComments": {
+          "n": 0,
+          "of": 10
+        },
+        "resolutionRecall": {
+          "n": 2,
+          "of": 3
+        },
+        "newFound": {
+          "n": 2,
+          "of": 2
+        }
+      },
+      "tp": 0,
+      "fn": 0,
+      "fp": 0
+    }
+  ]
+}
