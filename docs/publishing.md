@@ -25,6 +25,8 @@ During reconciliation:
 - A timed-out write can still land later. pr-review first waits `github.timeout_ms`, then needs two complete listings, at least that far apart, that both lack the review. Only then does it post again, up to `max_retries_per_phase` times.
 - If a listing fails, the outbox stays `needs_reconciliation`, the revision fails with `cannot_safely_decide`, and nothing is posted.
 
+The same caution applies to the inline comments of a later push. A finding whose outbox is `sending` or `needs_reconciliation` may already be on GitHub, so the next revision lists it as carried and does not comment on it, until `reconcile` decides: found marks it posted, and absent leaves its outbox `pending` on the failed revision, after which the next revision comments on it once. A `pending` outbox of a revision that failed, or of a superseded one, was never sent, so its findings are not posted and the next revision comments on them.
+
 pr-review retries a 429 or a rate-limit 403 after `Retry-After` or the rate-limit reset. GitHub sends those answers before it processes the request, so the retry cannot create a second review.
 
 ## Recover an uncertain publication

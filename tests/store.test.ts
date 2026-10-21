@@ -1,9 +1,12 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import { expect, it } from "vitest";
-import type { PullInfo } from "../src/domain/types.ts";
+import type { CandidateFinding, PullInfo } from "../src/domain/types.ts";
 import { AppStore } from "../src/persistence/store.ts";
+
+const MIGRATIONS = new URL("../migrations/", import.meta.url);
 
 const pull: PullInfo = {
   installationId: 0,
@@ -176,4 +179,57 @@ it("journals tool activity and revision creation without adding to the audit tra
   ]);
   expect(store.auditEvents(rev.id).map((e) => e.seq)).toEqual([3]);
   expect(store.db.prepare("SELECT key, length(value) AS n FROM meta WHERE key = 'stream_epoch'").all()).toEqual([{ key: "stream_epoch", n: 32 }]);
+});
+
+const candidate: CandidateFinding = {
+  id: "c1",
+  category: "security",
+  severity: "high",
+  title: "t",
+  explanation: "e",
+  file: "src/x.ts",
+  newLine: 5,
+  codeEvidence: [],
+  reasoningSummary: "r",
+  confidence: 0.9,
+  evidenceKind: "confirmed_by_static_trace",
+};
+
+it("records a p1 outbox's review only on the findings its payload commented on", () => {
+  const { store } = openFresh();
+  const { revision, outbox } = revisionInPublish(store);
+  const observe = (findingId: string, newLine: number) => ({ findingId, path: ["DETECTED" as const], basis: null, candidate, location: { file: "src/x.ts", newLine, headSha: pull.headSha, evidence: [] } });
+  store.writeVerification(revision, [], ["f-commented", "f-listed"].map((findingId) => ({ findingId, fingerprint: findingId, candidate })), [observe("f-commented", 5), observe("f-listed", 9)]);
+  store.db.prepare("UPDATE publication_outbox SET inline_finding_ids_json = NULL, payload_json = ? WHERE id = ?").run(JSON.stringify({ comments: [{ path: "src/x.ts", line: 5 }] }), outbox.id);
+  store.advanceOutbox(outbox.id, "SEND");
+  store.advanceOutbox(outbox.id, "SENT", "review 7", 7);
+  store.markFindingsPublished(outbox.id);
+  expect(store.db.prepare("SELECT id, status, github_review_id FROM findings ORDER BY id").all()).toEqual([
+    { id: "f-commented", status: "PUBLISHED", github_review_id: 7 },
+    { id: "f-listed", status: "PUBLISHED", github_review_id: null },
+  ]);
+});
+
+it("backfills the review of record at migration 055 only for findings a published payload commented on", () => {
+  const path = join(mkdtempSync(join(tmpdir(), "store-")), "app.sqlite");
+  const db = new DatabaseSync(path);
+  db.exec("CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL)");
+  for (const name of readdirSync(MIGRATIONS).filter((f) => f.endsWith(".sql") && f < "055").sort()) {
+    db.exec(readFileSync(new URL(name, MIGRATIONS), "utf8"));
+    db.prepare("INSERT INTO schema_migrations (name, applied_at) VALUES (?, ?)").run(name, "2026-10-20T00:00:00Z");
+  }
+  const at = "2026-10-20T00:00:00Z";
+  db.prepare("INSERT INTO pull_requests (id, installation_id, repository_id, number, status, latest_base_sha, latest_head_sha, updated_at, repo_full_name) VALUES ('pr', 0, 42, 7, 'ACTIVE', 'b', 'h', ?, 'acme/shop')").run(at);
+  db.prepare("INSERT INTO review_revisions (id, pr_id, base_sha, head_sha, policy_version, reviewer_version, state, created_at) VALUES ('rev', 'pr', 'b', 'h', '1', 'm', 'COMPLETED', ?)").run(at);
+  for (const [id, line] of [["f-commented", 5], ["f-listed", 9]] as const) {
+    db.prepare("INSERT INTO findings (id, pr_id, first_revision_id, fingerprint, status, current_severity, created_at, updated_at) VALUES (?, 'pr', 'rev', ?, 'PUBLISHED', 'high', ?, ?)").run(id, id, at, at);
+    db.prepare("INSERT INTO finding_observations (id, finding_id, revision_id, disposition, evidence_json, location_json, created_at) VALUES (?, ?, 'rev', 'VERIFIED', '{}', ?, ?)").run(`o-${id}`, id, JSON.stringify({ file: "src/x.ts", newLine: line }), at);
+  }
+  db.prepare("INSERT INTO publication_outbox (id, revision_id, idempotency_key, payload_hash, payload_json, status, github_review_id, updated_at) VALUES ('ob', 'rev', 'rev:p1', 'h', ?, 'published', 7, ?)").run(JSON.stringify({ comments: [{ path: "src/x.ts", line: 5 }] }), at);
+  db.close();
+  const store = AppStore.open(path);
+  expect(store.db.prepare("SELECT id, github_review_id FROM findings ORDER BY id").all()).toEqual([
+    { id: "f-commented", github_review_id: 7 },
+    { id: "f-listed", github_review_id: null },
+  ]);
 });

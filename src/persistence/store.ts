@@ -369,16 +369,29 @@ export class AppStore {
    */
   markFindingsPublished(outboxId: string): void {
     const outbox = this.outbox(outboxId)!;
-    const inline: string[] = outbox.inline_finding_ids_json
-      ? JSON.parse(outbox.inline_finding_ids_json)
-      : (this.db.prepare("SELECT finding_id FROM finding_observations WHERE revision_id = ?").all(outbox.revision_id) as { finding_id: string }[]).map((r) => r.finding_id);
-    for (const id of inline) this.db.prepare("UPDATE findings SET github_review_id = ? WHERE id = ? AND github_review_id IS NULL").run(outbox.github_review_id, id);
+    for (const id of this.inlineFindingIds(outbox)) this.db.prepare("UPDATE findings SET github_review_id = ? WHERE id = ? AND github_review_id IS NULL").run(outbox.github_review_id, id);
     this.db
       .prepare(
         `UPDATE findings SET status = 'PUBLISHED', updated_at = ? WHERE status = 'DETECTED'
          AND id IN (SELECT finding_id FROM finding_observations WHERE revision_id = ?)`,
       )
       .run(now(), outbox.revision_id);
+  }
+
+  /**
+   * The findings an outbox's payload comments on. A `p1` outbox recorded none, so they are read off its payload: the
+   * revision's findings observed at a file and line one of its comments sits on.
+   */
+  private inlineFindingIds(outbox: Pick<OutboxRow, "revision_id" | "payload_json" | "inline_finding_ids_json">): string[] {
+    if (outbox.inline_finding_ids_json !== null) return JSON.parse(outbox.inline_finding_ids_json) as string[];
+    const rows = this.db
+      .prepare(
+        `SELECT fo.finding_id FROM finding_observations fo, json_each(?, '$.comments') c
+         WHERE fo.revision_id = ? AND json_extract(c.value, '$.path') = json_extract(fo.location_json, '$.file')
+         AND json_extract(c.value, '$.line') = json_extract(fo.location_json, '$.newLine')`,
+      )
+      .all(outbox.payload_json, outbox.revision_id) as { finding_id: string }[];
+    return rows.map((r) => r.finding_id);
   }
 
   retryCount(revisionId: string): number {
@@ -566,18 +579,20 @@ export class AppStore {
          WHERE o.revision_id = ? ORDER BY o.created_at, f.id`,
       )
       .all(revisionId) as Record<string, string | null>[];
-    // Revision N can be posting while N+1 verifies (the coordinator aborts only states before PUBLISH): a finding in
-    // an outbox that may still reach GitHub counts as posted. A missed comment is cheaper than a duplicate.
-    const inFlight = new Set(
-      (
-        this.db
-          .prepare(
-            `SELECT o.inline_finding_ids_json AS ids FROM publication_outbox o JOIN review_revisions r ON r.id = o.revision_id
-             WHERE r.pr_id = ? AND o.revision_id != ? AND o.status != 'failed' AND o.inline_finding_ids_json IS NOT NULL`,
-          )
-          .all(revision.pr_id, revisionId) as { ids: string }[]
-      ).flatMap((r) => JSON.parse(r.ids) as string[]),
-    );
+    // Revision N can be posting while N+1 verifies (the coordinator aborts only states before PUBLISH). A finding counts
+    // as posted while an outbox may still put it on GitHub: one whose POST may have landed (`sending` or
+    // `needs_reconciliation`, whatever became of its revision, until reconciliation decides) or one a live revision is
+    // about to send. A missed comment is cheaper than a duplicate. A `pending` outbox of a finished revision was never
+    // sent, or was proven absent, so its findings are not posted and this revision comments on them.
+    const terminal = TERMINAL_REVIEW_STATES.map((s) => `'${s}'`).join(", ");
+    const outboxes = this.db
+      .prepare(
+        `SELECT o.revision_id, o.payload_json, o.inline_finding_ids_json FROM publication_outbox o JOIN review_revisions r ON r.id = o.revision_id
+         WHERE r.pr_id = ? AND o.revision_id != ?
+         AND (o.status IN ('sending', 'needs_reconciliation') OR (o.status = 'pending' AND r.state NOT IN (${terminal})))`,
+      )
+      .all(revision.pr_id, revisionId) as Pick<OutboxRow, "revision_id" | "payload_json" | "inline_finding_ids_json">[];
+    const inFlight = new Set(outboxes.flatMap((o) => this.inlineFindingIds(o)));
     return rows.map((row) => {
       const location = JSON.parse(row.location_json!) as Partial<ObservedLocation>;
       return {

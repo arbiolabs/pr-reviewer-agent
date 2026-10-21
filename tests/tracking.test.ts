@@ -7,6 +7,7 @@ import { type Config, DEFAULT_CONFIG } from "../src/config/config.ts";
 import { AppDbSource } from "../src/control/appdb.ts";
 import { GitHubClient } from "../src/github/client.ts";
 import { GitHubPullSource } from "../src/github/pulls.ts";
+import { reconcileOutbox } from "../src/publish/publisher.ts";
 import { type App, finishReview, openApp, startReview } from "../src/runtime/app.ts";
 import { approve } from "../src/runtime/commands.ts";
 import { FakeGitHub } from "./fake-github.ts";
@@ -32,27 +33,29 @@ const submitNothing = () => fauxAssistantMessage([fauxToolCall("submit_candidate
 
 /** One app session on `dataDir`; a second session on the same directory carries the store over, like a later `pr-review review`. */
 async function open(responses: FauxResponseStep[], cfg = config, dataDir = mkdtempSync(join(tmpdir(), "tracking-"))) {
-  const client = new GitHubClient({ auth: { kind: "token", token: "ghp_test" }, baseUrl: fake.url, maxRetries: 2, backoffMs: 1, concurrency: 2, timeoutMs: 5000 });
+  const client = new GitHubClient({ auth: { kind: "token", token: "ghp_test" }, baseUrl: fake.url, maxRetries: 2, backoffMs: 1, concurrency: 2, timeoutMs: 5000, sleep: async () => {} });
   const pulls = new GitHubPullSource(() => client);
   const app = await openApp({ dataDir, config: cfg, pulls, github: () => client, engine: { skipped: "test" }, models: fauxModels(responses), model: { provider: "faux", modelId: "reviewer" }, reviewerVersion: "m1+faux/reviewer" });
   apps.push(app);
   app.harness.resume();
-  return { app, pulls, dataDir };
+  return { app, pulls, dataDir, client };
 }
 async function close(app: App) {
   apps.splice(apps.indexOf(app), 1);
   await app.close();
 }
 
-/** The second head: an unrelated file changes, so the defect's lines stay where they were. */
-function secondHead() {
-  const pull = pushCommit(fixture, { "src/routes/users.ts": "export const users = [];\n" });
+/** The next head: an unrelated file changes, so the defect's lines stay where they were. */
+let heads = 0;
+function nextHead() {
+  const pull = pushCommit(fixture, { "src/routes/users.ts": `export const users = [${heads++}];\n` });
   fake.setPull(pull);
   return pull;
 }
 
 const review = async (app: App, publish = true) => finishReview(app, await startReview(app, fixture.pulls.pull, "1", { publish }));
 const inline = () => fake.reviews.flatMap((r) => (r.comments as { path: string; line: number }[]).map(({ path, line }) => ({ path, line })));
+const findingRow = (app: App) => app.store.db.prepare("SELECT status, github_review_id FROM findings").get();
 const observations = (app: App) =>
   app.store.db.prepare("SELECT disposition, basis, path_json FROM finding_observations ORDER BY created_at").all() as { disposition: string; basis: string | null; path_json: string }[];
 
@@ -65,7 +68,7 @@ it("posts one inline comment across two revisions and lists the finding as still
   await close(one.app);
 
   // The model reports the same defect again on the new head.
-  const pull = secondHead();
+  const pull = nextHead();
   const { app, dataDir } = await open([readDiff(), submitDefect({ ...fixture, headSha: pull.headSha })], config, one.dataDir);
   const second = await review(app);
   expect([second.state, fake.reviews.length, inline().length]).toEqual(["COMPLETED", 2, 1]);
@@ -99,7 +102,7 @@ it("locates a finding the model did not report again, and posts its first inline
   const { app } = await open([readDiff(), submitDefect(fixture), readDiff(), submitNothing()]);
   const first = await review(app, false);
   expect([first.state, fake.reviews.length, app.store.findingsForRevision(first.id)[0]!.status]).toEqual(["COMPLETED", 0, "DETECTED"]);
-  secondHead();
+  nextHead();
   const second = await review(app);
   const [finding] = app.store.findingsForRevision(second.id);
   expect([second.state, finding!.status, finding!.carried, finding!.posted, fake.reviews.length]).toEqual(["COMPLETED", "STILL_PRESENT", true, true, 1]);
@@ -115,7 +118,7 @@ it("locates a finding the model did not report again, and posts its first inline
 it("under silent_no_findings, a revision with nothing new posts nothing", async () => {
   const { app } = await open([readDiff(), submitDefect(fixture), readDiff(), submitNothing()], { ...config, review: { ...config.review, publish_mode: "silent_no_findings" } });
   await review(app);
-  secondHead();
+  nextHead();
   const second = await review(app);
   expect([second.state, fake.reviews.length, app.store.findingsForRevision(second.id)[0]!.status]).toEqual(["COMPLETED", 1, "STILL_PRESENT"]);
   expect(app.store.auditEvents(second.id).at(-1)!.detail).toBe("nothing new to post: silent_no_findings");
@@ -130,6 +133,56 @@ it("completes an in-flight p1 outbox: its payload posts as stored and its findin
   app.store.db.prepare("UPDATE publication_outbox SET idempotency_key = ?, inline_finding_ids_json = NULL WHERE id = ?").run(`${parked.id}:p1`, outbox.id);
   const done = await finishReview(app, await approve(app, pulls, { revisionId: parked.id, previewId: outbox.payload_hash }, "test"));
   expect([done.state, app.store.outbox(outbox.id)!.status, fake.postAttempts, inline().length]).toEqual(["COMPLETED", "published", 1, 1]);
-  expect(app.store.db.prepare("SELECT status, github_review_id FROM findings").get()).toEqual({ status: "PUBLISHED", github_review_id: 1000 });
+  expect(findingRow(app)).toEqual({ status: "PUBLISHED", github_review_id: 1000 });
   expect(app.store.db.prepare("SELECT count(*) AS n FROM publication_outbox").get()).toEqual({ n: 1 });
 }, 30_000);
+
+it("comments once on a finding whose revision failed with its outbox pending: nothing of it ever reached GitHub", async () => {
+  fake.postBehaviors = Array(20).fill("rate-limited");
+  const { app } = await open([readDiff(), submitDefect(fixture), readDiff(), submitNothing()]);
+  const first = await review(app);
+  expect([first.state, app.store.outboxForRevision(first.id)!.status, fake.reviews.length]).toEqual(["FAILED", "pending", 0]);
+  fake.postBehaviors = [];
+  nextHead();
+  const second = await review(app);
+  expect([second.state, fake.reviews.length, inline()]).toEqual(["COMPLETED", 1, [{ path: DEFECT.file, line: DEFECT.line }]]);
+  expect(findingRow(app)).toEqual({ status: "STILL_PRESENT", github_review_id: 1000 });
+}, 30_000);
+
+it.each([
+  [
+    "the listing before the first POST kept failing",
+    () => {
+      fake.listStatus = 500;
+    },
+  ],
+  [
+    "the POST was ambiguous and reconciliation could not list",
+    () => {
+      fake.postBehaviors = ["bad-gateway"];
+      fake.onPost = () => {
+        fake.listStatus = 500;
+        fake.onPost = undefined;
+      };
+    },
+  ],
+])("keeps a finding whose outbox needs reconciliation out of later comments until reconcile proves it absent, then comments once (%s)", async (_case, setup) => {
+  setup();
+  const { app, client } = await open([readDiff(), submitDefect(fixture), readDiff(), submitNothing(), readDiff(), submitNothing()]);
+  const first = await review(app);
+  const outbox = app.store.outboxForRevision(first.id)!;
+  expect([first.state, outbox.status, fake.reviews.length]).toEqual(["FAILED", "needs_reconciliation", 0]);
+  fake.listStatus = 200;
+  // The write may have landed: the next head lists the finding as still present and does not comment on it.
+  nextHead();
+  const second = await review(app);
+  expect([second.state, fake.reviews.length, inline()]).toEqual(["COMPLETED", 1, []]);
+  expect(app.store.findingsForRevision(second.id).map((f) => [f.status, f.posted])).toEqual([["STILL_PRESENT", true]]);
+  // The operator reconciles: absent, so the outbox is pending on its failed revision and the finding is not posted.
+  expect(await reconcileOutbox(app.store, client, { fullName: fixture.pull.fullName, number: fixture.pull.number }, outbox)).toEqual({ kind: "absent" });
+  expect(app.store.outbox(outbox.id)!.status).toBe("pending");
+  nextHead();
+  const third = await review(app);
+  expect([third.state, fake.reviews.length, inline()]).toEqual(["COMPLETED", 2, [{ path: DEFECT.file, line: DEFECT.line }]]);
+  expect(findingRow(app)).toEqual({ status: "STILL_PRESENT", github_review_id: 1001 });
+}, 60_000);
