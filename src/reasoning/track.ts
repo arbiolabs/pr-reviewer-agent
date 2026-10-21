@@ -167,10 +167,25 @@ type Fingerprint = (c: Pick<CandidateFinding, "category" | "file" | "title">) =>
 type Report = { candidate: CandidateFinding; location: ObservedLocation };
 
 /**
+ * The finding's evidence in its own file, at the path that file has at this head: the located ranges when its code was
+ * found, else the ranges last seen, under the rename the diff reports. Evidence in another file, such as a helper that
+ * two defects both call, says nothing about which defect a report is, so it never takes part in a link.
+ */
+function ownEvidence(f: PriorFinding): EvidenceText[] {
+  if (f.located.kind === "same") {
+    const at = f.located.location;
+    return at.evidence.filter((e) => e.path === at.file);
+  }
+  const file = f.located.kind === "changed" ? f.located.file : f.location.file;
+  return f.location.evidence.filter((e) => e.path === f.location.file).map((e) => ({ ...e, path: file }));
+}
+
+/**
  * How strongly a verified candidate reads as another report of an open finding, or undefined when it does not. Every
- * link needs the candidate in the finding's category and in its file at this head, after the rename the diff reports.
- * 3: the fingerprint agrees, so the title names the same defect. 2: a cited text agrees (substantial and equal).
- * 1: the anchor is within LINK_DISTANCE of the located anchor and the cited ranges overlap the located evidence.
+ * link needs the candidate in the finding's category and in its file at this head, after the rename the diff reports,
+ * and reads only what each cites in its own file. 3: the fingerprint agrees, so the title names the same defect.
+ * 2: a cited text agrees (substantial and equal). 1: the anchor is within LINK_DISTANCE of the located anchor and the
+ * cited ranges overlap the located evidence.
  * When the finding's file is gone and the diff names no rename (a file the PR added shows as added, not renamed),
  * a substantial equal cited text is what says where the code went, so that link alone may cross files.
  * Two defects on neighbouring lines in one category are told apart by what they cite: a report that cites none of
@@ -178,7 +193,9 @@ type Report = { candidate: CandidateFinding; location: ObservedLocation };
  */
 function linkScore(candidate: CandidateFinding, location: ObservedLocation, fingerprintOf: Fingerprint, f: PriorFinding): number | undefined {
   if (candidate.category !== f.candidate.category) return undefined;
-  const sameCitedText = location.evidence.some((e) => f.location.evidence.some((p) => sameText(e.text, p.text)));
+  const own = ownEvidence(f);
+  const cited = location.evidence.filter((e) => e.path === candidate.file);
+  const sameCitedText = cited.some((e) => own.some((p) => sameText(e.text, p.text)));
   const file = currentFile(f);
   if (file === undefined) return sameCitedText ? 2 : undefined;
   if (file !== candidate.file) return undefined;
@@ -188,7 +205,7 @@ function linkScore(candidate: CandidateFinding, location: ObservedLocation, fing
   if (f.located.kind !== "same") return undefined;
   const at = f.located.location;
   const nearAnchor = candidate.newLine !== null && at.newLine !== null && Math.abs(candidate.newLine - at.newLine) <= LINK_DISTANCE;
-  return nearAnchor && overlaps(location.evidence, at.evidence) ? 1 : undefined;
+  return nearAnchor && overlaps(cited, own) ? 1 : undefined;
 }
 
 const anchorDistance = (candidate: CandidateFinding, f: PriorFinding) =>

@@ -208,6 +208,18 @@ it("links across files once the finding's file is gone, but only on a substantia
   expect(linkOne(reported({ file: "x.ts", newLine: 1 }), [gone])).toBe(undefined);
 });
 
+it("reads a cited text only from the finding's own file, so two defects that cite one shared helper stay apart", () => {
+  const helper = { path: "src/lib/auth.ts", start: 20, end: 22, text: normalize(["export function checkToken(t: string) {", "  return t.length > 0 && verify(t);", "}"]) };
+  const withHelper = (f: PriorFinding): PriorFinding => ({ ...f, location: { ...f.location, evidence: [...f.location.evidence, helper] } });
+  const gone = withHelper(prior({ kind: "file_gone" }));
+  const other = { path: "src/new/router.ts", start: 78, end: 82, text: normalize(["router.post('/hook', (req) => {", "  handle(req.body);", "});"]) };
+  expect(linkOne(reported({ title: "Webhook route accepts unsigned payloads", file: "src/new/router.ts", newLine: 80 }, [other, helper]), [gone])).toBe(undefined);
+  const changed = withHelper(prior({ kind: "changed", file: FILE }));
+  expect(linkOne(reported({ title: "Webhook route accepts unsigned payloads", newLine: 80 }, [{ ...other, path: FILE }, helper]), [changed])).toBe(undefined);
+  // The helper's text cited from the finding's own file is still that file's code.
+  expect(linkOne(reported({ title: "Anyone can refund", newLine: 10 }, cites(9, 12)), [changed])).toBe("f-1");
+});
+
 it("assigns each open finding to at most one candidate, the best-scoring one, and leaves the rest fresh", () => {
   const f = prior(same());
   const byTitle = reported({ id: "c-title", title: "Refund route lacks requireAdmin", newLine: 13 }, cites(13, 14));
