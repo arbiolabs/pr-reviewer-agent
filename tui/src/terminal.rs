@@ -58,8 +58,17 @@ pub fn detect_palette() -> Palette {
 
 /// Keys typed while the query read the terminal's reply, handed to the input path once it starts.
 static TYPED: std::sync::Mutex<Vec<u8>> = std::sync::Mutex::new(Vec::new());
-/// The query gave up inside the OSC reply: the rest of it is on its way to the key reader.
-static REPLY_CUT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The query gave up inside a reply: the rest of it is on its way to the key reader.
+static REPLY_CUT: std::sync::Mutex<Option<Tail>> = std::sync::Mutex::new(None);
+
+/// Which reply a cut left its tail in: the OSC 11 one, DA1, or none yet after a lone ESC, which a person may have
+/// typed as Esc. That ESC lets through anything but a plain `]` or `[`, the only ways a reply cut there continues.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Tail {
+    Osc,
+    Da1,
+    Esc,
+}
 
 /// Sends OSC 11 and then DA1, which every terminal answers, so the DA1 reply marks the end of whatever the terminal
 /// had to say. A terminal that answers neither costs `timeout`. It reads one byte at a time and stops at the DA1
@@ -90,7 +99,9 @@ fn query_background(timeout: Duration) -> Option<Vec<u8>> {
     })();
     let _ = disable_raw_mode();
     let reply = reply?;
-    REPLY_CUT.store(inside_osc(&reply), std::sync::atomic::Ordering::Relaxed);
+    if let Ok(mut c) = REPLY_CUT.lock() {
+        *c = cut(&reply);
+    }
     let (answers, typed) = split_replies(&reply);
     if let Ok(mut t) = TYPED.lock() {
         *t = typed;
@@ -98,19 +109,20 @@ fn query_background(timeout: Duration) -> Option<Vec<u8>> {
     Some(answers)
 }
 
-/// The keys typed before the terminal answered, as key events: printable ASCII, Enter, Tab and Backspace. An escape
-/// sequence (an arrow key's `ESC [ A`, Alt+x) drops whole, never as the plain keys inside it.
+/// The keys typed before the terminal answered, as key events: printable ASCII, Enter, Tab, Backspace and a bare Esc
+/// at the end. An escape sequence (an arrow key's `ESC [ A`, Alt+x) drops whole, never as the plain keys inside it.
 pub fn typed_before_start() -> Vec<crossterm::event::KeyEvent> {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     let typed = TYPED.lock().map(|mut t| std::mem::take(&mut *t)).unwrap_or_default();
     let mut plain = Vec::new();
     let mut bytes = typed.into_iter().peekable();
     while let Some(b) = bytes.next() {
-        if b != 0x1b {
+        if b != 0x1b || bytes.peek().is_none() {
             plain.push(b);
             continue;
         }
-        match bytes.next() {
+        // A second ESC (Alt+arrow is `ESC ESC [ A`) stays queued and starts the sequence again.
+        match bytes.next_if(|&b| b != 0x1b) {
             // CSI: parameter and intermediate bytes, then one final byte.
             Some(b'[') => {
                 while bytes.next_if(|b| (0x20..0x40).contains(b)).is_some() {}
@@ -128,6 +140,7 @@ pub fn typed_before_start() -> Vec<crossterm::event::KeyEvent> {
             b'\r' | b'\n' => Some(KeyCode::Enter),
             b'\t' => Some(KeyCode::Tab),
             0x7f | 0x08 => Some(KeyCode::Backspace),
+            0x1b => Some(KeyCode::Esc),
             b' '..=b'~' => Some(KeyCode::Char(b as char)),
             _ => None,
         })
@@ -164,10 +177,11 @@ pub fn split_replies(buf: &[u8]) -> (Vec<u8>, Vec<u8>) {
 /// Drops a terminal reply that arrives after the query gave up: crossterm reads `ESC ]` as Alt+`]` and the reply's
 /// text as keys, ended by BEL (Ctrl+G) or ST (Alt+`\\`). Only in the first `WINDOW` after startup, and only keys
 /// that can belong to `11;rgb:RRRR/GGGG/BBBB` arriving within `BURST` of the Alt+`]`; any other key ends it and acts.
+/// A tail the query's deadline cut off (no ESC of its own) drops the same way, DA1's `[?62;22c` included.
 #[derive(Default)]
 pub struct LateReply {
-    /// When the reply's Alt+`]` came, and how many keys followed it.
-    open: Option<(Duration, usize)>,
+    /// When the reply's Alt+`]` came, how many keys followed it, and which reply they are in.
+    open: Option<(Duration, usize, Tail)>,
 }
 
 impl LateReply {
@@ -176,33 +190,49 @@ impl LateReply {
     const BURST: Duration = Duration::from_millis(200);
     const MAX: usize = 64;
 
-    /// The filter for the key reader that starts after the query: already open when the query gave up inside the
-    /// OSC reply, so the tail that follows, which has no Alt+`]` of its own, is swallowed too.
+    /// The filter for the key reader that starts after the query: already open when the query gave up inside a
+    /// reply, so the tail that follows, which has no ESC of its own, is swallowed too.
     pub fn after_query() -> LateReply {
-        let cut = REPLY_CUT.swap(false, std::sync::atomic::Ordering::Relaxed);
-        LateReply { open: cut.then_some((Duration::ZERO, 0)) }
+        let cut = REPLY_CUT.lock().ok().and_then(|mut c| c.take());
+        LateReply { open: cut.map(|tail| (Duration::ZERO, 0, tail)) }
     }
 
     /// True when `key`, `since_start` into the session, is part of a late reply and must not act.
     pub fn swallow(&mut self, key: &crossterm::event::KeyEvent, since_start: Duration) -> bool {
         use crossterm::event::{KeyCode, KeyModifiers};
         let alt = key.modifiers == KeyModifiers::ALT;
-        let Some((began, n)) = self.open.take() else {
+        // An expired filter is a closed one, so an Alt+] after it can still start a reply.
+        let open =
+            self.open.take().filter(|(began, n, _)| since_start.saturating_sub(*began) < Self::BURST && *n < Self::MAX);
+        let Some((began, n, tail)) = open else {
             let starts = since_start < Self::WINDOW && alt && key.code == KeyCode::Char(']');
-            self.open = starts.then_some((since_start, 0));
+            self.open = starts.then_some((since_start, 0, Tail::Osc));
             return starts;
         };
-        if since_start.saturating_sub(began) >= Self::BURST || n >= Self::MAX {
+        let KeyCode::Char(c) = key.code else { return false };
+        let control = key.modifiers == KeyModifiers::CONTROL;
+        if tail == Tail::Osc && (control && c == 'g' || alt && c == '\\') {
+            return true;
+        }
+        // A whole reply after a cut that was only the user's Esc.
+        if alt && c == ']' {
+            self.open = Some((since_start, 0, Tail::Osc));
+            return true;
+        }
+        if key.modifiers.intersects(KeyModifiers::ALT | KeyModifiers::CONTROL) {
             return false;
         }
-        let end = (key.modifiers == KeyModifiers::CONTROL && key.code == KeyCode::Char('g'))
-            || (alt && key.code == KeyCode::Char('\\'));
-        let plain = !key.modifiers.intersects(KeyModifiers::ALT | KeyModifiers::CONTROL);
-        let part = plain && matches!(key.code, KeyCode::Char(c) if c.is_ascii_hexdigit() || "rgb:/;".contains(c));
-        if part {
-            self.open = Some((began, n + 1));
-        }
-        end || part
+        // `ESC [ ? 62;22c`: DA1 ends at its `c`, and a plain `[` after a cut ESC starts it.
+        let then = match (tail, c) {
+            (Tail::Osc, '\\') | (Tail::Da1, 'c') => None,
+            (Tail::Osc | Tail::Esc, '[') => Some(Tail::Da1),
+            (Tail::Esc, ']') => Some(Tail::Osc),
+            (Tail::Osc, c) if c.is_ascii_hexdigit() || "]rgb:/;".contains(c) => Some(Tail::Osc),
+            (Tail::Da1, c) if c.is_ascii_digit() || "?;".contains(c) => Some(Tail::Da1),
+            _ => return false,
+        };
+        self.open = then.map(|t| (began, n + 1, t));
+        true
     }
 }
 
@@ -226,6 +256,23 @@ fn readable(timeout: Duration) -> bool {
         libc::FD_SET(libc::STDIN_FILENO, &mut set);
         let mut tv = libc::timeval { tv_sec: timeout.as_secs() as _, tv_usec: timeout.subsec_micros() as _ };
         libc::select(libc::STDIN_FILENO + 1, &mut set, std::ptr::null_mut(), std::ptr::null_mut(), &mut tv) > 0
+    }
+}
+
+/// Where the deadline left the query's buffer: inside the OSC reply, inside DA1 (`ESC [` or `ESC [ ? 6`), just past
+/// an ESC, or between replies.
+fn cut(buf: &[u8]) -> Option<Tail> {
+    let in_da1 = buf.ends_with(b"\x1b[")
+        || (buf.windows(3).rposition(|w| w == b"\x1b[?"))
+            .is_some_and(|s| buf[s + 3..].iter().all(|b| b.is_ascii_digit() || *b == b';'));
+    if inside_osc(buf) {
+        Some(Tail::Osc)
+    } else if in_da1 {
+        Some(Tail::Da1)
+    } else if buf.last() == Some(&0x1b) {
+        Some(Tail::Esc)
+    } else {
+        None
     }
 }
 

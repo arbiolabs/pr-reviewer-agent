@@ -3,8 +3,8 @@ source: tests/golden.rs
 expression: text
 ---
   pr-review · ◔ #184 waiting for you · p previews   ● live
-
   #184 Booking API                     ●─●─●─●─●─◔  ▲1 →0
+
   ┃ ▲ HIGH   correctness          detected · 82% confident
   ┃ Finding f-1
   ┃ src/booking.ts:42
@@ -17,4 +17,4 @@ expression: text
   ┃
   ┃ Enter  5 evidence items · the fix · the diff
 
-   j/k finding  p preview & publish  Enter read  ? help
+   j/k move  Enter read  p publish  ? help  q quit

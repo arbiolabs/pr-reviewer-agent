@@ -19,9 +19,10 @@ pub const COLUMN: u16 = 112;
 
 /// A quadrant turning clockwise: no frame reads as the `·` separator or the `●` of a finished phase, and block
 /// elements are in every monospace font (braille and the half circles are missing from some, freeze's among them).
+/// The ASCII bar rocks between its slants: upright it is the ASCII separator `|`, and flat the stepper's `-`.
 pub fn spinner(c: &Ctx) -> &'static str {
     const U: &[&str] = &["▘", "▝", "▗", "▖"];
-    const A: &[&str] = &["-", "\\", "|", "/"];
+    const A: &[&str] = &["/", "\\"];
     let set = if c.t.ascii { A } else { U };
     set[(c.m.now_ms / 125) as usize % set.len()]
 }
@@ -49,7 +50,7 @@ pub fn phase_label(p: Phase) -> &'static str {
         Phase::Analyze => "analyze",
         Phase::Verify => "verify",
         Phase::PreparePublication => "prepare",
-        Phase::AwaitingApproval => "awaiting you",
+        Phase::AwaitingApproval => "waiting for you",
         Phase::Publish => "publish",
         Phase::Reconcile => "reconcile",
         Phase::Completed => "done",
@@ -227,7 +228,7 @@ impl Doc {
             Some((start, end)) if end > height => end.saturating_sub(height).min(start.saturating_sub(1)),
             _ => 0,
         };
-        (auto, self.lines.len().saturating_sub(height.min(self.lines.len()) / 2))
+        (auto, self.lines.len().saturating_sub(height))
     }
 }
 
@@ -265,9 +266,12 @@ pub fn document(c: &Ctx, pr: &Pr, w: usize, height: usize) -> Doc {
 
     let findings = c.m.domain.pr_findings(&pr.id);
     let running = run.is_some_and(|r| r.active());
-    lines.push(summary_line(c, pr, &findings, w));
-    lines.push(Line::from(c.span(rule(c, w), Role::Muted)));
-    if !compact {
+    // An unreviewed PR says so in one sentence, with no count or rule under it.
+    if run.is_some() {
+        lines.push(summary_line(c, pr, &findings, w));
+        lines.push(Line::from(c.span(rule(c, w), Role::Muted)));
+    }
+    if !compact && run.is_some() {
         lines.push(Line::raw(""));
     }
 
@@ -281,7 +285,13 @@ pub fn document(c: &Ctx, pr: &Pr, w: usize, height: usize) -> Doc {
             }
         }
         lines.push(Line::raw(""));
-        lines.push(Line::from(c.span("  R retries the run once the cause is fixed.", Role::Muted)));
+        // The daemon's reason for a cancel from this client (protocol/README.md, review.cancel).
+        let next = if r.failure_reason.as_ref().is_some_and(|x| x.as_str() == "cancelled from the TUI") {
+            "  You cancelled this review. R starts it again."
+        } else {
+            "  R retries the run once the cause is fixed."
+        };
+        lines.push(Line::from(c.span(next, Role::Muted)));
         lines.push(Line::raw(""));
     }
     if running && c.m.look.show_activity {
@@ -292,12 +302,15 @@ pub fn document(c: &Ctx, pr: &Pr, w: usize, height: usize) -> Doc {
     if run.is_some_and(|r| r.parked()) {
         ready = Some(lines.len());
         let on = c.m.on_ready_line() && c.m.ui.screen == Screen::Review && c.m.ui.focus != Pane::Sidebar;
-        lines.push(Line::from(vec![
+        let mut ready_line = vec![
             c.span(format!("{} Ready to publish", g.pending), if on { Role::Selected } else { Role::Pending }),
             c.span(format!(" {} ", g.sep), Role::Muted),
-            c.span("p", Role::Accent),
-            c.span(" previews", Role::Muted),
-        ]));
+        ];
+        match crate::update::write_block(c.m, "review.publish") {
+            Some(why) => ready_line.push(c.span(format!("publishing is off: {why}"), Role::Muted)),
+            None => ready_line.extend([c.span("p", Role::Accent), c.span(" previews", Role::Muted)]),
+        }
+        lines.push(Line::from(ready_line));
         lines.push(Line::raw(""));
     }
     if findings.is_empty() && run.is_some_and(|r| r.status == RunStatus::Completed) {
@@ -385,7 +398,13 @@ fn summary_line(c: &Ctx, pr: &Pr, findings: &[&Finding], w: usize) -> Line<'stat
 /// `● Collect ── ● Triage ── ⠹ Analyze ── ○ Verify ...`, then how the run ended.
 fn phase_line(c: &Ctx, run: Option<&Run>, w: usize) -> Line<'static> {
     let g = c.t.g();
-    let Some(run) = run else { return Line::from(c.span("Not reviewed yet. s starts a review.", Role::Muted)) };
+    let Some(run) = run else {
+        // Not through `offer::offered`, whose J/K measures this page.
+        let start = c.m.top_modal().is_none() && crate::update::can_mutate(c.m, crate::keymap::Mutation::Start);
+        return Line::from(
+            c.span(if start { "Not reviewed yet. s starts a review." } else { "Not reviewed yet." }, Role::Muted),
+        );
+    };
     const NAMES: [&str; 6] = ["Collect", "Triage", "Analyze", "Verify", "Prepare", "Publish"];
     let cur = match run.phase {
         Phase::CollectContext => 0,
@@ -444,7 +463,9 @@ fn phase_line(c: &Ctx, run: Option<&Run>, w: usize) -> Line<'static> {
         RunStatus::Unknown => ("?".into(), Role::Muted),
     };
     let right = vec![c.span(tail.0, tail.1)];
-    let fits = |spans: &Vec<Span<'static>>| spans_w(spans) + spans_w(&right) + 2 <= w;
+    // The shape follows the width alone: every state's tail gets the room of the widest, `◔ waiting for you`.
+    let tail_w = spans_w(&right).max(17);
+    let fits = |spans: &Vec<Span<'static>>| spans_w(spans) + tail_w + 2 <= w;
     let spans = [build(Some(link), true), build(None, true), build(None, false)]
         .into_iter()
         .find(fits)
@@ -473,7 +494,12 @@ fn live(c: &Ctx, pr: &Pr, w: usize, log: usize, lines: &mut Vec<Line<'static>>) 
         let calls = c.m.domain.activity.iter().filter(|a| a.pr_id.as_ref() == Some(&p.id)).count();
         let this = p.id == pr.id;
         let label = format!("{:<7}", format!("#{}", p.number));
-        let tail = format!("  {:<8} {:>3} calls", super::doc::phase_label(r.phase), calls);
+        let tail = format!(
+            "  {:<8} {:>3} {:<5}",
+            super::doc::phase_label(r.phase),
+            calls,
+            if calls == 1 { "call" } else { "calls" }
+        );
         let seg = w.saturating_sub(width(&label) + width(&tail) + 6) / 6;
         let mut s = vec![c.span(label, if this { Role::Title } else { Role::Muted })];
         s.extend(phase_bar(c, r, seg.clamp(2, 10)));

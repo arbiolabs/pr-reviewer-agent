@@ -25,4 +25,4 @@ expression: ascii_text
   #
   # Enter  5 evidence items | the fix | the diff    d diff at this line
 
-   j/k finding  p preview & publish  Enter read  h pull requests  ? help
+   j/k move  Enter read  p publish  c cancel  d diff  h PRs  ? help  q quit

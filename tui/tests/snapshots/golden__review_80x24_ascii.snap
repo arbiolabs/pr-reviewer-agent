@@ -2,16 +2,16 @@
 source: tests/golden.rs
 expression: ascii_text
 ---
-  pr-review | - reviewing #184 verify found: Finding f-1                * live
+  pr-review | / reviewing #184 verify found: Finding f-1                * live
 
-  #184 Booking API                                        +-+-+---.-.  ^1 ->0
+  #184 Booking API                                        +-+-+-/-.-.  ^1 ->0
   ----------------------------------------------------------------------------
-  - Reviewing now                                               :  0.2 calls/s
+  / Reviewing now                                               :  0.2 calls/s
 
   #184   ======= ======= ======= ======= ------- -------  verify     2 calls
 
       13:00:11  read_file   src/booking.ts:1-120
-    - 13:00:12  finding     ^ HIGH Finding f-1
+    / 13:00:12  finding     ^ HIGH Finding f-1
 
   # ^ HIGH   correctness                              detected | 82% confident
   # Finding f-1
@@ -25,4 +25,4 @@ expression: ascii_text
   #
   # Enter  5 evidence items | the fix | the diff    d diff at this line
 
-   j/k finding  Enter read  d diff  h pull requests  ? help  q quit
+   Enter read  d diff  h pull requests  / search  t timeline  ? help  q quit

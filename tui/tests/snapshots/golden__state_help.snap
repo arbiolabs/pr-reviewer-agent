@@ -15,14 +15,14 @@ expression: text
     j k        move
     C-d C-u    page down / up
     g G        first / last
+    1 2 3 4 5  views; 5 is settings
+    r          refresh snapshot
+
+  Every screen
     h l        pane left / right
     Tab        cycle panes
     Enter      open selected
-    1 2 3 4 5  views; 5 is settings
-    /          search PRs
-    d          diff at the finding
-    t          timeline for selection
-    r          refresh snapshot
     A          GitHub accounts (Settings)
-    … 39 more below, j scrolls
-   j/k scroll  Esc close  q quit
+    w          watch the running review
+    … 45 more below, j scrolls
+   j/k scroll  Esc close  q quit                                      1 2 3 4 5

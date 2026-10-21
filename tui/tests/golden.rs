@@ -80,6 +80,19 @@ fn accounts_view() {
     }
 }
 
+/// The gh-active account once selected: both marks fit their column, and the hint does not say "selected" again.
+#[test]
+fn accounts_selected_and_gh_active() {
+    let mut s = accounts_live(Look::default()).key(KeyCode::Char('A'));
+    for a in s.m.domain.accounts.iter_mut().flatten() {
+        a.selected = a.gh_active;
+    }
+    let (text, _) = render(&mut s.m, 120, 38);
+    let row = text.lines().find(|l| l.contains("diego-arbio-dev  github.com")).unwrap();
+    assert!(row.trim_end().ends_with("selected, gh active"), "{row}");
+    insta::assert_snapshot!("accounts_selected_gh_active_120x38", text);
+}
+
 #[test]
 fn special_states() {
     let mut cases: Vec<(&str, Sim, (u16, u16))> = vec![

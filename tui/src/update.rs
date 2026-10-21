@@ -123,16 +123,26 @@ pub fn update(m: &mut Model, msg: Msg) -> Vec<Effect> {
         Msg::Resize(w, h) => m.size = (w, h),
         Msg::Key(k) => {
             if let Some(a) = keymap::resolve(m.ui.screen, m.top_modal(), k) {
+                let before = (view_of(m), m.notice.clone());
                 act(m, a, &mut fx);
+                forget_old_toast(m, before);
             }
         }
-        Msg::Mouse(e) => mouse(m, e, &mut fx),
+        Msg::Mouse(e) => {
+            let before = (view_of(m), m.notice.clone());
+            mouse(m, e, &mut fx);
+            forget_old_toast(m, before);
+        }
         Msg::Net(e) => net(m, e, &mut fx),
     }
     prefetch(m, &mut fx);
     settle_timeline_cursor(m);
     if !page_reloading(m) {
         clamp_page(m);
+    }
+    // A resize or new content can leave less below the fold than the reader had scrolled past.
+    if m.top_modal().is_none() && matches!(m.ui.screen, Screen::Inbox | Screen::Review) {
+        m.ui.doc_scroll = m.ui.doc_scroll.min(crate::view::doc_scroll_limit(m));
     }
     m.dirty = true;
     fx
@@ -225,31 +235,53 @@ fn waiting_confirm<'a>(m: &'a mut Model, id: &RequestId) -> Option<&'a mut Confi
     })
 }
 
-/// The daemon answers a start's own key with its recorded run, even once that run has ended: no event will follow,
-/// so the panel closes and says the head is reviewed.
+/// A start the daemon answers with a run the client already knows sends no run.started. A running run took the
+/// start in, so the panel gives way to that review; any other turns into the refusal its state means.
 fn settle_replayed_start(m: &mut Model) {
-    let ended = |modal: &Modal| match modal {
+    let known = m.ui.modals.iter().enumerate().find_map(|(i, modal)| match modal {
         Modal::Confirm { command: Command::Start(_), state: ConfirmState::Accepted { operation, .. }, .. } => {
-            let run = operation.as_str().strip_prefix("review.start:").unwrap_or_default();
-            m.domain.runs.get(&RunId::new(run)).is_some_and(|r| r.status != RunStatus::Running)
+            let run = m.domain.runs.get(&RunId::new(operation.as_str().strip_prefix("review.start:")?))?;
+            Some((i, run.clone()))
         }
-        _ => false,
-    };
-    let Some(i) = m.ui.modals.iter().position(ended) else { return };
-    let Modal::Confirm { command: Command::Start(p), state: ConfirmState::Accepted { operation, .. }, .. } =
-        m.ui.modals.remove(i)
-    else {
-        return;
-    };
-    let run = operation.as_str().strip_prefix("review.start:").map(RunId::new);
-    // The daemon's words for a head whose review ended.
-    let why = match run.and_then(|r| m.domain.runs.get(&r)).map(|r| r.status) {
-        Some(RunStatus::Failed) => "failed its review; retry it instead",
-        Some(RunStatus::Superseded) => "is superseded by a newer head",
+        _ => None,
+    });
+    let Some((i, run)) = known else { return };
+    if run.status == RunStatus::Running && !run.parked() {
+        m.ui.modals.remove(i);
+        m.ui.screen = Screen::Review;
+        m.ui.focus = Pane::Main;
+        m.ui.selected_pr = Some(run.pr_id.clone());
+        return notice(m, "Already running; showing that review.");
+    }
+    let message = Text::new(&start_refusal(m, &run));
+    if let Modal::Confirm { state, .. } = &mut m.ui.modals[i] {
+        *state = ConfirmState::Refused { code: Some(ErrorCode::Conflict), message };
+    }
+}
+
+/// The run that makes the daemon refuse a start of `pr` for certain: a parked run on the same base and head, under a
+/// daemon that grants publishing. The daemon keys a revision on its policy and reviewer too, which the client does
+/// not know, so a start on any other head it has a run for goes to the daemon to decide; a running one it takes in.
+/// Without review.publish (a dry_run restart) its policy differs from the parked run's, so it starts a new one.
+fn parked_head<'a>(m: &'a Model, pr: &Pr) -> Option<&'a Run> {
+    m.domain
+        .runs
+        .values()
+        .filter(|_| m.may_write("review.publish"))
+        .find(|r| r.pr_id == pr.id && r.base_sha == pr.base_sha && r.head_sha == pr.head_sha && r.parked())
+}
+
+/// The daemon's words for refusing a start at `run`'s head: `#184 at 4444444 is already being reviewed`.
+fn start_refusal(m: &Model, run: &Run) -> String {
+    let why = match run.status {
+        RunStatus::Running if run.parked() => "is waiting for your approval",
+        RunStatus::Running => "is already being reviewed",
+        RunStatus::Failed => "failed its review; retry it instead",
+        RunStatus::Superseded => "is superseded by a newer head",
         _ => "is already reviewed",
     };
-    let pr = m.domain.prs.get(&p.pr_id).map_or(p.pr_id.to_string(), |x| format!("#{}", x.number));
-    notice(m, format!("{pr} at {} {why}", p.expected_head_sha.short()));
+    let number = m.domain.prs.get(&run.pr_id).map_or(run.pr_id.to_string(), |x| format!("#{}", x.number));
+    format!("{number} at {} {why}", run.head_sha.short())
 }
 
 /// Clears the pending marker that waits on `id` and shows `message` there. False when nothing waits on it.
@@ -274,8 +306,39 @@ fn fail_request(m: &mut Model, id: &RequestId, message: Text) -> bool {
     true
 }
 
+/// The sentence for a diff the daemon would not serve; its own words go to Settings' errors.
+fn diff_error(m: &Model, key: &DiffKey, code: ErrorCode) -> String {
+    let failed = m.domain.runs.values().any(|r| {
+        r.pr_id == key.pr && r.base_sha == key.base && r.head_sha == key.head && r.status == RunStatus::Failed
+    });
+    match code {
+        ErrorCode::NotFound | ErrorCode::TemporarilyUnavailable if failed => {
+            "No diff for this run. The review failed before it read the diff.".into()
+        }
+        ErrorCode::NotFound => "The daemon has no diff for this revision.".into(),
+        ErrorCode::TemporarilyUnavailable => "The daemon can't read this diff now. Settings lists why.".into(),
+        _ => "The diff did not load. Settings lists the error.".into(),
+    }
+}
+
+/// What the reader is looking at: the screen and the panels over it.
+fn view_of(m: &Model) -> (Screen, usize) {
+    (m.ui.screen, m.ui.modals.len())
+}
+
+/// A toast speaks about the view it was raised in, so a key that changes the view without raising one clears it.
+fn forget_old_toast(m: &mut Model, (view, notice): ((Screen, usize), Option<Notice>)) {
+    if view_of(m) != view && m.notice == notice {
+        m.notice = None;
+    }
+}
+
+/// Every toast goes through here and reads as a sentence: a debug build, and so every test that reaches one, fails on
+/// a toast that starts with a lowercase letter.
 fn notice(m: &mut Model, text: impl Into<String>) {
-    m.notice = Some(Notice { text: text.into(), until_ms: m.now_ms + NOTICE_MS });
+    let text = text.into();
+    debug_assert!(!text.starts_with(|c: char| c.is_lowercase()), "a toast starts with a capital: {text:?}");
+    m.notice = Some(Notice { text, until_ms: m.now_ms + NOTICE_MS });
 }
 
 fn transition(m: &mut Model, input: LinkInput) -> bool {
@@ -457,7 +520,7 @@ fn server_message(m: &mut Model, msg: ServerMessage, fx: &mut Vec<Effect>) {
                     CommandOutcome::Accepted { operation_id } => {
                         ConfirmState::Accepted { operation: operation_id, at_ms: now }
                     }
-                    CommandOutcome::Rejected { code, message } => ConfirmState::Refused { code, message },
+                    CommandOutcome::Rejected { code, message } => ConfirmState::Refused { code: Some(code), message },
                 };
                 settle_replayed_start(m);
                 return;
@@ -481,11 +544,15 @@ fn server_message(m: &mut Model, msg: ServerMessage, fx: &mut Vec<Effect>) {
             }
             m.diag.error(m.now_ms, format!("{code}: {message}"));
             let Some(id) = request_id else {
-                notice(m, format!("server error {code}: {message}"));
+                notice(m, format!("Server error {code}: {message}"));
                 return;
             };
-            if !fail_request(m, &id, message.clone()) {
-                notice(m, format!("server error {code}: {message}"));
+            let shown = match &m.diff {
+                Some(d) if d.pending.as_ref() == Some(&id) => Text::new(&diff_error(m, &d.key, code)),
+                _ => message.clone(),
+            };
+            if !fail_request(m, &id, shown) {
+                notice(m, format!("Server error {code}: {message}"));
             }
         }
     }
@@ -526,7 +593,7 @@ fn apply_snapshot(m: &mut Model, s: Snapshot, fx: &mut Vec<Effect>) {
             m.ui.selected_pr = Some(p.id.clone());
             m.ui.screen = Screen::Review;
         } else {
-            notice(m, format!("{wanted} is not tracked by the reviewer"));
+            notice(m, format!("The reviewer does not track {wanted}"));
         }
     }
     // Land on the story that matters most: the PR with the most severe current finding.
@@ -905,7 +972,7 @@ fn resolve_anchor(m: &mut Model, fx: &mut Vec<Effect>) {
         None => {
             d.anchor = None;
             if shown {
-                notice(m, format!("{path} is not in this diff"));
+                notice(m, format!("No file in this diff matches \"{path}\""));
             }
         }
     }
@@ -960,8 +1027,10 @@ fn finding_stops(m: &Model, d: &DiffView) -> Vec<(usize, usize, usize)> {
 // ---- timeline ----
 
 fn load_timeline(m: &mut Model, scope: TimelineScope, query: TimelineQuery, fx: &mut Vec<Effect>) {
-    let (category, phase, text) =
-        m.timeline.as_ref().map_or((None, None, String::new()), |t| (t.category, t.phase, t.text.clone()));
+    // Filters belong to the PR they were set on; another PR starts unfiltered, so its timeline is never empty
+    // for a reason set elsewhere.
+    let (category, phase, text) = (m.timeline.as_ref().filter(|t| t.query.pr == query.pr))
+        .map_or((None, None, String::new()), |t| (t.category, t.phase, t.text.clone()));
     let pending = send(m, fx, |request_id| ClientMessage::TimelineGet {
         request_id,
         pr_id: query.pr.clone(),
@@ -1143,6 +1212,7 @@ fn act(m: &mut Model, a: Action, fx: &mut Vec<Effect>) {
                 m.ui.modals.push(Modal::Help { scroll: 0 });
             }
         }
+        Action::Back if !can_back(m) => {}
         Action::Back => {
             if let Some(t) = m.timeline.as_mut().filter(|t| m.ui.screen == Screen::Timeline && t.open.is_some())
                 && m.ui.modals.is_empty()
@@ -1154,19 +1224,16 @@ fn act(m: &mut Model, a: Action, fx: &mut Vec<Effect>) {
                 d.search = None;
                 d.matches.clear();
             } else if m.ui.modals.pop().is_none() {
-                m.ui.screen = match m.ui.screen {
-                    Screen::Diff | Screen::Timeline => Screen::Review,
-                    _ => Screen::Inbox,
-                };
+                m.ui.screen = if m.ui.screen == Screen::Settings { Screen::Inbox } else { Screen::Review };
             }
         }
         Action::Goto(s) => goto(m, s, fx),
         Action::Refresh => {
-            if matches!(m.link, Link::Live | Link::Stalled { .. }) {
+            if can_refresh(m) {
                 resync(m, "manual refresh", fx);
-                notice(m, "refreshing snapshot");
+                notice(m, format!("Refreshing the snapshot{}", crate::theme::glyphs(m.look.ascii).ellipsis));
             } else {
-                notice(m, "not connected; the client reconnects on its own");
+                notice(m, "Not connected; the client reconnects on its own");
             }
         }
         Action::Up => move_by(m, -1, fx),
@@ -1175,14 +1242,15 @@ fn act(m: &mut Model, a: Action, fx: &mut Vec<Effect>) {
         Action::PageDown => move_by(m, page(m), fx),
         Action::Top => move_by(m, isize::MIN / 2, fx),
         Action::Bottom => move_by(m, isize::MAX / 2, fx),
-        Action::Left => m.ui.focus = Pane::Sidebar,
-        Action::Right => m.ui.focus = Pane::Main,
+        Action::Left => focus(m, Pane::Sidebar),
+        Action::Right => focus(m, Pane::Main),
         // Two panes: either way round, Tab moves to the other one.
         Action::FocusNext | Action::FocusPrev => {
-            m.ui.focus = if m.ui.focus == Pane::Main { Pane::Sidebar } else { Pane::Main }
+            focus(m, if m.ui.focus == Pane::Main { Pane::Sidebar } else { Pane::Main })
         }
         Action::Open => open(m, fx),
         // `/` searches what the screen shows: the diff's text, the timeline's events, else the PR list.
+        Action::Search if !can_search(m) => {}
         Action::Search => {
             let (purpose, before) = match (m.ui.screen, &m.timeline, &m.diff) {
                 (Screen::Diff, _, Some(d)) => (InputPurpose::DiffSearch, d.search.clone().unwrap_or_default()),
@@ -1191,6 +1259,7 @@ fn act(m: &mut Model, a: Action, fx: &mut Vec<Effect>) {
             };
             m.ui.modals.push(Modal::Input { purpose, buffer: before.clone(), before });
         }
+        Action::JumpTo if !can_jump(m) => {}
         Action::JumpTo => m.ui.modals.push(Modal::Input {
             purpose: InputPurpose::JumpTo,
             buffer: String::new(),
@@ -1200,6 +1269,16 @@ fn act(m: &mut Model, a: Action, fx: &mut Vec<Effect>) {
         Action::Watch => watch(m),
         Action::ScrollDown => m.ui.doc_scroll = (m.ui.doc_scroll + 1).min(crate::view::doc_scroll_limit(m)),
         Action::ScrollUp => m.ui.doc_scroll = (m.ui.doc_scroll - 1).max(0),
+        Action::OpenTimeline if !can_timeline(m) => {
+            notice(
+                m,
+                if m.selected_pr().is_none() {
+                    "No PR selected"
+                } else {
+                    "Can't load the timeline: the client is not live"
+                },
+            );
+        }
         Action::OpenTimeline => {
             m.ui.modals.retain(|x| !matches!(x, Modal::Finding { .. }));
             // The document is the PR, so its timeline is the PR's; f narrows to the run or the finding.
@@ -1226,9 +1305,12 @@ fn act(m: &mut Model, a: Action, fx: &mut Vec<Effect>) {
         Action::Accounts => {
             goto(m, Screen::Settings, fx);
             if m.domain.accounts.is_none() {
-                notice(m, "this daemon reports no GitHub accounts");
+                notice(m, "This daemon reports no GitHub accounts");
             }
         }
+        Action::CycleScope if !can_filter_timeline(m) => {}
+        Action::CycleCategory if !can_cycle_kind(m) => {}
+        Action::CyclePhase if !can_cycle_phase(m) => {}
         Action::CycleScope => {
             if let Some(t) = &m.timeline {
                 let scope = cycle(&[TimelineScope::Pr, TimelineScope::Run, TimelineScope::Finding], t.scope);
@@ -1365,6 +1447,279 @@ fn click(m: &mut Model, x: u16, y: u16, fx: &mut Vec<Effect>) {
     }
 }
 
+// ---- what a key would do ----
+//
+// Each key's guard in the reducer and its hint in the footer (`crate::offer`) ask the same question here, so the footer
+// offers a key exactly when pressing it acts.
+
+/// A cursor over `items` moves when there is somewhere else to go.
+fn walks<T: PartialEq>(items: &[T], current: Option<&T>) -> bool {
+    items.len() > 1 || items.first().is_some_and(|only| current != Some(only))
+}
+
+/// The Review cursor's stops, a parked run's ready line (`None`) above the findings, and where it rests now.
+fn finding_cursor(m: &Model) -> (Vec<Option<FindingId>>, Option<FindingId>) {
+    let Some(pr) = &m.ui.selected_pr else { return (vec![], None) };
+    let ready = m.parked_run().map(|_| None);
+    let stops = ready.into_iter().chain(m.domain.pr_findings(pr).iter().map(|f| Some(f.id.clone()))).collect();
+    (stops, if m.on_ready_line() { None } else { m.ui.selected_finding.clone() })
+}
+
+/// j/k and the paging keys: a cursor with somewhere to go, a page with more to scroll, or a page to load.
+pub fn can_move(m: &Model) -> bool {
+    match m.top_modal() {
+        Some(Modal::Finding { .. } | Modal::Help { .. } | Modal::Publication { .. }) => {
+            crate::view::page_scroll_limit(m) > 0
+        }
+        Some(_) => false,
+        None => match (m.ui.screen, m.ui.focus) {
+            (Screen::Inbox, _) | (Screen::Review, Pane::Sidebar) => {
+                let ids: Vec<PrId> = m.inbox().iter().map(|p| p.id.clone()).collect();
+                walks(&ids, m.ui.selected_pr.as_ref())
+            }
+            (Screen::Review, Pane::Main) => {
+                let (stops, at) = finding_cursor(m);
+                walks(&stops, Some(&at))
+            }
+            // A next page is somewhere to go too: j on the last loaded file asks for it.
+            (Screen::Diff, Pane::Sidebar) => m.diff.as_ref().is_some_and(|d| {
+                let paths: Vec<&Text> = d.files.iter().map(|f| &f.path).collect();
+                walks(&paths, d.selected_file.as_ref().as_ref()) || d.next_cursor.is_some() && d.pending.is_none()
+            }),
+            (Screen::Diff, Pane::Main) => {
+                m.diff.as_ref().and_then(|d| d.file()).is_some_and(|f| file_rows(f).len() > 1)
+            }
+            (Screen::Timeline, _) => m.timeline.as_ref().is_some_and(|t| {
+                walks(&timeline_stops(m, t), t.selected.as_ref()) || t.next_before.is_some() && t.pending.is_none()
+            }),
+            (Screen::Settings, _) => m.domain.accounts.as_ref().is_some_and(|a| a.len() > 1),
+        },
+    }
+}
+
+/// The finding under the Diff cursor: the one stacked at its line, else one anchored to the file as a whole.
+fn diff_cursor_finding(m: &Model) -> Option<FindingId> {
+    let d = m.diff.as_ref()?;
+    let file = d.file()?;
+    match file_rows(file).get(d.cursor) {
+        Some(row @ DiffRow::Line(_)) => {
+            row_findings(&diff_findings(m, d), file, row).get(d.stack).map(|f| f.id.clone())
+        }
+        _ => diff_findings(m, d).into_iter().find(|f| f.file == file.path && f.line.is_none()).map(|f| f.id.clone()),
+    }
+}
+
+/// Enter: read the selection, open the code pane, fold a timeline row or select an account. On the Inbox and in a
+/// side pane it moves into the page, so it needs something to show there.
+pub fn can_open(m: &Model) -> bool {
+    if m.top_modal().is_some() {
+        return false;
+    }
+    match (m.ui.screen, m.ui.focus) {
+        (Screen::Inbox, _) | (Screen::Review, Pane::Sidebar) => m.selected_pr().is_some(),
+        (Screen::Review, Pane::Main) => m.on_ready_line() || m.ui.selected_finding.is_some(),
+        (Screen::Diff, Pane::Sidebar) => m.diff.as_ref().and_then(|d| d.file()).is_some(),
+        (Screen::Diff, Pane::Main) => diff_cursor_finding(m).is_some(),
+        (Screen::Timeline, _) => {
+            m.timeline.as_ref().is_some_and(|t| t.selected.is_some_and(|s| timeline_stops(m, t).contains(&s)))
+        }
+        (Screen::Settings, _) => m.cursor_account().is_some_and(|a| m.account_block(a).is_none()),
+    }
+}
+
+/// Esc: closes the top panel, folds the open timeline row, clears the diff search, or goes back to the Review page.
+/// The Review page and the Inbox are where Esc ends.
+pub fn can_back(m: &Model) -> bool {
+    m.top_modal().is_some() || matches!(m.ui.screen, Screen::Diff | Screen::Timeline | Screen::Settings)
+}
+
+/// h, l and Tab: the Review page's PR list and findings, the Diff's files and code. Another screen has one pane.
+pub fn can_focus(m: &Model, pane: Pane) -> bool {
+    if m.top_modal().is_some() || m.ui.focus == pane {
+        return false;
+    }
+    match (m.ui.screen, pane) {
+        (Screen::Review, Pane::Sidebar) => !m.domain.prs.is_empty(),
+        (Screen::Review, Pane::Main) => m.selected_pr().is_some(),
+        (Screen::Diff, Pane::Sidebar) => m.diff.as_ref().is_some_and(|d| !d.files.is_empty()),
+        (Screen::Diff, Pane::Main) => m.diff.as_ref().and_then(|d| d.file()).is_some(),
+        _ => false,
+    }
+}
+
+/// `/`: searches what the screen lists, so there must be something listed.
+pub fn can_search(m: &Model) -> bool {
+    m.top_modal().is_none()
+        && match m.ui.screen {
+            Screen::Inbox | Screen::Review => !m.domain.prs.is_empty(),
+            Screen::Diff => can_jump(m),
+            Screen::Timeline => can_filter_timeline(m),
+            Screen::Settings => false,
+        }
+}
+
+/// `:` jumps to a path in the diff on screen.
+pub fn can_jump(m: &Model) -> bool {
+    m.diff.as_ref().is_some_and(|d| !d.files.is_empty())
+}
+
+/// f, v, P and `/` on the Timeline: something to narrow. Its other scopes are parts of the PR's, so a PR with no
+/// events has nothing in any scope.
+pub fn can_filter_timeline(m: &Model) -> bool {
+    m.timeline.as_ref().is_some_and(|t| !timeline_shown(m, t).is_empty())
+}
+
+/// v: some kind in the cycle keeps rows that the others do not, so there are rows to narrow with any kind.
+pub fn can_cycle_kind(m: &Model) -> bool {
+    m.timeline.as_ref().is_some_and(|t| !timeline_rows(m, &TimelineView { category: None, ..t.clone() }).is_empty())
+}
+
+/// P: as v, for the phase.
+pub fn can_cycle_phase(m: &Model) -> bool {
+    m.timeline.as_ref().is_some_and(|t| !timeline_rows(m, &TimelineView { phase: None, ..t.clone() }).is_empty())
+}
+
+/// J/K: the open card is longer than the page.
+pub fn can_scroll_doc(m: &Model) -> bool {
+    m.top_modal().is_none() && crate::view::doc_scroll_limit(m) > 0
+}
+
+/// n/N: the next finding in the reader; on the Diff, the next match of its search or the next anchored finding;
+/// on the Review page, the next finding as j does.
+pub fn can_turn(m: &Model) -> bool {
+    match (m.top_modal(), m.ui.screen) {
+        (Some(Modal::Finding { id, .. }), _) => {
+            m.domain.findings.get(id).is_some_and(|f| m.domain.pr_findings(&f.pr_id).len() > 1)
+        }
+        (Some(_), _) => false,
+        (None, Screen::Review) => {
+            let (stops, at) = finding_cursor(m);
+            stops.iter().any(Option::is_some) && (m.ui.focus == Pane::Sidebar || walks(&stops, Some(&at)))
+        }
+        // A jump also moves into the code pane.
+        (None, Screen::Diff) => m.diff.as_ref().is_some_and(|d| {
+            let here = diff_position(d);
+            let side = m.ui.focus == Pane::Sidebar;
+            match &d.search {
+                Some(_) => walks(&d.matches, Some(&(here.0, here.1))) || side && !d.matches.is_empty(),
+                None => {
+                    let stops = finding_stops(m, d);
+                    walks(&stops, Some(&here)) || side && !stops.is_empty()
+                }
+            }
+        }),
+        (None, _) => false,
+    }
+}
+
+/// (file index, row, place in the line's stack) of the Diff cursor.
+fn diff_position(d: &DiffView) -> (usize, usize, usize) {
+    (d.selected_file.as_ref().and_then(|p| d.files.iter().position(|f| &f.path == p)).unwrap_or(0), d.cursor, d.stack)
+}
+
+/// The revision `d` opens: the finding in the reader or under the Review cursor, at its run's revision; else the
+/// selected PR at its head.
+fn diff_target(m: &Model) -> Option<(DiffKey, Option<Finding>)> {
+    let modal = match m.top_modal() {
+        Some(Modal::Finding { id, .. }) => Some(id.clone()),
+        _ => None,
+    };
+    let review = (m.ui.screen == Screen::Review && m.ui.focus != Pane::Sidebar && m.top_modal().is_none())
+        .then(|| m.ui.selected_finding.clone());
+    let finding = modal.or(review.flatten()).and_then(|id| m.domain.findings.get(&id).cloned());
+    if let Some(f) = finding
+        && let Some(key) = finding_diff_key(m, &f.id)
+    {
+        return Some((key, Some(f)));
+    }
+    let pr = m.selected_pr()?;
+    Some((DiffKey { pr: pr.id.clone(), base: pr.base_sha.clone(), head: pr.head_sha.clone() }, None))
+}
+
+/// d: a diff already loaded, or one to ask the daemon for. Whether it has one for a head it never reviewed is its to
+/// say, and the Diff says what it answered.
+pub fn can_diff(m: &Model) -> bool {
+    let Some((key, _)) = diff_target(m) else { return false };
+    let loaded = m.diff.as_ref().is_some_and(|d| d.key == key && d.error.is_none() && !d.files.is_empty());
+    loaded || m.link.welcomed()
+}
+
+/// t: the selected PR's events, which the daemon sends.
+pub fn can_timeline(m: &Model) -> bool {
+    m.selected_pr().is_some() && m.link.welcomed()
+}
+
+/// r: asks the daemon for a fresh snapshot, so the client must be talking to one.
+pub fn can_refresh(m: &Model) -> bool {
+    matches!(m.link, Link::Live | Link::Stalled { .. })
+}
+
+/// The review `w` moves to: parked ones first, because the human is the bottleneck, then the running ones; pressed
+/// again on the one it shows, the next. With nothing parked it starts at the review the status line names.
+fn watch_target(m: &Model) -> Option<PrId> {
+    let mut running: Vec<(bool, u64, PrId)> = m
+        .domain
+        .runs
+        .values()
+        .filter(|r| r.status == RunStatus::Running)
+        .filter_map(|r| Some((!r.parked(), m.domain.prs.get(&r.pr_id)?.number, r.pr_id.clone())))
+        .collect();
+    running.sort();
+    running.dedup();
+    let parked = running.first().is_some_and(|r| !r.0);
+    let active: Vec<&PrId> = running.iter().filter(|r| r.0).map(|r| &r.2).collect();
+    let newest = m
+        .domain
+        .activity
+        .iter()
+        .rev()
+        .filter(|_| !parked)
+        .find_map(|a| active.iter().find(|id| a.pr_id.as_ref() == Some(**id)).copied());
+    let ids: Vec<&PrId> = running.iter().map(|r| &r.2).collect();
+    let at = ids.iter().position(|id| Some(*id) == m.ui.selected_pr.as_ref());
+    match at {
+        Some(i) if watching(m) => Some(ids[(i + 1) % ids.len()].clone()),
+        Some(i) => Some(ids[i].clone()),
+        None => newest.or(ids.first().copied()).cloned(),
+    }
+}
+
+/// The Review page shows the selected PR's card with nothing over it.
+fn watching(m: &Model) -> bool {
+    m.ui.screen == Screen::Review && m.top_modal().is_none()
+}
+
+/// w: a review to move to that is not the one already in front of the reader.
+pub fn can_watch(m: &Model) -> bool {
+    watch_target(m).is_some_and(|t| {
+        !(watching(m) && m.ui.focus == Pane::Main && m.ui.pr_filter.is_empty() && m.ui.selected_pr == Some(t))
+    })
+}
+
+/// s, R, c and p on the selected PR: the daemon grants it, and the PR's latest run is in the state the command acts on.
+pub fn can_mutate(m: &Model, mu: Mutation) -> bool {
+    let Some(p) = m.selected_pr() else { return false };
+    let run = m.domain.latest_run(&p.id);
+    write_block(m, mu.capability()).is_none()
+        && match mu {
+            Mutation::Start => parked_head(m, p).is_none(),
+            Mutation::Retry => run.is_some_and(|r| r.status == RunStatus::Failed),
+            Mutation::Cancel => run.is_some_and(|r| r.status == RunStatus::Running),
+            Mutation::Publish => run.is_some_and(|r| r.phase == Phase::AwaitingApproval),
+        }
+}
+
+/// y: the panel on top asks, and for a preview, it is still the one to publish.
+pub fn can_confirm(m: &Model) -> bool {
+    match m.top_modal() {
+        Some(Modal::Confirm { state, .. }) => matches!(state, ConfirmState::Asking | ConfirmState::TimedOut),
+        Some(Modal::Publication { preview: Preview::Ready(p), publish, .. }) => {
+            matches!(publish, ConfirmState::Asking | ConfirmState::TimedOut) && publish_block(m, p).is_none()
+        }
+        _ => false,
+    }
+}
+
 /// Why `capability` cannot be sent now, in the words the help page and the notices use; `None` when it can.
 pub fn write_block(m: &Model, capability: &str) -> Option<&'static str> {
     if !m.link.accepts_events() {
@@ -1378,52 +1733,62 @@ pub fn write_block(m: &Model, capability: &str) -> Option<&'static str> {
 
 /// `s`, `R`, `c` and `p` on the selected PR: a confirmation panel naming the exact target, or a notice saying why not.
 fn mutation(m: &mut Model, mu: Mutation, fx: &mut Vec<Effect>) {
-    let cap = mu.capability();
+    if !can_mutate(m, mu) {
+        refuse(m, mu);
+        return;
+    }
+    let Some(p) = m.selected_pr().cloned() else { return };
+    let Some(r) = m.domain.latest_run(&p.id).cloned().filter(|_| mu != Mutation::Start) else {
+        let prompt = format!("Start a review of #{} at {}?", p.number, p.head_sha.short());
+        confirm(m, prompt, Command::Start(StartParams { pr_id: p.id, expected_head_sha: p.head_sha }));
+        return;
+    };
+    let (prompt, command) = match mu {
+        Mutation::Retry => {
+            let next = r.attempt.map_or(String::new(), |n| format!(" (attempt {})", n + 1));
+            (format!("Retry the failed review of #{}{next}?", p.number), Command::Retry(RunParams { run_id: r.id }))
+        }
+        Mutation::Cancel => {
+            let what = if r.phase == Phase::AwaitingApproval { "parked" } else { "running" };
+            (format!("Cancel the {what} review of #{}?", p.number), Command::Cancel(RunParams { run_id: r.id }))
+        }
+        _ => return open_publication(m, r, fx),
+    };
+    confirm(m, prompt, command);
+}
+
+/// Why `mu` does nothing now, in one sentence: in a notice, or for a start the client knows the daemon refuses, in
+/// the panel the start would have opened, marked as never sent.
+fn refuse(m: &mut Model, mu: Mutation) {
     let verb = match mu {
-        Mutation::Start => "start a review",
+        Mutation::Start => "start",
         Mutation::Retry => "retry",
         Mutation::Cancel => "cancel",
         Mutation::Publish => "publish",
     };
-    if let Some(why) = write_block(m, cap) {
-        notice(m, format!("Can't {verb}: {why}"));
-        return;
+    if let Some(why) = write_block(m, mu.capability()) {
+        return notice(m, format!("Can't {verb}: {why}"));
     }
     let Some(p) = m.selected_pr().cloned() else {
-        notice(m, format!("Can't {verb}: no PR is selected"));
+        return notice(m, format!("Can't {verb}: no PR is selected"));
+    };
+    if let Some(run) = parked_head(m, &p).filter(|_| mu == Mutation::Start) {
+        let message = Text::new(&start_refusal(m, run));
+        m.ui.modals.push(Modal::Confirm {
+            prompt: format!("Start a review of #{} at {}?", p.number, p.head_sha.short()),
+            command: Command::Start(StartParams { pr_id: p.id, expected_head_sha: p.head_sha }),
+            state: ConfirmState::Refused { code: None, message },
+        });
         return;
-    };
-    let run = m.domain.latest_run(&p.id).cloned();
-    let (prompt, command) = match (mu, run) {
-        (Mutation::Start, _) => (
-            format!("Start a review of #{} at {}?", p.number, p.head_sha.short()),
-            Command::Start(StartParams { pr_id: p.id, expected_head_sha: p.head_sha }),
-        ),
-        (Mutation::Retry, Some(r)) if r.status == RunStatus::Failed => {
-            let next = r.attempt.map_or(String::new(), |n| format!(" (attempt {})", n + 1));
-            (format!("Retry run {}{next}?", r.id.short()), Command::Retry(RunParams { run_id: r.id }))
-        }
-        (Mutation::Cancel, Some(r)) if r.status == RunStatus::Running => {
-            let what = if r.phase == Phase::AwaitingApproval { "parked" } else { "running" };
-            (format!("Cancel the {what} review of #{}?", p.number), Command::Cancel(RunParams { run_id: r.id }))
-        }
-        (Mutation::Publish, Some(r)) if r.phase == Phase::AwaitingApproval => {
-            open_publication(m, r, fx);
-            return;
-        }
-        (mu, _) => {
-            notice(
-                m,
-                match mu {
-                    Mutation::Retry => format!("Can't retry #{}: its latest run has not failed", p.number),
-                    Mutation::Cancel => format!("Can't cancel #{}: no review is running on it", p.number),
-                    _ => format!("Nothing to publish on #{}", p.number),
-                },
-            );
-            return;
-        }
-    };
-    confirm(m, prompt, command);
+    }
+    notice(
+        m,
+        match mu {
+            Mutation::Retry => format!("Can't retry #{}: its latest run has not failed", p.number),
+            Mutation::Cancel => format!("Can't cancel #{}: no review is running on it", p.number),
+            _ => format!("Nothing to publish on #{}", p.number),
+        },
+    );
 }
 
 /// The publication page for a parked run: its stored payload, and the diff its comments sit on.
@@ -1449,7 +1814,7 @@ pub fn publish_block(m: &Model, p: &PublicationPreview) -> Option<String> {
     let Some(run) = m.domain.runs.get(&p.run_id) else { return Some("the run is no longer tracked".into()) };
     if run.phase != Phase::AwaitingApproval {
         return Some(format!(
-            "stale: the run is now {}, no longer awaiting approval",
+            "stale: the run is now {}, no longer waiting for approval",
             crate::theme::phase_name(run.phase)
         ));
     }
@@ -1472,14 +1837,12 @@ pub fn published_url(m: &Model, run: &RunId) -> Option<String> {
 }
 
 fn send_confirmed(m: &mut Model, fx: &mut Vec<Effect>) {
+    if !can_confirm(m) {
+        return;
+    }
     let command = match m.top_modal().cloned() {
-        Some(Modal::Confirm { command, state: ConfirmState::Asking | ConfirmState::TimedOut, .. }) => command,
-        Some(Modal::Publication {
-            run_id,
-            preview: Preview::Ready(p),
-            publish: ConfirmState::Asking | ConfirmState::TimedOut,
-            ..
-        }) if publish_block(m, &p).is_none() => Command::Publish(PublishParams {
+        Some(Modal::Confirm { command, .. }) => command,
+        Some(Modal::Publication { run_id, preview: Preview::Ready(p), .. }) => Command::Publish(PublishParams {
             run_id,
             preview_id: p.preview_id.clone(),
             expected_head_sha: p.head_sha.clone(),
@@ -1540,7 +1903,16 @@ fn goto(m: &mut Model, s: Screen, fx: &mut Vec<Effect>) {
     }
 }
 
+fn focus(m: &mut Model, pane: Pane) {
+    if can_focus(m, pane) {
+        m.ui.focus = pane;
+    }
+}
+
 fn move_by(m: &mut Model, delta: isize, fx: &mut Vec<Effect>) {
+    if !can_move(m) {
+        return;
+    }
     if let Some(top) = m.ui.modals.last_mut() {
         if let Modal::Finding { scroll, .. } | Modal::Help { scroll } | Modal::Publication { scroll, .. } = top {
             *scroll = (*scroll as isize + delta).max(0).min(u16::MAX as isize) as u16;
@@ -1560,15 +1932,8 @@ fn move_by(m: &mut Model, delta: isize, fx: &mut Vec<Effect>) {
             }
         }
         (Screen::Review, Pane::Main) => {
-            let Some(pr) = m.ui.selected_pr.clone() else { return };
-            // A parked run's ready line sits above the findings, as `None`.
             let parked = m.parked_run().map(|r| r.id.clone());
-            let ids: Vec<Option<FindingId>> = parked
-                .iter()
-                .map(|_| None)
-                .chain(m.domain.pr_findings(&pr).iter().map(|f| Some(f.id.clone())))
-                .collect();
-            let current = if m.on_ready_line() { None } else { m.ui.selected_finding.clone() };
+            let (ids, current) = finding_cursor(m);
             if let Some(next) = step(&ids, Some(&current), delta)
                 && next != current
             {
@@ -1603,8 +1968,8 @@ fn move_by(m: &mut Model, delta: isize, fx: &mut Vec<Effect>) {
             let Some(t) = &m.timeline else { return };
             let seqs = timeline_stops(m, t);
             let next = step(&seqs, t.selected.as_ref(), delta);
-            // Older events sit at the top: reaching it pages them in.
-            let at_top = next.is_some() && next == seqs.first().copied();
+            // Older events sit at the top: reaching it, or a page with no row to stop on, pages them in.
+            let at_top = next == seqs.first().copied();
             let more = t.next_before.filter(|_| at_top && t.pending.is_none());
             let (scope, query) = (t.scope, t.query.clone());
             if let Some(t) = &mut m.timeline {
@@ -1656,7 +2021,11 @@ fn clamp_page(m: &mut Model) {
 }
 
 fn open(m: &mut Model, fx: &mut Vec<Effect>) {
-    if m.top_modal().is_some() {
+    // On Settings an account that cannot be selected says why.
+    if m.ui.screen == Screen::Settings && m.top_modal().is_none() {
+        return select_account(m);
+    }
+    if !can_open(m) {
         return;
     }
     match (m.ui.screen, m.ui.focus) {
@@ -1674,19 +2043,7 @@ fn open(m: &mut Model, fx: &mut Vec<Effect>) {
         }
         (Screen::Diff, Pane::Sidebar) => m.ui.focus = Pane::Main,
         (Screen::Diff, _) => {
-            let Some(d) = &m.diff else { return };
-            let Some(file) = d.file() else { return };
-            let rows = file_rows(file);
-            let hit = match rows.get(d.cursor) {
-                Some(row @ DiffRow::Line(_)) => {
-                    row_findings(&diff_findings(m, d), file, row).get(d.stack).map(|f| f.id.clone())
-                }
-                _ => diff_findings(m, d)
-                    .into_iter()
-                    .find(|f| f.file == file.path && f.line.is_none())
-                    .map(|f| f.id.clone()),
-            };
-            if let Some(id) = hit {
+            if let Some(id) = diff_cursor_finding(m) {
                 open_finding(m, id, fx);
             }
         }
@@ -1717,51 +2074,26 @@ fn open(m: &mut Model, fx: &mut Vec<Effect>) {
 
 fn select_account(m: &mut Model) {
     let Some(a) = m.cursor_account().cloned() else {
-        notice(m, "no GitHub accounts to select");
+        notice(m, "No GitHub accounts to select");
         return;
     };
     if let Some(why) = m.account_block(&a) {
-        notice(m, format!("{} cannot be selected: {why}", a.id));
+        notice(m, format!("Can't select {}: {why}", a.id));
         return;
     }
     let prompt = format!("Use {} on {} for GitHub reads and publishing?", a.login, a.host);
     confirm(m, prompt, Command::SelectAccount(AccountParams { account_id: a.id }));
 }
 
-/// `w`: the review that needs the reader, one key from anywhere. Parked reviews come first, because the human is
-/// the bottleneck, then the running ones; pressed again, it moves on to the next.
+/// `w`: the review that needs the reader, one key from anywhere; see `watch_target`.
 fn watch(m: &mut Model) {
-    let mut running: Vec<(bool, u64, PrId)> = m
-        .domain
-        .runs
-        .values()
-        .filter(|r| r.status == RunStatus::Running)
-        .filter_map(|r| Some((!r.parked(), m.domain.prs.get(&r.pr_id)?.number, r.pr_id.clone())))
-        .collect();
-    running.sort();
-    let active: Vec<PrId> = running.iter().filter(|r| r.0).map(|r| r.2.clone()).collect();
-    let parked = running.first().is_some_and(|r| !r.0);
-    let running: Vec<(u64, PrId)> = running.into_iter().map(|(_, n, id)| (n, id)).collect();
-    if running.is_empty() {
-        notice(m, "no review is running");
+    if !can_watch(m) {
+        if watch_target(m).is_none() {
+            notice(m, "No review is running");
+        }
         return;
     }
-    // With nothing parked, first the review the status line names: the running PR with the newest activity.
-    let newest = m
-        .domain
-        .activity
-        .iter()
-        .rev()
-        .filter(|_| !parked)
-        .find_map(|a| running.iter().find(|r| a.pr_id.as_ref() == Some(&r.1) && active.contains(&r.1)));
-    let first = newest.unwrap_or(&running[0]).1.clone();
-    let at = running.iter().position(|r| Some(&r.1) == m.ui.selected_pr.as_ref());
-    let watching = m.ui.screen == Screen::Review && m.top_modal().is_none();
-    let next = match at {
-        Some(i) if watching => running[(i + 1) % running.len()].1.clone(),
-        Some(i) => running[i].1.clone(),
-        None => first,
-    };
+    let Some(next) = watch_target(m) else { return };
     m.ui.modals.clear();
     m.ui.pr_filter.clear();
     m.ui.screen = Screen::Review;
@@ -1784,18 +2116,15 @@ fn open_finding(m: &mut Model, id: FindingId, fx: &mut Vec<Effect>) {
 
 /// The diff for the finding in focus (modal, Review list), pinned to that finding's own revision; else the PR's head.
 fn open_diff(m: &mut Model, fx: &mut Vec<Effect>) {
-    let modal_finding = match m.top_modal() {
-        Some(Modal::Finding { id, .. }) => Some(id.clone()),
-        _ => None,
-    };
-    let finding = modal_finding
-        .or_else(|| {
-            (m.ui.screen == Screen::Review && m.ui.focus != Pane::Sidebar).then(|| m.ui.selected_finding.clone())?
-        })
-        .and_then(|id| m.domain.findings.get(&id).cloned());
+    if !can_diff(m) {
+        let why =
+            if m.selected_pr().is_none() { "No PR selected" } else { "Can't open the diff: the client is not live" };
+        return notice(m, why);
+    }
+    let Some((key, finding)) = diff_target(m) else { return };
     m.ui.modals.clear();
-    match finding.and_then(|f| Some((finding_diff_key(m, &f.id)?, f))) {
-        Some((key, f)) => {
+    match finding {
+        Some(f) => {
             m.ui.selected_pr = Some(f.pr_id.clone());
             m.ui.selected_finding = Some(f.id.clone());
             m.ui.screen = Screen::Diff;
@@ -1820,7 +2149,7 @@ fn next_finding(m: &mut Model, dir: isize, fx: &mut Vec<Effect>) {
         return;
     }
     match m.ui.screen {
-        Screen::Review => {
+        Screen::Review if can_turn(m) => {
             m.ui.focus = Pane::Main;
             move_by(m, dir, fx);
         }
@@ -1829,7 +2158,7 @@ fn next_finding(m: &mut Model, dir: isize, fx: &mut Vec<Effect>) {
             let Some(d) = &m.diff else { return };
             let stops = finding_stops(m, d);
             if stops.is_empty() {
-                notice(m, "no findings anchored to this revision");
+                notice(m, "No findings anchored to this revision");
                 return;
             }
             let here = (
@@ -1889,7 +2218,7 @@ fn walk_matches(m: &mut Model, dir: isize, here: bool) {
         stops.iter().rev().find(|s| **s < at).or(stops.last())
     };
     let Some(&(fi, row)) = target else {
-        notice(m, format!("no line in this diff contains \"{q}\""));
+        notice(m, format!("No line in this diff contains \"{q}\""));
         return;
     };
     d.selected_file = Some(d.files[fi].path.clone());

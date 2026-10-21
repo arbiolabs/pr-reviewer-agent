@@ -347,6 +347,19 @@ it("approves a review end to end over the socket: parked, previewed, published o
   // The start's own key replays its recorded result after the run finished: a true replay, not a new start.
   expect(operation(await command(c, { command: "review.start", params: { prId, expectedHeadSha: fixture.headSha } }))).toEqual(operation(started));
   expect(await taskStatuses(h.app)).toEqual(["terminal", "terminal"]);
+  // With GitHub unreachable the replay still answers with its recorded result.
+  fake.pulls.delete(`${fixture.pull.fullName}#${fixture.pull.number}`);
+  expect(operation(await command(c, { command: "review.start", params: { prId, expectedHeadSha: fixture.headSha } }))).toEqual(operation(started));
+  fake.setPull(fixture.pull);
+  // Once the base moves, the same key starts a new revision on it instead of replaying the reviewed one.
+  fake.setPull({ ...fixture.pull, baseSha: "e".repeat(40) });
+  const rebased = await command(c, { command: "review.start", params: { prId, expectedHeadSha: fixture.headSha } });
+  expect(rebased).toMatchObject({ status: "accepted", operationId: expect.stringMatching(/^review\.start:[0-9a-f]{32}$/) });
+  expect((rebased as { operationId: string }).operationId).not.toBe((started as { operationId: string }).operationId);
+  const rebasedId = (rebased as { operationId: string }).operationId.slice("review.start:".length);
+  expect(h.app.store.revision(rebasedId)?.base_sha).toBe("e".repeat(40));
+  expect(await command(c, { command: "review.cancel", params: { runId: rebasedId } })).toMatchObject({ status: "accepted" });
+  fake.setPull(fixture.pull);
   // A key that never started this revision (the head was reviewed some other way) is refused in plain words.
   h.app.store.db.prepare("DELETE FROM control_commands WHERE command = 'review.start'").run();
   expect(await command(c, { command: "review.start", params: { prId, expectedHeadSha: fixture.headSha } })).toEqual(
@@ -371,6 +384,14 @@ it("supersedes a parked review when the head moves before approval, with nothing
   const runId = started.operationId.slice("review.start:".length);
   await c.waitFor((m) => m.type === "event" && m.eventType === "review.phase_changed" && (m.data as { to: string }).to === "AWAITING_APPROVAL");
   const previewId = h.app.store.outboxForRevision(runId)!.payload_hash;
+  // A start for the parked head: its own key replays the run, any other key is refused in plain words.
+  expect(await command(c, { command: "review.start", params: { prId, expectedHeadSha: fixture.headSha } })).toMatchObject({ operationId: started.operationId });
+  const moveStartKey = (from: string, to: string) => h.app.store.db.prepare("UPDATE control_commands SET idempotency_key = ? WHERE idempotency_key = ?").run(to, from);
+  moveStartKey(`review.start:${prId}:${fixture.headSha}`, "elsewhere");
+  expect(await command(c, { command: "review.start", params: { prId, expectedHeadSha: fixture.headSha } })).toEqual(
+    rejected("CONFLICT", `#1 at ${fixture.headSha.slice(0, 7)} is waiting for your approval`),
+  );
+  moveStartKey("elsewhere", `review.start:${prId}:${fixture.headSha}`);
 
   fake.setPull({ ...fixture.pull, headSha: "f".repeat(40) });
   expect(await command(c, { command: "review.publish", params: { runId, previewId, expectedHeadSha: fixture.headSha } })).toEqual(
@@ -413,6 +434,11 @@ it("binds each key to one attempt: cancel, retry and approve act again on a late
   const runId = started.operationId.slice("review.start:".length);
   let previewId = "";
   await inAnalyze;
+  // A start for the running head under a key that never started it attaches to the run: no second task.
+  const startKey = `review.start:${prId}:${fixture.headSha}`;
+  h.app.store.db.prepare("UPDATE control_commands SET idempotency_key = 'elsewhere' WHERE idempotency_key = ?").run(startKey);
+  expect(operation(await command(c, { command: "review.start", params: { prId, expectedHeadSha: fixture.headSha } }))).toEqual(operation(started as Result));
+  expect((await taskStatuses(h.app)).length).toBe(1);
   const cancelled = await cancel();
   expect(cancelled).toEqual({ type: "command.result", requestId: expect.any(String), status: "accepted", operationId: `review.cancel:${runId}` });
   await failed(1);
@@ -556,6 +582,28 @@ it("recovers an approval the daemon was stopped in the middle of, with one POST"
   // The replayed approval still answers the recorded operation.
   expect(await command(again.c, { command: "review.publish", params: { runId, previewId, expectedHeadSha: fixture.headSha } })).toMatchObject({ status: "accepted", operationId: `review.publish:${runId}` });
   expect(fake.postAttempts).toBe(1);
+}, 60_000);
+
+it("starts a head again under the same key once approval mode makes it a new revision", async () => {
+  const dryRun: Config = { ...approvalConfig, review: { ...approvalConfig.review, publish_mode: "dry_run" } };
+  const first = await host({ config: dryRun });
+  const { c } = await serve(first.source);
+  const prId = first.app.store.upsertPull(fixture.pull);
+  c.send({ type: "snapshot.get", requestId: "s" });
+  await c.waitFor((m) => m.type === "snapshot");
+  const dry = (await command(c, { command: "review.start", params: { prId, expectedHeadSha: fixture.headSha } })) as { operationId: string };
+  await c.waitFor((m) => m.type === "event" && m.eventType === "review.completed", 0, 20_000);
+  for (const fn of cleanup.splice(0).reverse()) await fn();
+
+  const second = await host({ dataDir: first.dataDir });
+  const again = await serve(second.source);
+  again.c.send({ type: "snapshot.get", requestId: "s" });
+  await again.c.waitFor((m) => m.type === "snapshot");
+  const started = await command(again.c, { command: "review.start", params: { prId, expectedHeadSha: fixture.headSha } });
+  expect(started).toMatchObject({ status: "accepted", operationId: expect.stringMatching(/^review\.start:[0-9a-f]{32}$/) });
+  expect((started as { operationId: string }).operationId).not.toBe(dry.operationId);
+  await again.c.waitFor((m) => m.type === "event" && m.eventType === "review.phase_changed" && (m.data as { to: string }).to === "AWAITING_APPROVAL", 0, 20_000);
+  expect(fake.postAttempts).toBe(0);
 }, 60_000);
 
 it("produced the M3 server messages, each passing the v1 schema", () => {

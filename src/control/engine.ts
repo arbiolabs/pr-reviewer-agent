@@ -3,9 +3,9 @@ import type { Env } from "../github/accounts.ts";
 import type { GitHubClient } from "../github/client.ts";
 import type { PullSource } from "../github/pulls.ts";
 import type { ReviewCommand } from "../protocol/v1.ts";
-import { type App, finishReview, recover, type StartedReview } from "../runtime/app.ts";
+import { type App, finishReview, recover, type StartedReview, startPolicy } from "../runtime/app.ts";
 import { StateConflict } from "../persistence/store.ts";
-import { approve, cancel, Refused, retry, startFromHead } from "../runtime/commands.ts";
+import { approve, cancel, livePull, Refused, retry, startFromHead } from "../runtime/commands.ts";
 import { AppDbSource } from "./appdb.ts";
 import { ControlError } from "./source.ts";
 
@@ -95,12 +95,24 @@ export class EngineSource extends AppDbSource {
     const replay = app.store.commandResult(key);
     const record = (operationId: string) => () => app.store.recordCommand(key, { command: request.command, operationId, attempt });
     try {
-      // A start replays only for the head its recorded run reviewed; otherwise it starts anew, which refuses a reviewed head.
-      const replays = request.command !== "review.start" || app.store.revision(replay?.operationId.slice("review.start:".length) ?? "")?.head_sha === request.params.expectedHeadSha;
+      const publish = options.config.review.publish_mode !== "dry_run";
+      // A start replays only for the revision it would start now: the same base, head, policy and reviewer, with the
+      // base read from GitHub. Otherwise it starts anew, which refuses a reviewed head. When GitHub can't be read, a
+      // new start couldn't run either, so the recorded result stands.
+      const recorded = app.store.revision(replay?.operationId.slice("review.start:".length) ?? "");
+      const base =
+        request.command === "review.start" && recorded
+          ? await livePull(app, options.pulls, request.params.prId).then((pull) => pull.baseSha, () => recorded.base_sha)
+          : undefined;
+      const replays =
+        request.command !== "review.start" ||
+        (recorded?.head_sha === request.params.expectedHeadSha &&
+          recorded.base_sha === base &&
+          recorded.policy_version === startPolicy(options.config.review.base_policy_version, publish) &&
+          recorded.reviewer_version === app.reviewerVersion);
       if (replay && replay.attempt === attempt && replays) return replay.operationId;
       switch (request.command) {
         case "review.start": {
-          const publish = options.config.review.publish_mode !== "dry_run";
           const started = await startFromHead(app, options.pulls, request.params, { basePolicyVersion: options.config.review.base_policy_version, publish });
           this.follow(started);
           const operationId = `review.start:${started.revision.id}`;

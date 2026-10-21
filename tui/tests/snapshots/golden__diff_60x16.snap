@@ -3,18 +3,18 @@ source: tests/golden.rs
 expression: text
 ---
   pr-review · ▘ reviewing #184 verify new finding   ● live
-
  src/booking.ts   +2 -1
  acme/shop #184 · bbbbbbb → 4444444   TRUNCATED
-
               @@ -40,3 +40,4 @@  export function book()
      40   40     const slot = await lock(id);
      41      -   if (slot.free) {
           41 +   if (slot.free && !slot.held) {
  ▲        42 +     slot.held = true;
               ┃ ▲ HIGH     Finding f-1
-              ┃ Enter reads the finding   n next finding
+              ┃ Enter reads the finding
      42   43     }
 
 
-   j/k line  Enter read  h files  Esc back  ? help
+
+
+   j/k line  Enter read  h files  Esc back  ? help  q quit

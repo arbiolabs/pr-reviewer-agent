@@ -2,9 +2,7 @@
 source: tests/golden.rs
 expression: ascii_text
 ---
-  pr-review | - reviewing #184 verify new finding   * live
-
-
+  pr-review | / reviewing #184 verify new finding   * live
   PULL REQUESTS                                          3
 
   . #186 Bump deps
@@ -13,8 +11,10 @@ expression: ascii_text
 > o #185 Fix cache eviction
 >   acme/shop | 5555555                              o1 ->0
 
-  - #184 Booking API
-    acme/shop | by octocat | verify     +-+-+---.-. . 0.2/s
+  / #184 Booking API
+    acme/shop | by octocat | verify     +-+-+-/-.-. . 0.2/s
 
 
-   j/k pull request  Enter read  / search  ? help  q quit
+
+
+   j/k PR  Enter read  d diff  / search  ? help  q quit

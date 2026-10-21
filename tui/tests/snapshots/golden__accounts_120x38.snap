@@ -10,8 +10,8 @@ expression: text
 
     GitHub accounts
       publishes as          diego-arbio-dev on github.com
-      diego-arbio-dev  github.com  ✓ ok      gh active           Enter selects
-    ▌ octo-work        github.com  ✓ ok                          Enter selects
+      diego-arbio-dev  github.com  ✓ ok      gh active
+    ▌ octo-work        github.com  ✓ ok                            Enter selects
 
     Connection
       state                 ● live
@@ -25,7 +25,7 @@ expression: text
       epoch, last sequence  epoch-1, 10
       snapshot, heartbeat   0.0s ago, never
       resyncs / reconnects  0 / 0
-      activity              0 feed entries kept (cap 2000); 0 tool events applied
+      activity              0 feed entries (cap 2000); 0 tool events applied
 
     Display
       glyphs                unicode
@@ -39,4 +39,4 @@ expression: text
 
 
 
-   j/k account  Enter select account  w watch live  ? help  q quit   1 inbox  2 review  3 diff  4 timeline  5 settings
+   j/k account  Enter select account  w watch live  r refresh  Esc back  ? help  q quit                       1 2 3 4 5

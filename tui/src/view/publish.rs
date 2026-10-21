@@ -26,9 +26,10 @@ pub fn lines(
     let pr = run.and_then(|r| c.m.domain.prs.get(&r.pr_id));
     let mut out = vec![Line::raw("")];
     let place = pr.map_or(format!("run {}", run_id.short()), |p| format!("{} #{}", p.repository, p.number));
+    let outcome = outcome(c, run_id, publish);
     out.push(Line::from(vec![
         c.span(format!("{place} {} ", g.arrow), Role::Muted),
-        c.span("publication preview", Role::Accent),
+        c.span(if outcome.is_some() { "publication" } else { "publication preview" }, Role::Accent),
     ]));
     out.push(Line::raw(""));
     let p = match preview {
@@ -43,7 +44,7 @@ pub fn lines(
         }
         Preview::Ready(p) => p,
     };
-    out.push(Line::from(c.span(heading(c, run_id, publish), Role::Title)));
+    out.push(Line::from(c.span(outcome.unwrap_or_else(|| "Publish this review?".into()), Role::Title)));
     let n = p.comments.len();
     let target = format!(
         "{place} at {} {} as event {} {} {n} inline comment{}",
@@ -156,18 +157,20 @@ fn body(c: &Ctx, text: &str, w: usize, raw: bool) -> Vec<Line<'static>> {
     out
 }
 
-/// The page's question while `y` can still publish, then what became of the answer.
-fn heading(c: &Ctx, run_id: &RunId, publish: &ConfirmState) -> String {
+/// What became of the approval, or `None` while `y` can still publish and the page is a preview. A refused approval
+/// posted nothing, whatever the daemon then marks the stored payload; only a post that failed reads as a failure.
+fn outcome(c: &Ctx, run_id: &RunId, publish: &ConfirmState) -> Option<String> {
     let status = c.m.domain.publications.get(run_id).map(|p| p.status);
-    match (status, publish) {
+    Some(match (status, publish) {
         (Some(PublicationStatus::Published), _) => "Published on GitHub".into(),
-        (Some(PublicationStatus::Failed), _) | (_, ConfirmState::Refused { .. }) => "Publication failed".into(),
+        (_, ConfirmState::Refused { .. }) => "Not published".into(),
+        (Some(PublicationStatus::Failed), _) => "Publication failed".into(),
         (Some(PublicationStatus::Uncertain | PublicationStatus::Unknown), _) => "Publication uncertain".into(),
         (Some(PublicationStatus::Publishing), _) | (_, ConfirmState::Requested(_) | ConfirmState::Accepted { .. }) => {
             format!("Publishing{}", c.t.g().ellipsis)
         }
-        _ => "Publish this review?".into(),
-    }
+        _ => return None,
+    })
 }
 
 /// What `y` does now, or did: the key while it would publish, why it would not, then the request and the
@@ -193,6 +196,10 @@ fn state(c: &Ctx, w: usize, run_id: &RunId, p: &PublicationPreview, publish: &Co
     }
     let mut out = Vec::new();
     match (status.map(|s| s.status), publish) {
+        (s, ConfirmState::Refused { message, .. }) if s != Some(PublicationStatus::Published) => {
+            out.push(line(format!("{} Can't publish: {message}", g.fail), Role::Fail));
+            out.push(line(format!("  {}", command_detail(c, "review.publish", publish)), Role::Muted));
+        }
         (Some(PublicationStatus::Published), _) => {
             let id = status.and_then(|s| s.review_id).map_or(String::new(), |id| format!(" as review {id}"));
             out.push(line(format!("{} published on GitHub{id}", g.ok), Role::Ok));
@@ -200,11 +207,11 @@ fn state(c: &Ctx, w: usize, run_id: &RunId, p: &PublicationPreview, publish: &Co
                 out.push(line(format!("  {url}"), Role::Accent));
             }
             if published_url(c.m, run_id).is_some() {
-                out.push(line("  o opens it in the browser".into(), Role::Muted));
+                out.push(line("  o opens it on GitHub".into(), Role::Muted));
             }
         }
         (Some(PublicationStatus::Publishing), _) => {
-            out.push(line(format!("{} publishing{}", super::doc::spinner(c), g.ellipsis), Role::Active))
+            out.push(line(format!("{} posting to GitHub{}", super::doc::spinner(c), g.ellipsis), Role::Active))
         }
         (Some(s @ (PublicationStatus::Uncertain | PublicationStatus::Failed | PublicationStatus::Unknown)), _) => {
             let (word, role) = publication_status(s);
@@ -214,28 +221,26 @@ fn state(c: &Ctx, w: usize, run_id: &RunId, p: &PublicationPreview, publish: &Co
             }
         }
         (_, ConfirmState::Requested(_)) => {
-            out.push(line(format!("requested{} waiting for the daemon", g.ellipsis), Role::Pending))
+            out.push(line(format!("{} requested{} waiting for the daemon", g.pending, g.ellipsis), Role::Pending))
         }
         (_, ConfirmState::Accepted { .. }) => out.push(line(
-            format!("Approved; publishing{}  not on GitHub until it says published", g.ellipsis),
+            format!("{} approved{} not on GitHub until it says published", g.pending, g.ellipsis),
             Role::Pending,
         )),
-        (_, ConfirmState::Refused { message, .. }) => {
-            out.push(line(format!("{} Can't publish: {message}", g.fail), Role::Fail));
-            out.push(line(format!("  {}", command_detail(c, "review.publish", publish)), Role::Muted));
-        }
         (_, ConfirmState::TimedOut) => {
-            out.push(line("request timed out; y sends the same approval again".into(), Role::Fail))
+            out.push(line(format!("{} request timed out; y sends the same approval again", g.fail), Role::Fail))
         }
-        (_, ConfirmState::Asking) => {}
+        (_, ConfirmState::Asking | ConfirmState::Refused { .. }) => {}
     }
     out
 }
 
-/// `daemon command review.start`, and once the daemon refused it, its code: `· CONFLICT`.
+/// `daemon command review.start`, and once the daemon refused it, its code: `· CONFLICT`. A command the client never
+/// sent says so the same way: `· not sent`.
 pub fn command_detail(c: &Ctx, command: &str, state: &ConfirmState) -> String {
     match state {
-        ConfirmState::Refused { code, .. } => format!("daemon command {command} {} {code}", c.t.g().sep),
+        ConfirmState::Refused { code: Some(code), .. } => format!("daemon command {command} {} {code}", c.t.g().sep),
+        ConfirmState::Refused { code: None, .. } => format!("daemon command {command} {} not sent", c.t.g().sep),
         _ => format!("daemon command {command}"),
     }
 }

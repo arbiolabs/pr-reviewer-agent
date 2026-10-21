@@ -2,8 +2,7 @@
 source: tests/golden.rs
 expression: text
 ---
-  pr-review · ◔ #184 waiting for you · p previews   ● live
-
+  pr-review · ◔ #184 waiting for you                ● live
 
   acme/shop #184 → publication preview
 
@@ -16,5 +15,6 @@ expression: text
     Automated PR review
 
     Reviewed commit:
-    … 29 more below, j scrolls
-   j/k scroll  y publish  m raw markdown  Esc close
+    4444444444444444444444444444444444444444
+    … 28 more below, j scrolls
+   y publish  j/k scroll  m raw  d diff  Esc close

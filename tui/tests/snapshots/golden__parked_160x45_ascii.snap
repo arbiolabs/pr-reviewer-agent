@@ -14,7 +14,7 @@ expression: ascii_text
     shop 5555555               o1 ->0      1 finding   ^ 1 high                                                                        . none on GitHub yet
                                            ----------------------------------------------------------------------------------------------------------------
 > ~ #184 Booking API
->   shop               ~ awaiting you      ~ Ready to publish | p previews
+>   shop            ~ waiting for you      ~ Ready to publish | p previews
 
                                            # ^ HIGH   correctness                                                                  detected | 82% confident
                                            # Finding f-1
@@ -46,4 +46,4 @@ expression: ascii_text
 
 
 
-   j/k finding  p preview & publish  Enter read  w watch live  d diff  h pull requests  ? help  q quit       1 inbox  2 review  3 diff  4 timeline  5 settings
+   j/k move  Enter read  p preview & publish  c cancel review  d diff  h pull requests  / search  t timeline  ? help  q quit                          1 2 3 4 5

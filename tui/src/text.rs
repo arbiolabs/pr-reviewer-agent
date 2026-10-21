@@ -9,6 +9,12 @@ use unicode_width::UnicodeWidthStr;
 
 const CHARS_PER_COL: usize = 4;
 
+/// `1 tool event`, `0 tool events`, `2 tool events`.
+pub fn count(n: impl Into<u64>, one: &str, many: &str) -> String {
+    let n = n.into();
+    format!("{n} {}", if n == 1 { one } else { many })
+}
+
 pub fn width(s: &str) -> usize {
     UnicodeWidthStr::width(s)
 }
@@ -135,5 +141,11 @@ mod tests {
         assert!(took < std::time::Duration::from_millis(50), "fit took {took:?}");
         assert_eq!(out.replace('\u{200b}', ""), "abcdefghij…");
         assert_eq!(fit(&line, 80, "…").replace('\u{200b}', ""), "abcdefghij…");
+    }
+
+    #[test]
+    fn a_count_takes_the_singular_only_for_one() {
+        let n = |k: u64| count(k, "match", "matches");
+        assert_eq!([n(0), n(1), n(2)], ["0 matches", "1 match", "2 matches"]);
     }
 }

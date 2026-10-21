@@ -159,11 +159,17 @@ pub struct Glyphs {
     pub sep: &'static str,
     pub ellipsis: &'static str,
     pub arrow: &'static str,
+    pub up: &'static str,
+    pub down: &'static str,
     pub vbar: &'static str,
     pub sev_crit: &'static str,
     pub sev_high: &'static str,
     pub sev_med: &'static str,
     pub sev_low: &'static str,
+}
+
+pub fn glyphs(ascii: bool) -> &'static Glyphs {
+    if ascii { &ASCII } else { &UNICODE }
 }
 
 const UNICODE: Glyphs = Glyphs {
@@ -176,6 +182,8 @@ const UNICODE: Glyphs = Glyphs {
     sep: "·",
     ellipsis: "…",
     arrow: "→",
+    up: "↑",
+    down: "↓",
     vbar: "│",
     sev_crit: "◆",
     sev_high: "▲",
@@ -193,6 +201,8 @@ const ASCII: Glyphs = Glyphs {
     sep: "|",
     ellipsis: "~",
     arrow: "->",
+    up: "^",
+    down: "v",
     vbar: "|",
     sev_crit: "!",
     sev_high: "^",
@@ -265,7 +275,7 @@ impl Theme {
     }
 
     pub fn g(&self) -> &'static Glyphs {
-        if self.ascii { &ASCII } else { &UNICODE }
+        glyphs(self.ascii)
     }
 
     pub fn severity(&self, s: Severity) -> (&'static str, &'static str, Role) {
@@ -307,7 +317,7 @@ pub fn finding_status(s: FindingStatus) -> (&'static str, Role) {
 /// A publication's status in words. Only `published` reads as done.
 pub fn publication_status(s: PublicationStatus) -> (&'static str, Role) {
     match s {
-        PublicationStatus::AwaitingApproval => ("awaiting your approval", Role::Pending),
+        PublicationStatus::AwaitingApproval => ("waiting for your approval", Role::Pending),
         PublicationStatus::Publishing => ("publishing", Role::Active),
         PublicationStatus::Published => ("published", Role::Ok),
         PublicationStatus::Uncertain => ("uncertain: the daemon is checking GitHub", Role::Pending),

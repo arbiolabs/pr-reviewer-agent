@@ -3,7 +3,8 @@
 //! timeline is the events already played on top of the history the `server.timeline.page.showcase-*` pages recorded
 //! before the session opened. A line with `after: "<gate>"` holds until the client sends a command the gate names,
 //! which the playback then accepts: the showcase's approval plays only once the reader approves it, and its start,
-//! cancel, retry and account switch play whenever the reader sends them. A `snapshot.get` (the `r`
+//! cancel, retry and account switch play whenever the reader sends them. A start answers as the daemon does: its own
+//! key again replays the run it made, and a head with a run is refused. A `snapshot.get` (the `r`
 //! key) is answered with the last snapshot played and every event played after it, as one gap-free chain, so the
 //! client catches up again.
 
@@ -55,6 +56,8 @@ pub struct Player {
     renumber: bool,
     /// Runs the reader cancelled: the script's later ungated lines about them drop once the cancel has played.
     cancelled: Vec<crate::protocol::RunId>,
+    /// Each start accepted, by idempotency key, with the operation the daemon would replay for it.
+    started: Vec<(String, String)>,
     last: Option<u64>,
     pub played: Vec<ServerMessage>,
 }
@@ -75,6 +78,7 @@ impl Player {
             gates,
             sent: Vec::new(),
             cancelled: Vec::new(),
+            started: Vec::new(),
             last: None,
             played: Vec::new(),
         }
@@ -125,17 +129,20 @@ impl Player {
     /// The replies to a client request: a command a gate names is accepted and opens it; any other is rejected,
     /// saying where the script plays that command.
     pub fn answer(&mut self, req: &ClientMessage) -> Vec<ServerMessage> {
-        use crate::protocol::{CommandOutcome, CommandResult, ErrorCode, Text};
+        use crate::protocol::{CommandOutcome, CommandResult, Text};
         let ClientMessage::Command(c) = req else { return answer(&self.fixtures, &self.played, req) };
         let key = c.idempotency_key.clone();
         let opened: Vec<String> = self.gates.iter().filter(|g| opens(g, &key)).cloned().collect();
-        let reviewed = match &c.command {
-            crate::protocol::Command::Start(p) => self.reviewed(p),
+        let replay = self.started.iter().find(|(k, _)| *k == key).map(|(_, op)| op.clone());
+        let known = match &c.command {
+            crate::protocol::Command::Start(p) => self.known_head(p),
             _ => None,
         };
-        let outcome = if let Some(message) = reviewed {
-            // As the daemon answers: a head whose review has ended is not started again.
-            CommandOutcome::Rejected { code: ErrorCode::Conflict, message: Text::new(&message) }
+        let outcome = if let Some(operation) = replay {
+            // As the daemon answers its own key again: the run that start made, however it has gone since.
+            CommandOutcome::Accepted { operation_id: Text::new(&operation) }
+        } else if let Some(outcome) = known {
+            outcome
         } else if opened.is_empty() {
             let name = c.command.name();
             let message = match self.gates.iter().find(|g| opens(name, g)).and_then(|g| self.target(g)) {
@@ -150,17 +157,32 @@ impl Player {
             if let Some(run) = key.strip_prefix("review.cancel:") {
                 self.cancelled.push(crate::protocol::RunId::new(run));
             }
-            self.sent.extend(opened);
             let operation = match &c.command {
                 crate::protocol::Command::Publish(p) => format!("review.publish:{}", p.run_id),
+                crate::protocol::Command::Start(_) => {
+                    let run =
+                        self.steps.iter().filter(|s| s.after.as_ref().is_some_and(|a| opened.contains(a))).find_map(
+                            |s| match &s.message {
+                                ServerMessage::Event(Event::Sequenced(e)) => match &e.body {
+                                    EventBody::Run(_, r) => Some(r.id.to_string()),
+                                    _ => None,
+                                },
+                                _ => None,
+                            },
+                        );
+                    let operation = run.map_or(key.clone(), |r| format!("review.start:{r}"));
+                    self.started.push((key, operation.clone()));
+                    operation
+                }
                 _ => key,
             };
+            self.sent.extend(opened);
             CommandOutcome::Accepted { operation_id: Text::new(&operation) }
         };
         vec![ServerMessage::CommandResult(CommandResult { request_id: c.request_id.clone(), outcome })]
     }
 
-    /// Every run as played so far: the snapshot's, then each run event's newer copy.
+    /// Every run as played so far: the snapshot's, then each run event's newer copy and each phase change.
     fn runs(&self) -> Vec<crate::protocol::Run> {
         let mut runs: Vec<crate::protocol::Run> = Vec::new();
         for m in &self.played {
@@ -168,6 +190,10 @@ impl Player {
                 ServerMessage::Snapshot(s) => s.runs.clone(),
                 ServerMessage::Event(Event::Sequenced(e)) => match &e.body {
                     EventBody::Run(_, r) => vec![r.clone()],
+                    EventBody::PhaseChanged(c) => {
+                        runs.iter_mut().filter(|r| r.id == c.run_id).for_each(|r| r.phase = c.to);
+                        vec![]
+                    }
                     _ => vec![],
                 },
                 _ => vec![],
@@ -180,14 +206,12 @@ impl Player {
         runs
     }
 
-    /// Why a start is refused, as the daemon says it (`#1287 at 647fb3b is already reviewed`), every time, when the latest run of
-    /// the start's PR, at its head, has ended.
-    fn reviewed(&self, p: &crate::protocol::StartParams) -> Option<String> {
+    /// As the daemon answers a start under a new key for a head it has a run for: a running run takes the start
+    /// in, and any other is refused (`#1287 at 647fb3b is already reviewed`).
+    fn known_head(&self, p: &crate::protocol::StartParams) -> Option<crate::protocol::CommandOutcome> {
+        use crate::protocol::{CommandOutcome, ErrorCode, Text};
         let runs = self.runs();
         let latest = runs.iter().rev().find(|r| r.pr_id == p.pr_id && r.head_sha == p.expected_head_sha)?;
-        if latest.status == RunStatus::Running {
-            return None;
-        }
         let pr = self.played.iter().rev().find_map(|m| match m {
             ServerMessage::Snapshot(s) => s.prs.iter().find(|x| x.id == p.pr_id).map(|x| x.number),
             ServerMessage::Event(Event::Sequenced(e)) => match &e.body {
@@ -198,11 +222,18 @@ impl Player {
         });
         let pr = pr.map_or(p.pr_id.to_string(), |n| format!("#{n}"));
         let why = match latest.status {
+            RunStatus::Running if latest.parked() => "is waiting for your approval",
+            RunStatus::Running => {
+                return Some(CommandOutcome::Accepted {
+                    operation_id: Text::new(&format!("review.start:{}", latest.id)),
+                });
+            }
             RunStatus::Failed => "failed its review; retry it instead",
             RunStatus::Superseded => "is superseded by a newer head",
             _ => "is already reviewed",
         };
-        Some(format!("{pr} at {} {why}", p.expected_head_sha.short()))
+        let message = format!("{pr} at {} {why}", p.expected_head_sha.short());
+        Some(CommandOutcome::Rejected { code: ErrorCode::Conflict, message: Text::new(&message) })
     }
 
     /// What a gate's target reads as to the reader: `#338` for a PR or a run, the account for an account.

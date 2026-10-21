@@ -4,7 +4,6 @@ expression: text
 ---
   pr-review · ▘ reviewing #184 verify new finding   ● live
 
-
   acme/shop #184 → finding 1 of 1
 
   ┃ ▲ HIGH   correctness          detected · 82% confident
@@ -16,5 +15,6 @@ expression: text
   ┃ before either sets held.
   ┃
   ┃ Evidence
-    … 32 more below, j scrolls
-   j/k scroll  n/N finding  d diff at anchor  Esc close
+  ┃   src/booking.ts  lines 40-43 @ 4444444
+    … 31 more below, j scrolls
+   j/k scroll  d diff at anchor  t timeline  Esc close

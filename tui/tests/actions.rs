@@ -5,7 +5,7 @@ mod common;
 
 use common::*;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use pr_review_tui::model::{ConfirmState, Modal, Model, Preview};
+use pr_review_tui::model::{ConfirmState, Modal, Model, Preview, Screen};
 use pr_review_tui::protocol::{ClientMessage, Command, ServerMessage};
 use pr_review_tui::update::{Effect, Msg, NetEvent, update};
 
@@ -86,9 +86,11 @@ fn start_names_the_pr_and_head_sends_only_on_y_and_settles_on_run_started_not_on
     let rid = c.request_id.clone();
     assert!(commands(&press(&mut m, KeyCode::Char('y'))).is_empty(), "a second y must not resend");
 
+    assert!(frame(&mut m).contains("requested… waiting for the daemon"), "the daemon, as the panel names it");
     let accepted = read("fixtures/server.command.result.accepted.json").replace("req-cmd", rid.as_str());
     send(&mut m, &accepted);
     assert!(matches!(confirm_state(&m), ConfirmState::Accepted { .. }), "accepted alone keeps the panel waiting");
+    assert!(frame(&mut m).contains("accepted… waiting for the event that shows it happened"));
     assert!(m.notice.is_none(), "{:?}", m.notice);
 
     let started = run_json("rev-186-a", "acme/shop#186", H186, "COLLECT_CONTEXT", "RUNNING");
@@ -149,16 +151,93 @@ fn a_rejection_reads_as_a_refusal_with_its_code_only_beside_the_command() {
     assert!(!f.contains("rejected"), "{f}");
 }
 
+/// The refused panel's sentence, as the daemon would word it; it panics when no refused panel is up.
+fn refusal(m: &Model) -> String {
+    match m.top_modal() {
+        Some(Modal::Confirm { state: ConfirmState::Refused { message, .. }, .. }) => message.to_string(),
+        other => panic!("{other:?}"),
+    }
+}
+
 #[test]
-fn a_start_the_daemon_replays_for_a_run_that_already_ended_says_the_head_is_reviewed() {
+fn a_start_on_a_head_whose_review_ended_goes_to_the_daemon_which_may_start_it_under_another_policy() {
+    // #185 was reviewed, but perhaps as a dry run: after a switch to approval the daemon starts it anew.
     let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#185");
+    assert!(commands(&press(&mut m, KeyCode::Char('s'))).is_empty());
+    assert_eq!(prompt(&m), "Start a review of #185 at 5555555?");
+    let sent = press(&mut m, KeyCode::Char('y'));
+    let sent = commands(&sent);
+    assert_eq!(sent.len(), 1, "the daemon decides");
+    send(&mut m, &rejected(&sent[0].request_id, "CONFLICT", "#185 at 5555555 is already reviewed"));
+    assert_eq!(refusal(&m), "#185 at 5555555 is already reviewed", "and when it refuses, the panel says so");
+
+    // The daemon replays the start that made a run the client has since seen end: the panel says why.
+    for (status, why) in [("COMPLETED", "is already reviewed"), ("FAILED", "failed its review; retry it instead")] {
+        let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#186");
+        press(&mut m, KeyCode::Char('s'));
+        let rid = commands(&press(&mut m, KeyCode::Char('y')))[0].request_id.clone();
+        let run: pr_review_tui::protocol::Run =
+            serde_json::from_str(&run_json("rev-186-a", "acme/shop#186", H186, status, status)).unwrap();
+        m.domain.runs.insert(run.id.clone(), run);
+        let replayed =
+            r#"{"type":"command.result","requestId":"RID","status":"accepted","operationId":"review.start:rev-186-a"}"#;
+        send(&mut m, &replayed.replace("RID", rid.as_str()));
+        assert_eq!(refusal(&m), format!("#186 at 6666666 {why}"), "{status}");
+    }
+}
+
+/// A daemon restarted in dry_run grants no review.publish, so it takes a start for the parked head in.
+#[test]
+fn a_start_on_a_parked_head_is_sent_when_the_daemon_grants_no_publish() {
+    let mut m = model();
+    update(&mut m, Msg::Net(NetEvent::Opened));
+    send(&mut m, &read("fixtures/server.welcome.engine.json").replace(",\n    \"review.publish\"", ""));
+    assert!(!m.may_write("review.publish"));
+    send(&mut m, &read("fixtures/server.snapshot.json"));
+    m.ui.selected_pr = Some(pr_review_tui::protocol::PrId::new("acme/shop#184"));
+    let parked = r#"{"from":"VERIFY","to":"AWAITING_APPROVAL","event":"PREVIEW_STORED","detail":null}"#;
+    send(&mut m, &event(109, "acme/shop#184", "rev-184-a", "review.phase_changed", parked));
     press(&mut m, KeyCode::Char('s'));
+    assert_eq!(prompt(&m), "Start a review of #184 at 4444444?");
+    assert_eq!(confirm_state(&m), ConfirmState::Asking);
+    let sent = press(&mut m, KeyCode::Char('y'));
+    assert_eq!(commands(&sent).len(), 1, "the start goes to the daemon to decide");
+}
+
+#[test]
+fn a_start_on_a_running_head_attaches_to_its_review_and_on_a_parked_one_is_refused_before_sending() {
+    let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#184");
+    m.ui.screen = Screen::Inbox;
+    press(&mut m, KeyCode::Char('s'));
+    assert_eq!(prompt(&m), "Start a review of #184 at 4444444?", "the daemon takes a start for a running head in");
     let rid = commands(&press(&mut m, KeyCode::Char('y')))[0].request_id.clone();
-    let replayed =
-        r#"{"type":"command.result","requestId":"RID","status":"accepted","operationId":"review.start:rev-185-a"}"#;
-    send(&mut m, &replayed.replace("RID", rid.as_str()));
-    assert_eq!(m.top_modal(), None, "nothing will happen, so nothing waits");
-    assert_eq!(m.notice.as_ref().unwrap().text, "#185 at 5555555 is already reviewed");
+    let attached =
+        r#"{"type":"command.result","requestId":"RID","status":"accepted","operationId":"review.start:rev-184-a"}"#;
+    send(&mut m, &attached.replace("RID", rid.as_str()));
+    assert_eq!(m.top_modal(), None, "no event will close the panel, so it gives way");
+    assert_eq!(m.notice.as_ref().unwrap().text, "Already running; showing that review.");
+    assert_eq!((m.ui.screen, m.ui.selected_pr.as_ref().map(|p| p.as_str())), (Screen::Review, Some("acme/shop#184")));
+
+    let parked = r#"{"from":"VERIFY","to":"AWAITING_APPROVAL","event":"PREVIEW_STORED","detail":null}"#;
+    send(&mut m, &event(109, "acme/shop#184", "rev-184-a", "review.phase_changed", parked));
+    assert!(commands(&press(&mut m, KeyCode::Char('s'))).is_empty());
+    assert_eq!(refusal(&m), "#184 at 4444444 is waiting for your approval");
+    let f = frame(&mut m);
+    assert!(f.contains("daemon command review.start · not sent"), "the client refused it, not the daemon: {f}");
+    assert!(!f.contains("CONFLICT"), "{f}");
+    assert!(commands(&press(&mut m, KeyCode::Char('y'))).is_empty(), "y has nothing to confirm");
+    press(&mut m, KeyCode::Esc);
+    assert_eq!(m.top_modal(), None, "Esc closes");
+}
+
+#[test]
+fn a_start_on_a_head_whose_base_moved_under_its_running_review_goes_to_the_daemon() {
+    let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#184");
+    let pr = pr_review_tui::protocol::PrId::new("acme/shop#184");
+    m.domain.prs.get_mut(&pr).unwrap().base_sha = pr_review_tui::protocol::Sha::new(&"c".repeat(40));
+    assert!(commands(&press(&mut m, KeyCode::Char('s'))).is_empty());
+    assert_eq!(prompt(&m), "Start a review of #184 at 4444444?", "the daemon keys reviews on the base too");
+    assert_eq!(commands(&press(&mut m, KeyCode::Char('y'))).len(), 1);
 }
 
 #[test]
@@ -182,7 +261,7 @@ fn cancel_and_retry_name_their_target_and_settle_on_the_run_ending_or_moving() {
     assert_eq!(m.notice.as_ref().unwrap().text, "Cancelled the review of #184");
 
     press(&mut m, KeyCode::Char('R'));
-    assert_eq!(prompt(&m), "Retry run rev-184-?");
+    assert_eq!(prompt(&m), "Retry the failed review of #184?", "named like start and cancel, by PR");
     let fx = press(&mut m, KeyCode::Char('y'));
     assert_eq!(commands(&fx)[0].idempotency_key, "review.retry:rev-184-a");
 }
@@ -194,7 +273,7 @@ fn the_retry_prompt_names_the_attempt_it_opens_when_the_daemon_counts_them() {
         .replacen('{', r#"{"attempt":1,"#, 1);
     send(&mut m, &event(109, "acme/shop#184", "rev-184-a", "run.failed", &failed));
     press(&mut m, KeyCode::Char('R'));
-    assert_eq!(prompt(&m), "Retry run rev-184- (attempt 2)?");
+    assert_eq!(prompt(&m), "Retry the failed review of #184 (attempt 2)?");
 }
 
 #[test]
@@ -202,7 +281,7 @@ fn a_read_only_daemon_says_why_the_action_keys_do_nothing() {
     let mut m = engine("fixtures/server.welcome.read-only.json", "acme/shop#186");
     assert!(commands(&press(&mut m, KeyCode::Char('s'))).is_empty());
     assert_eq!(m.top_modal(), None);
-    assert_eq!(m.notice.as_ref().unwrap().text, "Can't start a review: daemon is read-only");
+    assert_eq!(m.notice.as_ref().unwrap().text, "Can't start: daemon is read-only");
 
     let off = read("fixtures/server.welcome.read-only.json").replace(
         "another pr-review is running on /srv/pr-review/.data",
@@ -313,13 +392,13 @@ fn y_sends_exactly_one_publish_naming_the_preview_and_only_published_reads_as_do
     assert_eq!(c.idempotency_key, format!("review.publish:rev-184-a:{}", p.preview_id));
     let rid = c.request_id.clone();
     assert!(commands(&press(&mut m, KeyCode::Char('y'))).is_empty(), "a second y must not resend");
-    assert!(frame(&mut m).contains("requested… waiting for the daemon"));
+    assert!(frame(&mut m).contains("◔ requested… waiting for the daemon"));
 
     let rest = script("approval");
     let accepted = read("fixtures/server.command.result.accepted.json").replace("req-cmd", rid.as_str());
     send(&mut m, &accepted);
     let f = frame(&mut m);
-    assert!(f.contains("Approved; publishing…"), "{f}");
+    assert!(f.contains("◔ approved… not on GitHub until it says published"), "{f}");
     assert!(!f.contains("published on GitHub"), "accepted is not published: {f}");
 
     for msg in rest.into_iter().skip(6).take(2) {
@@ -327,11 +406,16 @@ fn y_sends_exactly_one_publish_naming_the_preview_and_only_published_reads_as_do
     }
     let f = frame(&mut m);
     assert!(f.lines().any(|l| l.trim() == "Publishing…") && !f.contains("Publish this review?"), "{f}");
+    assert!(
+        f.contains(" posting to GitHub…") && !f.contains("publishing…"),
+        "the line under the heading adds to it: {f}"
+    );
     assert_eq!(press(&mut m, KeyCode::Char('o')), [], "o does nothing before it is published");
 
     server(&mut m, script("approval").remove(8));
     let f = frame(&mut m);
     assert!(f.contains("✓ published on GitHub as review 3141"), "{f}");
+    assert!(f.contains("o opens it on GitHub") && f.contains("o open on GitHub"), "the page and footer agree: {f}");
     assert!(f.lines().any(|l| l.trim() == "Published on GitHub") && !f.contains("Publish this review?"), "{f}");
     assert!(f.contains("https://github.com/acme/shop/pull/184#pullrequestreview-3141"), "{f}");
     assert_eq!(
@@ -355,7 +439,7 @@ fn a_stale_preview_turns_y_off_and_says_why() {
     let out = r#"{"from":"AWAITING_APPROVAL","to":"FAILED","event":"CANCELLED","detail":null}"#;
     send(&mut m, &event(14, "acme/shop#184", "rev-184-a", "review.phase_changed", out));
     assert!(commands(&press(&mut m, KeyCode::Char('y'))).is_empty());
-    assert!(frame(&mut m).contains("y is off: stale: the run is now FAILED, no longer awaiting approval"));
+    assert!(frame(&mut m).contains("y is off: stale: the run is now FAILED, no longer waiting for approval"));
 }
 
 #[test]
@@ -383,7 +467,8 @@ fn awaiting_approval_is_its_own_amber_state_in_the_stepper_the_rail_and_the_stat
     assert!(!top.contains("reviewing") && !top.contains("nothing running"), "{top}");
     assert!(f.contains("● Prepare ◔ Publish"), "{f}");
     assert!(f.contains("◔ waiting for you"), "{f}");
-    assert!(f.lines().any(|l| l.starts_with("▌   shop") && l.contains("◔ awaiting you")), "the rail row: {f}");
+    assert!(f.lines().any(|l| l.starts_with("▌   shop") && l.contains("◔ waiting for you")), "the rail row: {f}");
+    assert!(!f.contains("awaiting"), "one wording for a parked review: {f}");
     assert!(f.contains("◔ Ready to publish"), "{f}");
     assert!(!f.contains("failed") && !f.contains("✓ done"), "neither an error nor done: {f}");
     // Amber: the status line's glyph is drawn in the palette's warn color.
@@ -393,11 +478,11 @@ fn awaiting_approval_is_its_own_amber_state_in_the_stepper_the_rail_and_the_stat
 
     let (f, _) = parked_frame(Look { color: false, ..Look::default() });
     assert!(f.lines().next().unwrap().contains("◔ #184 waiting for you"), "NO_COLOR keeps the glyph and words: {f}");
-    assert!(f.contains("awaiting you"), "{f}");
+    assert!(f.lines().any(|l| l.starts_with("▌   shop") && l.contains("◔ waiting for you")), "{f}");
 
     let (f, _) = parked_frame(Look { ascii: true, ..Look::default() });
     assert!(f.lines().next().unwrap().contains("~ #184 waiting for you | p previews"), "{f}");
-    assert!(f.contains("~ awaiting you"), "{f}");
+    assert!(f.lines().any(|l| l.starts_with(">   shop") && l.contains("~ waiting for you")), "{f}");
     assert!(f.contains("+ Prepare ~ Publish"), "{f}");
     assert!(f.is_ascii(), "{f}");
 }
@@ -444,7 +529,7 @@ fn publication_events_show_in_the_timeline_and_a_pr_update_between_runs_is_under
         "{f}"
     );
     assert!(at("publication   publishing") > at("PUBLISH ─"), "{f}");
-    assert!(f.contains("publication   awaiting your approval"), "{f}");
+    assert!(f.contains("publication   waiting for your approval"), "{f}");
     let update = at("PR #184 updated");
     assert!(f.lines().nth(update - 1).unwrap().trim_start().starts_with("PR ─"), "{f}");
     assert!(!f.lines().skip(update.saturating_sub(2)).any(|l| l.contains("BEFORE THE RUN")), "{f}");
@@ -679,4 +764,320 @@ fn an_accepted_command_with_no_event_after_15_s_says_so_and_esc_closes() {
     assert!(frame.replace('\n', " ").split_whitespace().collect::<Vec<_>>().join(" ").contains(quiet), "{frame}");
     press(&mut m, KeyCode::Esc);
     assert_eq!(m.top_modal(), None);
+}
+
+#[test]
+fn a_refused_approval_reads_not_published_and_only_a_failed_post_reads_publication_failed() {
+    for (code, message) in [
+        ("REVISION_STALE", "the head of acme/shop#184 is now 7777777"),
+        ("INVALID_TRANSITION", "APPROVED is not legal in SUPERSEDED"),
+    ] {
+        let mut m = previewing();
+        let rid = commands(&press(&mut m, KeyCode::Char('y')))[0].request_id.clone();
+        send(&mut m, &rejected(&rid, code, message));
+        // The daemon marks the stored payload failed as it supersedes the run; still nothing was posted.
+        let failed = r#"{"runId":"rev-184-a","status":"failed"}"#;
+        let seq = m.stream.last_applied + 1;
+        send(&mut m, &event(seq, "acme/shop#184", "rev-184-a", "review.publication_changed", failed));
+        let f = frame(&mut m);
+        assert!(f.contains("Not published"), "{code}:\n{f}");
+        assert!(f.contains(&format!("Can't publish: {message}")), "{code}: the reason follows\n{f}");
+        assert!(!f.contains("Publication failed"), "{code}:\n{f}");
+    }
+    let mut m = previewing();
+    let rid = commands(&press(&mut m, KeyCode::Char('y')))[0].request_id.clone();
+    send(&mut m, &read("fixtures/server.command.result.accepted.json").replace("req-cmd", rid.as_str()));
+    let failed = r#"{"runId":"rev-184-a","status":"failed"}"#;
+    let seq = m.stream.last_applied + 1;
+    send(&mut m, &event(seq, "acme/shop#184", "rev-184-a", "review.publication_changed", failed));
+    let f = frame(&mut m);
+    assert!(f.contains("Publication failed") && !f.contains("Not published"), "{f}");
+}
+
+#[test]
+fn the_publication_page_is_a_preview_only_while_y_can_publish() {
+    let crumb = |m: &mut Model| frame(m).lines().find(|l| l.contains("acme/shop #184 →")).unwrap().trim().to_string();
+    let mut m = previewing();
+    assert_eq!(crumb(&mut m), "acme/shop #184 → publication preview");
+    let rid = commands(&press(&mut m, KeyCode::Char('y')))[0].request_id.clone();
+    assert_eq!(crumb(&mut m), "acme/shop #184 → publication", "requested");
+    send(&mut m, &read("fixtures/server.command.result.accepted.json").replace("req-cmd", rid.as_str()));
+    let seq = m.stream.last_applied + 1;
+    let published = r#"{"runId":"rev-184-a","status":"published","reviewId":3141}"#;
+    send(&mut m, &event(seq, "acme/shop#184", "rev-184-a", "review.publication_changed", published));
+    assert_eq!(crumb(&mut m), "acme/shop #184 → publication", "published");
+}
+
+#[test]
+fn a_toast_is_a_sentence_and_one_still_under_way_ends_in_an_ellipsis() {
+    let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#186");
+    press(&mut m, KeyCode::Char('r'));
+    assert_eq!(m.notice.as_ref().unwrap().text, "Refreshing the snapshot…");
+    let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#186");
+    m.look.ascii = true;
+    press(&mut m, KeyCode::Char('r'));
+    assert_eq!(m.notice.as_ref().unwrap().text, "Refreshing the snapshot~", "the ASCII ellipsis");
+}
+
+#[test]
+fn no_ascii_spinner_frame_reads_as_the_separator_or_a_status_glyph() {
+    let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#184");
+    m.look.ascii = true;
+    let g = pr_review_tui::theme::glyphs(true);
+    for frame in 0..4 {
+        update(&mut m, Msg::Tick(frame * 125));
+        let (f, _) = render(&mut m, 120, 38);
+        let top = f.lines().next().unwrap().to_string();
+        let at = top.find(" reviewing").unwrap_or_else(|| panic!("{top}"));
+        let spin = &top[at - 1..at];
+        assert!(top[..at - 1].ends_with(&format!("{} ", g.sep)), "{top}");
+        // `-` joins the ASCII stepper's phases.
+        for taken in [g.sep, g.idle, g.active, g.ok, g.fail, g.pending, "-"] {
+            assert_ne!(spin, taken, "frame {frame}: {top}");
+        }
+    }
+}
+
+#[test]
+fn every_count_in_settings_agrees_with_its_noun() {
+    let mut m = Sim::new(pr_review_tui::model::Look::default()).play("showcase", 40).m;
+    assert!(m.domain.activity.len() >= 2, "the showcase feeds the activity log");
+    m.ui.screen = pr_review_tui::model::Screen::Settings;
+    let all = m.domain.activity.clone();
+    for (n, want) in [
+        (0, "0 feed entries (cap 2000); 0 tool events applied"),
+        (1, "1 feed entry (cap 2000); 1 tool event applied"),
+        (12, "12 feed entries (cap 2000); 12 tool events applied"),
+    ] {
+        m.domain.activity = all.iter().cycle().take(n).cloned().collect();
+        m.domain.tool_activity_count = n as u64;
+        for (w, h) in [(120, 38), (80, 24)] {
+            let (f, _) = render(&mut m, w, h);
+            assert!(f.contains(want), "{n} at {w}: {f}");
+        }
+    }
+}
+
+#[test]
+fn the_stepper_takes_one_shape_per_width_whatever_the_run_state() {
+    use pr_review_tui::protocol::{Phase, RunId, RunStatus};
+    for w in [80, 100, 120, 160] {
+        let shapes: Vec<(&str, (bool, bool, bool))> = [
+            ("failed", Phase::Failed, RunStatus::Failed),
+            ("parked", Phase::AwaitingApproval, RunStatus::Running),
+            ("done", Phase::Completed, RunStatus::Completed),
+        ]
+        .into_iter()
+        .map(|(name, phase, status)| {
+            let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#185");
+            m.ui.screen = pr_review_tui::model::Screen::Review;
+            m.ui.focus = pr_review_tui::model::Pane::Main;
+            let r = m.domain.runs.get_mut(&RunId::new("rev-185-a")).unwrap();
+            (r.phase, r.status) = (phase, status);
+            let (f, _) = render(&mut m, w, 38);
+            let tail = ["✗ failed", "◔ waiting for you", "✓ done"];
+            let line = f.lines().find(|l| tail.iter().any(|t| l.contains(t))).unwrap_or_else(|| panic!("{f}"));
+            (name, (line.contains("──"), line.contains("Collect"), line.contains("Triage")))
+        })
+        .collect();
+        assert!(shapes.iter().all(|s| s.1 == shapes[0].1), "{w}: {shapes:?}");
+    }
+}
+
+#[test]
+fn a_run_you_cancelled_says_so_and_a_real_failure_names_the_cause() {
+    use pr_review_tui::protocol::{Phase, RunId, RunStatus, Text};
+    for (reason, want, not) in [
+        ("cancelled from the TUI", "You cancelled this review. R starts it again.", "once the cause is fixed"),
+        ("model timed out", "R retries the run once the cause is fixed.", "You cancelled"),
+    ] {
+        let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#185");
+        m.ui.screen = pr_review_tui::model::Screen::Review;
+        m.ui.focus = pr_review_tui::model::Pane::Main;
+        let r = m.domain.runs.get_mut(&RunId::new("rev-185-a")).unwrap();
+        (r.phase, r.status, r.failure_reason) = (Phase::Failed, RunStatus::Failed, Some(Text::new(reason)));
+        let (f, _) = render(&mut m, 120, 38);
+        assert!(f.contains(want) && !f.contains(not), "{reason}: {f}");
+    }
+}
+
+#[test]
+fn the_header_names_what_its_counts_count_or_drops_them() {
+    let mut m = Sim::new(pr_review_tui::model::Look::default()).play("showcase", 40).m;
+    let (f, _) = render(&mut m, 120, 38);
+    assert!(f.lines().next().unwrap().contains("+1 more running"), "{f}");
+    for (w, h) in [(60, 16), (80, 24), (100, 30)] {
+        let (f, _) = render(&mut m, w, h);
+        let top = f.lines().next().unwrap().to_string();
+        for (at, _) in top.match_indices('+') {
+            let rest = &top[at + 1..];
+            let digits = rest.chars().take_while(|c| c.is_ascii_digit()).count();
+            assert!(digits == 0 || rest[digits..].starts_with(" more"), "{w}: {top}");
+        }
+    }
+}
+
+#[test]
+fn timeline_filters_hold_for_one_pr_and_reset_on_another() {
+    use pr_review_tui::protocol::PrId;
+    let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#184");
+    let rid = press(&mut m, KeyCode::Char('4')).iter().find_map(|e| match e {
+        Effect::Send(ClientMessage::TimelineGet { request_id, .. }) => Some(request_id.clone()),
+        _ => None,
+    });
+    send(&mut m, &read("fixtures/server.timeline.page.json").replace("req-tl", rid.unwrap().as_str()));
+    press(&mut m, KeyCode::Char('v'));
+    press(&mut m, KeyCode::Char('P'));
+    let t = m.timeline.as_ref().unwrap();
+    let set = (t.category, t.phase);
+    assert!(set.0.is_some() && set.1.is_some(), "{set:?}");
+    press(&mut m, KeyCode::Char('f'));
+    let t = m.timeline.as_ref().unwrap();
+    assert_eq!((t.category, t.phase), set, "a new scope on the same PR keeps them");
+
+    m.ui.selected_pr = Some(PrId::new("acme/shop#185"));
+    press(&mut m, KeyCode::Char('2'));
+    press(&mut m, KeyCode::Char('4'));
+    let t = m.timeline.as_ref().unwrap();
+    assert_eq!(t.query.pr, Some(PrId::new("acme/shop#185")));
+    assert_eq!((t.category, t.phase, t.text.as_str()), (None, None, ""), "another PR starts unfiltered");
+}
+
+#[test]
+fn a_link_state_still_under_way_ends_in_an_ellipsis() {
+    let mut m = model();
+    update(&mut m, Msg::Net(NetEvent::Opened));
+    let (f, _) = render(&mut m, 80, 24);
+    let top = f.lines().next().unwrap().trim_end().to_string();
+    assert!(top.ends_with("◔ negotiating…"), "{top}");
+    assert!(top.contains("waiting for the first snapshot…"), "{top}");
+    send(&mut m, &read("fixtures/server.welcome.engine.json"));
+    let (f, _) = render(&mut m, 80, 24);
+    assert!(f.lines().next().unwrap().trim_end().ends_with("◔ loading snapshot…"), "{f}");
+}
+
+#[test]
+fn the_footer_offers_no_key_that_has_nothing_to_act_on() {
+    let footer = |m: &mut Model| {
+        let f = frame(m);
+        f.lines().last().unwrap().split("1 inbox").next().unwrap().trim().to_string()
+    };
+    let mut m = model();
+    update(&mut m, Msg::Net(NetEvent::Opened));
+    send(&mut m, &read("fixtures/server.welcome.json"));
+    send(&mut m, &read("fixtures/server.snapshot.empty.json"));
+    assert_eq!(footer(&mut m), "? help  q quit", "nothing to move to, open or search");
+
+    let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#186");
+    m.ui.screen = pr_review_tui::model::Screen::Inbox;
+    press(&mut m, KeyCode::Char('/'));
+    for c in "nothing matches this".chars() {
+        press(&mut m, KeyCode::Char(c));
+    }
+    press(&mut m, KeyCode::Enter);
+    let f = footer(&mut m);
+    assert!(
+        f.starts_with("/ search  w watch live  ? help") && !f.contains("j/k") && !f.contains("Enter"),
+        "/ changes the filter: {f}"
+    );
+
+    let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#186");
+    m.ui.screen = pr_review_tui::model::Screen::Review;
+    m.ui.focus = pr_review_tui::model::Pane::Main;
+    m.ui.selected_finding = None;
+    let f = footer(&mut m);
+    let all: Vec<String> = pr_review_tui::offer::offered(&m).iter().map(|h| h.text()).collect();
+    assert!(f.contains("h pull requests") && all.contains(&"t timeline".to_string()), "{f}");
+    assert!(!f.contains("j/k finding") && !f.contains("Enter read") && !f.contains("J/K"), "#186 has no findings: {f}");
+    assert!(f.contains("d diff"), "d asks the daemon for #186's diff: {f}");
+
+    // No daemon and no PR: nothing to diff, list or show a timeline of, and h leaves no findings to go to.
+    let mut m = model();
+    update(&mut m, Msg::Net(NetEvent::Lost { reason: "no socket".into(), retry_in_ms: Some(2000) }));
+    m.ui.screen = pr_review_tui::model::Screen::Review;
+    m.ui.focus = pr_review_tui::model::Pane::Main;
+    assert_eq!(footer(&mut m), "? help  q quit");
+    press(&mut m, KeyCode::Char('h'));
+    assert_eq!(footer(&mut m), "? help  q quit", "no l findings");
+    m.ui.screen = pr_review_tui::model::Screen::Diff;
+    assert_eq!(footer(&mut m), "Esc back  ? help  q quit");
+    m.ui.screen = pr_review_tui::model::Screen::Timeline;
+    assert_eq!(footer(&mut m), "Esc back  ? help  q quit", "no timeline to move through or filter");
+
+    // A timeline whose filters hide every event, with no older page: they still act, moving and opening do not.
+    let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#184");
+    let rid = press(&mut m, KeyCode::Char('4')).iter().find_map(|e| match e {
+        Effect::Send(ClientMessage::TimelineGet { request_id, .. }) => Some(request_id.clone()),
+        _ => None,
+    });
+    send(&mut m, &read("fixtures/server.timeline.page.json").replace("req-tl", rid.unwrap().as_str()));
+    m.timeline.as_mut().unwrap().text = "matches nothing".into();
+    m.timeline.as_mut().unwrap().next_before = None;
+    let f = footer(&mut m);
+    assert!(!f.contains("j/k") && !f.contains("Enter") && f.contains("/ filter"), "{f}");
+}
+
+#[test]
+fn d_on_a_pr_with_no_review_asks_and_the_diff_says_there_is_none_and_offers_only_the_way_back() {
+    // The daemon answers NOT_FOUND for a PR it never reviewed; a playback may answer with no files.
+    let base = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+    let answers = [
+        format!(
+            r#"{{"type":"diff.page","requestId":"RID","prId":"acme/shop#186","baseSha":"{base}","headSha":"{H186}","files":[],"nextCursor":null,"truncated":false}}"#
+        ),
+        format!(
+            r#"{{"type":"error","requestId":"RID","code":"NOT_FOUND","message":"no review of acme/shop#186 at {base}...{H186}"}}"#
+        ),
+    ];
+    for answer in answers {
+        let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#186");
+        m.ui.screen = pr_review_tui::model::Screen::Review;
+        m.ui.focus = pr_review_tui::model::Pane::Main;
+        m.ui.selected_finding = None;
+        // Whether the daemon has a diff for a head it never reviewed is its to say, so d asks.
+        let rid = press(&mut m, KeyCode::Char('d')).iter().find_map(|e| match e {
+            Effect::Send(ClientMessage::DiffGet { request_id, .. }) => Some(request_id.clone()),
+            _ => None,
+        });
+        assert_eq!(m.ui.screen, pr_review_tui::model::Screen::Diff);
+        send(&mut m, &answer.replace("RID", rid.unwrap().as_str()));
+        let f = frame(&mut m);
+        assert!(f.contains("No review of #186 yet, so there is no diff to show."), "{answer}\n{f}");
+        assert!(!f.contains("s starts one"), "s does nothing on the Diff: {f}");
+        assert!(!f.contains("FILES"), "{f}");
+        let last = f.lines().last().unwrap().split("1 inbox").next().unwrap().trim().to_string();
+        assert_eq!(last, "w watch live  Esc back  ? help  q quit", "#184 runs, so w still acts");
+    }
+}
+
+#[test]
+fn a_diff_that_fails_says_why_however_long_the_reason() {
+    let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#185");
+    m.ui.selected_finding = None;
+    let rid = press(&mut m, KeyCode::Char('3')).iter().find_map(|e| match e {
+        Effect::Send(ClientMessage::DiffGet { request_id, .. }) => Some(request_id.clone()),
+        _ => None,
+    });
+    let long = "x".repeat(200);
+    let error = format!(r#"{{"type":"error","requestId":"{}","code":"INTERNAL","message":"{long}"}}"#, rid.unwrap());
+    send(&mut m, &error);
+    let f = frame(&mut m);
+    assert!(f.contains("The diff did not load. Settings lists the error."), "{f}");
+    assert!(m.diag.errors.back().is_some_and(|e| e.1.ends_with(&long)), "Settings keeps the daemon's words");
+}
+
+/// Under a daemon that grants no review.publish, the parked run's ready line names why p is off instead of offering it.
+#[test]
+fn a_parked_run_under_a_daemon_without_publish_does_not_offer_p() {
+    let mut m = model();
+    update(&mut m, Msg::Net(NetEvent::Opened));
+    for line in read("playback/approval.ndjson").lines().take(5) {
+        let v: serde_json::Value = serde_json::from_str(&line.replace(r#","review.publish""#, "")).unwrap();
+        send(&mut m, &v["message"].to_string());
+    }
+    m.ui.selected_pr = Some(pr_review_tui::protocol::PrId::new("acme/shop#184"));
+    m.ui.screen = Screen::Review;
+    let f = frame(&mut m);
+    assert!(f.contains("Ready to publish · publishing is off: the daemon does not grant it"), "{f}");
+    assert!(!f.contains("p previews"), "{f}");
 }

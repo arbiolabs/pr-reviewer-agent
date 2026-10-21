@@ -126,11 +126,14 @@ fn settings_describes_the_display_in_plain_words() {
 }
 
 #[test]
-fn the_footer_lists_settings_among_the_views_when_it_fits() {
+fn the_footer_names_the_views_where_its_hints_leave_room_and_numbers_them_where_they_do_not() {
     let mut s = showcase(2);
-    let (frame, _) = render(&mut s.m, 120, 38);
+    let (frame, _) = render(&mut s.m, 200, 50);
     let footer = frame.lines().last().unwrap();
     assert!(footer.ends_with("4 timeline  5 settings"), "{footer}");
+    let (frame, _) = render(&mut s.m, 120, 38);
+    let footer = frame.lines().last().unwrap();
+    assert!(footer.contains("q quit ") && footer.ends_with(" 1 2 3 4 5"), "{footer}");
 }
 
 #[test]
@@ -385,7 +388,7 @@ fn clicks_select_diff_files_and_lines_timeline_events_and_footer_views() {
     click(&mut s, x + 20, y);
     assert_ne!(s.m.diff.as_ref().unwrap().cursor, before, "a click on a patch line moves the cursor there");
 
-    let mut s = s.key(KeyCode::Char('t'));
+    let mut s = s.key(KeyCode::Char('4'));
     let (frame, _) = render(&mut s.m, 120, 38);
     let (x, y) = cell_of(&frame, "review started");
     click(&mut s, x, y);
@@ -398,6 +401,12 @@ fn clicks_select_diff_files_and_lines_timeline_events_and_footer_views() {
     assert_eq!(s.m.timeline.as_ref().unwrap().open, started, "a second click opens the event");
 
     let (frame, _) = render(&mut s.m, 120, 38);
+    let footer = frame.lines().last().unwrap();
+    assert!(footer.ends_with("1 2 3 4 5"), "the hints fill 120 columns, so the views are numbers: {footer}");
+    click(&mut s, footer.chars().count() as u16 - 1, 37);
+    assert_eq!(s.m.ui.screen, pr_review_tui::model::Screen::Settings);
+    let mut s = s.key(KeyCode::Char('4'));
+    let (frame, _) = render(&mut s.m, 200, 50);
     let (x, y) = cell_of(&frame, "5 settings");
     click(&mut s, x + 3, y);
     assert_eq!(s.m.ui.screen, pr_review_tui::model::Screen::Settings);
@@ -443,7 +452,7 @@ fn the_showcase_parks_1291_and_its_preview_lands_every_comment_on_the_diff() {
     let mut s = showcase(parked + 1).key(crossterm::event::KeyCode::Char('w'));
     let (frame, _) = render(&mut s.m, 120, 38);
     assert!(
-        first_line(&frame).contains("reviewing #338") && first_line(&frame).contains("◔ 1 awaiting you"),
+        first_line(&frame).contains("reviewing #338") && first_line(&frame).contains("◔ 1 waiting for you"),
         "{frame}"
     );
     assert!(frame.contains("◔ Ready to publish · p previews"), "{frame}");
@@ -680,4 +689,158 @@ fn a_two_word_category_reads_as_two_words() {
     s = s.key(KeyCode::Enter);
     let (frame, _) = render(&mut s.m, 120, 38);
     assert!(frame.contains("data integrity"), "the open timeline row:\n{frame}");
+}
+
+#[test]
+fn the_ascii_rail_keeps_the_head_sha_of_a_pr_with_findings_as_the_unicode_rail_does() {
+    for ascii in [false, true] {
+        let mut s = Sim::new(Look { ascii, ..Look::default() }).play("showcase", usize::MAX);
+        let (frame, _) = render(&mut s.m, 120, 38);
+        let row = frame.lines().find(|l| l.contains("1 ^1") || l.contains("1 ▲1")).unwrap();
+        assert!(row.contains("647fb3b"), "ascii {ascii}: {row}");
+    }
+}
+
+/// The showcase played whole, with PR `number` on the Review page.
+fn reading(number: u64) -> Sim {
+    let mut s = showcase(usize::MAX);
+    s.m.ui.screen = pr_review_tui::model::Screen::Review;
+    s.m.ui.selected_pr = s.m.domain.prs.values().find(|p| p.number == number).map(|p| p.id.clone());
+    s
+}
+
+#[test]
+fn a_toast_gives_way_to_the_panel_that_opens_after_it_and_to_another_view() {
+    use crossterm::event::KeyCode;
+    let s = reading(1296).key(KeyCode::Char('c'));
+    assert_eq!(s.m.notice.as_ref().unwrap().text, "Can't cancel #1296: no review is running on it");
+    let mut s = s.key(KeyCode::Char('s'));
+    assert_eq!(s.m.notice, None, "the panel is a new view");
+    let (frame, _) = render(&mut s.m, 120, 38);
+    assert!(frame.lines().last().unwrap().contains("y confirm  n/Esc cancel"), "{frame}");
+
+    let s = reading(1296).key(KeyCode::Char('c')).key(KeyCode::Char('5'));
+    assert_eq!(s.m.notice, None, "Settings is a new view");
+}
+
+#[test]
+fn a_toast_raised_under_a_panel_shows_below_the_title_and_leaves_the_panel_its_key_line() {
+    use crossterm::event::KeyCode;
+    let mut s = reading(1296).key(KeyCode::Char('s')).key(KeyCode::Char('r'));
+    let (frame, _) = render(&mut s.m, 120, 38);
+    let lines: Vec<&str> = frame.lines().collect();
+    assert_eq!(lines[1].trim(), "Refreshing the snapshot…", "{frame}");
+    assert!(lines.last().unwrap().contains("y confirm  n/Esc cancel"), "{frame}");
+}
+
+#[test]
+fn an_unreviewed_pr_says_so_in_one_sentence_and_offers_the_start_it_names() {
+    // The showcase up to the snapshot, where #1296 is tracked and never reviewed.
+    let mut s = showcase(2);
+    s.m.ui.screen = pr_review_tui::model::Screen::Review;
+    s.m.ui.selected_pr = s.m.domain.prs.values().find(|p| p.number == 1296).map(|p| p.id.clone());
+    assert!(s.m.domain.latest_run(s.m.ui.selected_pr.as_ref().unwrap()).is_none());
+    s.m.ui.focus = pr_review_tui::model::Pane::Main;
+    s.m.ui.selected_finding = None;
+    let (frame, _) = render(&mut s.m, 120, 38);
+    assert!(frame.contains("Not reviewed yet. s starts a review."), "{frame}");
+    assert!(!frame.contains("No findings"), "{frame}");
+    assert!(frame.lines().last().unwrap().contains("s start review"), "{frame}");
+}
+
+#[test]
+fn a_failed_run_with_no_diff_says_so_in_a_sentence_and_settings_keeps_the_daemons_words() {
+    use crossterm::event::KeyCode;
+    let mut s = showcase(2);
+    s.m.ui.screen = pr_review_tui::model::Screen::Review;
+    s.m.ui.selected_pr = s.m.domain.prs.values().find(|p| p.number == 345).map(|p| p.id.clone());
+    s.m.ui.selected_finding = None;
+    let mut s = s.key(KeyCode::Char('d'));
+    let (frame, _) = render(&mut s.m, 120, 38);
+    assert!(frame.contains("No diff for this run. The review failed before it read the diff."), "{frame}");
+    assert!(!frame.contains("diff unavailable"), "{frame}");
+    let mut s = s.key(KeyCode::Char('5'));
+    let (frame, _) = render(&mut s.m, 120, 38);
+    assert!(frame.contains("NOT_FOUND: no diff for"), "{frame}");
+}
+
+#[test]
+fn settings_lists_a_disconnect_that_repeats_on_every_retry_once_with_its_count() {
+    use pr_review_tui::update::{Msg, NetEvent};
+    let mut s = Sim::new(Look::default());
+    for i in 0..7 {
+        s.apply(Msg::Tick(i * 1000));
+        s.apply(Msg::Net(NetEvent::Lost {
+            reason: "connect: No such file or directory".into(),
+            retry_in_ms: Some(1000),
+        }));
+    }
+    let mut s = s.key(crossterm::event::KeyCode::Char('5'));
+    let (frame, _) = render(&mut s.m, 120, 38);
+    let rows: Vec<&str> = frame.lines().filter(|l| l.contains(" ago ") && l.contains("No such file")).collect();
+    assert_eq!(rows.len(), 1, "{frame}");
+    assert!(rows[0].contains("(×7)"), "{}", rows[0]);
+}
+
+#[test]
+fn below_twenty_rows_no_row_is_spent_on_the_spacer_and_the_rail_points_up_and_down() {
+    for ascii in [false, true] {
+        let mut s = Sim::new(Look { ascii, ..Look::default() }).play("showcase", usize::MAX);
+        // Seven PRs, one more than the 60x16 rail holds.
+        let mut extra = s.m.domain.prs.values().next().unwrap().clone();
+        (extra.id, extra.number) = (pr_review_tui::protocol::PrId::new("acme/shop#9"), 9);
+        s.m.domain.prs.insert(extra.id.clone(), extra);
+        let last = s.m.inbox().last().map(|p| p.id.clone());
+        s.m.ui.selected_pr = last;
+        let (frame, _) = render(&mut s.m, 60, 16);
+        let rows: Vec<&str> = frame.lines().collect();
+        assert!(rows[1..15].iter().all(|r| !r.trim().is_empty()), "no blank row:\n{frame}");
+        let up = if ascii { "^ 1 more above" } else { "↑ 1 more above" };
+        assert!(frame.contains(up), "{frame}");
+        let (frame, _) = render(&mut s.m, 80, 24);
+        assert!(frame.lines().nth(1).unwrap().trim().is_empty(), "the spacer stays at 24 rows:\n{frame}");
+    }
+}
+
+/// At 60x16 the rows under the title and over the footer carry content in every view, and a rail that hides PRs
+/// keeps no blank row.
+#[test]
+fn at_60x16_no_view_pads_with_blank_rows_while_its_content_is_cut() {
+    use crossterm::event::KeyCode;
+    let all = showcase(usize::MAX / 2);
+    let views = [
+        ("inbox", all.clone()),
+        ("review", all.clone().key(KeyCode::Enter)),
+        ("diff", all.clone().key(KeyCode::Enter).key(KeyCode::Char('d'))),
+        ("timeline", all.clone().key(KeyCode::Enter).key(KeyCode::Char('t'))),
+        ("settings", all.clone().key(KeyCode::Char('5'))),
+    ];
+    for (name, mut s) in views {
+        let (frame, _) = render(&mut s.m, 60, 16);
+        let rows: Vec<&str> = frame.lines().collect();
+        for y in [1, 14] {
+            assert!(!rows[y].trim().is_empty(), "{name}: row {y} is blank:\n{frame}");
+        }
+        if frame.contains("more above") || frame.contains("more below") {
+            let blank = rows[1..15].iter().position(|r| r.trim().is_empty());
+            assert_eq!(blank, None, "{name} hides PRs but keeps a blank row:\n{frame}");
+        }
+    }
+}
+
+/// With no daemon and nothing ever loaded, the Diff and Timeline say why they are empty instead of asking for a PR.
+#[test]
+fn with_no_daemon_and_nothing_loaded_every_view_names_the_missing_connection() {
+    use crossterm::event::KeyCode;
+    let mut none = Sim::new(Look::default());
+    none.apply(pr_review_tui::update::Msg::Net(pr_review_tui::update::NetEvent::Lost {
+        reason: "connection refused".into(),
+        retry_in_ms: Some(1000),
+    }));
+    for key in ['3', '4'] {
+        let mut s = none.clone().key(KeyCode::Char(key));
+        let (frame, _) = render(&mut s.m, 120, 38);
+        assert!(frame.contains("Not connected to a daemon, so there is nothing to show yet."), "{key}:\n{frame}");
+        assert!(!frame.contains("Select a PR") && !frame.contains("No PR selected"), "{key}:\n{frame}");
+    }
 }

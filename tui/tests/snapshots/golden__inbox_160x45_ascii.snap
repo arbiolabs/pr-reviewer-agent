@@ -2,7 +2,7 @@
 source: tests/golden.rs
 expression: ascii_text
 ---
-  pr-review | - reviewing #184 verify found: Finding f-1                                                                                                * live
+  pr-review | / reviewing #184 verify found: Finding f-1                                                                                                * live
 
 
   PULL REQUESTS                    3       acme/shop  #185
@@ -13,8 +13,8 @@ expression: ascii_text
 > o #185 Fix cache eviction
 >   shop 5555555               o1 ->0      1 finding   o 1 low                                                                         . none on GitHub yet
                                            ----------------------------------------------------------------------------------------------------------------
-  - #184 Booking API
-    shop          +-+-+---.-. . 0.2/s      | o LOW   performance                                                                   detected | 82% confident
+  / #184 Booking API
+    shop          +-+-+-/-.-. . 0.2/s      | o LOW   performance                                                                   detected | 82% confident
                                            | Finding f-2
                                            | src/cache.ts (whole file)
                                            |
@@ -46,4 +46,4 @@ expression: ascii_text
 
 
 
-   j/k pull request  Enter read  w watch live  / search  ? help  q quit                                      1 inbox  2 review  3 diff  4 timeline  5 settings
+   j/k pull request  Enter read  d diff  / search  t timeline  w watch live  ? help  q quit                  1 inbox  2 review  3 diff  4 timeline  5 settings

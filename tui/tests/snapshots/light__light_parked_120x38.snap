@@ -14,7 +14,7 @@ expression: frame
     shop 5555555            ○1 →0   1 finding   ▲ 1 high                                          · none on GitHub yet
                                     ──────────────────────────────────────────────────────────────────────────────────
 ▌ ◔ #184 Booking API
-▌   shop           ◔ awaiting you   ◔ Ready to publish · p previews
+▌   shop        ◔ waiting for you   ◔ Ready to publish · p previews
 
                                     ┃ ▲ HIGH   correctness                                    detected · 82% confident
                                     ┃ Finding f-1
@@ -39,7 +39,7 @@ expression: frame
 
 
 
-   j/k finding  p preview & publish  Enter read  ? help              1 inbox  2 review  3 diff  4 timeline  5 settings
+   j/k move  Enter read  p publish  c cancel  d diff  h PRs  / search  t timeline  ? help  q quit             1 2 3 4 5
 
 aabbbbbbbbbacadaddddadddddddadddadddadadaddddddddaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaeaeeeeaa
 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
@@ -53,7 +53,7 @@ ffkfiiiifjjjfjjjjjfjjjjjjjjfffffffaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 ffffggggfgggggggffffffffffffkkfggfaababbbbbbbaaalalallllaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaacaccccaccaccccccacccaa
 ffffffffffffffffffffffffffffffffffaaccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccaa
 mnonmmmmnpppppppnpppnnnnnnnnnnnnnnaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-mnnnqqqqnnnnnnnnnnnonoooooooonooonaadadddddaddadddddddacahaccccccccaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+mnnnqqqqnnnnnnnnonooooooonooonooonaadadddddaddadddddddacahaccccccccaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 ffffffffffffffffffffffffffffffffffaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 ffffffffffffffffffffffffffffffffffaalalallllaaacccccccccccaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaddddddddacacccacccccccccaa
 ffffffffffffffffffffffffffffffffffaalabbbbbbbabbbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
@@ -78,7 +78,7 @@ ffffffffffffffffffffffffffffffffffaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 ffffffffffffffffffffffffffffffffffaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 ffffffffffffffffffffffffffffffffffaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 ffffffffffffffffffffffffffffffffffaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-aaacccacccccccaacacccccccacacccccccaacccccaccccaacaccccaaaaaaaaaaaaaacacccccaacahhhhhhaacaccccaacaccccccccaacaccccccccaa
+aaacccaccccaacccccaccccaacacccccccaacaccccccaacaccccaacacccaacaccccccaacaccccccccaacaccccaacaccccaaaaaaaaaaaaacahacacaca
 
 a - on base
 b text on base

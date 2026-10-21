@@ -7,7 +7,7 @@ expression: text
 
   acme/shop  #184  timeline
   Booking API
-  1 event, oldest first · "Finding f-1" (f) · all kinds (v) · phase any (P)
+  1 event · oldest first · "Finding f-1" (f) · all kinds (v) · phase any (P)
 
   VERIFY ─────────────────────────────────────────────────────────── 13:00:12
   ▌ 13:00:12  ▲ HIGH          Finding f-1  detected
@@ -25,4 +25,4 @@ expression: text
 
 
 
-   j/k move  Enter detail  w watch live  / filter  f scope  Esc back  ? help
+   Enter detail  / filter  f scope  v kind  w watch  Esc back  ? help  q quit

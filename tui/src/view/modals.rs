@@ -53,14 +53,14 @@ fn heading(c: &Ctx, text: &str) -> Line<'static> {
 fn confirm(c: &Ctx, f: &mut Frame, body: Rect, prompt: &str, command: &Command, state: &ConfirmState) {
     let (status, role) = match state {
         ConfirmState::Asking => (format!("y confirms {} n or Esc cancels", c.t.g().sep), Role::Title),
-        ConfirmState::Requested(_) => (format!("requested{} waiting for the server", c.t.g().ellipsis), Role::Pending),
+        ConfirmState::Requested(_) => (format!("requested{} waiting for the daemon", c.t.g().ellipsis), Role::Pending),
         ConfirmState::Accepted { at_ms, .. } if c.m.now_ms.saturating_sub(*at_ms) >= ACCEPTED_QUIET_MS => (
             "The daemon accepted this but nothing happened yet. Esc closes; the timeline will show it if it runs."
                 .to_string(),
             Role::Pending,
         ),
         ConfirmState::Accepted { .. } => {
-            ("accepted; waiting for the event that shows it happened".to_string(), Role::Active)
+            (format!("accepted{} waiting for the event that shows it happened", c.t.g().ellipsis), Role::Active)
         }
         ConfirmState::Refused { message, .. } => (format!("Can't {}: {message}", command.verb()), Role::Fail),
         ConfirmState::TimedOut => ("request timed out; y sends it again, r refreshes".to_string(), Role::Fail),
@@ -130,7 +130,8 @@ pub fn help_lines(c: &Ctx, body: Rect) -> Vec<Line<'static>> {
     };
     let sections: Vec<Vec<Line<'static>>> = [
         (Context::Global, "Everywhere"),
-        (Context::Review, "Review"),
+        (Context::Screens, "Every screen"),
+        (Context::Review, "Review and the PR list"),
         (Context::Diff, "Diff"),
         (Context::Timeline, "Timeline"),
         (Context::FindingModal, "Finding reader"),
@@ -245,12 +246,15 @@ fn account_row(c: &Ctx, a: &Account, w: usize, cursor: bool) -> Line<'static> {
         Span::styled(c.pad(a.login.as_str(), 16), on(if block.is_none() { Role::Title } else { Role::Normal })),
         Span::styled(c.pad(&format!(" {}", a.host), 12), on(Role::Muted)),
         Span::styled(c.pad(&format!(" {state}"), 10), on(state_role)),
-        Span::styled(c.pad(&format!(" {marks}"), 20), on(Role::Active)),
+        Span::styled(c.pad(&format!(" {marks}"), 22), on(Role::Active)),
     ];
-    let used = 2 + 16 + 12 + 10 + 20;
+    let used = 2 + 16 + 12 + 10 + 22;
     let (why, role) = match block {
-        None => ("Enter selects".to_string(), Role::Accent),
-        Some(why) => (why.to_string(), Role::Pending),
+        None if cursor => ("Enter selects", Role::Accent),
+        None => ("", Role::Accent),
+        // The marks already say so.
+        Some("already selected") => ("", Role::Pending),
+        Some(why) => (why, Role::Pending),
     };
     spans.push(Span::styled(c.fit(&format!(" {why}"), w.saturating_sub(used)), on(role)));
     Line::from(filled(spans, w, st))
@@ -285,7 +289,8 @@ pub fn settings(c: &Ctx, f: &mut Frame, area: Rect) {
             s.capabilities.iter().map(|c| c.to_string()).collect::<Vec<_>>().join(", ")
         }
     });
-    let mut lines = vec![Line::raw("")];
+    // Below 20 rows the spacer row goes to the settings.
+    let mut lines = vec![Line::raw(""); usize::from(m.size.1 >= 20)];
     lines.push(Line::from(c.span("Settings", Role::Title)));
     let state = if m.link.welcomed() { "connected" } else { "not connected" };
     let socket = format!("socket {} {} {state}", m.diag.endpoint, c.t.g().sep);
@@ -346,9 +351,9 @@ pub fn settings(c: &Ctx, f: &mut Frame, area: Rect) {
         row(
             "activity",
             format!(
-                "{} feed entries kept (cap 2000); {} tool events applied",
-                m.domain.activity.len(),
-                m.domain.tool_activity_count
+                "{} (cap 2000); {} applied",
+                crate::text::count(m.domain.activity.len() as u64, "feed entry", "feed entries"),
+                crate::text::count(m.domain.tool_activity_count, "tool event", "tool events")
             ),
             Role::Normal,
         ),
@@ -371,8 +376,10 @@ pub fn settings(c: &Ctx, f: &mut Frame, area: Rect) {
     if errors.is_empty() {
         lines.push(Line::from(c.span("  none", Role::Muted)));
     }
-    for (at, e) in errors {
-        lines.push(row(&age(Some(*at)), e.clone(), Role::Fail));
+    let times = if c.t.ascii { "x" } else { "×" };
+    for (at, e, n) in errors {
+        let e = if *n > 1 { format!("{e} ({times}{n})") } else { e.clone() };
+        lines.push(row(&age(Some(*at)), e, Role::Fail));
     }
     f.render_widget(Paragraph::new(lines), col);
 }

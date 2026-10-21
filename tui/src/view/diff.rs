@@ -18,13 +18,24 @@ use crate::update::{diff_findings, row_findings};
 
 pub fn diff(c: &Ctx, f: &mut Frame, area: Rect) {
     let Some(d) = &c.m.diff else {
-        let text = if c.m.selected_pr().is_some() { "Press 3 to load the diff." } else { "No PR selected." };
+        let text = match super::never_loaded(c) {
+            Some(why) => why,
+            None if c.m.selected_pr().is_some() => "Press 3 to load the diff.",
+            None => "No PR selected.",
+        };
         f.render_widget(
             Paragraph::new(vec![Line::raw(""), Line::from(c.span(format!("  {text}"), Role::Muted))]),
             area,
         );
         return;
     };
+    if let Some(text) = nothing_to_show(c, d) {
+        f.render_widget(
+            Paragraph::new(vec![Line::raw(""), Line::from(c.span(format!("  {text}"), Role::Muted))]),
+            area,
+        );
+        return;
+    }
     let anchored = diff_findings(c.m, d);
     let tree_focus = c.focused(Pane::Sidebar);
     let (rail, body) = layout(c, area);
@@ -32,9 +43,30 @@ pub fn diff(c: &Ctx, f: &mut Frame, area: Rect) {
         tree(c, f, r, d, &anchored, tree_focus);
     }
     if let Some(b) = body {
-        let head = Rect { height: 3.min(b.height), ..b };
+        let head = Rect { height: 2.min(b.height), ..b };
         f.render_widget(Paragraph::new(header(c, d, &anchored, b.width as usize)), head);
-        hunks(c, f, listing(b), d, &anchored);
+        hunks(c, f, listing(c, b), d, &anchored);
+    }
+}
+
+/// The sentence in place of a diff with no files: a PR never reviewed has none to show, a diff that did not load says
+/// why, and an empty one says so.
+fn nothing_to_show(c: &Ctx, d: &DiffView) -> Option<String> {
+    if !d.files.is_empty() || d.pending.is_some() {
+        return None;
+    }
+    let pr = c.m.domain.prs.get(&d.key.pr)?;
+    match (c.m.domain.latest_run(&pr.id), &d.error) {
+        (None, _) => Some(format!("No review of #{} yet, so there is no diff to show.", pr.number)),
+        // The daemon's errors arrive worded as sentences (`update::diff_error`); the client's own are fragments.
+        (_, Some(e)) if e.as_str().starts_with(char::is_uppercase) => {
+            let retry = crate::update::can_mutate(c.m, crate::keymap::Mutation::Retry);
+            Some(if retry { format!("{e} R retries the review.") } else { e.to_string() })
+        }
+        (_, Some(e)) => Some(format!("Diff unavailable: {e}")),
+        (_, None) => {
+            Some(format!("#{} changes no files between {} and {}.", pr.number, d.key.base.short(), d.key.head.short()))
+        }
     }
 }
 
@@ -54,8 +86,10 @@ fn layout(c: &Ctx, area: Rect) -> (Option<Rect>, Option<Rect>) {
 }
 
 /// The patch listing under the three header rows.
-fn listing(b: Rect) -> Rect {
-    Rect { y: b.y + 3, height: b.height.saturating_sub(3), ..b }
+/// The patch under the two header rows, and under a spacer row from 20 rows up.
+fn listing(c: &Ctx, b: Rect) -> Rect {
+    let head = 2 + u16::from(c.m.size.1 >= 20);
+    Rect { y: b.y + head, height: b.height.saturating_sub(head), ..b }
 }
 
 /// What a click at (`x`, `y`) on the Diff screen in `area` lands on: a file in the list or a row of the patch.
@@ -67,7 +101,7 @@ pub fn hit(c: &Ctx, area: Rect, x: u16, y: u16) -> Option<super::Hit> {
         let i = range.start + (y.checked_sub(r.y + TREE_HEAD)? as usize) / rh;
         return (i < range.end).then(|| super::Hit::DiffFile(d.files[i].path.clone()));
     }
-    let rest = listing(body?);
+    let rest = listing(c, body?);
     let (_, owners) = listing_lines(c, rest, d, &diff_findings(c.m, d))?;
     owners.get(y.checked_sub(rest.y)? as usize).copied().flatten().map(super::Hit::DiffRow)
 }
@@ -95,14 +129,16 @@ fn header(c: &Ctx, d: &DiffView, anchored: &[&Finding], w: usize) -> Vec<Line<'s
     }
     if d.pending.is_some() {
         second.push(c.span(format!("   loading{}", g.ellipsis), Role::Pending));
-    } else if let Some(e) = &d.error {
-        second.push(c.span(format!("   diff unavailable: {e}"), Role::Fail));
+    } else if let Some(e) = d.error.as_ref().filter(|_| !d.files.is_empty()) {
+        // A later page failed: the files shown are not all of them. With none shown, the pane says why.
+        let room = w.saturating_sub(super::doc::spans_w(&second));
+        second.push(c.span(c.fit(&format!("   diff unavailable: {e}"), room), Role::Fail));
     } else if let Some(q) = &d.search {
         let matches = &d.matches;
         let here = d.selected_file.as_ref().and_then(|p| d.files.iter().position(|f| &f.path == p));
         let pos = match matches.iter().position(|m| Some(m.0) == here && m.1 == d.cursor) {
             Some(i) => format!("match {} of {} for \"{q}\"", i + 1, matches.len()),
-            None => format!("{} matches for \"{q}\"", matches.len()),
+            None => format!("{} for \"{q}\"", crate::text::count(matches.len() as u64, "match", "matches")),
         };
         second.push(c.span(format!("   {pos}"), Role::Accent));
     } else {
@@ -114,7 +150,7 @@ fn header(c: &Ctx, d: &DiffView, anchored: &[&Finding], w: usize) -> Vec<Line<'s
     while second.len() > 1 && super::doc::spans_w(&second) > w {
         second.pop();
     }
-    vec![Line::from(first), Line::from(second), Line::raw("")]
+    vec![Line::from(first), Line::from(second)]
 }
 
 fn on_cursor(d: &DiffView, f: &Finding) -> bool {
@@ -292,10 +328,12 @@ fn annotations(c: &Ctx, stack: &[&Finding], w: usize, focus: Option<usize>) -> V
     }
     if let (Some(k), Some(x)) = (focus, focus.and_then(|k| stack.get(k))) {
         let role = c.t.severity(x.severity).2;
+        // n names the next finding only where there is one to turn to.
+        let next = if crate::update::can_turn(c.m) { "   n next finding" } else { "" };
         let hint = match stack.len() {
-            1 => "Enter reads the finding   n next finding",
-            _ if k + 1 < stack.len() => "Enter reads the bright one   n the next one here",
-            _ => "Enter reads the bright one   n next finding",
+            1 => format!("Enter reads the finding{next}"),
+            _ if k + 1 < stack.len() => "Enter reads the bright one   n the next one here".to_string(),
+            _ => format!("Enter reads the bright one{next}"),
         };
         out.push(Line::from(vec![c.span(format!("{pad}{bar} "), role), c.span(hint, Role::Muted)]));
     }

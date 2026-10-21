@@ -146,7 +146,7 @@ fn y_and_write_shortcuts_never_send_anything() {
         assert_eq!(press(&mut m, KeyCode::Char('y')), []);
         assert_eq!(press(&mut m, KeyCode::Char('s')), []);
     }
-    assert_eq!(m.notice.as_ref().map(|n| n.text.as_str()), Some("Can't start a review: the daemon does not grant it"));
+    assert_eq!(m.notice.as_ref().map(|n| n.text.as_str()), Some("Can't start: the daemon does not grant it"));
 }
 
 #[test]
@@ -255,7 +255,7 @@ fn y_confirms_only_inside_the_confirmation_modal_and_sends_the_command_once() {
     assert_eq!(
         state,
         &pr_review_tui::model::ConfirmState::Refused {
-            code: pr_review_tui::protocol::ErrorCode::CapabilityDenied,
+            code: Some(pr_review_tui::protocol::ErrorCode::CapabilityDenied),
             message: pr_review_tui::protocol::Text::new("review.start is not available in this version"),
         }
     );
@@ -400,7 +400,7 @@ fn a_rejected_account_select_shows_the_code_and_message_in_the_modal() {
     let rejected = r#"{"type":"command.result","requestId":"RID","status":"rejected","code":"NOT_FOUND","message":"gh lists no account github.com/diego-arbio-dev"}"#;
     send(&mut m, &rejected.replace("RID", c.request_id.as_str()));
     let Some(Modal::Confirm { state: ConfirmState::Refused { code, message }, .. }) = m.top_modal() else { panic!() };
-    assert_eq!(code.to_string(), "NOT_FOUND");
+    assert_eq!(code.unwrap().to_string(), "NOT_FOUND");
     assert_eq!(message.as_str(), "gh lists no account github.com/diego-arbio-dev");
 }
 
@@ -414,12 +414,12 @@ fn a_confirm_panel_offers_y_only_while_y_can_send() {
     press(&mut m, KeyCode::Enter);
     assert_eq!(footer(&mut m), "y confirm  n/Esc cancel");
     let fx = press(&mut m, KeyCode::Char('y'));
-    assert_eq!(footer(&mut m), "Esc closes", "requested");
+    assert_eq!(footer(&mut m), "n/Esc close", "requested");
     let [Effect::Send(ClientMessage::Command(c))] = &fx[..] else { panic!("{fx:?}") };
     let rejected =
         r#"{"type":"command.result","requestId":"RID","status":"rejected","code":"NOT_FOUND","message":"no"}"#;
     send(&mut m, &rejected.replace("RID", c.request_id.as_str()));
-    assert_eq!(footer(&mut m), "Esc closes", "refused");
+    assert_eq!(footer(&mut m), "n/Esc close", "refused");
 }
 
 #[test]
@@ -446,7 +446,7 @@ fn accounts_that_cannot_be_selected_say_why_and_open_no_modal() {
     assert_eq!(m.top_modal(), None);
     assert_eq!(
         m.notice.as_ref().map(|n| n.text.as_str()),
-        Some("env/GITHUB_TOKEN cannot be selected: set by the daemon env")
+        Some("Can't select env/GITHUB_TOKEN: set by the daemon env")
     );
 
     // Without the capability, or off a live stream, a selectable account says so.
@@ -474,7 +474,7 @@ fn pr_flag_opens_a_daemon_pr_whose_id_is_a_hash() {
     update(&mut m, Msg::Net(NetEvent::Opened));
     send(&mut m, &read("fixtures/server.welcome.json"));
     send(&mut m, &read("fixtures/server.snapshot.json"));
-    assert_eq!(m.notice.as_ref().map(|n| n.text.as_str()), Some("acme/shop#999 is not tracked by the reviewer"));
+    assert_eq!(m.notice.as_ref().map(|n| n.text.as_str()), Some("The reviewer does not track acme/shop#999"));
 }
 
 fn sent(fx: &[Effect]) -> Vec<&'static str> {
@@ -732,9 +732,11 @@ fn a_click_selects_the_pr_or_finding_under_it_and_the_wheel_scrolls_the_document
     assert!(matches!(m.top_modal(), Some(Modal::Finding { id, .. }) if id == &second.id), "a second click reads it");
 
     press(&mut m, KeyCode::Esc);
-    mouse(&mut m, K::ScrollDown, (60, 20));
-    mouse(&mut m, K::ScrollDown, (60, 20));
-    mouse(&mut m, K::ScrollUp, (60, 20));
+    // At 38 rows the card fits, so the wheel scrolls a shorter terminal.
+    update(&mut m, Msg::Resize(120, 16));
+    mouse(&mut m, K::ScrollDown, (60, 10));
+    mouse(&mut m, K::ScrollDown, (60, 10));
+    mouse(&mut m, K::ScrollUp, (60, 10));
     assert_eq!(m.ui.doc_scroll, 3);
 }
 
@@ -799,7 +801,11 @@ fn the_diff_a_finding_prefetches_changes_nothing_on_the_review_screen() {
     press(&mut m, KeyCode::Char('l'));
     press(&mut m, KeyCode::Char('d'));
     assert_eq!(m.ui.screen, Screen::Diff);
-    assert!(m.notice.as_ref().is_some_and(|n| n.text.ends_with("is not in this diff")), "{:?}", m.notice);
+    assert!(
+        m.notice.as_ref().is_some_and(|n| n.text == "No file in this diff matches \"src/server/routes/orders.ts\""),
+        "{:?}",
+        m.notice
+    );
 }
 
 #[test]
@@ -1017,7 +1023,7 @@ fn the_timeline_counts_the_events_it_shows_and_a_filter_counts_against_them() {
     let mut m = checkpoint_timeline();
     let count = |m: &mut Model| {
         let (frame, _) = common::render(m, 120, 38);
-        frame.lines().find_map(|l| l.trim().split_once(", oldest first")).unwrap().0.to_string()
+        frame.lines().find_map(|l| l.trim().split_once(" · oldest first")).unwrap().0.to_string()
     };
     assert_eq!(count(&mut m), "1 event", "no filter: the tool call; VERIFY is a heading");
     for _ in 0..3 {
@@ -1078,4 +1084,88 @@ fn a_selected_row_that_a_live_phase_change_hides_hands_the_cursor_to_the_nearest
     assert_eq!(frame.lines().filter(|l| l.trim_start().starts_with('▌')).count(), 1, "{frame}");
     press(&mut m, KeyCode::Char('k'));
     assert_eq!(selected(&m), Some(12));
+}
+
+/// A one-entry page: `fixture` with its `list` cut to the first entry, answering `rid`.
+fn one_entry_page(fixture: &str, list: &str, rid: &str) -> String {
+    let mut v: serde_json::Value = serde_json::from_str(&read(fixture)).unwrap();
+    v["requestId"] = rid.into();
+    v[list].as_array_mut().unwrap().truncate(1);
+    v.to_string()
+}
+
+#[test]
+fn j_on_the_only_loaded_file_loads_the_next_diff_page() {
+    let mut m = review_184();
+    let fx = press(&mut m, KeyCode::Char('3'));
+    let Some(Effect::Send(ClientMessage::DiffGet { request_id, .. })) =
+        fx.iter().find(|e| matches!(e, Effect::Send(ClientMessage::DiffGet { .. })))
+    else {
+        panic!("{fx:?}")
+    };
+    send(&mut m, &one_entry_page("fixtures/server.diff.page.json", "files", request_id.as_str()));
+    press(&mut m, KeyCode::Char('h'));
+    assert_eq!((m.ui.focus, m.diff.as_ref().unwrap().files.len()), (Pane::Sidebar, 1));
+    let fx = press(&mut m, KeyCode::Char('j'));
+    let cursors: Vec<_> = fx
+        .iter()
+        .filter_map(|e| match e {
+            Effect::Send(ClientMessage::DiffGet { cursor, .. }) => Some(cursor.as_ref().map(|c| c.as_str())),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(cursors, [Some("c-2")]);
+}
+
+#[test]
+fn k_on_a_one_event_timeline_page_loads_the_older_events() {
+    let mut m = review_184();
+    let fx = press(&mut m, KeyCode::Char('4'));
+    let [Effect::Send(ClientMessage::TimelineGet { request_id, .. })] = &fx[..] else { panic!("{fx:?}") };
+    send(&mut m, &one_entry_page("fixtures/server.timeline.page.json", "events", request_id.as_str()));
+    assert_eq!(m.timeline.as_ref().unwrap().events.len(), 1);
+    let fx = press(&mut m, KeyCode::Char('k'));
+    let before: Vec<_> = fx
+        .iter()
+        .filter_map(|e| match e {
+            Effect::Send(ClientMessage::TimelineGet { before_sequence, .. }) => Some(*before_sequence),
+            _ => None,
+        })
+        .collect();
+    assert_eq!(before, [Some(99)]);
+}
+
+/// The whole showcase played, then PR `number` opened in Review at `w`x`h`.
+fn showcase_review(number: u64, w: u16, h: u16) -> Model {
+    let mut m = showcase(usize::MAX / 2);
+    update(&mut m, Msg::Resize(w, h));
+    let id = m.domain.prs.values().find(|p| p.number == number).map(|p| p.id.clone());
+    press(&mut m, KeyCode::Char('g'));
+    while m.ui.selected_pr != id {
+        press(&mut m, KeyCode::Char('j'));
+    }
+    press(&mut m, KeyCode::Enter);
+    m
+}
+
+#[test]
+fn a_page_that_fits_offers_no_j_and_j_keeps_its_header() {
+    let mut m = showcase_review(341, 120, 38);
+    let (before, _) = common::render(&mut m, 120, 38);
+    assert!(before.contains("No findings") && !before.contains("J/K"), "{before}");
+    press(&mut m, KeyCode::Char('J'));
+    assert_eq!((m.ui.doc_scroll, common::render(&mut m, 120, 38).0), (0, before));
+}
+
+#[test]
+fn a_taller_terminal_pulls_the_scroll_back_to_what_still_hides() {
+    let mut m = showcase_review(1287, 120, 16);
+    for _ in 0..200 {
+        press(&mut m, KeyCode::Char('J'));
+    }
+    let short = m.ui.doc_scroll;
+    update(&mut m, Msg::Resize(120, 38));
+    let limit = pr_review_tui::view::doc_scroll_limit(&m);
+    assert!(short > limit, "{short} {limit}");
+    assert_eq!(m.ui.doc_scroll, limit);
 }

@@ -5,14 +5,14 @@ expression: frame
   pr-review · ▘ reviewing #184 publish                                                                          ● live
 
 
-    acme/shop #184 → publication preview
+    acme/shop #184 → publication
 
     Published on GitHub
     acme/shop #184 at 4444444 · as event COMMENT · 1 inline comment
 
     ✓ published on GitHub as review 3141
       https://github.com/acme/shop/pull/184#pullrequestreview-3141
-      o opens it in the browser
+      o opens it on GitHub
 
     Summary
       Automated PR review
@@ -39,19 +39,19 @@ expression: frame
         41 -   if (slot.free) {
         41 +   if (slot.free && !slot.held) {
       … 6 more below, j scrolls
-   j/k scroll  m raw markdown  o open on GitHub  Esc close           1 inbox  2 review  3 diff  4 timeline  5 settings
+   j/k scroll  m raw markdown  o open on GitHub  d diff  Esc close   1 inbox  2 review  3 diff  4 timeline  5 settings
 
 aabbbbbbbbbacadabbbbbbbbbabbbbadddddddaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaeaeeeeaa
 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-aaaacccccccccaccccacadddddddddddadddddddaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+aaaacccccccccaccccacadddddddddddaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 aaaabbbbbbbbbabbabbbbbbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 aaaacccccccccaccccaccacccccccacaccacccccacccccccacacaccccccacccccccaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 aaaaeaeeeeeeeeeaeeaeeeeeeaeeaeeeeeeaeeeeaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 aaaaaaddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-aaaaaacacccccaccaccacccacccccccaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+aaaaaacacccccaccaccaccccccaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 aaaadddddddaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 aaaaaabbbbbbbbbabbabbbbbbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
@@ -78,7 +78,7 @@ aaaagggghhgggggkkkkkgllllglgkkkkkgmmmmlllllggggggggggggggggggggggggggggggggggggg
 aaaannnnoonpnnnqqnrrrrrrrrrrrnrnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnnaaaa
 aaaassssttsusssvvswwwwwwwwwwswwswwwwwwwwwwwswsssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssaaaa
 aaaaaacacaccccaccccccacacccccccaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-aaacccaccccccaacacccaccccccccaacaccccaccaccccccaacccacccccaaaaaaaaaaacacccccaacaddddddaacaccccaacaccccccccaacaccccccccaa
+aaacccaccccccaacacccaccccccccaacaccccaccaccccccaacaccccaacccacccccaaacacccccaacaddddddaacaccccaacaccccccccaacaccccccccaa
 
 a - on base
 b text on base

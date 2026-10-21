@@ -24,7 +24,7 @@ expression: settings
       epoch, last sequence  -, 0
       snapshot, heartbeat   never, never
       resyncs / reconnects  0 / 0
-      activity              0 feed entries kept (cap 2000); 0 tool events applied
+      activity              0 feed entries (cap 2000); 0 tool events applied
 
     Display
       glyphs                unicode
@@ -39,4 +39,4 @@ expression: settings
 
 
 
-   j/k account  Enter select account  1-5 views  ? help  q quit      1 inbox  2 review  3 diff  4 timeline  5 settings
+   Esc back  ? help  q quit                                          1 inbox  2 review  3 diff  4 timeline  5 settings

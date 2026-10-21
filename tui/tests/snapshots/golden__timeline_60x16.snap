@@ -3,12 +3,9 @@ source: tests/golden.rs
 expression: text
 ---
   pr-review · ▘ reviewing #184 verify new finding   ● live
-
-
   acme/shop  #184  timeline
   Booking API
-  2 events, oldest first · the whole PR (f) · all kinds (…
-
+  2 events · oldest first · the whole PR (f)
   VERIFY ─────────────────────────────────────── 13:00:11
     13:00:11    read_file     src/booking.ts:1-120
   ▌ 13:00:12  ▲ HIGH          Finding f-1  detected
@@ -17,4 +14,7 @@ expression: text
 
 
 
-   j/k move  Enter detail  / filter  Esc back  ? help
+
+
+
+   j/k move  Enter detail  Esc back  ? help  q quit

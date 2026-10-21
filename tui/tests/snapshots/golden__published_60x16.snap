@@ -4,17 +4,17 @@ expression: text
 ---
   pr-review · ▘ reviewing #184 publish              ● live
 
-
-  acme/shop #184 → publication preview
+  acme/shop #184 → publication
 
   Published on GitHub
   acme/shop #184 at 4444444 · as event COMMENT · 1 inline…
 
   ✓ published on GitHub as review 3141
     https://github.com/acme/shop/pull/184#pullrequestrevi…
-    o opens it in the browser
+    o opens it on GitHub
 
   Summary
     Automated PR review
-    … 31 more below, j scrolls
-   j/k scroll  m raw markdown  o open on GitHub  Esc close
+
+    … 30 more below, j scrolls
+   j/k scroll  m raw  o open  d diff  Esc close   1 2 3 4 5

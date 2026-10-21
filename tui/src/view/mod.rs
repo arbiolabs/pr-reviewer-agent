@@ -15,7 +15,7 @@ use ratatui::layout::{Constraint, Layout, Rect};
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
-use crate::model::{ConfirmState, InputPurpose, Link, Modal, Model, Pane, Screen};
+use crate::model::{InputPurpose, Link, Modal, Model, Pane, Screen};
 use crate::text::{fit, pad};
 use crate::theme::{Role, Theme};
 
@@ -72,6 +72,13 @@ pub(crate) fn window(len: usize, selected: Option<usize>, height: usize) -> std:
     start..start + height
 }
 
+/// What an empty view says while the link is down and no snapshot ever arrived, so there is no PR to pick.
+pub(crate) fn never_loaded(c: &Ctx) -> Option<&'static str> {
+    let down = matches!(c.m.link, Link::Disconnected { .. } | Link::Unusable { .. } | Link::Incompatible { .. });
+    (down && c.m.diag.last_snapshot_ms.is_none())
+        .then_some("Not connected to a daemon, so there is nothing to show yet.")
+}
+
 /// What a click lands on.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Hit {
@@ -97,12 +104,12 @@ fn ctx(m: &Model, width: u16) -> Ctx<'_> {
     }
 }
 
-/// The title, spacer, banner, body and footer rows.
+/// The title, spacer, banner, body and footer rows. Below 20 rows the spacer goes to the body.
 fn regions(c: &Ctx, area: Rect) -> [Rect; 5] {
     let banner = banner(c, area.width).is_some();
     Layout::vertical([
         Constraint::Length(1),
-        Constraint::Length(1),
+        Constraint::Length(u16::from(area.height >= 20)),
         Constraint::Length(u16::from(banner)),
         Constraint::Min(1),
         Constraint::Length(1),
@@ -134,9 +141,10 @@ pub fn hit(m: &Model, x: u16, y: u16) -> Option<Hit> {
 
 /// The view whose number or name in the footer's list covers column `x`.
 fn view_at(c: &Ctx, footer: Rect, x: u16) -> Option<Screen> {
-    let vw = views_w(c) as u16;
+    let strip = footer_parts(c, footer.width).1;
+    let vw = strip_w(c, strip) as u16;
     let mut at = (footer.x + footer.width.saturating_sub(vw)) as usize;
-    for (i, pair) in views_line(c).spans.chunks(2).enumerate() {
+    for (i, pair) in views_line(c, strip).spans.chunks(2).enumerate() {
         let w: usize = pair.iter().map(|s| crate::text::width(&s.content)).sum();
         if vw > 0 && (at..at + w).contains(&(x as usize)) {
             return Screen::ALL.get(i).copied();
@@ -177,7 +185,6 @@ pub fn view(m: &Model, f: &mut Frame) {
     let banner = banner(&c, area.width);
     let [title, tabs, banner_area, body, footer] = regions(&c, area);
     f.render_widget(Paragraph::new(status_line(&c, title.width)), title);
-    let _ = tabs;
     if let Some(b) = banner {
         f.render_widget(Paragraph::new(b), banner_area);
     }
@@ -187,23 +194,30 @@ pub fn view(m: &Model, f: &mut Frame) {
         Screen::Timeline => timeline::timeline(&c, f, body),
         Screen::Settings => modals::settings(&c, f, body),
     }
-    f.render_widget(Paragraph::new(footer_line(&c, footer.width.saturating_sub(views_w(&c) as u16 + 2))), footer);
-    let vw = views_w(&c) as u16;
+    let (hints, strip) = footer_parts(&c, footer.width);
+    let vw = strip_w(&c, strip) as u16;
+    f.render_widget(Paragraph::new(footer_line(&c, footer.width.saturating_sub(vw + 2), hints)), footer);
     let vr = Rect { x: footer.x + footer.width.saturating_sub(vw), width: vw.min(footer.width), ..footer };
-    f.render_widget(Paragraph::new(views_line(&c)), vr);
+    f.render_widget(Paragraph::new(views_line(&c, strip)), vr);
     for modal in &m.ui.modals {
         modals::modal(&c, f, body, modal);
     }
     toast(&c, f, footer, body);
+    if let Some(n) = m.notice.as_ref().filter(|_| m.top_modal().is_some()) {
+        let row = if tabs.height > 0 { tabs } else { title };
+        let line =
+            c.span(c.pad(&c.fit(&format!(" {}", n.text), row.width as usize), row.width as usize), Role::Pending);
+        f.render_widget(Paragraph::new(Line::from(line)), row);
+    }
 }
 
 /// A notice too long for the footer beside the views takes the whole footer and wraps upward over the body's last
 /// rows, instead of being cut.
 fn toast(c: &Ctx, f: &mut Frame, footer: Rect, body: Rect) {
-    let Some(n) = c.m.notice.as_ref().filter(|_| !matches!(c.m.top_modal(), Some(Modal::Input { .. }))) else {
+    let Some(n) = c.m.notice.as_ref().filter(|_| c.m.top_modal().is_none()) else {
         return;
     };
-    let room = footer.width.saturating_sub(views_w(c) as u16 + 3) as usize;
+    let room = footer.width.saturating_sub(views_w(c, footer.width) as u16 + 3) as usize;
     if crate::text::width(&n.text) <= room {
         return;
     }
@@ -225,11 +239,13 @@ fn link_status(c: &Ctx) -> (String, Role) {
     let g = c.t.g();
     match &c.m.link {
         Link::Live => (format!("{} live", g.active), Role::Ok),
-        Link::Syncing => (format!("{} loading snapshot", g.pending), Role::Pending),
-        Link::Resyncing => (format!("{} resyncing", g.pending), Role::Pending),
+        Link::Syncing => (format!("{} loading snapshot{}", g.pending, g.ellipsis), Role::Pending),
+        Link::Resyncing => (format!("{} resyncing{}", g.pending, g.ellipsis), Role::Pending),
         Link::Stalled { .. } => (format!("{} snapshot timed out", g.fail), Role::Fail),
-        Link::Negotiating => (format!("{} negotiating", g.pending), Role::Pending),
-        Link::Connecting { attempt } => (format!("{} connecting (attempt {attempt})", g.pending), Role::Pending),
+        Link::Negotiating => (format!("{} negotiating{}", g.pending, g.ellipsis), Role::Pending),
+        Link::Connecting { attempt } => {
+            (format!("{} connecting{} (attempt {attempt})", g.pending, g.ellipsis), Role::Pending)
+        }
         Link::Disconnected { .. } => (format!("{} disconnected", g.fail), Role::Fail),
         Link::Incompatible { .. } => (format!("{} incompatible", g.fail), Role::Fail),
         Link::Unusable { .. } => (format!("{} cannot connect", g.fail), Role::Fail),
@@ -249,17 +265,12 @@ fn status_line(c: &Ctx, width: u16) -> Line<'static> {
     let newest = c.m.domain.activity.iter().rev().find(|a| active.iter().any(|r| a.pr_id.as_ref() == Some(&r.pr_id)));
     // The review the line names: the one with the newest activity, else the first running one.
     let named = newest.and_then(|a| active.iter().find(|r| a.pr_id.as_ref() == Some(&r.pr_id))).or(active.first());
-    let waiting = |n: usize| match n {
-        0 => String::new(),
-        n if w >= 100 => format!("  {} {n} awaiting you", g.pending),
-        n => format!("  {}{n}", g.pending),
-    };
     match named {
         // Off the stream, the cache is a photo: say how old it is rather than what it claims is running.
         _ if c.m.link != Link::Live => {
             let text = match (c.m.diag.last_snapshot_ms, &c.m.link) {
                 (Some(at), _) => format!("last known state, {}s old", c.m.now_ms.saturating_sub(at) / 1000),
-                (None, Link::Negotiating | Link::Syncing) => "waiting for the first snapshot".into(),
+                (None, Link::Negotiating | Link::Syncing) => format!("waiting for the first snapshot{}", g.ellipsis),
                 (None, _) => "not connected".into(),
             };
             left.push(c.span(text, Role::Muted));
@@ -271,14 +282,29 @@ fn status_line(c: &Ctx, width: u16) -> Line<'static> {
                 left.push(c.span(format!("reviewing #{} ", p.number), Role::Normal));
             }
             left.push(c.span(format!("{} ", doc::phase_label(r.phase)), Role::Accent));
-            let more = match active.len() {
-                1 => String::new(),
-                n if w >= 100 => format!("  +{} more running", n - 1),
-                n => format!("  +{}", n - 1),
+            // Each count keeps a noun or goes: the longest pair of notes that fits, then shorter, then none.
+            let (others, n_parked) = (active.len() - 1, parked.len());
+            let notes = |level: usize| {
+                let more = match (others, level) {
+                    (0, _) | (_, 2..) => String::new(),
+                    (n, 0) => format!("  +{n} more running"),
+                    (n, _) => format!("  +{n} more"),
+                };
+                let parked_note = match (n_parked, level) {
+                    (0, _) | (_, 2..) => String::new(),
+                    (n, 0) => format!("  {} {n} waiting for you", g.pending),
+                    (n, _) => format!("  {} {n} waiting", g.pending),
+                };
+                (more, parked_note)
             };
-            let parked_note = waiting(parked.len());
             let used: usize = left.iter().chain(&right).map(|s| crate::text::width(&s.content)).sum();
-            let room = w.saturating_sub(used + crate::text::width(&more) + crate::text::width(&parked_note) + 2);
+            let width_of = |(a, b): &(String, String)| crate::text::width(a) + crate::text::width(b);
+            // Below 100 columns the short notes leave the activity words room.
+            let first = if w >= 100 { 0 } else { 1 };
+            let fits = |n: &(String, String)| used + width_of(n) + 2 <= w;
+            let chosen = (first..3).map(notes).find(fits).unwrap_or_else(|| notes(2));
+            let room = w.saturating_sub(used + width_of(&chosen) + 2);
+            let (more, parked_note) = chosen;
             let words = newest
                 .filter(|a| a.pr_id.as_ref() == Some(&r.pr_id))
                 .map_or(vec![], |a| activity_words(&a.kind, Some(r.phase)));
@@ -292,7 +318,11 @@ fn status_line(c: &Ctx, width: u16) -> Line<'static> {
                 parked.iter().filter_map(|r| c.m.domain.prs.get(&r.pr_id).map(|p| p.number)).collect();
             numbers.sort();
             let list = numbers.iter().map(|n| format!("#{n}")).collect::<Vec<_>>().join(" ");
-            left.push(c.span(format!("{} {list} waiting for you {} p previews", g.pending, g.sep), Role::Pending));
+            // The key that gets the reader there from here, if one does.
+            let offered = crate::offer::offered(c.m);
+            let key = ["p previews", "w shows it"].into_iter().find(|k| offered.iter().any(|h| k.starts_with(h.keys)));
+            let key = key.map_or(String::new(), |k| format!(" {} {k}", g.sep));
+            left.push(c.span(format!("{} {list} waiting for you{key}", g.pending), Role::Pending));
         }
         None => {
             let n = c.m.domain.prs.len();
@@ -327,20 +357,50 @@ fn activity_words(kind: &crate::model::ActivityKind, phase: Option<crate::protoc
     }
 }
 
-fn views_line(c: &Ctx) -> Line<'static> {
+/// How much of the views list the footer shows beside its hints.
+#[derive(Clone, Copy, PartialEq)]
+enum Strip {
+    Names,
+    Numbers,
+    None,
+}
+
+/// The footer's hints and the views list beside them. The hints get room first: the list shrinks to numbers, then
+/// goes, before it costs a hint.
+fn footer_parts(c: &Ctx, width: u16) -> (Vec<crate::offer::Hint>, Strip) {
+    let w = width.saturating_sub(2) as usize;
+    let hints = crate::offer::fit(crate::offer::offered(c.m), w);
+    let need = crate::text::width(&crate::offer::line(&hints));
+    let strip = [Strip::Names, Strip::Numbers].into_iter().find(|s| need + strip_w(c, *s) <= w).unwrap_or(Strip::None);
+    (hints, strip)
+}
+
+fn views_line(c: &Ctx, strip: Strip) -> Line<'static> {
     let mut spans = Vec::new();
-    // Settings joins the list once the footer has room for it beside the hints.
-    let shown = if c.m.size.0 >= 120 { 5 } else { 4 };
-    for (i, s) in Screen::ALL.iter().take(shown).enumerate() {
+    for (i, s) in Screen::ALL.iter().enumerate().filter(|_| strip != Strip::None) {
         let on = *s == c.m.ui.screen;
-        spans.push(c.span(format!("{}", i + 1), Role::Muted));
-        spans.push(c.span(format!(" {}  ", s.label().to_lowercase()), if on { Role::Focus } else { Role::Muted }));
+        let role = if on { Role::Focus } else { Role::Muted };
+        match strip {
+            Strip::Names => {
+                spans.push(c.span(format!("{}", i + 1), Role::Muted));
+                spans.push(c.span(format!(" {}  ", s.label().to_lowercase()), role));
+            }
+            _ => {
+                spans.push(c.span(format!("{}", i + 1), role));
+                spans.push(c.span(" ", Role::Muted));
+            }
+        }
     }
     Line::from(spans)
 }
 
-fn views_w(c: &Ctx) -> usize {
-    if c.m.size.0 < 100 { 0 } else { views_line(c).spans.iter().map(|s| crate::text::width(&s.content)).sum() }
+fn strip_w(c: &Ctx, strip: Strip) -> usize {
+    views_line(c, strip).spans.iter().map(|s| crate::text::width(&s.content)).sum()
+}
+
+/// The columns the views list takes at the right of a `width`-column footer.
+fn views_w(c: &Ctx, width: u16) -> usize {
+    strip_w(c, footer_parts(c, width).1)
 }
 
 fn banner(c: &Ctx, width: u16) -> Option<Line<'static>> {
@@ -367,7 +427,7 @@ fn banner(c: &Ctx, width: u16) -> Option<Line<'static>> {
     Some(Line::from(c.span(c.fit(&text, width as usize), role)))
 }
 
-fn footer_line(c: &Ctx, width: u16) -> Line<'static> {
+fn footer_line(c: &Ctx, width: u16, hints: Vec<crate::offer::Hint>) -> Line<'static> {
     let w = width as usize;
     if let Some(Modal::Input { purpose, buffer, .. }) = c.m.top_modal() {
         let prompt = match purpose {
@@ -383,75 +443,11 @@ fn footer_line(c: &Ctx, width: u16) -> Line<'static> {
             c.span("  Enter apply  Esc cancel", Role::Muted),
         ]);
     }
-    if let Some(n) = &c.m.notice {
+    // Under a panel the footer is the panel's key line, and the toast shows below the title.
+    if let Some(n) = c.m.notice.as_ref().filter(|_| c.m.top_modal().is_none()) {
         return Line::from(c.span(c.pad(&format!(" {}", n.text), w), Role::Pending));
     }
-    let hints = match (c.m.top_modal(), c.m.ui.screen) {
-        (Some(Modal::Help { .. }), _) => "j/k scroll  Esc close  q quit",
-        (Some(Modal::Finding { .. }), _) => "j/k scroll  n/N finding  d diff at anchor  t timeline  Esc close",
-        (Some(Modal::Confirm { state: ConfirmState::Asking | ConfirmState::TimedOut, .. }), _) => {
-            "y confirm  n/Esc cancel"
-        }
-        (Some(Modal::Confirm { .. }), _) => "Esc closes",
-        (Some(Modal::Publication { raw: false, .. }), _) => {
-            "j/k scroll  y publish  m raw markdown  o open on GitHub  Esc close"
-        }
-        (Some(Modal::Publication { raw: true, .. }), _) => {
-            "j/k scroll  y publish  m styled  o open on GitHub  Esc close"
-        }
-        (_, Screen::Inbox) => "j/k pull request  Enter read  / search  ? help  q quit",
-        (_, Screen::Review) if c.m.ui.focus == Pane::Sidebar => {
-            "j/k pull request  Enter read  / search  l findings  ? help  q quit"
-        }
-        (_, Screen::Review) => {
-            "j/k finding  Enter read  d diff  J/K scroll  h pull requests  t timeline  ? help  q quit"
-        }
-        (_, Screen::Diff) if c.m.ui.focus == Pane::Sidebar => "j/k file  Enter or l code  Esc back  ? help",
-        (_, Screen::Diff) if c.m.diff.as_ref().is_some_and(|d| d.search.is_some()) => {
-            "j/k line  n/N match  Enter read  h files  / search  Esc clear search  ? help"
-        }
-        (_, Screen::Diff) => "j/k line  n/N finding  Enter read  h files  / search  : jump  Esc back  ? help",
-        (_, Screen::Timeline) if c.m.timeline.as_ref().is_some_and(|t| t.open.is_some()) => {
-            "j/k move  Enter fold or read  / filter  f scope  v kind  P phase  Esc fold  ? help"
-        }
-        (_, Screen::Timeline) => "j/k move  Enter detail  / filter  f scope  v kind  P phase  Esc back  ? help",
-        (_, Screen::Settings) => "j/k account  Enter select account  r refresh  1-5 views  ? help  q quit",
-    };
-    let running = c.m.domain.runs.values().any(|r| r.status == crate::protocol::RunStatus::Running);
-    let watch = running && c.m.top_modal().is_none();
-    let parked = c.m.selected_pr().and_then(|p| c.m.domain.latest_run(&p.id)).is_some_and(|r| r.parked());
-    let mut hints: Vec<&str> = hints.split("  ").collect();
-    if let Some(Modal::Publication { run_id, preview, publish, .. }) = c.m.top_modal() {
-        let can_publish = matches!(publish, crate::model::ConfirmState::Asking | crate::model::ConfirmState::TimedOut)
-            && matches!(preview, crate::model::Preview::Ready(p) if crate::update::publish_block(c.m, p).is_none());
-        let url = crate::update::published_url(c.m, run_id).is_some();
-        hints.retain(|h| (*h != "y publish" || can_publish) && (*h != "o open on GitHub" || url));
-    }
-    if watch {
-        hints.insert(2.min(hints.len()), "w watch live");
-    }
-    if parked && c.m.top_modal().is_none() {
-        hints.insert(1.min(hints.len()), "p preview & publish");
-    }
-    // Too wide: drop the least important hint, then the next, keeping the rest in order.
-    let line = |hints: &[&str]| format!("   {}", hints.join("  "));
-    while hints.len() > 1 && crate::text::width(&line(&hints)) > w {
-        let least = (0..hints.len()).min_by_key(|&i| (rank(hints[i]), std::cmp::Reverse(i))).unwrap_or(0);
-        hints.remove(least);
-    }
-    Line::from(c.span(c.fit(&line(&hints), w), Role::Muted))
-}
-
-/// How much a footer hint matters, by its key: moving, opening, going back and help outlast the shortcuts.
-fn rank(hint: &str) -> u8 {
-    match hint.split(' ').next().unwrap_or("") {
-        "j/k" | "Enter" | "Esc" | "?" => 4,
-        "h" | "l" | "y" | "n/Esc" => 3,
-        "q" | "n/N" | "/" | ":" | "d" | "m" => 2,
-        "t" | "w" | "f" | "1-5" => 1,
-        "p" => 3,
-        _ => 0,
-    }
+    Line::from(c.span(c.fit(&crate::offer::line(&hints), w), Role::Muted))
 }
 
 fn minimal(c: &Ctx, f: &mut Frame, area: Rect) {

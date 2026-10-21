@@ -1,5 +1,6 @@
 //! `(Context, KeyEvent) -> Action` as one table. A focused text input captures every key, so no shortcut fires while
-//! the user types. `y` is bound only in the confirmation modal.
+//! the user types, and a panel captures every key but its own and the few that work everywhere. `y` is bound only in
+//! the confirmation and publication panels.
 
 use crossterm::event::{KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 
@@ -7,7 +8,11 @@ use crate::model::{Modal, Screen};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Context {
+    /// Every screen and every panel.
     Global,
+    /// Every screen while no panel is open.
+    Screens,
+    /// The Review page with the PR list in focus: it takes the Review page's keys.
     Inbox,
     Review,
     Diff,
@@ -108,31 +113,33 @@ const TABLE: &[(Context, KeyCode, KeyModifiers, Action)] = &[
     (C::Global, K::Char('G'), SHIFT, A::Bottom),
     (C::Global, K::Char('G'), NONE, A::Bottom),
     (C::Global, K::End, NONE, A::Bottom),
-    (C::Global, K::Char('h'), NONE, A::Left),
-    (C::Global, K::Left, NONE, A::Left),
-    (C::Global, K::Char('l'), NONE, A::Right),
-    (C::Global, K::Right, NONE, A::Right),
-    (C::Global, K::Tab, NONE, A::FocusNext),
-    (C::Global, K::BackTab, SHIFT, A::FocusPrev),
-    (C::Global, K::BackTab, NONE, A::FocusPrev),
-    (C::Global, K::Enter, NONE, A::Open),
+    (C::Screens, K::Char('h'), NONE, A::Left),
+    (C::Screens, K::Left, NONE, A::Left),
+    (C::Screens, K::Char('l'), NONE, A::Right),
+    (C::Screens, K::Right, NONE, A::Right),
+    (C::Screens, K::Tab, NONE, A::FocusNext),
+    (C::Screens, K::BackTab, SHIFT, A::FocusPrev),
+    (C::Screens, K::BackTab, NONE, A::FocusPrev),
+    (C::Screens, K::Enter, NONE, A::Open),
     (C::Global, K::Char('1'), NONE, A::Goto(Screen::Inbox)),
     (C::Global, K::Char('2'), NONE, A::Goto(Screen::Review)),
     (C::Global, K::Char('3'), NONE, A::Goto(Screen::Diff)),
     (C::Global, K::Char('4'), NONE, A::Goto(Screen::Timeline)),
     (C::Global, K::Char('5'), NONE, A::Goto(Screen::Settings)),
-    (C::Global, K::Char('/'), NONE, A::Search),
-    (C::Global, K::Char('d'), NONE, A::OpenDiff),
-    (C::Global, K::Char('t'), NONE, A::OpenTimeline),
+    (C::Review, K::Char('/'), NONE, A::Search),
+    (C::Review, K::Char('d'), NONE, A::OpenDiff),
+    (C::Review, K::Char('t'), NONE, A::OpenTimeline),
     (C::Global, K::Char('r'), NONE, A::Refresh),
-    (C::Global, K::Char('A'), SHIFT, A::Accounts),
-    (C::Global, K::Char('A'), NONE, A::Accounts),
-    (C::Global, K::Char('s'), NONE, A::Mutation(Mutation::Start)),
-    (C::Global, K::Char('R'), SHIFT, A::Mutation(Mutation::Retry)),
-    (C::Global, K::Char('R'), NONE, A::Mutation(Mutation::Retry)),
-    (C::Global, K::Char('c'), NONE, A::Mutation(Mutation::Cancel)),
-    (C::Global, K::Char('p'), NONE, A::Mutation(Mutation::Publish)),
-    (C::Global, K::Char('w'), NONE, A::Watch),
+    (C::Screens, K::Char('A'), SHIFT, A::Accounts),
+    (C::Screens, K::Char('A'), NONE, A::Accounts),
+    (C::Review, K::Char('s'), NONE, A::Mutation(Mutation::Start)),
+    (C::Review, K::Char('R'), SHIFT, A::Mutation(Mutation::Retry)),
+    (C::Review, K::Char('R'), NONE, A::Mutation(Mutation::Retry)),
+    (C::Diff, K::Char('R'), SHIFT, A::Mutation(Mutation::Retry)),
+    (C::Diff, K::Char('R'), NONE, A::Mutation(Mutation::Retry)),
+    (C::Review, K::Char('c'), NONE, A::Mutation(Mutation::Cancel)),
+    (C::Review, K::Char('p'), NONE, A::Mutation(Mutation::Publish)),
+    (C::Screens, K::Char('w'), NONE, A::Watch),
     (C::Review, K::Char('J'), SHIFT, A::ScrollDown),
     (C::Review, K::Char('J'), NONE, A::ScrollDown),
     (C::Review, K::Char('K'), SHIFT, A::ScrollUp),
@@ -151,6 +158,8 @@ const TABLE: &[(Context, KeyCode, KeyModifiers, Action)] = &[
     (C::Timeline, K::Char('v'), NONE, A::CycleCategory),
     (C::Timeline, K::Char('P'), SHIFT, A::CyclePhase),
     (C::Timeline, K::Char('P'), NONE, A::CyclePhase),
+    (C::FindingModal, K::Char('d'), NONE, A::OpenDiff),
+    (C::FindingModal, K::Char('t'), NONE, A::OpenTimeline),
     (C::FindingModal, K::Char('n'), NONE, A::NextFinding),
     (C::FindingModal, K::Char('N'), SHIFT, A::PrevFinding),
     (C::FindingModal, K::Char('N'), NONE, A::PrevFinding),
@@ -158,6 +167,7 @@ const TABLE: &[(Context, KeyCode, KeyModifiers, Action)] = &[
     (C::PublicationModal, K::Char('y'), NONE, A::Confirm),
     (C::PublicationModal, K::Char('o'), NONE, A::OpenUrl),
     (C::PublicationModal, K::Char('m'), NONE, A::ToggleRaw),
+    (C::PublicationModal, K::Char('d'), NONE, A::OpenDiff),
     (C::ConfirmModal, K::Char('n'), NONE, A::Back),
 ];
 
@@ -177,7 +187,8 @@ pub fn context(screen: Screen, modal: Option<&Modal>) -> Context {
     }
 }
 
-/// Resolves a key against the context's own bindings, then the global ones.
+/// Resolves a key against the context's own bindings, then the ones every screen shares (no panel open), then the
+/// global ones.
 pub fn resolve(screen: Screen, modal: Option<&Modal>, key: KeyEvent) -> Option<Action> {
     if key.kind == KeyEventKind::Release {
         return None;
@@ -196,7 +207,9 @@ pub fn resolve(screen: Screen, modal: Option<&Modal>, key: KeyEvent) -> Option<A
     let lookup = |c: Context| {
         TABLE.iter().find(|(tc, code, mods, _)| *tc == c && *code == key.code && *mods == key.modifiers).map(|t| t.3)
     };
-    lookup(ctx).or_else(|| lookup(C::Global))
+    let page = (ctx == C::Inbox).then_some(C::Review);
+    let screens = modal.is_none().then_some(C::Screens);
+    [Some(ctx), page, screens, Some(C::Global)].into_iter().flatten().find_map(lookup)
 }
 
 /// The help page's rows by context, read from the same table so help never drifts from behavior: the context, its keys,

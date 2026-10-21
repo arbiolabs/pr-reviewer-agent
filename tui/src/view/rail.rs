@@ -8,7 +8,7 @@ use ratatui::style::Style;
 use ratatui::text::{Line, Span};
 use ratatui::widgets::Paragraph;
 
-use super::doc::{current, filled, spinner, split_row};
+use super::doc::{current, filled, spans_w, spinner, split_row};
 use super::live::{per_sec, rate_cell, stepper};
 use super::{Ctx, window};
 use crate::model::{InputPurpose, Link, Modal};
@@ -21,8 +21,10 @@ use crate::theme::{Bg, Role};
 pub fn rail_w(width: u16) -> u16 {
     (34 + width.saturating_sub(140) * 14 / 60).min(48)
 }
-/// Rows above the first PR: blank, heading, filter or blank.
-pub const RAIL_HEAD: u16 = 3;
+/// Rows above the first PR: blank, heading, filter or blank. Below 20 rows the blank goes to the list.
+pub fn rail_head(c: &Ctx) -> u16 {
+    if c.m.size.1 < 20 { 2 } else { 3 }
+}
 
 /// What an empty rail says: no snapshot yet, no reviewer to ask, nothing tracked, or nothing matching the filter.
 pub fn empty_rail(c: &Ctx, total: usize) -> Vec<(String, Role)> {
@@ -35,7 +37,7 @@ pub fn empty_rail(c: &Ctx, total: usize) -> Vec<(String, Role)> {
             return vec![(format!("  unavailable: {message}"), Role::Fail)];
         }
         Link::Connecting { .. } | Link::Negotiating | Link::Syncing => {
-            return vec![("  loading the snapshot".into(), Role::Muted)];
+            return vec![(format!("  loading the snapshot{}", c.t.g().ellipsis), Role::Muted)];
         }
         Link::Live | Link::Resyncing => return vec![("  nothing tracked yet".into(), Role::Muted)],
     };
@@ -49,7 +51,7 @@ pub fn empty_rail(c: &Ctx, total: usize) -> Vec<(String, Role)> {
 
 /// Rows each PR takes; the spacer row goes when the list would not fit.
 pub fn row_h(c: &Ctx, height: u16) -> u16 {
-    if c.m.inbox().len() as u16 * 3 + RAIL_HEAD <= height { 3 } else { 2 }
+    if c.m.inbox().len() as u16 * 3 + rail_head(c) <= height { 3 } else { 2 }
 }
 
 pub fn rail(c: &Ctx, f: &mut Frame, area: Rect, focused: bool) {
@@ -61,18 +63,16 @@ pub fn rail(c: &Ctx, f: &mut Frame, area: Rect, focused: bool) {
     let head_role = if focused { Role::Accent } else { Role::Muted };
     let typing = matches!(c.m.top_modal(), Some(Modal::Input { purpose: InputPurpose::Search, .. }));
     let count = if prs.len() == total { format!("{total}  ") } else { format!("{} of {total}  ", prs.len()) };
-    let mut lines = vec![
-        Line::from(filled(vec![], w, bg)),
-        Line::from(filled(
-            split_row(
-                vec![Span::raw("  "), Span::styled("PULL REQUESTS", c.s(head_role).patch(bg))],
-                vec![Span::styled(count, c.s(Role::Muted).patch(bg))],
-                w,
-            ),
+    let mut lines = vec![Line::from(filled(vec![], w, bg)); rail_head(c) as usize - 2];
+    lines.extend([Line::from(filled(
+        split_row(
+            vec![Span::raw("  "), Span::styled("PULL REQUESTS", c.s(head_role).patch(bg))],
+            vec![Span::styled(count, c.s(Role::Muted).patch(bg))],
             w,
-            bg,
-        )),
-    ];
+        ),
+        w,
+        bg,
+    ))]);
     let filter = &c.m.ui.pr_filter;
     lines.push(Line::from(if filter.is_empty() && !typing {
         filled(vec![], w, bg)
@@ -101,7 +101,7 @@ pub fn rail(c: &Ctx, f: &mut Frame, area: Rect, focused: bool) {
     let sel = c.m.ui.selected_pr.as_ref().and_then(|id| prs.iter().position(|p| &p.id == id));
     if range.start > 0 {
         lines.pop();
-        let more = format!("  {} {} more above", c.t.g().arrow, range.start);
+        let more = format!("  {} {} more above", c.t.g().up, range.start);
         lines.push(Line::from(filled(vec![Span::styled(more, c.s(Role::Muted).patch(bg))], w, bg)));
     }
     let below = prs.len() - range.end;
@@ -110,7 +110,7 @@ pub fn rail(c: &Ctx, f: &mut Frame, area: Rect, focused: bool) {
         lines.extend(pr_rows(c, pr, w, selected, rh));
     }
     if below > 0 {
-        let more = format!("  {} more below", below);
+        let more = format!("  {} {below} more below", c.t.g().down);
         let last = lines.len().min(area.height as usize) - 1;
         lines.truncate(last);
         lines.push(Line::from(filled(vec![Span::styled(more, c.s(Role::Muted).patch(bg))], w, bg)));
@@ -122,7 +122,7 @@ pub fn rail(c: &Ctx, f: &mut Frame, area: Rect, focused: bool) {
 fn visible(c: &Ctx, prs: &[&Pr], height: u16) -> (std::ops::Range<usize>, usize) {
     let rh = row_h(c, height) as usize;
     let sel = c.m.ui.selected_pr.as_ref().and_then(|id| prs.iter().position(|p| &p.id == id));
-    let fits = (height as usize).saturating_sub(RAIL_HEAD as usize) / rh;
+    let fits = (height as usize).saturating_sub(rail_head(c) as usize) / rh;
     (window(prs.len(), sel, fits), rh)
 }
 
@@ -130,7 +130,7 @@ fn visible(c: &Ctx, prs: &[&Pr], height: u16) -> (std::ops::Range<usize>, usize)
 pub fn pr_at(c: &Ctx, area: Rect, y: u16) -> Option<crate::protocol::PrId> {
     let prs = c.m.inbox();
     let (range, rh) = visible(c, &prs, area.height);
-    let k = (y.checked_sub(area.y + RAIL_HEAD)? as usize) / rh;
+    let k = (y.checked_sub(area.y + rail_head(c))? as usize) / rh;
     let i = range.start + k;
     (i < range.end).then(|| prs[i].id.clone())
 }
@@ -176,7 +176,7 @@ fn pr_rows(c: &Ctx, pr: &Pr, w: usize, selected: bool, rh: usize) -> Vec<Line<'s
         vec![Span::styled(marker.to_string(), on(Role::Accent)), Span::styled(format!("   {repo} "), on(Role::Muted))];
     let right: Vec<Span<'static>> = match run {
         None => vec![Span::styled("not reviewed ", on(Role::Muted))],
-        Some(r) if r.parked() => vec![Span::styled(format!("{} awaiting you ", g.pending), on(Role::Pending))],
+        Some(r) if r.parked() => vec![Span::styled(format!("{} waiting for you ", g.pending), on(Role::Pending))],
         Some(r) if r.status == RunStatus::Running => {
             let rate = per_sec(c, Some(&pr.id));
             let mut s: Vec<Span<'static>> = stepper(c, r).into_iter().map(|s| s.patch_style(row_bg)).collect();
@@ -192,11 +192,13 @@ fn pr_rows(c: &Ctx, pr: &Pr, w: usize, selected: bool, rh: usize) -> Vec<Line<'s
         Some(_) if findings.is_empty() => vec![Span::styled(format!("{} clean ", g.ok), on(Role::Ok))],
         Some(_) => counts(c, &findings, row_bg),
     };
-    let sha_room = w.saturating_sub(width(&repo) + 6 + right.iter().map(|s| width(&s.content)).sum::<usize>());
     let mut left = left;
-    if sha_room >= 9 && run.is_none_or(|r| r.status != RunStatus::Running) {
-        let sep = if w >= 60 { format!("{} ", g.sep) } else { String::new() };
-        left.push(Span::styled(format!("{sep}{}", pr.head_sha.short()), on(Role::Muted)));
+    let sep = if w >= 60 { format!("{} ", g.sep) } else { String::new() };
+    let sha = format!("{sep}{}", pr.head_sha.short());
+    // The cells the row's glyphs really take, so `->0` in ASCII counts one wider than `→0`; two spaces before the counts.
+    let fits = spans_w(&left) + width(&sha) + 2 + spans_w(&right) <= w;
+    if fits && run.is_none_or(|r| r.status != RunStatus::Running) {
+        left.push(Span::styled(sha, on(Role::Muted)));
     }
     let mut out = vec![
         Line::from(filled(first, w, row_bg)).style(row_bg),

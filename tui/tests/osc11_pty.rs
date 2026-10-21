@@ -72,21 +72,73 @@ fn the_background_query_reads_the_reply_and_hands_on_only_what_was_typed() {
     assert!(took < Duration::from_millis(60), "took {took:?}");
     assert_eq!(typed, [KeyCode::Char('j'), KeyCode::Char('k')], "no [ or A from the arrow key");
 
+    // Alt+Up is ESC ESC [ A: the second ESC starts the arrow's sequence, which drops whole too.
+    detect_on_pty(b"j\x1b\x1b[Ak\x1b]11;rgb:ffff/ffff/ffff\x07\x1b[?62;22c", Duration::ZERO, b"");
+    let typed: Vec<KeyCode> = typed_before_start().into_iter().map(|k| k.code).collect();
+    assert_eq!(typed, [KeyCode::Char('j'), KeyCode::Char('k')], "no [ or A from Alt+Up");
+
     // The deadline falls inside the reply: its tail reaches the key reader without the opening Alt+].
     let (palette, _) = detect_on_pty(b"\x1b]11;rgb:ffff/ff", Duration::from_millis(150), b"ff/ffff\x07\x1b[?62;22c");
     assert_eq!(palette, Palette::Dark);
+    assert_eq!(after_query("ff/ffff\x07j"), [KeyCode::Char('j')], "the tail is swallowed; the next key acts");
+
+    // Cut between the reply's ESC and its ]: the tail starts with a plain ].
+    detect_on_pty(b"\x1b", Duration::from_millis(150), b"]11;rgb:ffff/ffff/ffff\x07\x1b[?62;22c");
+    assert_eq!(after_query("]11;rgb:ffff/ffff/ffff\x07j"), [KeyCode::Char('j')], "cut before ]");
+
+    // A bare Esc typed in the first 100 ms on a slow terminal: the Esc acts, and the whole late reply, which
+    // crossterm reads as Alt+] and keys, is swallowed.
+    let (palette, _) =
+        detect_on_pty(b"\x1b", Duration::from_millis(150), b"\x1b]11;rgb:ffff/ffff/ffff\x07\x1b[?62;22c");
+    assert_eq!(palette, Palette::Dark);
+    let typed: Vec<KeyCode> = typed_before_start().into_iter().map(|k| k.code).collect();
+    assert_eq!(typed, [KeyCode::Esc], "the early Esc reaches the app");
+    let mut keys = vec![KeyEvent::new(KeyCode::Char(']'), KeyModifiers::ALT)];
+    keys.extend("11;rgb:ffff/ffff/ffff".chars().map(|c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)));
+    keys.push(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::CONTROL));
+    keys.push(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
+    let acted = |at: u64| -> Vec<KeyCode> {
+        let mut late = LateReply::after_query();
+        keys.iter()
+            .filter_map(|k| input(Event::Key(*k), &mut late, Duration::from_millis(at)))
+            .filter_map(|m| match m {
+                Msg::Key(k) => Some(k.code),
+                _ => None,
+            })
+            .collect()
+    };
+    assert_eq!(acted(60), [KeyCode::Char('j')], "the late reply is swallowed whole; the next key acts");
+
+    // The same reply 300 ms in, after the filter the cut opened has expired: its Alt+] opens a new one.
+    detect_on_pty(b"\x1b", Duration::from_millis(150), b"\x1b]11;rgb:ffff/ffff/ffff\x07\x1b[?62;22c");
+    assert_eq!(acted(300), [KeyCode::Char('j')], "a reply later than the cut's burst is swallowed too");
+
+    // Cut inside the DA1 reply: its digits and final c drop, and a key after the c acts, hex digit or not.
+    let (palette, _) = detect_on_pty(b"\x1b]11;rgb:ffff/ffff/ffff\x07\x1b[?6", Duration::from_millis(150), b"2;22c");
+    assert_eq!(palette, Palette::Light);
+    assert_eq!(after_query("2;22c1"), [KeyCode::Char('1')], "cut inside DA1");
+
+    // Cut between DA1's ESC and its [: the tail is a plain [ and the rest of DA1.
+    detect_on_pty(b"\x1b]11;rgb:ffff/ffff/ffff\x07\x1b", Duration::from_millis(150), b"[?62;22c");
+    assert_eq!(after_query("[?62;22cf"), [KeyCode::Char('f')], "cut before DA1's [");
+
+    // Cut between DA1's [ and its ?: the tail is the rest of DA1.
+    detect_on_pty(b"\x1b]11;rgb:ffff/ffff/ffff\x07\x1b[", Duration::from_millis(150), b"?62;22c");
+    assert_eq!(after_query("?62;22cf"), [KeyCode::Char('f')], "cut after DA1's [");
+}
+
+/// What acts of `tail` (BEL as Ctrl+G, the rest as plain keys) once it reaches the key reader just after the query.
+fn after_query(tail: &str) -> Vec<KeyCode> {
     let mut late = LateReply::after_query();
-    let key = |c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE);
-    let mut tail: Vec<KeyEvent> = "ff/ffff".chars().map(key).collect();
-    tail.push(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::CONTROL));
-    tail.push(key('j'));
-    let acted: Vec<KeyCode> = tail
-        .into_iter()
+    tail.chars()
+        .map(|c| match c {
+            '\x07' => KeyEvent::new(KeyCode::Char('g'), KeyModifiers::CONTROL),
+            c => KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE),
+        })
         .filter_map(|k| input(Event::Key(k), &mut late, Duration::from_millis(60)))
         .filter_map(|m| match m {
             Msg::Key(k) => Some(k.code),
             _ => None,
         })
-        .collect();
-    assert_eq!(acted, [KeyCode::Char('j')], "the tail is swallowed; the next key acts");
+        .collect()
 }
