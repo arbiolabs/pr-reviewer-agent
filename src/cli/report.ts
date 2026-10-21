@@ -51,6 +51,9 @@ const CARRIED_SECTIONS: [heading: string, states: string[]][] = [
   ["Carried from an earlier commit:", []],
 ];
 
+/** Carried findings listed per section before "and N more": a long PR's body stays readable and bounded. */
+const MAX_CARRIED_PER_SECTION = 20;
+
 /** The §12 body for a head; `incomplete` replaces the findings line for a run that did not finish. */
 export function renderSummary(headSha: string, findings: FindingView[], limitations: string[], incomplete?: string): string {
   const lines = ["## Automated PR review", "", `Reviewed commit: \`${headSha}\``, ""];
@@ -71,7 +74,8 @@ export function renderSummary(headSha: string, findings: FindingView[], limitati
     const group = carried.filter((f) => (states.length === 0 ? !sectioned.has(f.status) : states.includes(f.status)));
     if (group.length === 0) continue;
     lines.push("", heading, "");
-    for (const f of group) lines.push(`- ${capitalize(f.candidate.severity)}: ${f.candidate.title} (\`${where(f)}\`, first reported on \`${f.firstHeadSha.slice(0, 7)}\`)`);
+    for (const f of group.slice(0, MAX_CARRIED_PER_SECTION)) lines.push(`- ${capitalize(f.candidate.severity)}: ${f.candidate.title} (\`${where(f)}\`, first reported on \`${f.firstHeadSha.slice(0, 7)}\`)`);
+    if (group.length > MAX_CARRIED_PER_SECTION) lines.push(`- and ${group.length - MAX_CARRIED_PER_SECTION} more`);
   }
   for (const limitation of limitations) lines.push("", `Scope limited: ${limitation}.`);
   lines.push("", "Review performed with isolated read-only tools. Human review is still required.");
