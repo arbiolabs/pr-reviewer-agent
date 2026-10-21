@@ -15,7 +15,7 @@ expression: ascii_text
                           o opens it in the browser
 
                         Summary
-                          ## Automated PR review
+                          Automated PR review
 
                           Reviewed commit: 4444444444444444444444444444444444444444
 
@@ -28,8 +28,8 @@ expression: ascii_text
 
                         Inline comments (1)
 
-                        src/booking.ts:42  RIGHT
-                          **High: Finding f-1**
+                        src/booking.ts:42  new side
+                          High: Finding f-1
 
                           Two concurrent bookings can both observe slot.free before either sets held.
 
@@ -42,8 +42,8 @@ expression: ascii_text
                             43     }
 
                         Positioning
-                        comments go on the head side (RIGHT) of the diff, at the line shown
+                        comments go on the new side of the diff, at the line shown
                         every comment sits on a line of the diff
 
 
-   j/k scroll  o open on GitHub  Esc close                                                                   1 inbox  2 review  3 diff  4 timeline  5 settings
+   j/k scroll  m raw markdown  o open on GitHub  Esc close                                                   1 inbox  2 review  3 diff  4 timeline  5 settings

@@ -13,7 +13,7 @@ expression: ascii_text
     y publishes exactly this to GitHub   Esc closes without publishing
 
     Summary
-      ## Automated PR review
+      Automated PR review
 
       Reviewed commit: 4444444444444444444444444444444444444444
 
@@ -26,8 +26,8 @@ expression: ascii_text
 
     Inline comments (1)
 
-    src/booking.ts:42  RIGHT
-      **High: Finding f-1**
+    src/booking.ts:42  new side
+      High: Finding f-1
 
       Two concurrent bookings can both observe slot.free before either sets held.
 
@@ -39,4 +39,4 @@ expression: ascii_text
      >  42 +     slot.held = true;
         43     }
       ~ 4 more below, j scrolls
-   j/k scroll  y publish  Esc close                                  1 inbox  2 review  3 diff  4 timeline  5 settings
+   j/k scroll  y publish  m raw markdown  Esc close                  1 inbox  2 review  3 diff  4 timeline  5 settings

@@ -206,22 +206,50 @@ fn frame(m: &mut Model) -> String {
 }
 
 #[test]
-fn the_preview_shows_the_exact_body_and_every_comment_from_the_fixture() {
+fn the_preview_styles_the_payload_and_m_shows_the_raw_markdown_exactly() {
     let mut m = previewing();
-    let f = frame(&mut m);
+    let (f, term) = render(&mut m, 120, 60);
     for want in [
         "acme/shop #184 at 4444444 · as event COMMENT · 1 inline comment",
-        "## Automated PR review",
+        "Automated PR review",
         "Found 1 actionable issue.",
         "- High: Finding f-1 (src/booking.ts:42)",
         "Review performed with isolated read-only tools. Human review is still required.",
         "hidden marker  <!-- durable-review:rev-184-a:8984214f",
-        "src/booking.ts:42  RIGHT",
-        "**High: Finding f-1**",
+        "src/booking.ts:42  new side",
+        "High: Finding f-1",
         "Two concurrent bookings can both observe slot.free before either sets held.",
         "y publishes exactly this to GitHub",
+        "m raw markdown",
     ] {
         assert!(f.contains(want), "missing {want:?} in\n{f}");
+    }
+    for raw in ["## Automated", "**", "RIGHT"] {
+        assert!(!f.contains(raw), "styled view shows {raw:?}:\n{f}");
+    }
+    let bold = |term: &ratatui::Terminal<ratatui::backend::TestBackend>, text: &str, frame: &str| {
+        let (y, line) = frame.lines().enumerate().find(|(_, l)| l.contains(text)).unwrap();
+        let x = line[..line.find(text).unwrap()].chars().count() as u16;
+        term.backend().buffer()[(x, y as u16)].modifier.contains(ratatui::style::Modifier::BOLD)
+    };
+    assert!(bold(&term, "Automated PR review", &f), "the heading is styled as one");
+    assert!(
+        bold(&term, "High: Finding f-1**".trim_end_matches('*'), &f.replace("- High", "- high")),
+        "**bold** is bold"
+    );
+
+    press(&mut m, KeyCode::Char('m'));
+    let raw = frame(&mut m);
+    for want in [
+        "## Automated PR review",
+        "Reviewed commit: `4444444444444444444444444444444444444444`",
+        "- High: Finding f-1 (`src/booking.ts:42`)",
+        "<!-- durable-review:rev-184-a:8984214f",
+        "**High: Finding f-1**",
+        "Two concurrent bookings can both observe `slot.free` before either sets `held`.",
+        "m styled",
+    ] {
+        assert!(raw.contains(want), "raw view lacks {want:?}:\n{raw}");
     }
 }
 

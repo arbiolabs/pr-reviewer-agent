@@ -13,7 +13,14 @@ use crate::update::{publish_block, published_url};
 
 const MARKER: &str = "<!-- durable-review:";
 
-pub fn lines(c: &Ctx, w: usize, run_id: &RunId, preview: &Preview, publish: &ConfirmState) -> Vec<Line<'static>> {
+pub fn lines(
+    c: &Ctx,
+    w: usize,
+    run_id: &RunId,
+    preview: &Preview,
+    publish: &ConfirmState,
+    raw: bool,
+) -> Vec<Line<'static>> {
     let g = c.t.g();
     let run = c.m.domain.runs.get(run_id);
     let pr = run.and_then(|r| c.m.domain.prs.get(&r.pr_id));
@@ -52,7 +59,7 @@ pub fn lines(c: &Ctx, w: usize, run_id: &RunId, preview: &Preview, publish: &Con
     out.push(Line::raw(""));
 
     out.push(Line::from(c.span("Summary", Role::Focus)));
-    out.extend(body(c, p.body.as_str(), w));
+    out.extend(body(c, p.body.as_str(), w, raw));
     out.push(Line::raw(""));
 
     let key = run.map(|r| DiffKey { pr: r.pr_id.clone(), base: r.base_sha.clone(), head: r.head_sha.clone() });
@@ -64,9 +71,9 @@ pub fn lines(c: &Ctx, w: usize, run_id: &RunId, preview: &Preview, publish: &Con
         out.push(Line::raw(""));
         out.push(Line::from(vec![
             c.span(c.fit(&format!("{}:{}", cm.path, cm.line), w.saturating_sub(10)), Role::Accent),
-            c.span(format!("  {}", cm.side), Role::Muted),
+            c.span(format!("  {}", side(cm.side.as_str(), raw)), Role::Muted),
         ]));
-        out.extend(rich(c, cm.body.as_str(), w.saturating_sub(2), Role::Normal).into_iter().map(indent));
+        out.extend(markdown(c, cm.body.as_str(), w.saturating_sub(2), raw).into_iter().map(indent));
         out.push(Line::raw(""));
         out.extend(inset(c, key.as_ref(), &cm.path, Some(cm.line.get()), Role::Accent, w).into_iter().map(Line::from));
     }
@@ -82,23 +89,69 @@ fn indent(spans: Vec<Span<'static>>) -> Line<'static> {
     Line::from(s)
 }
 
-/// The summary exactly as it will be posted, line by line: headings in the title style, code spans as chips, and the
-/// hidden marker, which GitHub does not render, dimmed and named.
-fn body(c: &Ctx, text: &str, w: usize) -> Vec<Line<'static>> {
+/// GitHub's side of the diff in the reader's words; the raw view keeps GitHub's.
+fn side(side: &str, raw: bool) -> String {
+    match (side, raw) {
+        (_, true) => side.to_string(),
+        ("RIGHT", false) => "new side".into(),
+        ("LEFT", false) => "old side".into(),
+        (other, false) => other.to_lowercase(),
+    }
+}
+
+/// Markdown as GitHub will show it: `#` headings as bold titles, `**bold**` bold, code spans as chips. Raw, the text
+/// exactly as it will be posted, wrapped and nothing else.
+fn markdown(c: &Ctx, text: &str, w: usize, raw: bool) -> Vec<Vec<Span<'static>>> {
+    use ratatui::style::Modifier;
+    let mut out = Vec::new();
+    for line in text.split('\n') {
+        if raw {
+            let spans = vec![Span::styled(line.to_string(), c.s(Role::Normal))];
+            out.extend(super::code::wrap_spans(spans, w.max(1)));
+            continue;
+        }
+        let heading = line.trim_start_matches('#');
+        let (text, role, bold) = match heading.strip_prefix(' ') {
+            Some(h) if heading.len() < line.len() => (h, Role::Title, true),
+            _ => (line, Role::Normal, false),
+        };
+        let mut on = bold;
+        for row in rich(c, text, w, role) {
+            let mut styled = Vec::new();
+            for span in row {
+                let parts: Vec<&str> = span.content.split("**").collect();
+                for (k, part) in parts.iter().enumerate() {
+                    if k > 0 {
+                        on = !on;
+                    }
+                    if !part.is_empty() {
+                        let st = if on { span.style.add_modifier(Modifier::BOLD) } else { span.style };
+                        styled.push(Span::styled(part.to_string(), st));
+                    }
+                }
+            }
+            out.push(styled);
+        }
+    }
+    out
+}
+
+/// The summary, line by line, styled or raw. Styled, the hidden marker, which GitHub does not render, is dimmed and
+/// named.
+fn body(c: &Ctx, text: &str, w: usize, raw: bool) -> Vec<Line<'static>> {
     let mut out = Vec::new();
     for line in text.trim_end_matches('\n').split('\n') {
-        if line.trim_start().starts_with(MARKER) {
+        if !raw && line.trim_start().starts_with(MARKER) {
             out.push(Line::from(vec![
                 c.span("  hidden marker  ", Role::Muted),
                 c.span(c.fit(line.trim(), w.saturating_sub(19)), Role::Muted),
             ]));
             continue;
         }
-        let role = if line.starts_with('#') { Role::Title } else { Role::Normal };
         if line.is_empty() {
             out.push(Line::raw(""));
         }
-        out.extend(rich(c, line, w.saturating_sub(2), role).into_iter().filter(|l| !l.is_empty()).map(indent));
+        out.extend(markdown(c, line, w.saturating_sub(2), raw).into_iter().filter(|l| !l.is_empty()).map(indent));
     }
     out
 }
@@ -167,7 +220,7 @@ fn positioning(c: &Ctx, key: Option<&DiffKey>, p: &PublicationPreview, w: usize)
     if d.error.is_some() || d.pending.is_some() {
         return vec![line("the diff is not loaded, so placement is unchecked".into(), Role::Pending)];
     }
-    let mut out = vec![line("comments go on the head side (RIGHT) of the diff, at the line shown".into(), Role::Muted)];
+    let mut out = vec![line("comments go on the new side of the diff, at the line shown".into(), Role::Muted)];
     let outside: Vec<String> = p
         .comments
         .iter()

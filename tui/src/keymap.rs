@@ -77,6 +77,7 @@ pub enum Action {
     InputCancel,
     Confirm,
     OpenUrl,
+    ToggleRaw,
 }
 
 const NONE: KeyModifiers = KeyModifiers::NONE;
@@ -156,6 +157,7 @@ const TABLE: &[(Context, KeyCode, KeyModifiers, Action)] = &[
     (C::ConfirmModal, K::Char('y'), NONE, A::Confirm),
     (C::PublicationModal, K::Char('y'), NONE, A::Confirm),
     (C::PublicationModal, K::Char('o'), NONE, A::OpenUrl),
+    (C::PublicationModal, K::Char('m'), NONE, A::ToggleRaw),
     (C::ConfirmModal, K::Char('n'), NONE, A::Back),
 ];
 
@@ -232,6 +234,7 @@ pub fn help_rows() -> Vec<(Context, String, &'static str, Option<&'static str>)>
             A::CyclePhase => "timeline phase",
             A::Confirm if ctx == C::PublicationModal => "publish this preview",
             A::OpenUrl => "open the published review",
+            A::ToggleRaw => "raw markdown or styled",
             _ => return None,
         })
     };

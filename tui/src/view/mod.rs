@@ -390,7 +390,12 @@ fn footer_line(c: &Ctx, width: u16) -> Line<'static> {
         (Some(Modal::Help { .. }), _) => "j/k scroll  Esc close  q quit",
         (Some(Modal::Finding { .. }), _) => "j/k scroll  n/N finding  d diff at anchor  t timeline  Esc close",
         (Some(Modal::Confirm { .. }), _) => "y confirm  n/Esc cancel",
-        (Some(Modal::Publication { .. }), _) => "j/k scroll  y publish  o open on GitHub  Esc close",
+        (Some(Modal::Publication { raw: false, .. }), _) => {
+            "j/k scroll  y publish  m raw markdown  o open on GitHub  Esc close"
+        }
+        (Some(Modal::Publication { raw: true, .. }), _) => {
+            "j/k scroll  y publish  m styled  o open on GitHub  Esc close"
+        }
         (_, Screen::Inbox) => "j/k pull request  Enter read  / search  ? help  q quit",
         (_, Screen::Review) if c.m.ui.focus == Pane::Sidebar => {
             "j/k pull request  Enter read  / search  l findings  ? help  q quit"
@@ -438,7 +443,7 @@ fn rank(hint: &str) -> u8 {
     match hint.split(' ').next().unwrap_or("") {
         "j/k" | "Enter" | "Esc" | "?" => 4,
         "h" | "l" | "y" | "n/Esc" => 3,
-        "q" | "n/N" | "/" | ":" | "d" => 2,
+        "q" | "n/N" | "/" | ":" | "d" | "m" => 2,
         "t" | "w" | "f" | "1-5" => 1,
         "p" => 3,
         _ => 0,

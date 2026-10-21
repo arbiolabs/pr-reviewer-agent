@@ -228,6 +228,8 @@ pub enum Modal {
         preview: Preview,
         /// `Asking` until `y` sends the approval.
         publish: ConfirmState,
+        /// `m`: the markdown exactly as it will be posted, instead of styled.
+        raw: bool,
     },
     /// The only place `y` acts. Generic over the command it confirms.
     Confirm {

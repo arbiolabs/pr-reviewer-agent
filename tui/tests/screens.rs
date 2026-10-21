@@ -452,7 +452,7 @@ fn the_showcase_parks_1291_and_its_preview_lands_every_comment_on_the_diff() {
     for want in [
         "Publish this review?",
         "Found 2 actionable issues.",
-        "**High: Sign-in redirects to any URL passed in returnTo**",
+        "High: Sign-in redirects to any URL passed in returnTo",
         "every comment sits on a line of the diff",
         "y publishes exactly this to GitHub",
     ] {

@@ -1134,6 +1134,11 @@ fn act(m: &mut Model, a: Action, fx: &mut Vec<Effect>) {
                 fx.push(Effect::OpenUrl(url));
             }
         }
+        Action::ToggleRaw => {
+            if let Some(Modal::Publication { raw, .. }) = m.ui.modals.last_mut() {
+                *raw = !*raw;
+            }
+        }
         Action::Accounts => {
             goto(m, Screen::Settings, fx);
             if m.domain.accounts.is_none() {
@@ -1345,6 +1350,7 @@ fn open_publication(m: &mut Model, r: Run, fx: &mut Vec<Effect>) {
         scroll: 0,
         preview: Preview::Failed(Text::new(OFFLINE)),
         publish: ConfirmState::Asking,
+        raw: false,
     });
     fetch_preview(m, r.id, fx);
     load_diff(m, DiffKey { pr: r.pr_id, base: r.base_sha, head: r.head_sha }, None, fx);

@@ -30,8 +30,8 @@ pub fn page_lines(c: &Ctx, body: Rect, modal: &Modal) -> Option<Vec<Line<'static
     match modal {
         Modal::Help { .. } => Some(help_lines(c, body)),
         Modal::Finding { id, .. } => Some(super::doc::finding_lines(c, w, id)),
-        Modal::Publication { run_id, preview, publish, .. } => {
-            Some(super::publish::lines(c, w, run_id, preview, publish))
+        Modal::Publication { run_id, preview, publish, raw, .. } => {
+            Some(super::publish::lines(c, w, run_id, preview, publish, *raw))
         }
         Modal::Input { .. } | Modal::Confirm { .. } => None,
     }

@@ -15,7 +15,7 @@ expression: text
     o opens it in the browser
 
   Summary
-    ## Automated PR review
+    Automated PR review
 
     Reviewed commit: 4444444444444444444444444444444444444444
 
@@ -25,4 +25,4 @@ expression: text
 
     Review performed with isolated read-only tools. Human review is still
     … 22 more below, j scrolls
-   j/k scroll  o open on GitHub  Esc close
+   j/k scroll  m raw markdown  o open on GitHub  Esc close
