@@ -25,4 +25,4 @@ expression: settings
   Display
     glyphs                unicode
     color                 on
-   Esc back  ? help  q quit
+   Esc back  ? help  q quit  1 inbox  2 review  3 diff  4 timeline  5 settings

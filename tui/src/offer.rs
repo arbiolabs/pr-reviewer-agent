@@ -21,11 +21,12 @@ impl Hint {
 }
 
 /// Most important first. Where the footer runs out of room the last of these goes first: the keys that leave or
-/// explain a view, then the ones that act on what it shows, then the ones that move elsewhere or narrow it.
+/// explain a view and the page's main action, then quit, then the other actions on what it shows, then the ones
+/// that move elsewhere or narrow it. A parked run's p is its one action.
 /// A start on an unreviewed PR is the page's one action; on a reviewed head the daemon most likely refuses it, so it
 /// is `s again` and goes early.
 pub const RANK: [&str; 27] = [
-    "?", "Esc", "n/Esc", "y", "Enter", "Enter/l", "j/k", "p", "s", "R", "c", "d", "q", "n/N", "h", "/", ":", "J/K",
+    "?", "Esc", "n/Esc", "y", "Enter", "Enter/l", "j/k", "p", "s", "q", "R", "c", "d", "n/N", "h", "/", ":", "J/K",
     "m", "o", "t", "w", "f", "v", "P", "s again", "r",
 ];
 
@@ -132,14 +133,39 @@ pub fn offered(m: &Model) -> Vec<Hint> {
     out
 }
 
+/// The shorter label a hint takes when the footer is too narrow for every hint at full length.
+const SHORT: [(&str, &str); 13] = [
+    ("pull request", "PR"),
+    ("pull requests", "PRs"),
+    ("preview & publish", "publish"),
+    ("select account", "select"),
+    ("start review", "start"),
+    ("review again", "again"),
+    ("cancel review", "cancel"),
+    ("watch live", "watch"),
+    ("diff at anchor", "diff"),
+    ("raw markdown", "raw"),
+    ("open on GitHub", "open"),
+    ("fold or read", "fold"),
+    ("clear search", "clear"),
+];
+
 /// The hints that fit in `width` columns, written `   a  b  c`: the least important go first, the rest keep their
-/// order.
-pub fn fit(mut hints: Vec<Hint>, width: usize) -> Vec<Hint> {
-    while hints.len() > 1 && crate::text::width(&line(&hints)) > width {
-        let least = (0..hints.len()).max_by_key(|&i| hints[i].rank).unwrap_or(0);
-        hints.remove(least);
-    }
-    hints
+/// order. Where short labels keep more hints than full ones, every label is short. A wider footer never shows fewer.
+pub fn fit(hints: Vec<Hint>, width: usize) -> Vec<Hint> {
+    let drop = |mut hints: Vec<Hint>| {
+        while hints.len() > 1 && crate::text::width(&line(&hints)) > width {
+            let least = (0..hints.len()).max_by_key(|&i| hints[i].rank).unwrap_or(0);
+            hints.remove(least);
+        }
+        hints
+    };
+    let short = hints
+        .iter()
+        .map(|h| Hint { label: SHORT.iter().find(|(l, _)| *l == h.label).map_or(h.label, |(_, s)| s), ..*h })
+        .collect();
+    let (full, short) = (drop(hints), drop(short));
+    if short.len() > full.len() { short } else { full }
 }
 
 pub fn line(hints: &[Hint]) -> String {
@@ -155,7 +181,7 @@ mod tests {
     }
 
     #[test]
-    fn the_review_footer_at_60_columns_keeps_diff_and_quit_over_the_pull_request_list() {
+    fn the_review_footer_at_60_columns_shortens_labels_and_keeps_diff_and_quit_over_the_pull_request_list() {
         let review = vec![
             hint("j/k", "finding"),
             hint("Enter", "read"),
@@ -166,6 +192,7 @@ mod tests {
             hint("?", "help"),
             hint("q", "quit"),
         ];
-        assert_eq!(line(&fit(review, 58)), "   j/k finding  Enter read  d diff  ? help  q quit");
+        assert_eq!(line(&fit(review.clone(), 58)), "   j/k finding  Enter read  d diff  h PRs  ? help  q quit");
+        assert_eq!(line(&fit(review, 52)), "   j/k finding  Enter read  d diff  ? help  q quit");
     }
 }

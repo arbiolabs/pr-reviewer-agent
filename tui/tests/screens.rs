@@ -126,11 +126,14 @@ fn settings_describes_the_display_in_plain_words() {
 }
 
 #[test]
-fn the_footer_lists_settings_among_the_views_when_it_fits() {
+fn the_footer_names_the_views_where_its_hints_leave_room_and_numbers_them_where_they_do_not() {
     let mut s = showcase(2);
-    let (frame, _) = render(&mut s.m, 120, 38);
+    let (frame, _) = render(&mut s.m, 200, 50);
     let footer = frame.lines().last().unwrap();
     assert!(footer.ends_with("4 timeline  5 settings"), "{footer}");
+    let (frame, _) = render(&mut s.m, 120, 38);
+    let footer = frame.lines().last().unwrap();
+    assert!(footer.contains("q quit ") && footer.ends_with(" 1 2 3 4 5"), "{footer}");
 }
 
 #[test]
@@ -398,6 +401,12 @@ fn clicks_select_diff_files_and_lines_timeline_events_and_footer_views() {
     assert_eq!(s.m.timeline.as_ref().unwrap().open, started, "a second click opens the event");
 
     let (frame, _) = render(&mut s.m, 120, 38);
+    let footer = frame.lines().last().unwrap();
+    assert!(footer.ends_with("1 2 3 4 5"), "the hints fill 120 columns, so the views are numbers: {footer}");
+    click(&mut s, footer.chars().count() as u16 - 1, 37);
+    assert_eq!(s.m.ui.screen, pr_review_tui::model::Screen::Settings);
+    let mut s = s.key(KeyCode::Char('4'));
+    let (frame, _) = render(&mut s.m, 200, 50);
     let (x, y) = cell_of(&frame, "5 settings");
     click(&mut s, x + 3, y);
     assert_eq!(s.m.ui.screen, pr_review_tui::model::Screen::Settings);

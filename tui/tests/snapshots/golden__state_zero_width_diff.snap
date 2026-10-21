@@ -39,4 +39,4 @@ expression: "text.replace('\\u{200b}', \"\")"
 
 
 
-   j/k line  n/N finding  h files  Esc back  ? help  q quit          1 inbox  2 review  3 diff  4 timeline  5 settings
+   j/k line  n/N finding  h files  / search  : jump  w watch live  Esc back  ? help  q quit                   1 2 3 4 5

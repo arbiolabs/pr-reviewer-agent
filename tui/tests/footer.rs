@@ -109,8 +109,103 @@ fn footer(m: &Model, cols: u16) -> Vec<String> {
     term.draw(|f| view(&m, f)).unwrap();
     let buf = term.backend().buffer();
     let row: String = (0..cols).map(|x| buf[(x, h - 1)].symbol().to_string()).collect();
+    hints_of(&row)
+}
+
+/// A footer row's hints, without the views list at its right: names (`1 inbox  2 review …`) or numbers (`1 2 3 4 5`).
+fn hints_of(row: &str) -> Vec<String> {
+    let row = row.trim_end();
     let hints = row.split(" 1 inbox").next().unwrap_or("");
+    let hints = hints.strip_suffix("1 2 3 4 5").unwrap_or(hints);
     hints.split("  ").map(str::trim).filter(|s| !s.is_empty()).map(String::from).collect()
+}
+
+/// The footer row of `m` drawn at its own size.
+fn footer_row(m: &Model) -> String {
+    let mut m = m.clone();
+    m.notice = None;
+    let (w, h) = m.size;
+    let mut term = Terminal::new(TestBackend::new(w, h)).unwrap();
+    term.draw(|f| view(&m, f)).unwrap();
+    let buf = term.backend().buffer();
+    (0..w).map(|x| buf[(x, h - 1)].symbol().to_string()).collect()
+}
+
+fn hint_rank(keys: &str, label: &str) -> usize {
+    let keys = if keys == "s" && label.contains("again") { "s again" } else { keys };
+    pr_review_tui::offer::RANK.iter().position(|k| *k == keys).unwrap()
+}
+
+/// At every width from 60 to 200 the footer drops hints least important first, drops or shrinks the views list
+/// before any hint, and a wider terminal never shows fewer hints.
+#[test]
+fn the_footer_gives_its_hints_room_before_the_views_list_and_never_loses_one_to_width() {
+    let mut cases = vec![
+        ("inbox".to_string(), showcase_player().1),
+        ("settings".to_string(), {
+            let mut m = showcase_player().1;
+            update(&mut m, Msg::Key(press('5')));
+            m
+        }),
+    ];
+    for (number, keys) in [(1291, ""), (1291, "h"), (338, ""), (338, "h"), (345, ""), (1287, "t"), (1296, "")] {
+        cases.push((format!("#{number} {keys:?}"), showcase_after(number, keys)));
+    }
+    let mut bad = Vec::new();
+    for (name, base) in cases {
+        let mut prev: Option<(u16, BTreeSet<String>)> = None;
+        for w in 60..=200u16 {
+            let mut m = base.clone();
+            update(&mut m, Msg::Resize(w, 38));
+            let row = footer_row(&m);
+            let shown = hints_of(&row);
+            let keys: BTreeSet<String> = shown.iter().map(|h| h.split(' ').next().unwrap().to_string()).collect();
+            let offered = pr_review_tui::offer::offered(&m);
+            let missing: Vec<_> = offered.iter().filter(|h| !keys.contains(h.keys)).collect();
+            let worst_shown =
+                offered.iter().filter(|h| keys.contains(h.keys)).map(|h| hint_rank(h.keys, h.label)).max();
+            if let (Some(best_missing), Some(worst)) =
+                (missing.iter().map(|h| hint_rank(h.keys, h.label)).min(), worst_shown)
+                && best_missing < worst
+            {
+                bad.push(format!("{name} {w}: dropped a hint ranked above one it shows: {row:?}"));
+            }
+            let unstripped: Vec<String> =
+                pr_review_tui::offer::fit(offered.clone(), w as usize - 2).iter().map(|h| h.text()).collect();
+            if shown != unstripped {
+                bad.push(format!("{name} {w}: the views list costs hints {unstripped:?}: {row:?}"));
+            }
+            // A hint the layout offers at one width only (J/K where the page wraps longer) is not the footer's to keep.
+            let still: BTreeSet<String> = offered.iter().map(|h| h.keys.to_string()).collect();
+            if let Some((pw, before)) = &prev
+                && !before.intersection(&still).all(|k| keys.contains(k))
+            {
+                bad.push(format!("{name}: {pw} columns show {before:?}, {w} show {keys:?}"));
+            }
+            prev = Some((w, keys));
+        }
+    }
+    assert!(bad.is_empty(), "{}", bad.join("\n"));
+}
+
+/// The cases the jury met, by name: the README's own 120x38 and the 60x16 minimum.
+#[test]
+fn the_footer_keeps_quit_and_the_main_action_where_the_jury_lost_them() {
+    let at = |mut m: Model, w: u16, h: u16| {
+        update(&mut m, Msg::Resize(w, h));
+        hints_of(&footer_row(&m)).iter().map(|h| h.split(' ').next().unwrap().to_string()).collect::<Vec<_>>()
+    };
+    let has = |got: &[String], want: &[&str]| want.iter().all(|k| got.iter().any(|g| g == k));
+    let parked = at(showcase_after(1291, ""), 120, 38);
+    assert!(has(&parked, &["p", "c", "d", "q"]), "{parked:?}");
+    let timeline = at(showcase_after(1287, "t"), 120, 38);
+    assert!(has(&timeline, &["f", "v", "P", "q"]), "{timeline:?}");
+    let mut settings = showcase_player().1;
+    update(&mut settings, Msg::Key(press('5')));
+    let settings = at(settings, 60, 16);
+    assert!(has(&settings, &["j/k", "Enter", "Esc", "q"]), "{settings:?}");
+    let rail = at(showcase_after(1291, "h"), 60, 16);
+    assert!(has(&rail, &["p", "q"]), "{rail:?}");
 }
 
 /// The whole frame without any toast, styles and footer included: a cursor is often only a background, and a key that
@@ -385,7 +480,8 @@ fn the_footer_offers_a_key_exactly_when_it_acts() {
                 }
             }
             let mut rest = full.iter();
-            if !kept.iter().all(|k| rest.any(|f| f == k)) {
+            let key = |h: &String| h.split(' ').next().unwrap_or("").to_string();
+            if !kept.iter().all(|k| rest.any(|f| key(f) == key(k))) {
                 flag("kept is not a subsequence", format!("{kept:?} of {full:?}"), &at);
             }
             let has = |list: &[String], key: &str| list.iter().any(|h| hint_keys(h).iter().any(|k| k == key));

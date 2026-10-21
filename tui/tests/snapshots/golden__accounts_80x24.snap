@@ -25,4 +25,4 @@ expression: text
     activity              0 feed entries (cap 2000); 0 tool events applied
   Display
     glyphs                unicode
-   j/k account  Enter select account  w watch live  Esc back  ? help  q quit
+   j/k account  Enter select  w watch  r refresh  Esc back  ? help  q quit

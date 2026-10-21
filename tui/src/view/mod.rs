@@ -134,9 +134,10 @@ pub fn hit(m: &Model, x: u16, y: u16) -> Option<Hit> {
 
 /// The view whose number or name in the footer's list covers column `x`.
 fn view_at(c: &Ctx, footer: Rect, x: u16) -> Option<Screen> {
-    let vw = views_w(c) as u16;
+    let strip = footer_parts(c, footer.width).1;
+    let vw = strip_w(c, strip) as u16;
     let mut at = (footer.x + footer.width.saturating_sub(vw)) as usize;
-    for (i, pair) in views_line(c).spans.chunks(2).enumerate() {
+    for (i, pair) in views_line(c, strip).spans.chunks(2).enumerate() {
         let w: usize = pair.iter().map(|s| crate::text::width(&s.content)).sum();
         if vw > 0 && (at..at + w).contains(&(x as usize)) {
             return Screen::ALL.get(i).copied();
@@ -186,10 +187,11 @@ pub fn view(m: &Model, f: &mut Frame) {
         Screen::Timeline => timeline::timeline(&c, f, body),
         Screen::Settings => modals::settings(&c, f, body),
     }
-    f.render_widget(Paragraph::new(footer_line(&c, footer.width.saturating_sub(views_w(&c) as u16 + 2))), footer);
-    let vw = views_w(&c) as u16;
+    let (hints, strip) = footer_parts(&c, footer.width);
+    let vw = strip_w(&c, strip) as u16;
+    f.render_widget(Paragraph::new(footer_line(&c, footer.width.saturating_sub(vw + 2), hints)), footer);
     let vr = Rect { x: footer.x + footer.width.saturating_sub(vw), width: vw.min(footer.width), ..footer };
-    f.render_widget(Paragraph::new(views_line(&c)), vr);
+    f.render_widget(Paragraph::new(views_line(&c, strip)), vr);
     for modal in &m.ui.modals {
         modals::modal(&c, f, body, modal);
     }
@@ -208,7 +210,7 @@ fn toast(c: &Ctx, f: &mut Frame, footer: Rect, body: Rect) {
     let Some(n) = c.m.notice.as_ref().filter(|_| c.m.top_modal().is_none()) else {
         return;
     };
-    let room = footer.width.saturating_sub(views_w(c) as u16 + 3) as usize;
+    let room = footer.width.saturating_sub(views_w(c, footer.width) as u16 + 3) as usize;
     if crate::text::width(&n.text) <= room {
         return;
     }
@@ -348,20 +350,50 @@ fn activity_words(kind: &crate::model::ActivityKind, phase: Option<crate::protoc
     }
 }
 
-fn views_line(c: &Ctx) -> Line<'static> {
+/// How much of the views list the footer shows beside its hints.
+#[derive(Clone, Copy, PartialEq)]
+enum Strip {
+    Names,
+    Numbers,
+    None,
+}
+
+/// The footer's hints and the views list beside them. The hints get room first: the list shrinks to numbers, then
+/// goes, before it costs a hint.
+fn footer_parts(c: &Ctx, width: u16) -> (Vec<crate::offer::Hint>, Strip) {
+    let w = width.saturating_sub(2) as usize;
+    let hints = crate::offer::fit(crate::offer::offered(c.m), w);
+    let need = crate::text::width(&crate::offer::line(&hints));
+    let strip = [Strip::Names, Strip::Numbers].into_iter().find(|s| need + strip_w(c, *s) <= w).unwrap_or(Strip::None);
+    (hints, strip)
+}
+
+fn views_line(c: &Ctx, strip: Strip) -> Line<'static> {
     let mut spans = Vec::new();
-    // Settings joins the list once the footer has room for it beside the hints.
-    let shown = if c.m.size.0 >= 120 { 5 } else { 4 };
-    for (i, s) in Screen::ALL.iter().take(shown).enumerate() {
+    for (i, s) in Screen::ALL.iter().enumerate().filter(|_| strip != Strip::None) {
         let on = *s == c.m.ui.screen;
-        spans.push(c.span(format!("{}", i + 1), Role::Muted));
-        spans.push(c.span(format!(" {}  ", s.label().to_lowercase()), if on { Role::Focus } else { Role::Muted }));
+        let role = if on { Role::Focus } else { Role::Muted };
+        match strip {
+            Strip::Names => {
+                spans.push(c.span(format!("{}", i + 1), Role::Muted));
+                spans.push(c.span(format!(" {}  ", s.label().to_lowercase()), role));
+            }
+            _ => {
+                spans.push(c.span(format!("{}", i + 1), role));
+                spans.push(c.span(" ", Role::Muted));
+            }
+        }
     }
     Line::from(spans)
 }
 
-fn views_w(c: &Ctx) -> usize {
-    if c.m.size.0 < 100 { 0 } else { views_line(c).spans.iter().map(|s| crate::text::width(&s.content)).sum() }
+fn strip_w(c: &Ctx, strip: Strip) -> usize {
+    views_line(c, strip).spans.iter().map(|s| crate::text::width(&s.content)).sum()
+}
+
+/// The columns the views list takes at the right of a `width`-column footer.
+fn views_w(c: &Ctx, width: u16) -> usize {
+    strip_w(c, footer_parts(c, width).1)
 }
 
 fn banner(c: &Ctx, width: u16) -> Option<Line<'static>> {
@@ -388,7 +420,7 @@ fn banner(c: &Ctx, width: u16) -> Option<Line<'static>> {
     Some(Line::from(c.span(c.fit(&text, width as usize), role)))
 }
 
-fn footer_line(c: &Ctx, width: u16) -> Line<'static> {
+fn footer_line(c: &Ctx, width: u16, hints: Vec<crate::offer::Hint>) -> Line<'static> {
     let w = width as usize;
     if let Some(Modal::Input { purpose, buffer, .. }) = c.m.top_modal() {
         let prompt = match purpose {
@@ -408,7 +440,6 @@ fn footer_line(c: &Ctx, width: u16) -> Line<'static> {
     if let Some(n) = c.m.notice.as_ref().filter(|_| c.m.top_modal().is_none()) {
         return Line::from(c.span(c.pad(&format!(" {}", n.text), w), Role::Pending));
     }
-    let hints = crate::offer::fit(crate::offer::offered(c.m), w);
     Line::from(c.span(c.fit(&crate::offer::line(&hints), w), Role::Muted))
 }
 

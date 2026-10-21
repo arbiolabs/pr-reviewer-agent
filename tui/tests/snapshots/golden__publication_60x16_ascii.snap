@@ -17,4 +17,4 @@ expression: ascii_text
     Reviewed commit:
     4444444444444444444444444444444444444444
     ~ 28 more below, j scrolls
-   y publish  j/k scroll  d diff  Esc close
+   y publish  j/k scroll  m raw  d diff  Esc close

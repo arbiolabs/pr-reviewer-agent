@@ -17,4 +17,4 @@ expression: ascii_text
   #
   # Enter  5 evidence items | the fix | the diff
 
-   Enter read  d diff  h pull requests  ? help  q quit
+   Enter read  d diff  h PRs  / search  ? help  q quit

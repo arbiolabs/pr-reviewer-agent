@@ -17,4 +17,4 @@ expression: text
     Automated PR review
 
     … 30 more below, j scrolls
-   j/k scroll  m raw markdown  d diff  Esc close
+   j/k scroll  m raw  o open  d diff  Esc close   1 2 3 4 5
