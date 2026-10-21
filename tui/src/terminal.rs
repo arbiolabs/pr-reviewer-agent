@@ -5,13 +5,14 @@ use std::io::{self, IsTerminal, Stdout, Write};
 use std::time::{Duration, Instant};
 
 use crossterm::cursor::{Hide, Show};
-use crossterm::event::{DisableMouseCapture, EnableMouseCapture};
+use crossterm::event::{DisableMouseCapture, EnableMouseCapture, Event, MouseEventKind};
 use crossterm::execute;
 use crossterm::terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 
 use crate::theme::{Palette, relative_luminance};
+use crate::update::Msg;
 
 pub struct TerminalGuard {
     pub terminal: Terminal<CrosstermBackend<Stdout>>,
@@ -166,6 +167,18 @@ impl LateReply {
                 true
             }
         }
+    }
+}
+
+/// What one terminal event means to the app, or `None` for a late reply's keys, pointer motion, focus and paste.
+pub fn input(event: Event, late: &mut LateReply, since_start: Duration) -> Option<Msg> {
+    match event {
+        Event::Key(k) if late.swallow(&k, since_start) => None,
+        Event::Key(k) => Some(Msg::Key(k)),
+        // Motion events would wake the app on every cell the pointer crosses.
+        Event::Mouse(e) if !matches!(e.kind, MouseEventKind::Moved | MouseEventKind::Drag(_)) => Some(Msg::Mouse(e)),
+        Event::Resize(w, h) => Some(Msg::Resize(w, h)),
+        _ => None,
     }
 }
 

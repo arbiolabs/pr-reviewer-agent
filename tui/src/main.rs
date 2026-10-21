@@ -4,7 +4,7 @@ use std::process::ExitCode;
 use std::sync::Mutex;
 use std::time::{Duration, Instant};
 
-use crossterm::event::{self, Event as TermEvent, MouseEventKind};
+use crossterm::event;
 use pr_review_tui::app::dispatch;
 use pr_review_tui::config::{self, Source};
 use pr_review_tui::model::Model;
@@ -113,17 +113,8 @@ async fn run(settings: config::Settings, script: Option<playback::Script>) -> st
     std::thread::spawn(move || {
         let mut late = pr_review_tui::terminal::LateReply::default();
         loop {
-            let msg = match event::read() {
-                Ok(TermEvent::Key(k)) if late.swallow(&k, opened.elapsed()) => continue,
-                Ok(TermEvent::Key(k)) => Msg::Key(k),
-                // Motion events would wake the app on every cell the pointer crosses.
-                Ok(TermEvent::Mouse(e)) if !matches!(e.kind, MouseEventKind::Moved | MouseEventKind::Drag(_)) => {
-                    Msg::Mouse(e)
-                }
-                Ok(TermEvent::Resize(w, h)) => Msg::Resize(w, h),
-                Ok(_) => continue,
-                Err(_) => return,
-            };
+            let Ok(ev) = event::read() else { return };
+            let Some(msg) = pr_review_tui::terminal::input(ev, &mut late, opened.elapsed()) else { continue };
             if input.blocking_send(msg).is_err() {
                 return;
             }

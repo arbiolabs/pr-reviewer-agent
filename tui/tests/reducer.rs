@@ -806,10 +806,18 @@ fn a_command_result_for_a_request_the_client_never_sent_is_ignored() {
     let mut m = live();
     send(&mut m, &read("fixtures/server.command.result.accepted.json"));
     assert_eq!(m.notice, None);
-    let mut s = common::Sim::new(pr_review_tui::model::Look::default()).play("approval", 12);
-    assert_eq!(s.m.notice, None, "landing on approval.ndjson pops no toast");
+    let mut lines = script("approval");
+    lines.truncate(12);
+    let stray = ServerMessage::parse(&read("fixtures/server.command.result.rejected.json")).unwrap();
+    lines.insert(6, stray.clone());
+    lines.push(stray);
+    let mut s = common::Sim::new(pr_review_tui::model::Look::default());
+    for msg in lines {
+        s.server(msg);
+    }
+    assert_eq!(s.m.notice, None, "a stray command.result in the stream pops no toast");
     let (frame, _) = common::render(&mut s.m, 120, 38);
-    assert!(!frame.contains("waiting for the daemon"), "{frame}");
+    assert!(!frame.contains("Refused"), "{frame}");
 }
 
 /// The keys crossterm reads from a late `ESC ] 11 ; rgb:… BEL`: Alt+`]`, the text as plain keys, BEL as Ctrl+G.
@@ -820,9 +828,24 @@ fn late_osc11() -> Vec<KeyEvent> {
     keys
 }
 
+/// Feeds key events through the input thread's path, `since_start` into the session, and returns what reached the
+/// reducer.
+fn through_input(m: &mut Model, late: &mut pr_review_tui::terminal::LateReply, keys: &[(KeyEvent, u64)]) -> Vec<char> {
+    let mut acted = vec![];
+    for (k, ms) in keys {
+        let at = std::time::Duration::from_millis(*ms);
+        if let Some(msg) = pr_review_tui::terminal::input(crossterm::event::Event::Key(*k), late, at) {
+            if let KeyCode::Char(c) = k.code {
+                acted.push(c);
+            }
+            update(m, msg);
+        }
+    }
+    acted
+}
+
 #[test]
 fn a_late_osc11_reply_reaching_the_key_reader_fires_no_action() {
-    use pr_review_tui::terminal::LateReply;
     let fresh = live();
     let mut raw = live();
     for k in late_osc11() {
@@ -831,16 +854,13 @@ fn a_late_osc11_reply_reaching_the_key_reader_fires_no_action() {
     assert!(raw.top_modal().is_some() || raw.ui.screen != fresh.ui.screen, "unfiltered, the reply acts as keys");
 
     let mut m = live();
-    let mut late = LateReply::default();
-    let at = std::time::Duration::from_millis(400);
-    for k in late_osc11() {
-        if !late.swallow(&k, at) {
-            assert!(update(&mut m, Msg::Key(k)).is_empty(), "{k:?} sent something");
-        }
-    }
+    let mut late = pr_review_tui::terminal::LateReply::default();
+    let reply: Vec<_> = late_osc11().into_iter().map(|k| (k, 400)).collect();
+    assert_eq!(through_input(&mut m, &mut late, &reply), Vec::<char>::new());
     assert_eq!(m.top_modal(), None);
     assert_eq!((m.ui.screen, &m.ui.pr_filter), (fresh.ui.screen, &fresh.ui.pr_filter));
-    assert!(!late.swallow(&KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE), at), "the next key acts");
+    let j = KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE);
+    assert_eq!(through_input(&mut m, &mut late, &[(j, 401)]), ['j'], "the next key acts");
     let alt = KeyEvent::new(KeyCode::Char(']'), KeyModifiers::ALT);
-    assert!(!late.swallow(&alt, std::time::Duration::from_secs(3)), "after the window, Alt+] is a key again");
+    assert_eq!(through_input(&mut m, &mut late, &[(alt, 3000), (j, 3001)]), [']', 'j'], "after the window");
 }
