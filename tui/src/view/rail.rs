@@ -31,7 +31,7 @@ pub fn empty_rail(c: &Ctx, total: usize) -> Vec<(String, Role)> {
     }
     let reason = match &c.m.link {
         Link::Disconnected { reason, .. } => reason,
-        Link::Unusable { message } | Link::Incompatible { message, .. } => {
+        Link::Unusable { message } | Link::Incompatible { message, .. } | Link::Stalled { reason: message } => {
             return vec![(format!("  unavailable: {message}"), Role::Fail)];
         }
         Link::Connecting { .. } | Link::Negotiating | Link::Syncing => {

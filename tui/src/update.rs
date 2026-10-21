@@ -168,7 +168,11 @@ fn expire_requests(m: &mut Model) {
         m.sent_at.iter().filter(|(_, at)| now.saturating_sub(**at) >= timeout).map(|(id, _)| id.clone()).collect();
     for id in expired {
         m.sent_at.remove(&id);
-        if let Some(state) = waiting_confirm(m, &id) {
+        if m.snapshot_request.as_ref() == Some(&id) {
+            m.snapshot_request = None;
+            transition(m, LinkInput::SnapshotTimedOut);
+            m.dirty = true;
+        } else if let Some(state) = waiting_confirm(m, &id) {
             *state = ConfirmState::TimedOut;
             m.dirty = true;
         } else if fail_request(m, &id, Text::new(TIMED_OUT)) {
@@ -1034,7 +1038,7 @@ fn act(m: &mut Model, a: Action, fx: &mut Vec<Effect>) {
         }
         Action::Goto(s) => goto(m, s, fx),
         Action::Refresh => {
-            if m.link == Link::Live {
+            if matches!(m.link, Link::Live | Link::Stalled { .. }) {
                 resync(m, "manual refresh", fx);
                 notice(m, "refreshing snapshot");
             } else {

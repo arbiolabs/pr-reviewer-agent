@@ -23,6 +23,10 @@ pub enum Link {
     Live,
     /// A gap, an epoch change or `resync.required`: waiting for a fresh snapshot; events are dropped.
     Resyncing,
+    /// The snapshot a sync or resync asked for never came: events stay dropped until `r` asks again.
+    Stalled {
+        reason: Text,
+    },
     /// The server does not speak protocol v1. Terminal: the client stops reconnecting.
     Incompatible {
         supported: Vec<u32>,
@@ -42,6 +46,7 @@ pub enum LinkInput {
     Mismatch { supported: Vec<u32>, message: Text },
     Unusable { message: Text },
     SnapshotApplied,
+    SnapshotTimedOut,
     StreamBroken,
     Lost { reason: Text, retry_in_ms: Option<u64> },
 }
@@ -60,8 +65,11 @@ impl Link {
             (Negotiating, I::Mismatch { supported, message }) => Some(Incompatible { supported, message }),
             (Negotiating, I::Welcomed { resuming: true }) => Some(Live),
             (Negotiating, I::Welcomed { resuming: false }) => Some(Syncing),
-            (Negotiating | Syncing | Live | Resyncing, I::SnapshotApplied) => Some(Live),
-            (Live, I::StreamBroken) => Some(Resyncing),
+            (Negotiating | Syncing | Live | Resyncing | Stalled { .. }, I::SnapshotApplied) => Some(Live),
+            (Syncing | Resyncing, I::SnapshotTimedOut) => {
+                Some(Stalled { reason: Text::new("the snapshot did not arrive; r asks again") })
+            }
+            (Live | Stalled { .. }, I::StreamBroken) => Some(Resyncing),
             _ => None,
         }
     }
@@ -72,7 +80,7 @@ impl Link {
 
     /// The server has answered `hello` with `welcome`, so requests other than `hello` may go out.
     pub fn welcomed(&self) -> bool {
-        matches!(self, Link::Syncing | Link::Live | Link::Resyncing)
+        matches!(self, Link::Syncing | Link::Live | Link::Resyncing | Link::Stalled { .. })
     }
 }
 

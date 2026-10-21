@@ -118,7 +118,8 @@ fn showcase_answers_every_finding_with_quoted_code_and_a_hunk_holding_its_line()
 
     let (m, _) = replay("showcase");
     let fixtures = protocol_dir().join("fixtures");
-    let ask = |req: serde_json::Value| playback::answer(&fixtures, &[], &serde_json::from_value(req).unwrap()).unwrap();
+    let ask =
+        |req: serde_json::Value| playback::answer(&fixtures, &[], &serde_json::from_value(req).unwrap()).remove(0);
     assert_eq!(m.domain.findings.len(), 7);
     for f in m.domain.findings.values() {
         let ServerMessage::FindingDetail { finding: d, .. } =
@@ -141,4 +142,16 @@ fn showcase_answers_every_finding_with_quoted_code_and_a_hunk_holding_its_line()
         assert!((start..=end).contains(&line), "{}: the first code_ref quotes the flagged line", f.title);
         assert_eq!(code.text.as_str().lines().nth((line - start) as usize), Some(row.text.as_str()), "{}", f.title);
     }
+}
+
+#[test]
+fn r_in_the_showcase_resyncs_from_the_played_snapshot_and_replays_what_followed() {
+    use crossterm::event::KeyCode;
+    use pr_review_tui::model::Look;
+    let before = Sim::new(Look::default()).play("showcase", 30);
+    let after = Sim::new(Look::default()).play("showcase", 30).key(KeyCode::Char('r'));
+    assert_eq!(after.m.link, Link::Live, "r leaves the client live, not resyncing forever");
+    assert_eq!(summary(&after.m)["runs"], summary(&before.m)["runs"]);
+    assert_eq!(summary(&after.m)["findings"], summary(&before.m)["findings"]);
+    assert_eq!(after.m.stream.last_applied, before.m.stream.last_applied);
 }

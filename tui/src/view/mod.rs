@@ -202,6 +202,7 @@ fn link_status(c: &Ctx) -> (String, Role) {
         Link::Live => (format!("{} live", g.active), Role::Ok),
         Link::Syncing => (format!("{} loading snapshot", g.pending), Role::Pending),
         Link::Resyncing => (format!("{} resyncing", g.pending), Role::Pending),
+        Link::Stalled { .. } => (format!("{} snapshot timed out", g.fail), Role::Fail),
         Link::Negotiating => (format!("{} negotiating", g.pending), Role::Pending),
         Link::Connecting { attempt } => (format!("{} connecting (attempt {attempt})", g.pending), Role::Pending),
         Link::Disconnected { .. } => (format!("{} disconnected", g.fail), Role::Fail),
@@ -333,7 +334,7 @@ fn banner(c: &Ctx, width: u16) -> Option<Line<'static>> {
             " {} protocol mismatch: {message}; server supports {supported:?}, this client speaks [1]. Upgrade the client or daemon.",
             g.fail
         ),
-        Link::Unusable { message } => format!(" {} {message}", g.fail),
+        Link::Unusable { message } | Link::Stalled { reason: message } => format!(" {} {message}", g.fail),
         Link::Resyncing => format!(" {} resyncing: fetching an authoritative snapshot; live events paused", g.pending),
         _ => return None,
     };

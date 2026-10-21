@@ -6,7 +6,7 @@ use std::path::{Path, PathBuf};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use pr_review_tui::model::{Look, Model, Screen};
 use pr_review_tui::playback;
-use pr_review_tui::protocol::{Event, PrId, SequencedEvent, ServerMessage};
+use pr_review_tui::protocol::{PrId, ServerMessage};
 use pr_review_tui::text::width;
 use pr_review_tui::update::{Effect, Msg, NetEvent, update};
 use pr_review_tui::view::view;
@@ -70,7 +70,7 @@ pub fn summary(m: &Model) -> Value {
 /// A model driven only through messages, answering its requests the way the playback driver does.
 pub struct Sim {
     pub m: Model,
-    pub played: Vec<SequencedEvent>,
+    pub played: Vec<ServerMessage>,
 }
 
 impl Sim {
@@ -88,7 +88,7 @@ impl Sim {
         for e in fx {
             if let Effect::Send(req) = e {
                 let dir = protocol_dir().join("fixtures");
-                if let Some(reply) = playback::answer(&dir, &self.played, &req) {
+                for reply in playback::answer(&dir, &self.played, &req) {
                     self.apply(Msg::Net(NetEvent::Message(reply)));
                 }
             }
@@ -96,9 +96,7 @@ impl Sim {
     }
 
     pub fn server(&mut self, msg: ServerMessage) {
-        if let ServerMessage::Event(Event::Sequenced(e)) = &msg {
-            self.played.push(e.clone());
-        }
+        self.played.push(msg.clone());
         self.apply(Msg::Net(NetEvent::Message(msg)));
     }
 

@@ -785,3 +785,21 @@ fn the_diff_a_finding_prefetches_changes_nothing_on_the_review_screen() {
     assert_eq!(m.ui.screen, Screen::Diff);
     assert!(m.notice.as_ref().is_some_and(|n| n.text.ends_with("is not in this diff")), "{:?}", m.notice);
 }
+
+#[test]
+fn a_snapshot_that_never_arrives_ends_the_resync_with_an_error_and_r_asks_again() {
+    let mut m = live();
+    let fx = press(&mut m, KeyCode::Char('r'));
+    assert_eq!(sent(&fx), ["snapshot.get"]);
+    assert_eq!(m.link, Link::Resyncing);
+    let late = m.request_timeout_ms + 1;
+    update(&mut m, Msg::Tick(late));
+    assert!(matches!(m.link, Link::Stalled { .. }), "{:?}", m.link);
+    let (frame, _) = common::render(&mut m, 120, 38);
+    assert!(frame.contains("the snapshot did not arrive; r asks again"), "{frame}");
+    let fx = press(&mut m, KeyCode::Char('r'));
+    assert_eq!(sent(&fx), ["snapshot.get"], "r retries");
+    assert_eq!(m.link, Link::Resyncing);
+    send(&mut m, &read("fixtures/server.snapshot.json"));
+    assert_eq!(m.link, Link::Live);
+}
