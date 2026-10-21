@@ -371,6 +371,12 @@ fn server_message(m: &mut Model, msg: ServerMessage, fx: &mut Vec<Effect>) {
             }
         }
         ServerMessage::PublicationPreview(p) => {
+            // Snapshots carry no publication status, so after a resync the preview is where it comes back from.
+            if m.domain.publications.get(&p.run_id).is_none_or(|x| x.status != p.status) {
+                let seeded =
+                    PublicationChanged { run_id: p.run_id.clone(), status: p.status, review_id: None, url: None };
+                m.domain.publications.insert(p.run_id.clone(), seeded);
+            }
             for x in &mut m.ui.modals {
                 if let Modal::Publication { run_id, preview, .. } = x
                     && *run_id == p.run_id
@@ -474,9 +480,8 @@ fn apply_snapshot(m: &mut Model, s: Snapshot, fx: &mut Vec<Effect>) {
     }
     match m.top_modal().cloned() {
         Some(Modal::Finding { id, .. }) => fetch_detail(m, &id, fx),
-        Some(Modal::Publication { run_id, preview: Preview::Loading(_) | Preview::Failed(_), .. }) => {
-            fetch_preview(m, run_id, fx)
-        }
+        // The events that moved the publication may be the ones the resync lost: ask again, whatever it showed.
+        Some(Modal::Publication { run_id, .. }) => fetch_preview(m, run_id, fx),
         _ => {}
     }
 }

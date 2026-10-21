@@ -555,3 +555,30 @@ fn enter_opens_the_preview_on_a_parked_pr_with_no_findings() {
     press(&mut m, KeyCode::Enter);
     assert!(matches!(m.top_modal(), Some(Modal::Publication { .. })), "{:?}", m.top_modal());
 }
+
+#[test]
+fn a_resync_between_accepted_and_published_refetches_the_preview_and_takes_its_status() {
+    let mut m = previewing();
+    let fx = press(&mut m, KeyCode::Char('y'));
+    let rid = commands(&fx)[0].request_id.clone();
+    send(&mut m, &read("fixtures/server.command.result.accepted.json").replace("req-cmd", rid.as_str()));
+    // The stream breaks; the publication_changed events are lost; the snapshot carries none.
+    send(&mut m, &read("fixtures/server.resync.required.unsolicited.json"));
+    let fx = send(
+        &mut m,
+        &read("fixtures/server.snapshot.json").replace("\"requestId\":\"req-snapshot\"", "\"requestId\":null"),
+    );
+    let get = fx.iter().find_map(|e| match e {
+        Effect::Send(ClientMessage::PublicationGet { request_id, .. }) => Some(request_id.clone()),
+        _ => None,
+    });
+    let get = get.expect("the snapshot refetches the open preview");
+    let published = read("fixtures/server.publication.preview.json")
+        .replace("req-pub", get.as_str())
+        .replace("\"awaiting_approval\"", "\"published\"");
+    send(&mut m, &published);
+    let run = pr_review_tui::protocol::RunId::new("rev-184-a");
+    assert_eq!(m.domain.publications[&run].status, pr_review_tui::protocol::PublicationStatus::Published);
+    let f = frame(&mut m);
+    assert!(f.contains("published on GitHub"), "{f}");
+}
