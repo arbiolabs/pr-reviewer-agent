@@ -239,6 +239,8 @@ it("approves a review end to end over the socket: parked, previewed, published o
   const prId = h.app.store.upsertPull(fixture.pull);
   c.send({ type: "snapshot.get", requestId: "s" });
   const snap = await c.waitFor<Extract<ServerMessage, { type: "snapshot" }>>((m) => m.type === "snapshot");
+  // The title comes from GitHub with the PR, before any review has collected context.
+  expect(snap.prs.map((p) => p.title)).toEqual([fixture.pull.title]);
 
   expect(await command(c, { command: "review.start", params: { prId: "nope", expectedHeadSha: fixture.headSha } })).toEqual(rejected("NOT_FOUND", "no PR nope"));
   expect(await command(c, { command: "review.start", params: { prId, expectedHeadSha: "0".repeat(40) } })).toEqual(rejected("REVISION_STALE", `the head of acme/shop#1 is now ${fixture.headSha}`));
@@ -253,6 +255,7 @@ it("approves a review end to end over the socket: parked, previewed, published o
   await c.waitFor((m) => m.type === "event" && m.eventType === "review.publication_changed" && (m.data as { status: string }).status === "awaiting_approval");
   expect(c.events().map(describeEvent)).toEqual(UP_TO_APPROVAL);
   expect(chained(c.events(), snap.sequence)).toBe(true);
+  expect(c.events().filter((e) => e.eventType === "pr.updated").map((e) => (e.data as { title: string }).title)).toEqual([fixture.pull.title]);
   expect([h.app.store.revision(runId)!.state, fake.postAttempts]).toEqual(["AWAITING_APPROVAL", 0]);
 
   // A replayed start answers the same operation; a running or parked head cannot be started, retried or cancelled wrongly.

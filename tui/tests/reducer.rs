@@ -928,3 +928,11 @@ fn a_preview_after_a_resync_mid_publish_brings_back_the_review_and_its_link() {
     let fx = press(&mut s.m, KeyCode::Char('o'));
     assert_eq!(fx, [Effect::OpenUrl("https://github.com/acme/shop/pull/184#pullrequestreview-3141".into())]);
 }
+
+#[test]
+fn a_pr_updated_event_retitles_the_pr_in_the_rail_and_the_header() {
+    let mut m = review_184();
+    send(&mut m, &pr_event(109, 184, "Booking API v2"));
+    let (frame, _) = common::render(&mut m, 120, 38);
+    assert_eq!(frame.matches("Booking API v2").count(), 2, "{frame}");
+}

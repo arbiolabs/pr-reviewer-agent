@@ -51,6 +51,8 @@ export type PullRow = {
   latest_base_sha: string;
   latest_head_sha: string;
   repo_full_name: string;
+  /** NULL on rows written before migration 054 until GitHub reports the PR again. */
+  title: string | null;
 };
 
 export type Snapshot = {
@@ -159,12 +161,13 @@ export class AppStore {
     const status = pr.merged ? "MERGED" : pr.state === "closed" ? "CLOSED" : "ACTIVE";
     this.db
       .prepare(
-        `INSERT INTO pull_requests (id, installation_id, repository_id, number, status, latest_base_sha, latest_head_sha, updated_at, repo_full_name)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO pull_requests (id, installation_id, repository_id, number, status, latest_base_sha, latest_head_sha, updated_at, repo_full_name, title)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET latest_base_sha = excluded.latest_base_sha,
-           latest_head_sha = excluded.latest_head_sha, updated_at = excluded.updated_at, repo_full_name = excluded.repo_full_name`,
+           latest_head_sha = excluded.latest_head_sha, updated_at = excluded.updated_at, repo_full_name = excluded.repo_full_name,
+           title = excluded.title`,
       )
-      .run(id, pr.installationId, pr.repositoryId, pr.number, status, pr.baseSha, pr.headSha, now(), pr.fullName);
+      .run(id, pr.installationId, pr.repositoryId, pr.number, status, pr.baseSha, pr.headSha, now(), pr.fullName, pr.title);
     return id;
   }
 

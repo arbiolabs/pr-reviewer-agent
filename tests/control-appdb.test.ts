@@ -192,9 +192,10 @@ it("maps failure, manual retry and supersession, and sanitizes repository text",
 
   const store = AppStore.open(join(dataDir, "app.sqlite"));
   cleanup.push(() => store.close());
-  const prId = store.upsertPull({ ...createFixture().pull, title: "ignored" });
+  // GitHub's title is what the PR reads as; the reviewed context's copy only stands in for rows that predate it.
+  const prId = store.upsertPull({ ...createFixture().pull, title: "\u001b[31mevil\u001b[0m\u009b2J title" });
   const rev = store.ensureRevision({ prId, baseSha: "b".repeat(40), headSha: "h".repeat(40), policyVersion: "1", reviewerVersion: "m1+faux/reviewer" });
-  store.saveSnapshot({ revisionId: rev.id, pr: { title: "\u001b[31mevil\u001b[0m\u009b2J title", body: "", fullName: "acme/shop", number: 1, cloneUrl: "" }, changedFiles: [], diff: "", limitations: [] });
+  store.saveSnapshot({ revisionId: rev.id, pr: { title: "an older title", body: "", fullName: "acme/shop", number: 1, cloneUrl: "" }, changedFiles: [], diff: "", limitations: [] });
   store.advance(rev.id, "COLLECT_CONTEXT", "CONTEXT_PERSISTED");
   store.appendActivity(rev.id, "search_code", "\u001b]52;c;ZXZpbA==\u0007token");
   store.advanceFromCurrent(rev.id, "TERMINAL_ERROR", "model \u001b[2Kunavailable");
