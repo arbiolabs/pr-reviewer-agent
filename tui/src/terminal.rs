@@ -201,14 +201,14 @@ impl LateReply {
     pub fn swallow(&mut self, key: &crossterm::event::KeyEvent, since_start: Duration) -> bool {
         use crossterm::event::{KeyCode, KeyModifiers};
         let alt = key.modifiers == KeyModifiers::ALT;
-        let Some((began, n, tail)) = self.open.take() else {
+        // An expired filter is a closed one, so an Alt+] after it can still start a reply.
+        let open =
+            self.open.take().filter(|(began, n, _)| since_start.saturating_sub(*began) < Self::BURST && *n < Self::MAX);
+        let Some((began, n, tail)) = open else {
             let starts = since_start < Self::WINDOW && alt && key.code == KeyCode::Char(']');
             self.open = starts.then_some((since_start, 0, Tail::Osc));
             return starts;
         };
-        if since_start.saturating_sub(began) >= Self::BURST || n >= Self::MAX {
-            return false;
-        }
         let KeyCode::Char(c) = key.code else { return false };
         let control = key.modifiers == KeyModifiers::CONTROL;
         if tail == Tail::Osc && (control && c == 'g' || alt && c == '\\') {

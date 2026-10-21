@@ -93,20 +93,25 @@ fn the_background_query_reads_the_reply_and_hands_on_only_what_was_typed() {
     assert_eq!(palette, Palette::Dark);
     let typed: Vec<KeyCode> = typed_before_start().into_iter().map(|k| k.code).collect();
     assert_eq!(typed, [KeyCode::Esc], "the early Esc reaches the app");
-    let mut late = LateReply::after_query();
     let mut keys = vec![KeyEvent::new(KeyCode::Char(']'), KeyModifiers::ALT)];
     keys.extend("11;rgb:ffff/ffff/ffff".chars().map(|c| KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)));
     keys.push(KeyEvent::new(KeyCode::Char('g'), KeyModifiers::CONTROL));
     keys.push(KeyEvent::new(KeyCode::Char('j'), KeyModifiers::NONE));
-    let acted: Vec<KeyCode> = keys
-        .into_iter()
-        .filter_map(|k| input(Event::Key(k), &mut late, Duration::from_millis(60)))
-        .filter_map(|m| match m {
-            Msg::Key(k) => Some(k.code),
-            _ => None,
-        })
-        .collect();
-    assert_eq!(acted, [KeyCode::Char('j')], "the late reply is swallowed whole; the next key acts");
+    let acted = |at: u64| -> Vec<KeyCode> {
+        let mut late = LateReply::after_query();
+        keys.iter()
+            .filter_map(|k| input(Event::Key(*k), &mut late, Duration::from_millis(at)))
+            .filter_map(|m| match m {
+                Msg::Key(k) => Some(k.code),
+                _ => None,
+            })
+            .collect()
+    };
+    assert_eq!(acted(60), [KeyCode::Char('j')], "the late reply is swallowed whole; the next key acts");
+
+    // The same reply 300 ms in, after the filter the cut opened has expired: its Alt+] opens a new one.
+    detect_on_pty(b"\x1b", Duration::from_millis(150), b"\x1b]11;rgb:ffff/ffff/ffff\x07\x1b[?62;22c");
+    assert_eq!(acted(300), [KeyCode::Char('j')], "a reply later than the cut's burst is swallowed too");
 
     // Cut inside the DA1 reply: its digits and final c drop, and a key after the c acts, hex digit or not.
     let (palette, _) = detect_on_pty(b"\x1b]11;rgb:ffff/ffff/ffff\x07\x1b[?6", Duration::from_millis(150), b"2;22c");
