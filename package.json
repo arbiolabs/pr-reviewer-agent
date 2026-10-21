@@ -15,6 +15,9 @@
     "pr-review": "node bin/pr-review.mjs",
     "bench": "node bench/run.ts",
     "bench:compare": "node bench/compare.ts",
+    "eval:snapshot": "node bench/real-snapshot.ts",
+    "eval:real": "node bench/real-run.ts",
+    "eval:report": "node bench/real-report.ts",
     "protocol:emit": "node src/protocol/emit.ts"
   },
   "dependencies": {
