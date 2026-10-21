@@ -4,6 +4,8 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 ## [Unreleased]
 
+## [1.1.0] - 2026-10-21
+
 ### Added
 
 - **Setup command.** `pr-review setup` checks git, the config file, the model, the GitHub account, Jev, and the terminal client, and offers to log in, pick a default model, and choose a publish mode. `setup --check [--json]` prints the same checks without prompting and exits 1 when a review cannot run. Saving the default model from the `review` picker now writes to `PR_REVIEW_CONFIG` when it is set (#19).
@@ -55,6 +57,7 @@ This is the first release.
   - the PR is still open.
 - Command idempotency keys are bound to each run attempt, so a replayed command never has a second effect.
 
-[Unreleased]: https://github.com/diego-arbio-dev/pr-reviewer/compare/v1.0.1...HEAD
+[Unreleased]: https://github.com/diego-arbio-dev/pr-reviewer/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/diego-arbio-dev/pr-reviewer/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/diego-arbio-dev/pr-reviewer/compare/v1.0.0...v1.0.1
 [1.0.0]: https://github.com/diego-arbio-dev/pr-reviewer/releases/tag/v1.0.0
