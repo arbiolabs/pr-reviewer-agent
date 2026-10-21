@@ -121,6 +121,10 @@ fn the_background_query_reads_the_reply_and_hands_on_only_what_was_typed() {
     // Cut between DA1's ESC and its [: the tail is a plain [ and the rest of DA1.
     detect_on_pty(b"\x1b]11;rgb:ffff/ffff/ffff\x07\x1b", Duration::from_millis(150), b"[?62;22c");
     assert_eq!(after_query("[?62;22cf"), [KeyCode::Char('f')], "cut before DA1's [");
+
+    // Cut between DA1's [ and its ?: the tail is the rest of DA1.
+    detect_on_pty(b"\x1b]11;rgb:ffff/ffff/ffff\x07\x1b[", Duration::from_millis(150), b"?62;22c");
+    assert_eq!(after_query("?62;22cf"), [KeyCode::Char('f')], "cut after DA1's [");
 }
 
 /// What acts of `tail` (BEL as Ctrl+G, the rest as plain keys) once it reaches the key reader just after the query.

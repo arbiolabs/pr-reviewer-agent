@@ -259,11 +259,12 @@ fn readable(timeout: Duration) -> bool {
     }
 }
 
-/// Where the deadline left the query's buffer: inside the OSC reply, inside DA1 (`ESC [ ? 6`), just past an ESC, or
-/// between replies.
+/// Where the deadline left the query's buffer: inside the OSC reply, inside DA1 (`ESC [` or `ESC [ ? 6`), just past
+/// an ESC, or between replies.
 fn cut(buf: &[u8]) -> Option<Tail> {
-    let in_da1 = (buf.windows(3).rposition(|w| w == b"\x1b[?"))
-        .is_some_and(|s| buf[s + 3..].iter().all(|b| b.is_ascii_digit() || *b == b';'));
+    let in_da1 = buf.ends_with(b"\x1b[")
+        || (buf.windows(3).rposition(|w| w == b"\x1b[?"))
+            .is_some_and(|s| buf[s + 3..].iter().all(|b| b.is_ascii_digit() || *b == b';'));
     if inside_osc(buf) {
         Some(Tail::Osc)
     } else if in_da1 {
