@@ -49,6 +49,7 @@ Jev classifies the risk of a change, and the classification decides how deep the
 - With `TYPESAFE_API_KEY` set, pr-review uses TypeSafe.
 - Without it, the CLI uses the keyless OpenCode Zen tier for public repositories.
 - For a private repository without `TYPESAFE_API_KEY`, pr-review skips Jev and records the reason `jev_skipped_private_repo`. The PR title, description, and a diff excerpt would otherwise leave the machine. To allow the keyless tier for private repositories, set `"jev": { "allow_keyless_for_private": true }`.
+- `pr-review serve` and `pr-review daemon --allow-commands` share one Jev client across every repository. Without `TYPESAFE_API_KEY` and without `allow_keyless_for_private`, they skip Jev for public repositories too, and record the same reason, `jev_skipped_private_repo`.
 - `--no-jev` skips Jev and uses the standard review.
 
 When Jev fails, times out, or is skipped, the review runs at standard depth. Jev can raise the depth. It can never lower it below standard.
