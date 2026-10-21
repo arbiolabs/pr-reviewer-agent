@@ -291,8 +291,12 @@ fn fail_request(m: &mut Model, id: &RequestId, message: Text) -> bool {
     true
 }
 
+/// Every toast goes through here and reads as a sentence: a debug build, and so every test that reaches one, fails on
+/// a toast that starts with a lowercase letter.
 fn notice(m: &mut Model, text: impl Into<String>) {
-    m.notice = Some(Notice { text: text.into(), until_ms: m.now_ms + NOTICE_MS });
+    let text = text.into();
+    debug_assert!(!text.starts_with(|c: char| c.is_lowercase()), "a toast starts with a capital: {text:?}");
+    m.notice = Some(Notice { text, until_ms: m.now_ms + NOTICE_MS });
 }
 
 fn transition(m: &mut Model, input: LinkInput) -> bool {
@@ -543,7 +547,7 @@ fn apply_snapshot(m: &mut Model, s: Snapshot, fx: &mut Vec<Effect>) {
             m.ui.selected_pr = Some(p.id.clone());
             m.ui.screen = Screen::Review;
         } else {
-            notice(m, format!("{wanted} is not tracked by the reviewer"));
+            notice(m, format!("The reviewer does not track {wanted}"));
         }
     }
     // Land on the story that matters most: the PR with the most severe current finding.
@@ -922,7 +926,7 @@ fn resolve_anchor(m: &mut Model, fx: &mut Vec<Effect>) {
         None => {
             d.anchor = None;
             if shown {
-                notice(m, format!("{path} is not in this diff"));
+                notice(m, format!("This diff has no {path}"));
             }
         }
     }
@@ -1744,7 +1748,7 @@ fn select_account(m: &mut Model) {
         return;
     };
     if let Some(why) = m.account_block(&a) {
-        notice(m, format!("{} cannot be selected: {why}", a.id));
+        notice(m, format!("Can't select {}: {why}", a.id));
         return;
     }
     let prompt = format!("Use {} on {} for GitHub reads and publishing?", a.login, a.host);

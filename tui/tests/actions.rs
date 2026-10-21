@@ -781,18 +781,6 @@ fn a_toast_is_a_sentence_and_one_still_under_way_ends_in_an_ellipsis() {
     m.look.ascii = true;
     press(&mut m, KeyCode::Char('r'));
     assert_eq!(m.notice.as_ref().unwrap().text, "Refreshing the snapshot~", "the ASCII ellipsis");
-
-    // Every literal toast the reducer raises starts with a capital, so none reads as a fragment beside the others.
-    let source = std::fs::read_to_string(concat!(env!("CARGO_MANIFEST_DIR"), "/src/update.rs")).unwrap();
-    let fragments: Vec<&str> = source
-        .lines()
-        .filter(|l| {
-            let Some(at) = l.find("notice(m, ") else { return false };
-            let rest = l[at + 10..].trim_start_matches("format!(");
-            rest.strip_prefix('"').and_then(|r| r.chars().next()).is_some_and(|c| c.is_ascii_lowercase())
-        })
-        .collect();
-    assert_eq!(fragments, Vec::<&str>::new());
 }
 
 #[test]

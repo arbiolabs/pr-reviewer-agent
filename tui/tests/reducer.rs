@@ -446,7 +446,7 @@ fn accounts_that_cannot_be_selected_say_why_and_open_no_modal() {
     assert_eq!(m.top_modal(), None);
     assert_eq!(
         m.notice.as_ref().map(|n| n.text.as_str()),
-        Some("env/GITHUB_TOKEN cannot be selected: set by the daemon env")
+        Some("Can't select env/GITHUB_TOKEN: set by the daemon env")
     );
 
     // Without the capability, or off a live stream, a selectable account says so.
@@ -474,7 +474,7 @@ fn pr_flag_opens_a_daemon_pr_whose_id_is_a_hash() {
     update(&mut m, Msg::Net(NetEvent::Opened));
     send(&mut m, &read("fixtures/server.welcome.json"));
     send(&mut m, &read("fixtures/server.snapshot.json"));
-    assert_eq!(m.notice.as_ref().map(|n| n.text.as_str()), Some("acme/shop#999 is not tracked by the reviewer"));
+    assert_eq!(m.notice.as_ref().map(|n| n.text.as_str()), Some("The reviewer does not track acme/shop#999"));
 }
 
 fn sent(fx: &[Effect]) -> Vec<&'static str> {
@@ -799,7 +799,7 @@ fn the_diff_a_finding_prefetches_changes_nothing_on_the_review_screen() {
     press(&mut m, KeyCode::Char('l'));
     press(&mut m, KeyCode::Char('d'));
     assert_eq!(m.ui.screen, Screen::Diff);
-    assert!(m.notice.as_ref().is_some_and(|n| n.text.ends_with("is not in this diff")), "{:?}", m.notice);
+    assert!(m.notice.as_ref().is_some_and(|n| n.text.starts_with("This diff has no ")), "{:?}", m.notice);
 }
 
 #[test]
