@@ -19,10 +19,25 @@ pub fn modal(c: &Ctx, f: &mut Frame, body: Rect, modal: &Modal) {
         Modal::Input { .. } => {}
         Modal::Confirm { title, prompt, command, state } => confirm(c, f, body, title, prompt, command.name(), state),
         Modal::Help { scroll } => help(c, f, body, *scroll),
-        Modal::Finding { id, scroll } => super::doc::finding_page(c, f, body, id, *scroll),
-        Modal::Publication { run_id, scroll, preview, publish } => {
-            super::publish::page(c, f, body, run_id, *scroll, preview, publish)
+        Modal::Finding { scroll, .. } | Modal::Publication { scroll, .. } => {
+            let lines = page_lines(c, body, modal).unwrap_or_default();
+            let (len, h) = (lines.len(), body.height as usize);
+            let start = (*scroll as usize).min(help_limit(len, h));
+            page(c, f, body, lines.into_iter().skip(start).collect());
         }
+    }
+}
+
+/// The lines of a scrolling page, the help, the finding reader or the publication preview, before scrolling.
+pub fn page_lines(c: &Ctx, body: Rect, modal: &Modal) -> Option<Vec<Line<'static>>> {
+    let w = column(body).width as usize;
+    match modal {
+        Modal::Help { .. } => Some(help_lines(c, body)),
+        Modal::Finding { id, .. } => Some(super::doc::finding_lines(c, w, id)),
+        Modal::Publication { run_id, preview, publish, .. } => {
+            Some(super::publish::lines(c, w, run_id, preview, publish))
+        }
+        Modal::Input { .. } | Modal::Confirm { .. } => None,
     }
 }
 
@@ -72,7 +87,7 @@ fn confirm(c: &Ctx, f: &mut Frame, body: Rect, title: &str, prompt: &str, comman
     f.render_widget(Paragraph::new(lines), area);
 }
 
-/// The largest scroll of a `len`-line help page in `height` rows. An overflowing page keeps its last row for the cue.
+/// The largest scroll of a `len`-line page in `height` rows. An overflowing page keeps its last row for the cue.
 pub fn help_limit(len: usize, height: usize) -> usize {
     if len <= height { 0 } else { len - height.saturating_sub(1) }
 }

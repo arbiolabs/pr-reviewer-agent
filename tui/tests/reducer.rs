@@ -94,8 +94,10 @@ fn the_top_modal_takes_keys_and_esc_pops_one_at_a_time() {
 
     press(&mut m, KeyCode::Esc);
     assert!(matches!(m.top_modal(), Some(Modal::Finding { scroll: 0, .. })));
+    // The reader takes j, and a page that fits its rows does not scroll past its end.
     press(&mut m, KeyCode::Char('j'));
-    assert!(matches!(m.top_modal(), Some(Modal::Finding { scroll: 1, .. })));
+    assert!(matches!(m.top_modal(), Some(Modal::Finding { scroll: 0, .. })));
+    assert_eq!(m.ui.selected_finding, before);
     press(&mut m, KeyCode::Esc);
     assert_eq!(m.top_modal(), None);
     assert_eq!(m.ui.screen, Screen::Review);

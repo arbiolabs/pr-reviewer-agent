@@ -462,3 +462,43 @@ fn the_showcase_parks_1291_and_its_preview_lands_every_comment_on_the_diff() {
         assert!(frame.contains(want), "{want}:\n{frame}");
     }
 }
+
+/// Rows of the body that show text, below the status line and above the footer.
+fn body_rows(frame: &str) -> usize {
+    let lines: Vec<&str> = frame.lines().collect();
+    lines[2..lines.len() - 1].iter().filter(|l| !l.trim().is_empty()).count()
+}
+
+#[test]
+fn g_page_down_and_the_wheel_keep_the_reader_and_the_preview_on_screen() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseEvent, MouseEventKind};
+    use pr_review_tui::update::Msg;
+    let reader = || showcase(2).key(KeyCode::Enter).key(KeyCode::Enter);
+    let preview = || parked(Look::default()).key(KeyCode::Char('p'));
+    for (name, open) in [("reader", &reader as &dyn Fn() -> Sim), ("preview", &preview)] {
+        for (w, h) in [(80, 24), (120, 38)] {
+            let mut s = open();
+            render(&mut s.m, w, h);
+            let mut g = open().key(KeyCode::Char('G'));
+            let (end, _) = render(&mut g.m, w, h);
+            assert!(body_rows(&end) >= (h as usize - 3) / 2, "{name} {w}x{h} G blanks the page:\n{end}");
+            for _ in 0..6 {
+                s.apply(Msg::Key(KeyEvent::new(KeyCode::Char('d'), KeyModifiers::CONTROL)));
+            }
+            let (paged, _) = render(&mut s.m, w, h);
+            assert!(body_rows(&paged) >= (h as usize - 3) / 2, "{name} {w}x{h} C-d x6 blanks the page:\n{paged}");
+            for _ in 0..40 {
+                s.apply(Msg::Mouse(MouseEvent {
+                    kind: MouseEventKind::ScrollDown,
+                    column: 50,
+                    row: 10,
+                    modifiers: KeyModifiers::NONE,
+                }));
+            }
+            let (wheeled, _) = render(&mut s.m, w, h);
+            assert_eq!(wheeled, end, "{name} {w}x{h}: the wheel stops at the same end as G");
+            let mut up = g.key(KeyCode::Char('k'));
+            assert_ne!(render(&mut up.m, w, h).0, end, "{name} {w}x{h}: one k scrolls back from the end");
+        }
+    }
+}

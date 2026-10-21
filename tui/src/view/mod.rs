@@ -146,12 +146,13 @@ fn view_at(c: &Ctx, footer: Rect, x: u16) -> Option<Screen> {
     None
 }
 
-/// The largest useful help scroll at the current size.
-pub fn help_scroll_limit(m: &Model) -> u16 {
+/// The largest useful scroll of the top page (help, finding reader, publication preview) at the current size.
+pub fn page_scroll_limit(m: &Model) -> u16 {
     let area = Rect::new(0, 0, m.size.0, m.size.1);
     let c = ctx(m, area.width);
     let body = regions(&c, area)[3];
-    modals::help_limit(modals::help_lines(&c, body).len(), body.height as usize) as u16
+    let len = m.top_modal().and_then(|x| modals::page_lines(&c, body, x)).map_or(0, |l| l.len());
+    modals::help_limit(len, body.height as usize) as u16
 }
 
 /// The largest useful `doc_scroll` at the current size, so J past the end does not pile up presses K must undo.

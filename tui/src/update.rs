@@ -123,6 +123,7 @@ pub fn update(m: &mut Model, msg: Msg) -> Vec<Effect> {
         Msg::Net(e) => net(m, e, &mut fx),
     }
     prefetch(m, &mut fx);
+    clamp_page(m);
     m.dirty = true;
     fx
 }
@@ -1153,7 +1154,7 @@ fn mouse(m: &mut Model, e: MouseEvent, fx: &mut Vec<Effect>) {
         _ => return,
     };
     match (m.top_modal(), m.ui.screen) {
-        (Some(Modal::Finding { .. } | Modal::Help { .. }), _) => move_by(m, delta, fx),
+        (Some(Modal::Finding { .. } | Modal::Help { .. } | Modal::Publication { .. }), _) => move_by(m, delta, fx),
         (Some(_), _) => {}
         (None, Screen::Inbox | Screen::Review) => {
             m.ui.doc_scroll = (m.ui.doc_scroll + delta as i32).clamp(0, crate::view::doc_scroll_limit(m));
@@ -1396,16 +1397,11 @@ fn goto(m: &mut Model, s: Screen, fx: &mut Vec<Effect>) {
 }
 
 fn move_by(m: &mut Model, delta: isize, fx: &mut Vec<Effect>) {
-    let help_limit = crate::view::help_scroll_limit(m);
     if let Some(top) = m.ui.modals.last_mut() {
-        match top {
-            Modal::Finding { scroll, .. } => *scroll = (*scroll as isize + delta).clamp(0, u16::MAX as isize) as u16,
-            Modal::Help { scroll } => *scroll = (*scroll as isize + delta).clamp(0, help_limit as isize) as u16,
-            Modal::Publication { scroll, .. } => {
-                *scroll = (*scroll as isize + delta).clamp(0, u16::MAX as isize) as u16
-            }
-            Modal::Input { .. } | Modal::Confirm { .. } => {}
+        if let Modal::Finding { scroll, .. } | Modal::Help { scroll } | Modal::Publication { scroll, .. } = top {
+            *scroll = (*scroll as isize + delta).max(0).min(u16::MAX as isize) as u16;
         }
+        clamp_page(m);
         return;
     }
     match (m.ui.screen, m.ui.focus) {
@@ -1492,6 +1488,16 @@ fn move_by(m: &mut Model, delta: isize, fx: &mut Vec<Effect>) {
             let current = m.cursor_account().map(|a| a.id.clone());
             m.ui.selected_account = step(&ids, current.as_ref(), delta);
         }
+    }
+}
+
+/// Keeps the top page's scroll within its content, which changes as details, previews and sizes arrive.
+fn clamp_page(m: &mut Model) {
+    let limit = crate::view::page_scroll_limit(m);
+    if let Some(Modal::Finding { scroll, .. } | Modal::Help { scroll } | Modal::Publication { scroll, .. }) =
+        m.ui.modals.last_mut()
+    {
+        *scroll = (*scroll).min(limit);
     }
 }
 

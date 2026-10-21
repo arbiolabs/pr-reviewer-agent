@@ -5,7 +5,7 @@ use ratatui::Frame;
 use ratatui::layout::Rect;
 use ratatui::style::Style;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Clear, Paragraph};
+use ratatui::widgets::Paragraph;
 
 use super::Ctx;
 use super::code::{highlight, rich};
@@ -736,14 +736,9 @@ fn code_block(c: &Ctx, ev: &Evidence, f: &Finding, w: usize, max: usize) -> Vec<
 // ---------------------------------------------------------------- finding page
 
 /// Enter on a card: the whole finding as an article, every piece of evidence in full.
-pub fn finding_page(c: &Ctx, f: &mut Frame, area: Rect, id: &FindingId, scroll: u16) {
-    f.render_widget(Clear, area);
-    f.render_widget(Paragraph::new("").style(c.t.bg(Bg::Base)), area);
-    let col = column(area);
-    let w = col.width as usize;
+pub fn finding_lines(c: &Ctx, w: usize, id: &FindingId) -> Vec<Line<'static>> {
     let Some(fd) = c.m.domain.findings.get(id) else {
-        f.render_widget(Paragraph::new(c.span("This finding is no longer in the snapshot.", Role::Muted)), col);
-        return;
+        return vec![Line::from(c.span("This finding is no longer in the snapshot.", Role::Muted))];
     };
     let iw = w.saturating_sub(2);
     let mut lines = vec![Line::raw("")];
@@ -804,7 +799,7 @@ pub fn finding_page(c: &Ctx, f: &mut Frame, area: Rect, id: &FindingId, scroll: 
         }
     }
     lines.extend(barred(c, fd.severity, true, body));
-    f.render_widget(Paragraph::new(lines).scroll((scroll, 0)), col);
+    lines
 }
 
 /// A tool, test or scenario line from the evidence: `◎ search_code "x": 4 matches`, wrapped under its text.

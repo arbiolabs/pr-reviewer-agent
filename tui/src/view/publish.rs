@@ -1,35 +1,17 @@
 //! The publication page (TUI_SPEC §5.5): what approving a parked review would post, exactly, and what happened once
 //! it was approved. `y` sends only what this page shows; it says why when the preview has gone stale.
 
-use ratatui::Frame;
-use ratatui::layout::Rect;
 use ratatui::text::{Line, Span};
-use ratatui::widgets::{Clear, Paragraph};
 
 use super::Ctx;
 use super::code::rich;
-use super::doc::{column, inset};
+use super::doc::inset;
 use crate::model::{ConfirmState, DiffKey, Preview};
 use crate::protocol::{PublicationPreview, PublicationStatus, RunId};
-use crate::theme::{Bg, Role, publication_status};
+use crate::theme::{Role, publication_status};
 use crate::update::{publish_block, published_url};
 
 const MARKER: &str = "<!-- durable-review:";
-
-pub fn page(
-    c: &Ctx,
-    f: &mut Frame,
-    area: Rect,
-    run_id: &RunId,
-    scroll: u16,
-    preview: &Preview,
-    publish: &ConfirmState,
-) {
-    f.render_widget(Clear, area);
-    f.render_widget(Paragraph::new("").style(c.t.bg(Bg::Base)), area);
-    let col = column(area);
-    f.render_widget(Paragraph::new(lines(c, col.width as usize, run_id, preview, publish)).scroll((scroll, 0)), col);
-}
 
 pub fn lines(c: &Ctx, w: usize, run_id: &RunId, preview: &Preview, publish: &ConfirmState) -> Vec<Line<'static>> {
     let g = c.t.g();
