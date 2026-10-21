@@ -370,7 +370,12 @@ fn the_showcases_started_retried_and_running_runs_reach_an_end_and_a_reviewed_he
     assert_eq!(latest(&m, 1296).map(|r| r.0), Some(RunStatus::Completed), "{:?} {:?}", m.notice, m.top_modal());
     keys(&mut m, 345, "Ry");
     assert_eq!(latest(&m, 345).unwrap().0, RunStatus::Completed, "the retried run");
-    for number in [1296, 1287, 341] {
+    // The reader's own start replays as the daemon replays it: accepted for the run it made, which has ended.
+    keys(&mut m, 1296, "sy");
+    assert_eq!(m.top_modal(), None);
+    let why = m.notice.as_ref().unwrap().text.clone();
+    assert!(why.starts_with("#1296 at ") && why.ends_with(" is already reviewed"), "{why:?}");
+    for number in [1287, 341] {
         keys(&mut m, number, "sy");
         let why = refused(&m);
         assert!(why.starts_with(&format!("#{number} at ")) && why.ends_with(" is already reviewed"), "{why:?}");
@@ -464,14 +469,14 @@ fn the_showcase_refuses_a_start_on_a_head_under_review_as_the_daemon_does() {
         |message: String| CommandOutcome::Rejected { code: ErrorCode::Conflict, message: Text::new(&message) };
     let (outcome, head) = start_answer(&mut p, &m, 1291, None);
     assert_eq!(outcome, conflict(format!("#1291 at {head} is waiting for your approval")));
-    let (outcome, _) = start_answer(&mut p, &m, 1296, None);
-    assert!(matches!(outcome, CommandOutcome::Accepted { .. }), "{outcome:?}");
+    let (accepted, _) = start_answer(&mut p, &m, 1296, None);
     let (i, _) = p.upcoming().unwrap();
-    let started = p.play(i);
-    assert!(
-        matches!(&started, ServerMessage::Event(Event::Sequenced(e)) if matches!(e.body, EventBody::Run(RunChange::Started, _))),
-        "{started:?}"
-    );
+    let ServerMessage::Event(Event::Sequenced(e)) = p.play(i) else { panic!("run.started plays first") };
+    let EventBody::Run(RunChange::Started, run) = e.body else { panic!("{:?}", e.body) };
+    let operation = Text::new(&format!("review.start:{}", run.id));
+    assert_eq!(accepted, CommandOutcome::Accepted { operation_id: operation.clone() }, "the run it starts");
+    let (outcome, _) = start_answer(&mut p, &m, 1296, None);
+    assert_eq!(outcome, CommandOutcome::Accepted { operation_id: operation }, "its own key replays");
     let (outcome, head) = start_answer(&mut p, &m, 1296, Some("another client"));
     assert_eq!(outcome, conflict(format!("#1296 at {head} is already being reviewed")));
 }
