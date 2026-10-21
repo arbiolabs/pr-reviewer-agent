@@ -94,7 +94,7 @@ fn start_names_the_pr_and_head_sends_only_on_y_and_settles_on_run_started_not_on
     let started = run_json("rev-186-a", "acme/shop#186", H186, "COLLECT_CONTEXT", "RUNNING");
     send(&mut m, &event(109, "acme/shop#186", "rev-186-a", "run.started", &started));
     assert_eq!(m.top_modal(), None, "the event closes the panel");
-    assert_eq!(m.notice.as_ref().unwrap().text, "review.start done: run rev-186- started at 6666666");
+    assert_eq!(m.notice.as_ref().unwrap().text, "Started reviewing #186 at 6666666");
 }
 
 #[test]
@@ -132,7 +132,7 @@ fn cancel_and_retry_name_their_target_and_settle_on_the_run_ending_or_moving() {
     let failed = run_json("rev-184-a", "acme/shop#184", "4444444444444444444444444444444444444444", "FAILED", "FAILED");
     send(&mut m, &event(110, "acme/shop#184", "rev-184-a", "run.failed", &failed));
     assert_eq!(m.top_modal(), None);
-    assert_eq!(m.notice.as_ref().unwrap().text, "review.cancel done: run rev-184- failed: model timed out");
+    assert_eq!(m.notice.as_ref().unwrap().text, "Cancelled the review of #184");
 
     press(&mut m, KeyCode::Char('R'));
     assert_eq!(prompt(&m), "Retry run rev-184-?");
@@ -155,7 +155,7 @@ fn a_read_only_daemon_says_why_the_action_keys_do_nothing() {
     let mut m = engine("fixtures/server.welcome.read-only.json", "acme/shop#186");
     assert!(commands(&press(&mut m, KeyCode::Char('s'))).is_empty());
     assert_eq!(m.top_modal(), None);
-    assert_eq!(m.notice.as_ref().unwrap().text, "review.start unavailable: daemon is read-only");
+    assert_eq!(m.notice.as_ref().unwrap().text, "Can't start a review: daemon is read-only");
 
     let off = read("fixtures/server.welcome.read-only.json").replace(
         "another pr-review is running on /srv/pr-review/.data",
@@ -167,7 +167,7 @@ fn a_read_only_daemon_says_why_the_action_keys_do_nothing() {
     press(&mut m, KeyCode::Char('c'));
     assert_eq!(
         m.notice.as_ref().unwrap().text,
-        "review.cancel unavailable: commands are off (start the daemon with --allow-commands)"
+        "Can't cancel: commands are off (start the daemon with --allow-commands)"
     );
 }
 
@@ -243,7 +243,7 @@ fn y_sends_exactly_one_publish_naming_the_preview_and_only_published_reads_as_do
     let accepted = read("fixtures/server.command.result.accepted.json").replace("req-cmd", rid.as_str());
     send(&mut m, &accepted);
     let f = frame(&mut m);
-    assert!(f.contains("approval recorded; publishing…"), "{f}");
+    assert!(f.contains("Approved; publishing…"), "{f}");
     assert!(!f.contains("published on GitHub"), "accepted is not published: {f}");
 
     for msg in rest.into_iter().skip(7).take(2) {
@@ -285,10 +285,7 @@ fn p_on_a_run_that_is_not_parked_opens_nothing() {
     let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#184");
     assert_eq!(press(&mut m, KeyCode::Char('p')), []);
     assert_eq!(m.top_modal(), None);
-    assert_eq!(
-        m.notice.as_ref().unwrap().text,
-        "review.publish unavailable for #184: no review is awaiting approval on it"
-    );
+    assert_eq!(m.notice.as_ref().unwrap().text, "Nothing to publish on #184");
 }
 
 fn parked_frame(look: pr_review_tui::model::Look) -> (String, ratatui::Terminal<ratatui::backend::TestBackend>) {
@@ -489,4 +486,20 @@ fn the_confirmation_is_a_page_with_a_human_title_and_wraps_its_result() {
         assert!(text.contains("pull request"), "{w}x{h}: the rejection is cut:\n{frame}");
         assert!(!frame.contains('…'), "{w}x{h}: {frame}");
     }
+}
+
+#[test]
+fn toasts_say_what_happened_in_plain_words_and_wrap_instead_of_cutting() {
+    let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#186");
+    press(&mut m, KeyCode::Char('R'));
+    assert_eq!(m.notice.as_ref().unwrap().text, "Can't retry #186: its latest run has not failed");
+    press(&mut m, KeyCode::Char('c'));
+    assert_eq!(m.notice.as_ref().unwrap().text, "Can't cancel #186: no review is running on it");
+    m.notice = Some(pr_review_tui::model::Notice {
+        text: "Can't retry #186: its latest run has not failed, and the daemon keeps the attempt you asked for".into(),
+        until_ms: u64::MAX,
+    });
+    let (frame, _) = render(&mut m, 60, 16);
+    let text = frame.split_whitespace().collect::<Vec<_>>().join(" ");
+    assert!(text.contains("keeps the attempt you asked for"), "the toast is cut:\n{frame}");
 }

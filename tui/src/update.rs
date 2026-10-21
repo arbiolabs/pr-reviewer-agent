@@ -391,10 +391,8 @@ fn server_message(m: &mut Model, msg: ServerMessage, fx: &mut Vec<Effect>) {
                 return;
             }
             let text = match r.outcome {
-                CommandOutcome::Accepted { operation_id } => {
-                    format!("request accepted ({operation_id}); waiting for events")
-                }
-                CommandOutcome::Rejected { code, message } => format!("rejected {code}: {message}"),
+                CommandOutcome::Accepted { .. } => "Sent; waiting for the daemon to confirm it".to_string(),
+                CommandOutcome::Rejected { code, message } => format!("Refused ({code}): {message}"),
             };
             notice(m, text);
         }
@@ -642,20 +640,27 @@ fn settle_command(m: &mut Model, e: &SequencedEvent) {
     };
     let Some(i) = m.ui.modals.iter().position(done) else { return };
     let Modal::Confirm { command, .. } = m.ui.modals.remove(i) else { return };
-    let what = match &e.body {
-        EventBody::Run(RunChange::Started, r) => format!("run {} started at {}", r.id.short(), r.head_sha.short()),
-        EventBody::Run(RunChange::Failed, r) => {
-            let why = r.failure_reason.as_ref().map_or(String::new(), |x| format!(": {x}"));
-            format!("run {} failed{why}", r.id.short())
+    let number = |run: &RunId| {
+        let pr = m.domain.runs.get(run).and_then(|r| m.domain.prs.get(&r.pr_id));
+        pr.map_or(format!("run {}", run.short()), |p| format!("#{}", p.number))
+    };
+    let what = match (&command, &e.body) {
+        (Command::Cancel(_), EventBody::Run(_, r)) => format!("Cancelled the review of {}", number(&r.id)),
+        (Command::Cancel(p), _) => format!("Cancelled the review of {}", number(&p.run_id)),
+        (Command::Retry(p), _) => {
+            let attempt = m.domain.runs.get(&p.run_id).and_then(|r| r.attempt);
+            format!("Retrying {}{}", number(&p.run_id), attempt.map_or(String::new(), |n| format!(" (attempt {n})")))
         }
-        EventBody::Run(RunChange::Superseded, r) => format!("run {} superseded by a newer head", r.id.short()),
-        EventBody::Run(RunChange::Completed, r) => format!("run {} completed", r.id.short()),
-        EventBody::PhaseChanged(c) => {
-            format!("run {} is now {}", c.run_id.short(), crate::theme::phase_name(c.to))
+        (_, EventBody::Run(RunChange::Started, r)) => {
+            format!("Started reviewing {} at {}", number(&r.id), r.head_sha.short())
+        }
+        (_, EventBody::Run(RunChange::Failed, r)) => {
+            let why = r.failure_reason.as_ref().map_or(String::new(), |x| format!(": {x}"));
+            format!("The review of {} failed{why}", number(&r.id))
         }
         _ => return,
     };
-    notice(m, format!("{} done: {what}", command.name()));
+    notice(m, what);
 }
 
 /// Re-resolves selections by ID after the lists changed; an ID that vanished falls back to the first entry.
@@ -1250,12 +1255,18 @@ pub fn write_block(m: &Model, capability: &str) -> Option<&'static str> {
 /// `s`, `R`, `c` and `p` on the selected PR: a confirmation panel naming the exact target, or a notice saying why not.
 fn mutation(m: &mut Model, mu: Mutation, fx: &mut Vec<Effect>) {
     let cap = mu.capability();
+    let verb = match mu {
+        Mutation::Start => "start a review",
+        Mutation::Retry => "retry",
+        Mutation::Cancel => "cancel",
+        Mutation::Publish => "publish",
+    };
     if let Some(why) = write_block(m, cap) {
-        notice(m, format!("{cap} unavailable: {why}"));
+        notice(m, format!("Can't {verb}: {why}"));
         return;
     }
     let Some(p) = m.selected_pr().cloned() else {
-        notice(m, format!("{cap} unavailable: no PR selected"));
+        notice(m, format!("Can't {verb}: no PR is selected"));
         return;
     };
     let run = m.domain.latest_run(&p.id).cloned();
@@ -1277,12 +1288,14 @@ fn mutation(m: &mut Model, mu: Mutation, fx: &mut Vec<Effect>) {
             return;
         }
         (mu, _) => {
-            let why = match mu {
-                Mutation::Retry => "its latest run has not failed",
-                Mutation::Cancel => "no review is running on it",
-                _ => "no review is awaiting approval on it",
-            };
-            notice(m, format!("{cap} unavailable for #{}: {why}", p.number));
+            notice(
+                m,
+                match mu {
+                    Mutation::Retry => format!("Can't retry #{}: its latest run has not failed", p.number),
+                    Mutation::Cancel => format!("Can't cancel #{}: no review is running on it", p.number),
+                    _ => format!("Nothing to publish on #{}", p.number),
+                },
+            );
             return;
         }
     };

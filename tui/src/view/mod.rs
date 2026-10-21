@@ -194,6 +194,31 @@ pub fn view(m: &Model, f: &mut Frame) {
     for modal in &m.ui.modals {
         modals::modal(&c, f, body, modal);
     }
+    toast(&c, f, footer, body);
+}
+
+/// A notice too long for the footer beside the views takes the whole footer and wraps upward over the body's last
+/// rows, instead of being cut.
+fn toast(c: &Ctx, f: &mut Frame, footer: Rect, body: Rect) {
+    let Some(n) = c.m.notice.as_ref().filter(|_| !matches!(c.m.top_modal(), Some(Modal::Input { .. }))) else {
+        return;
+    };
+    let room = footer.width.saturating_sub(views_w(c) as u16 + 3) as usize;
+    if crate::text::width(&n.text) <= room {
+        return;
+    }
+    let w = footer.width.saturating_sub(2) as usize;
+    let lines: Vec<Line> = code::rich(c, &n.text, w, Role::Pending)
+        .into_iter()
+        .map(|mut l| {
+            l.insert(0, Span::raw(" "));
+            Line::from(l)
+        })
+        .collect();
+    let h = (lines.len() as u16).min(body.height + 1);
+    let area = Rect { y: footer.y + 1 - h, height: h, ..footer };
+    f.render_widget(ratatui::widgets::Clear, area);
+    f.render_widget(Paragraph::new(lines).style(c.t.bg(crate::theme::Bg::Base)), area);
 }
 
 fn link_status(c: &Ctx) -> (String, Role) {
