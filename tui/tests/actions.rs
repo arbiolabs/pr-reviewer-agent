@@ -821,6 +821,32 @@ fn every_count_in_settings_agrees_with_its_noun() {
 }
 
 #[test]
+fn the_stepper_takes_one_shape_per_width_whatever_the_run_state() {
+    use pr_review_tui::protocol::{Phase, RunId, RunStatus};
+    for w in [80, 100, 120, 160] {
+        let shapes: Vec<(&str, (bool, bool, bool))> = [
+            ("failed", Phase::Failed, RunStatus::Failed),
+            ("parked", Phase::AwaitingApproval, RunStatus::Running),
+            ("done", Phase::Completed, RunStatus::Completed),
+        ]
+        .into_iter()
+        .map(|(name, phase, status)| {
+            let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#185");
+            m.ui.screen = pr_review_tui::model::Screen::Review;
+            m.ui.focus = pr_review_tui::model::Pane::Main;
+            let r = m.domain.runs.get_mut(&RunId::new("rev-185-a")).unwrap();
+            (r.phase, r.status) = (phase, status);
+            let (f, _) = render(&mut m, w, 38);
+            let tail = ["✗ failed", "◔ waiting for you", "✓ done"];
+            let line = f.lines().find(|l| tail.iter().any(|t| l.contains(t))).unwrap_or_else(|| panic!("{f}"));
+            (name, (line.contains("──"), line.contains("Collect"), line.contains("Triage")))
+        })
+        .collect();
+        assert!(shapes.iter().all(|s| s.1 == shapes[0].1), "{w}: {shapes:?}");
+    }
+}
+
+#[test]
 fn a_link_state_still_under_way_ends_in_an_ellipsis() {
     let mut m = model();
     update(&mut m, Msg::Net(NetEvent::Opened));

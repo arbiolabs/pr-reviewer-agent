@@ -445,7 +445,9 @@ fn phase_line(c: &Ctx, run: Option<&Run>, w: usize) -> Line<'static> {
         RunStatus::Unknown => ("?".into(), Role::Muted),
     };
     let right = vec![c.span(tail.0, tail.1)];
-    let fits = |spans: &Vec<Span<'static>>| spans_w(spans) + spans_w(&right) + 2 <= w;
+    // The shape follows the width alone: every state's tail gets the room of the widest, `◔ waiting for you`.
+    let tail_w = spans_w(&right).max(17);
+    let fits = |spans: &Vec<Span<'static>>| spans_w(spans) + tail_w + 2 <= w;
     let spans = [build(Some(link), true), build(None, true), build(None, false)]
         .into_iter()
         .find(fits)
