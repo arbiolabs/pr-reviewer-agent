@@ -971,7 +971,7 @@ fn the_footer_offers_no_key_that_has_nothing_to_act_on() {
     let all: Vec<String> = pr_review_tui::offer::offered(&m).iter().map(|h| h.text()).collect();
     assert!(f.contains("h pull requests") && all.contains(&"t timeline".to_string()), "{f}");
     assert!(!f.contains("j/k finding") && !f.contains("Enter read") && !f.contains("J/K"), "#186 has no findings: {f}");
-    assert!(!f.contains("d diff"), "#186 has no review, so no diff: {f}");
+    assert!(f.contains("d diff"), "d asks the daemon for #186's diff: {f}");
 
     // No daemon and no PR: nothing to diff, list or show a timeline of, and h leaves no findings to go to.
     let mut m = model();
@@ -999,7 +999,7 @@ fn the_footer_offers_no_key_that_has_nothing_to_act_on() {
 }
 
 #[test]
-fn d_on_a_pr_with_no_review_says_there_is_no_diff_and_offers_only_the_way_back() {
+fn d_on_a_pr_with_no_review_asks_and_the_diff_says_there_is_none_and_offers_only_the_way_back() {
     // The daemon answers NOT_FOUND for a PR it never reviewed; a playback may answer with no files.
     let base = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
     let answers = [
@@ -1015,12 +1015,8 @@ fn d_on_a_pr_with_no_review_says_there_is_no_diff_and_offers_only_the_way_back()
         m.ui.screen = pr_review_tui::model::Screen::Review;
         m.ui.focus = pr_review_tui::model::Pane::Main;
         m.ui.selected_finding = None;
-        assert!(press(&mut m, KeyCode::Char('d')).is_empty(), "the daemon serves no diff for a head it never reviewed");
-        assert_eq!(m.ui.screen, pr_review_tui::model::Screen::Review);
-        let toast = &m.notice.as_ref().unwrap().text;
-        assert_eq!(toast, "No review of #186 at 6666666 yet, so there is no diff to show. s starts one.");
-        update(&mut m, Msg::Tick(pr_review_tui::update::NOTICE_MS));
-        let rid = press(&mut m, KeyCode::Char('3')).iter().find_map(|e| match e {
+        // Whether the daemon has a diff for a head it never reviewed is its to say, so d asks.
+        let rid = press(&mut m, KeyCode::Char('d')).iter().find_map(|e| match e {
             Effect::Send(ClientMessage::DiffGet { request_id, .. }) => Some(request_id.clone()),
             _ => None,
         });

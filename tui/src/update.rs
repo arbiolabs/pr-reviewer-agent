@@ -1629,13 +1629,12 @@ fn diff_target(m: &Model) -> Option<(DiffKey, Option<Finding>)> {
     Some((DiffKey { pr: pr.id.clone(), base: pr.base_sha.clone(), head: pr.head_sha.clone() }, None))
 }
 
-/// d: the daemon serves the diff of a revision it reviewed, so a revision with a run, or one already loaded.
+/// d: a diff already loaded, or one to ask the daemon for. Whether it has one for a head it never reviewed is its to
+/// say, and the Diff says what it answered.
 pub fn can_diff(m: &Model) -> bool {
     let Some((key, _)) = diff_target(m) else { return false };
     let loaded = m.diff.as_ref().is_some_and(|d| d.key == key && d.error.is_none() && !d.files.is_empty());
-    let reviewed =
-        m.domain.runs.values().any(|r| r.pr_id == key.pr && r.base_sha == key.base && r.head_sha == key.head);
-    loaded || reviewed && m.link.welcomed()
+    loaded || m.link.welcomed()
 }
 
 /// t: the selected PR's events, which the daemon sends.
@@ -2111,14 +2110,8 @@ fn open_finding(m: &mut Model, id: FindingId, fx: &mut Vec<Effect>) {
 /// The diff for the finding in focus (modal, Review list), pinned to that finding's own revision; else the PR's head.
 fn open_diff(m: &mut Model, fx: &mut Vec<Effect>) {
     if !can_diff(m) {
-        let why = match m.selected_pr() {
-            None => "No PR selected".to_string(),
-            Some(_) if !m.link.welcomed() => "Can't open the diff: the client is not live".to_string(),
-            Some(p) => {
-                let start = if can_mutate(m, Mutation::Start) { " s starts one." } else { "" };
-                format!("No review of #{} at {} yet, so there is no diff to show.{start}", p.number, p.head_sha.short())
-            }
-        };
+        let why =
+            if m.selected_pr().is_none() { "No PR selected" } else { "Can't open the diff: the client is not live" };
         return notice(m, why);
     }
     let Some((key, finding)) = diff_target(m) else { return };
