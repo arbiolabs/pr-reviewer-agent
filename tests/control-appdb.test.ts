@@ -534,3 +534,23 @@ it("produced every server message and event type, each passing the v1 schema", (
     ].sort(),
   );
 });
+
+it("shows an observation from before migration 055 as DETECTED until the finding's publication, then PUBLISHED, in replay and history", async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "ctl-legacy-"));
+  const store = AppStore.open(join(dataDir, "app.sqlite"));
+  cleanup.push(() => store.close());
+  const prId = store.upsertPull(createFixture().pull);
+  const key = { prId, baseSha: "b".repeat(40), policyVersion: "1", reviewerVersion: "m1+faux/reviewer" };
+  const [r1, r2] = [store.ensureRevision({ ...key, headSha: "1".repeat(40) }), store.ensureRevision({ ...key, headSha: "2".repeat(40) })];
+  const candidate = JSON.stringify({ id: "c1", category: "security", severity: "high", title: "t", explanation: "e", file: "src/x.ts", newLine: 5, codeEvidence: [], reasoningSummary: "r", confidence: 0.9, evidenceKind: "confirmed_by_static_trace" });
+  const t = (n: number) => `2026-10-20T00:00:0${n}Z`;
+  store.db.prepare("INSERT INTO findings (id, pr_id, first_revision_id, fingerprint, status, current_severity, created_at, updated_at) VALUES ('f', ?, ?, 'fp', 'DETECTED', 'high', ?, ?)").run(prId, r1.id, t(1), t(1));
+  const observe = store.db.prepare(`INSERT INTO finding_observations (id, finding_id, revision_id, disposition, evidence_json, location_json, created_at) VALUES (?, 'f', ?, 'VERIFIED', ?, '{"file":"src/x.ts","newLine":5}', ?)`);
+  observe.run("o1", r1.id, candidate, t(1));
+  store.db.prepare("UPDATE findings SET status = 'PUBLISHED', updated_at = ? WHERE id = 'f'").run(t(2));
+  observe.run("o2", r2.id, candidate, t(3));
+  const source = AppDbSource.open(dataDir, { PATH: "" });
+  cleanup.push(() => source.close());
+  expect(source.eventsAfter(0, 1000).filter((e) => e.eventType === "finding.updated").map((e) => (e.data as { status: string }).status)).toEqual(["DETECTED", "PUBLISHED", "PUBLISHED"]);
+  expect((await source.finding("f")).history.map((h) => h.disposition)).toEqual(["DETECTED", "PUBLISHED", "PUBLISHED"]);
+});
