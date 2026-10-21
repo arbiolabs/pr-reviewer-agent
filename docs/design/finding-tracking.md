@@ -1,6 +1,6 @@
 # Design: tracking findings across commits
 
-Status: proposal. Nothing here is built. Base: `main` at `f328e79`.
+Status: build plan steps 1 to 4 are built (#25, #26, #TBD); steps 6 and 7 were declined by the operator. The line references below describe `main` at `f328e79`, the base this design was written against.
 
 The README says each commit gets a fresh review, and that tracking a finding across commits, marking it resolved, and replying in review threads are not built (`README.md:233`). This document designs that tracking. It covers how a finding on commit N is matched on commit N+1, who decides its new status, what appears on GitHub, the store, protocol and benchmark changes, and a build plan of small PRs.
 

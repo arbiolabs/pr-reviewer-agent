@@ -108,7 +108,7 @@ The metrics, in priority order:
 3. **Duplicate-comment rate.** Inline comments on a label that had an inline comment in an earlier review, over all inline comments. Two comments in one review on one label are two findings, not a re-post. A comment is on a label when its path and line match the label's current location, as a finding would.
 4. **Resolution recall.** Expectations of `resolved` whose finding ended `RESOLVED`, over all such expectations.
 
-The runner also prints how many labels added by a later commit a new finding matched. A label that the first review missed has no finding ID, and its expectations count in no metric. The table shows its status as `unmatched`.
+The runner also prints how many labels added by a later commit a new finding matched. A label that the first review missed has no finding ID, and its expectations count in no metric. The table shows its status as `unmatched`. Below the table, each step lists its findings with their stored status, the candidates the verifier discarded, and the verdict on each resolution claim the model made, with the verifier's reason when it refused one.
 
 The eight cases share one bug, a refund route registered without `requireAdmin`, and differ in what the later commits do:
 

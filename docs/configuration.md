@@ -80,7 +80,7 @@ When Jev fails, times out, or is skipped, the review runs at standard depth. Jev
 |---|---|
 | `dry_run` | The default. Records the review and posts nothing. |
 | `comment` | Posts one `COMMENT` review per revision through the outbox. |
-| `silent_no_findings` | As `comment`, but posts nothing for a review with no findings. |
+| `silent_no_findings` | As `comment`, but posts only a review with something new: a new finding, a first inline comment on a carried finding, or a newly resolved finding. |
 | `approval` | Stores the payload and parks the run in `AWAITING_APPROVAL` until `pr-review approve` or the terminal client approves it. See [Publishing](publishing.md#approval-mode). |
 
 ### Control commands
