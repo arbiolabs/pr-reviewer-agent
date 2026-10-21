@@ -9,7 +9,7 @@ expression: ascii_text
                                     Booking API
   . #186 Bump deps                  by octocat | bbbbbbb -> 4444444 | claude-opus-5-5 | run rev-184-
     shop 6666666     not reviewed
-                                     + Collect + Triage + Analyze - Verify . Prepare . Publish          since 13:00:00
+                                    + Collect + Triage + Analyze - Verify . Prepare . Publish           since 13:00:00
   o #185 Fix cache eviction
     shop 5555555           o1 ->0   1 finding   ^ 1 high                                          . none on GitHub yet
                                     ----------------------------------------------------------------------------------

@@ -9,7 +9,7 @@ expression: text
                                     Booking API
   · #186 Bump deps                  by octocat · bbbbbbb → ccccccc · claude-opus-5-5 · run rev-184-
     shop 6666666     not reviewed
-                                     ▘ Collect ○ Triage ○ Analyze ○ Verify ○ Prepare ○ Publish          since 13:00:13
+                                    ▘ Collect ○ Triage ○ Analyze ○ Verify ○ Prepare ○ Publish           since 13:00:13
   ○ #185 Fix cache eviction
     shop 5555555            ○1 →0   No findings yet   1 from an older head
                                     ──────────────────────────────────────────────────────────────────────────────────

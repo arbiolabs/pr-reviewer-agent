@@ -556,3 +556,61 @@ fn show_activity_false_hides_the_live_log_and_the_rates() {
     assert!(!off.contains("Reviewing now") && !off.contains("/s  "), "{off}");
     assert!(off.contains("Sign-in: send users back"), "the document still shows:\n{off}");
 }
+
+/// Rows at 60x16 that run into a right edge (the screen's, or the reading column's two columns in) and end on a
+/// token that the same state, drawn with room to spare, never shows whole: text cut instead of fitted with `…`.
+fn cut_rows(frame: &str, whole: &std::collections::BTreeSet<String>) -> Vec<String> {
+    frame
+        .lines()
+        .filter(|l| {
+            let n = l.chars().count();
+            let last = l.split_whitespace().last().unwrap_or("");
+            (n == 60 || n == 58) && last.chars().last().is_some_and(|c| c.is_alphanumeric()) && !whole.contains(last)
+        })
+        .map(String::from)
+        .collect()
+}
+
+#[test]
+fn at_60x16_no_row_is_cut_mid_word_without_an_ellipsis() {
+    let mut frames: Vec<(String, pr_review_tui::model::Model)> = Vec::new();
+    for (name, s) in states(Look::default()) {
+        frames.push((name.to_string(), s.m));
+    }
+    let mut help = mid_review(Look::default()).key(KeyCode::Char('?'));
+    let mut preview = parked(Look::default()).key(KeyCode::Char('p'));
+    let mut live = Sim::new(Look::default()).play("showcase", 30).key(KeyCode::Char('w'));
+    for i in 0..30 {
+        render(&mut help.m, 60, 16);
+        render(&mut preview.m, 60, 16);
+        frames.push((format!("help+{i}"), help.m.clone()));
+        frames.push((format!("preview+{i}"), preview.m.clone()));
+        help = help.key(KeyCode::Char('j'));
+        preview = preview.key(KeyCode::Char('j'));
+    }
+    render(&mut live.m, 60, 16);
+    frames.push(("live".into(), live.m.clone()));
+    let mut bad = Vec::new();
+    for (name, m) in &frames {
+        let mut wide = m.clone();
+        wide.ui.modals.iter_mut().for_each(|x| {
+            if let pr_review_tui::model::Modal::Help { scroll }
+            | pr_review_tui::model::Modal::Publication { scroll, .. } = x
+            {
+                *scroll = 0;
+            }
+        });
+        let whole: std::collections::BTreeSet<String> =
+            render(&mut wide, 200, 400).0.split_whitespace().map(String::from).collect();
+        let mut narrow = m.clone();
+        let (frame, _) = render(&mut narrow, 60, 16);
+        for row in frame.lines().filter(|l| l.trim_end().ends_with("closes without")) {
+            bad.push(format!("{name}: cut at a word: {row:?}"));
+        }
+        for row in cut_rows(&frame, &whole) {
+            bad.push(format!("{name}: {row:?}"));
+        }
+    }
+    bad.dedup();
+    assert!(bad.is_empty(), "{}", bad.join("\n"));
+}

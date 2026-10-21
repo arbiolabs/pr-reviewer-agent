@@ -164,6 +164,10 @@ fn state(c: &Ctx, w: usize, run_id: &RunId, p: &PublicationPreview, publish: &Co
     let status = c.m.domain.publications.get(run_id).filter(|x| x.status != PublicationStatus::AwaitingApproval);
     if matches!(publish, ConfirmState::Asking) && status.is_none() {
         return vec![match publish_block(c.m, p) {
+            // The footer carries Esc too, so a narrow page keeps only the y half whole.
+            None if w < 70 => {
+                Line::from(vec![c.span("y", Role::Accent), c.span(" publishes exactly this to GitHub", Role::Title)])
+            }
             None => Line::from(vec![
                 c.span("y", Role::Accent),
                 c.span(" publishes exactly this to GitHub   ", Role::Title),

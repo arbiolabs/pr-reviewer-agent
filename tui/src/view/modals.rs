@@ -144,12 +144,14 @@ pub fn help_lines(c: &Ctx, body: Rect) -> Vec<Line<'static>> {
         .unwrap_or(0);
     let (left, right): (Vec<_>, Vec<_>) =
         if two { (sections[..split].concat(), sections[split..].concat()) } else { (sections.concat(), Vec::new()) };
-    let mut lines = vec![
-        Line::raw(""),
-        Line::from(c.span("Keys", Role::Title)),
-        Line::from(c.span("Read from the keymap, so this page cannot drift from what the keys do.", Role::Muted)),
-        Line::raw(""),
-    ];
+    let mut lines = vec![Line::raw(""), Line::from(c.span("Keys", Role::Title)), Line::raw("")];
+    // Below 70 columns the subtitle would be cut; the page is the same without it.
+    if body.width >= 70 {
+        lines.insert(
+            2,
+            Line::from(c.span("Read from the keymap, so this page cannot drift from what the keys do.", Role::Muted)),
+        );
+    }
     if two {
         for i in 0..left.len().max(right.len()) {
             let mut spans: Vec<Span<'static>> = left.get(i).map_or(vec![], |l| l.spans.clone());

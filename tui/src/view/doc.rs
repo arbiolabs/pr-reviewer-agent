@@ -388,31 +388,37 @@ fn phase_line(c: &Ctx, run: Option<&Run>, w: usize) -> Line<'static> {
         _ => 7,
     };
     let (done, todo, link) = if c.t.ascii { ("+", ".", " - ") } else { ("●", "○", " ── ") };
-    let mut spans = Vec::new();
-    for (i, name) in NAMES.iter().enumerate() {
-        if i > 0 {
-            spans.push(c.span(link, Role::Muted));
+    // Widest first: connectors and every name; then no connectors; then only the current phase named.
+    let build = |link: Option<&str>, all: bool| {
+        let mut spans = Vec::new();
+        for (i, name) in NAMES.iter().enumerate() {
+            if i > 0 {
+                spans.push(c.span(link.unwrap_or(" "), Role::Muted));
+            }
+            let (glyph, role) = match () {
+                _ if cur == 7 => (todo, Role::Muted),
+                _ if i < cur => (done, Role::Ok),
+                _ if i == cur && run.parked() => (g.pending, Role::Pending),
+                _ if i == cur && run.status == RunStatus::Running => (spinner(c), Role::Accent),
+                _ if i == cur => (g.pending, Role::Pending),
+                _ => (todo, Role::Muted),
+            };
+            let label_role = if i == cur && run.parked() {
+                Role::Pending
+            } else if i == cur && cur < 6 {
+                Role::Focus
+            } else if i < cur {
+                Role::Normal
+            } else {
+                Role::Muted
+            };
+            spans.push(c.span(glyph, role));
+            if all || i == cur {
+                spans.push(c.span(format!(" {name}"), label_role));
+            }
         }
-        let (glyph, role) = match () {
-            _ if cur == 7 => (todo, Role::Muted),
-            _ if i < cur => (done, Role::Ok),
-            _ if i == cur && run.parked() => (g.pending, Role::Pending),
-            _ if i == cur && run.status == RunStatus::Running => (spinner(c), Role::Accent),
-            _ if i == cur => (g.pending, Role::Pending),
-            _ => (todo, Role::Muted),
-        };
-        let label_role = if i == cur && run.parked() {
-            Role::Pending
-        } else if i == cur && cur < 6 {
-            Role::Focus
-        } else if i < cur {
-            Role::Normal
-        } else {
-            Role::Muted
-        };
-        spans.push(c.span(format!("{glyph} "), role));
-        spans.push(c.span(*name, label_role));
-    }
+        spans
+    };
     let start = secs(run.started_at.as_str());
     let tail = match run.status {
         RunStatus::Completed => {
@@ -428,13 +434,11 @@ fn phase_line(c: &Ctx, run: Option<&Run>, w: usize) -> Line<'static> {
         RunStatus::Unknown => ("?".into(), Role::Muted),
     };
     let right = vec![c.span(tail.0, tail.1)];
-    if spans_w(&spans) + spans_w(&right) + 2 > w {
-        // Narrow: drop the connectors.
-        spans.retain(|s| s.content != link);
-        for s in spans.iter_mut().filter(|s| s.content.ends_with(' ')) {
-            s.content = format!(" {}", s.content).into();
-        }
-    }
+    let fits = |spans: &Vec<Span<'static>>| spans_w(spans) + spans_w(&right) + 2 <= w;
+    let spans = [build(Some(link), true), build(None, true), build(None, false)]
+        .into_iter()
+        .find(fits)
+        .unwrap_or_else(|| build(None, false));
     Line::from(split_row(spans, right, w))
 }
 
