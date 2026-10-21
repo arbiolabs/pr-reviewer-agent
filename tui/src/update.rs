@@ -434,6 +434,7 @@ fn server_message(m: &mut Model, msg: ServerMessage, fx: &mut Vec<Effect>) {
             stream_epoch,
             mode,
             read_only_reason,
+            checks,
             ..
         } => {
             if protocol_version != PROTOCOL_VERSION {
@@ -443,8 +444,15 @@ fn server_message(m: &mut Model, msg: ServerMessage, fx: &mut Vec<Effect>) {
                 }
                 return;
             }
-            m.server =
-                Some(ServerInfo { protocol_version, server_version, session_id, capabilities, mode, read_only_reason });
+            m.server = Some(ServerInfo {
+                protocol_version,
+                server_version,
+                session_id,
+                capabilities,
+                mode,
+                read_only_reason,
+                checks,
+            });
             let resuming = m.stream.epoch.as_ref() == Some(&stream_epoch);
             if !transition(m, LinkInput::Welcomed { resuming }) {
                 return;

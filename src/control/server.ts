@@ -4,7 +4,7 @@ import { connect, createServer, type Socket } from "node:net";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { Compile } from "typebox/compile";
-import { ClientMessage, type ErrorCode, idempotencyKey, MAX_LINE_BYTES, PROTOCOL_VERSION, type ServerMessage } from "../protocol/v1.ts";
+import { ClientMessage, type ErrorCode, idempotencyKey, MAX_LINE_BYTES, PROTOCOL_VERSION, type ServerMessage, type SetupCheck } from "../protocol/v1.ts";
 import { ControlError, type ControlSource } from "./source.ts";
 
 const SERVER_VERSION = (JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as { version: string }).version;
@@ -55,6 +55,8 @@ export type ServerOptions = {
   heartbeatMs?: number;
   /** Messages waiting for a slow client before it is cut over to resync.required. */
   maxQueue?: number;
+  /** The readiness checks each `welcome` carries, recomputed per hello. */
+  checks?: () => Promise<SetupCheck[]>;
 };
 
 export type ControlServer = { path: string; close(): Promise<void>; queueDepths(): number[] };
@@ -212,6 +214,8 @@ export async function startControlServer(options: ServerOptions): Promise<Contro
       if (hello.protocolVersion !== PROTOCOL_VERSION) {
         return sendAndClose(c, fail("PROTOCOL_MISMATCH", `unsupported protocolVersion ${hello.protocolVersion}`, { supported: [PROTOCOL_VERSION] }));
       }
+      // A failed check never holds up the welcome: the client then shows none.
+      const checks = await options.checks?.().catch((error: unknown) => void report(error));
       c.phase = "idle";
       send(c, {
         type: "welcome",
@@ -222,6 +226,7 @@ export async function startControlServer(options: ServerOptions): Promise<Contro
         capabilities: [...(source.selectAccount ? ["account.select"] : []), ...(source.capabilities?.() ?? [])],
         ...(source.mode ? { mode: source.mode } : {}),
         ...(source.readOnlyReason ? { readOnlyReason: source.readOnlyReason } : {}),
+        ...(checks ? { checks } : {}),
         streamEpoch: source.epoch(),
         latestSequence: source.latestSequence(),
       });

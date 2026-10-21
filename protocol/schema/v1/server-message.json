@@ -50,6 +50,37 @@
           "type": "string",
           "description": "why a read-only daemon is read-only (commands off, another pr-review holds the data dir, or the engine failed to open), for display"
         },
+        "checks": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "id",
+              "status",
+              "detail"
+            ],
+            "properties": {
+              "id": {
+                "type": "string"
+              },
+              "status": {
+                "enum": [
+                  "ok",
+                  "warn",
+                  "missing"
+                ]
+              },
+              "detail": {
+                "type": "string"
+              },
+              "fix": {
+                "type": "string",
+                "description": "what to run or set, for display; never a secret"
+              }
+            }
+          },
+          "description": "the daemon's readiness checks, computed for this hello; absent from older servers and fixture servers"
+        },
         "streamEpoch": {
           "type": "string",
           "minLength": 1

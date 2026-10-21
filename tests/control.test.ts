@@ -43,6 +43,19 @@ describe("handshake", () => {
     expect(await c.hello()).toMatchObject({ type: "welcome", requestId: "h", protocolVersion: 1, capabilities: [], streamEpoch: "epoch-1", latestSequence: 10 });
   });
 
+  it("computes the checks for each welcome, and still welcomes when they fail", async () => {
+    let calls = 0;
+    const checks = async () => {
+      calls += 1;
+      if (calls === 3) throw new Error("gh hung");
+      return [{ id: "model", status: "missing" as const, detail: `no models available (${calls})` }];
+    };
+    const server = await serve({ source: FixtureSource.load("normal"), checks });
+    expect((await (await client(server)).hello()).checks).toEqual([{ id: "model", status: "missing", detail: "no models available (1)" }]);
+    expect((await (await client(server)).hello()).checks).toEqual([{ id: "model", status: "missing", detail: "no models available (2)" }]);
+    expect(await (await client(server)).hello()).not.toHaveProperty("checks");
+  });
+
   it("answers another protocol version with PROTOCOL_MISMATCH and closes", async () => {
     const c = await client(await serve({ source: FixtureSource.load("normal") }));
     c.send({ type: "hello", requestId: "h", protocolVersion: 2, client: "test", capabilities: [] });

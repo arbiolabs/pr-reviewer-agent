@@ -55,7 +55,7 @@ To try the client without GitHub or a model, play a scripted session:
 | `2` | Review | One PR as a document: its phase stepper, the live review while one runs, and a card per finding |
 | `3` | Diff | Files and hunks pinned to the reviewed base and head, with each finding written under its line |
 | `4` | Timeline | The PR's events, oldest first, under one heading per phase |
-| `5` | Settings | GitHub accounts, connection state, display settings, and diagnostics |
+| `5` | Settings | Setup checks, GitHub accounts, connection state, display settings, and diagnostics |
 
 The client starts on Review, on the PR with the most severe current finding. The PR list holds its order while reviews run. A new PR takes its sorted place, and the selection stays on the same PR.
 
@@ -75,6 +75,23 @@ In Diff, a long line or hunk header wraps onto up to four rows. Each finding is 
 In Timeline, `Enter` opens the selected event's detail under its row, and `Esc` closes it. The detail shows what the event carries: a tool call's whole summary, or a finding's title, severity, `file:line`, and the start of its explanation.
 
 The help page marks a write key `(not offered)` when the connected daemon does not grant its capability. Against a read-only daemon the note says `(daemon is read-only)` or `(commands are off)`, and the page's last line gives the whole reason.
+
+### Check the setup
+
+The client shows the daemon's setup checks, the same ones `pr-review setup --check` prints: git, the config file, the
+model, the GitHub account, and Jev. The daemon runs the checks in its own environment and sends them when the client
+connects. The client only shows them. It never asks for a key or a token, and you fix a check with `pr-review setup`
+in a terminal.
+
+- **Settings** lists every check under **Setup**, with its status as a symbol and a word (`✓ ok`, `◔ warn`,
+  `✗ missing`; `+ ok`, `~ warn`, `x missing` with `--ascii`), its detail, and its fix in dim text.
+- **The empty inbox.** When nothing is tracked yet and a check is `missing`, the inbox lists the missing checks with
+  their fixes and tells you to run `pr-review setup`. Against a read-only daemon with commands off, it also says
+  `commands are off (run pr-review setup, then --allow-commands)`, because a daemon started with `--allow-commands`
+  stays read-only while it has no model.
+
+The checks are from when the client connected. After you fix one, restart the client, or the daemon, to see the new
+result. `pr-review-tui --playback protocol/playback/setup.ndjson` shows a missing model with no daemon.
 
 ## Keys
 

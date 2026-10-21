@@ -23,7 +23,7 @@ also arrive unsolicited (`snapshot`, `resync.required`, `error`) have an optiona
 
 | Server → client | Fields |
 | --- | --- |
-| `welcome` | `protocolVersion: 1`, `serverVersion`, `sessionId`, `capabilities[]`, `mode?` (`engine` or `read-only`; absent from older servers), `readOnlyReason?` (display text, present in `read-only` mode), `streamEpoch`, `latestSequence` |
+| `welcome` | `protocolVersion: 1`, `serverVersion`, `sessionId`, `capabilities[]`, `mode?` (`engine` or `read-only`; absent from older servers), `readOnlyReason?` (display text, present in `read-only` mode), `checks[]?` (see [Setup checks](#setup-checks); absent from older and fixture servers), `streamEpoch`, `latestSequence` |
 | `snapshot` | `streamEpoch`, `sequence`, `prs[]`, `runs[]`, `findings[]`, `accounts[]?` (absent from older servers) |
 | `event` | see below |
 | `resync.required` | `reason` (display text) |
@@ -38,7 +38,7 @@ Error codes: `UNAUTHORIZED`, `CAPABILITY_DENIED`, `INVALID_TRANSITION`, `REVISIO
 `RATE_LIMITED`, `TEMPORARILY_UNAVAILABLE`, `INTERNAL_ERROR`, `PROTOCOL_MISMATCH`, `INVALID_REQUEST`. The server answers
 a line that is not JSON, is over 1 MiB, or fails the client schema with `INVALID_REQUEST`.
 
-Entities are in `schema/v1/{pr,run,finding,finding-detail,evidence,diff-file,account,event}.json`. A run is one engine revision
+Entities are in `schema/v1/{pr,run,finding,finding-detail,evidence,diff-file,account,check,event}.json`. A run is one engine revision
 (`id` is the revision id). `phase` is the engine state: `COLLECT_CONTEXT TRIAGE ANALYZE VERIFY PREPARE_PUBLICATION
 AWAITING_APPROVAL PUBLISH RECONCILE COMPLETED FAILED SUPERSEDED`. `AWAITING_APPROVAL` is a run whose review is stored and
 parked for a human (publish mode `approval`); its `status` is still `RUNNING`. A `Finding.line` of `null` means a file-level finding.
@@ -94,6 +94,18 @@ connection that is streaming (after `snapshot.get` or `resume`), for a `github.c
 now in state `ok`, and while no `GITHUB_TOKEN` or `GH_TOKEN` overrides the selection. Otherwise it answers `rejected` with
 `NOT_FOUND` (no such account) or `CONFLICT`. `accepted` only means the selection was journaled. The client shows the
 new selection when the `accounts.updated` event arrives, never on `accepted`. Tokens never cross the socket.
+
+## Setup checks
+
+`welcome.checks` is what `pr-review setup --check` reports for the daemon's own environment and data dir: a list of
+`{ id, status: ok | warn | missing, detail, fix? }`. `missing` means reviews cannot run, and `warn` means they run with
+a limitation. `detail` and `fix` are display text. `id` is open (`git`, `config`, `model`, `github` and `jev` today),
+so a client shows an unknown one as it is. The daemon leaves out the `tui` check, since the client asking is the TUI.
+
+The daemon computes the checks for each `hello`, so a client sees them fresh on every connect and reconnect; it never
+polls them. They come from the same code as `setup --check`, which never prompts, never fetches a GitHub token and
+never reads `TYPESAFE_API_KEY`'s value, so no secret crosses the socket. A check that fails to compute leaves `checks`
+out rather than delaying the welcome. The client only displays them: fixing one is `pr-review setup` in a terminal.
 
 ## Events
 
@@ -182,6 +194,7 @@ The fixtures write control bytes as JSON `\u` escapes.
 | `superseded` | a new head: the old run SUPERSEDED, its finding `stale`, a new run started |
 | `hostile` | ANSI, OSC 8 and 52, C1 CSI and DCS, CR overwrite, a 2,000-char title, CJK and emoji |
 | `burst` | 5,000 `tool.activity` events with no delay |
+| `setup` | a read-only welcome with commands off and `checks` (a `missing` model, a `warn` GitHub token and Jev), then an empty snapshot: nothing tracked yet on a machine that cannot review |
 | `accounts` | a snapshot with 2 accounts, `command.result accepted` for `account.select`, then `accounts.updated` with the new selection |
 | `approval` | an engine-mode welcome, a run reaching `AWAITING_APPROVAL`, its `publication.preview`, `command.result accepted` for `review.publish`, then `publishing`, `published` with the review id, and `review.completed` |
 | `showcase` | a realistic session for judging TUI designs: 6 PRs in `acme/shop` and `acme/api` (completed with 4 findings, completed clean, one review advancing live for about 18 s and then parking for approval, superseded with a stale finding, failed, never reviewed), 2 accounts, an engine-mode daemon. Once the client sends `review.publish`, the parked review publishes and completes. A `review.start` on the never-reviewed #1296 plays its first review to COMPLETED; a start on any head already reviewed is refused with CONFLICT, as the daemon refuses it |

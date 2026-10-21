@@ -51,6 +51,7 @@ fn every_script_reaches_its_expected_state() {
             "gap",
             "hostile",
             "normal",
+            "setup",
             "showcase",
             "superseded"
         ]
@@ -243,7 +244,7 @@ fn every_script_played_by_the_player_reaches_its_expected_state() {
         .filter_map(|e| e.unwrap().file_name().to_str()?.strip_suffix(".ndjson").map(String::from))
         .collect();
     names.sort();
-    assert_eq!(names.len(), 10);
+    assert_eq!(names.len(), 11);
     for name in names {
         let path = protocol_dir().join(format!("playback/{name}.ndjson"));
         let mut gates: Vec<String> = load(&path).unwrap().steps.into_iter().filter_map(|s| s.after).collect();

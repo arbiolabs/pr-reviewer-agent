@@ -1,6 +1,6 @@
 // Source of protocol/fixtures and protocol/playback. Edit here, then run `pnpm protocol:emit`.
 import { sha256, stableId } from "../domain/types.ts";
-import { type Account, type ClientMessage, type DiffFile, type Evidence, type Finding, type FindingDetail, type Pr, type PublicationChange, REVIEW_COMMANDS, type Run, type ServerMessage } from "./v1.ts";
+import { type Account, type ClientMessage, type DiffFile, type Evidence, type Finding, type FindingDetail, type Pr, type PublicationChange, REVIEW_COMMANDS, type Run, type ServerMessage, type SetupCheck } from "./v1.ts";
 
 const EPOCH = "epoch-1";
 const T0 = Date.parse("2026-10-20T13:00:00Z");
@@ -925,6 +925,24 @@ const showSteps: ShowStep[] = [
 ];
 
 
+// A fresh machine: no model credentials, no gh login, and a read-only daemon with commands off.
+const setupChecks: SetupCheck[] = [
+  { id: "git", status: "ok", detail: "/usr/bin/git" },
+  { id: "config", status: "ok", detail: "defaults, no pr-review.config.json" },
+  { id: "model", status: "missing", detail: "no models available", fix: "run `pr-review login anthropic`, or set ANTHROPIC_API_KEY" },
+  { id: "github", status: "warn", detail: "no token, public repositories only", fix: "run `gh auth login`, or set GITHUB_TOKEN" },
+  {
+    id: "jev",
+    status: "warn",
+    detail: "OpenCode Zen free tier for public repositories; private repositories skip Jev",
+    fix: "set TYPESAFE_API_KEY to use TypeSafe; without it, serve and daemon --allow-commands skip Jev for every repository",
+  },
+];
+const welcomeChecks = {
+  ...welcome(0, EPOCH, ["account.select"], "read-only", "review commands are off; start the daemon with --allow-commands or set control.allow_commands"),
+  checks: setupChecks,
+} as ServerMessage;
+
 // ---------- message fixtures ----------
 
 const diffFiles: DiffFile[] = [
@@ -1012,6 +1030,7 @@ export const fixtures: Record<string, ClientMessage | ServerMessage | Record<str
 
   "server.welcome": welcome(108),
   "server.welcome.engine": welcome(108, EPOCH, ["account.select", ...REVIEW_COMMANDS], "engine"),
+  "server.welcome.checks": welcomeChecks,
   "server.welcome.read-only": welcome(108, EPOCH, ["account.select"], "read-only", "another pr-review is running on /srv/pr-review/.data"),
   "server.publication.preview": preview,
   "server.publication.preview.published": { ...preview, status: "published", reviewId: 3141, url: "https://github.com/acme/shop/pull/184#pullrequestreview-3141" },
@@ -1273,6 +1292,9 @@ const burst: PlaybackLine[] = [
   })),
 ];
 
+// Nothing tracked yet on a machine that cannot review: the client shows the missing checks where the inbox would be.
+const setup = lines(0, [welcomeChecks, snapshot(0, [], [], [], EPOCH, [])]);
+
 // The client shows a selection only once accounts.updated confirms it, never on command.result accepted.
 const accounts = lines(40, [
   welcome(10, EPOCH, ["account.select"]),
@@ -1457,6 +1479,10 @@ export const playback: Record<string, { script: PlaybackLine[]; expect: Expect }
       ],
       publications: [{ runId: run1.id, status: "published" }],
     }),
+  },
+  setup: {
+    script: setup,
+    expect: { streamEpoch: EPOCH, lastSequence: 0, resyncRequested: false, toolActivityCount: 0, prs: [], runs: [], findings: [], accounts: [] },
   },
   burst: { script: burst, expect: baseExpect({ lastSequence: 5010, toolActivityCount: 5000 }) },
 };

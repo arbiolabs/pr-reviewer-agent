@@ -32,6 +32,7 @@ export const DAEMON_MODES = ["engine", "read-only"] as const;
 /** The commands a daemon in engine mode can grant (`welcome.capabilities`), besides `account.select`. */
 export const REVIEW_COMMANDS = ["review.start", "review.retry", "review.cancel", "review.publish"] as const;
 export const DIFF_FILE_STATUSES = ["added", "modified", "deleted", "renamed", "binary"] as const;
+export const CHECK_STATUSES = ["ok", "warn", "missing"] as const;
 export const EVIDENCE_KINDS = ["code_ref", "tool_summary", "test_result", "scenario", "link"] as const;
 
 // ---------- entities ----------
@@ -147,6 +148,18 @@ export const Account = Type.Object({
   scopes: Type.Array(Type.String()),
 });
 export type Account = Static<typeof Account>;
+
+/**
+ * One readiness check of the daemon's environment, as `pr-review setup --check` reports it: `missing` means reviews
+ * cannot run, `warn` that they run with a limitation. `id` is open, so a newer daemon may add checks.
+ */
+export const SetupCheck = Type.Object({
+  id: Type.String(),
+  status: oneOf(CHECK_STATUSES),
+  detail: Type.String(),
+  fix: Type.Optional(Type.String({ description: "what to run or set, for display; never a secret" })),
+});
+export type SetupCheck = Static<typeof SetupCheck>;
 
 /** One inline comment of the stored review payload, exactly as it will be posted. */
 export const ReviewComment = Type.Object({ path: Type.String(), line: Type.Integer({ minimum: 1 }), side: Type.Literal("RIGHT"), body: Type.String() });
@@ -318,6 +331,7 @@ export const ServerMessage = Type.Union([
     capabilities: Type.Array(Type.String()),
     mode: Type.Optional(oneOf(DAEMON_MODES)),
     readOnlyReason: Type.Optional(Type.String({ description: "why a read-only daemon is read-only (commands off, another pr-review holds the data dir, or the engine failed to open), for display" })),
+    checks: Type.Optional(Type.Array(SetupCheck, { description: "the daemon's readiness checks, computed for this hello; absent from older servers and fixture servers" })),
     streamEpoch: Id,
     latestSequence: Seq,
   }),
@@ -371,4 +385,4 @@ export const ServerMessage = Type.Union([
 export type ServerMessage = Static<typeof ServerMessage>;
 export type PublicationPreview = Omit<Extract<ServerMessage, { type: "publication.preview" }>, "type" | "requestId">;
 
-export const ENTITIES = { pr: Pr, run: Run, finding: Finding, "finding-detail": FindingDetail, evidence: Evidence, "diff-file": DiffFile, account: Account, event: Event } as const;
+export const ENTITIES = { pr: Pr, run: Run, finding: Finding, "finding-detail": FindingDetail, evidence: Evidence, "diff-file": DiffFile, account: Account, check: SetupCheck, event: Event } as const;

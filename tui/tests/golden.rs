@@ -80,6 +80,39 @@ fn accounts_view() {
     }
 }
 
+/// setup.ndjson: a read-only daemon with commands off whose model is missing, tracking nothing yet.
+fn setup_missing_model(look: Look) -> Sim {
+    Sim::new(look).play("setup", 2)
+}
+
+#[test]
+fn setup_checks_in_settings_and_the_empty_inbox() {
+    let ascii = Look { ascii: true, ..Look::default() };
+    let mono = Look { color: false, ..Look::default() };
+    for (name, key) in [("settings_checks", Some(KeyCode::Char('5'))), ("empty_missing_model", None)] {
+        let open = |s: Sim| match key {
+            Some(k) => s.key(k),
+            None => s,
+        };
+        let (mut s, mut a, mut n) = (
+            open(setup_missing_model(Look::default())),
+            open(setup_missing_model(ascii)),
+            open(setup_missing_model(mono)),
+        );
+        for (w, h) in [(80, 24), (120, 38)] {
+            let (text, _) = render(&mut s.m, w, h);
+            insta::assert_snapshot!(format!("{name}_{w}x{h}"), text);
+            let (ascii_text, _) = render(&mut a.m, w, h);
+            insta::assert_snapshot!(format!("{name}_{w}x{h}_ascii"), ascii_text);
+            assert!(ascii_text.is_ascii(), "{name} {w}x{h} --ascii frame has non-ASCII glyphs");
+            let (mono_text, term) = render(&mut n.m, w, h);
+            let mono_text = mono_text.replace(&format!("{:<22}off", "color"), &format!("{:<22}on", "color"));
+            assert_eq!(mono_text.replace('`', ""), text.replace('`', ""), "{name} {w}x{h}: NO_COLOR changed the text");
+            assert!(colorless(&term));
+        }
+    }
+}
+
 /// The gh-active account once selected: both marks fit their column, and the hint does not say "selected" again.
 #[test]
 fn accounts_selected_and_gh_active() {

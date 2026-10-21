@@ -79,6 +79,18 @@ pub(crate) fn never_loaded(c: &Ctx) -> Option<&'static str> {
         .then_some("Not connected to a daemon, so there is nothing to show yet.")
 }
 
+/// A setup check's status as its glyph and word, so `--ascii` and NO_COLOR still read it.
+pub(crate) fn check_status(c: &Ctx, status: crate::protocol::CheckStatus) -> (String, Role) {
+    use crate::protocol::CheckStatus;
+    let g = c.t.g();
+    match status {
+        CheckStatus::Ok => (format!("{} ok", g.ok), Role::Ok),
+        CheckStatus::Warn => (format!("{} warn", g.pending), Role::Pending),
+        CheckStatus::Missing => (format!("{} missing", g.fail), Role::Fail),
+        CheckStatus::Unknown => ("? unknown".into(), Role::Muted),
+    }
+}
+
 /// What a click lands on.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Hit {

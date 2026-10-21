@@ -8,6 +8,9 @@ expression: text
     Settings
     socket unix:/run/user/501/pr-review/reviewer.sock · connected
 
+    Setup
+      checks                not reported by this daemon version
+
     GitHub accounts
       publishes as          diego-arbio-dev on github.com
     ▌ diego-arbio-dev  github.com  ✓ ok      selected, gh active
@@ -34,9 +37,6 @@ expression: text
 
     Recent errors
       none
-
-
-
 
 
    j/k account  w watch live  r refresh  Esc back  ? help  q quit    1 inbox  2 review  3 diff  4 timeline  5 settings

@@ -39,7 +39,7 @@ pub fn empty_rail(c: &Ctx, total: usize) -> Vec<(String, Role)> {
         Link::Connecting { .. } | Link::Negotiating | Link::Syncing => {
             return vec![(format!("  loading the snapshot{}", c.t.g().ellipsis), Role::Muted)];
         }
-        Link::Live | Link::Resyncing => return vec![("  nothing tracked yet".into(), Role::Muted)],
+        Link::Live | Link::Resyncing => return nothing_tracked(c),
     };
     let path = c.m.diag.endpoint.strip_prefix("unix:").unwrap_or(&c.m.diag.endpoint);
     vec![
@@ -47,6 +47,24 @@ pub fn empty_rail(c: &Ctx, total: usize) -> Vec<(String, Role)> {
         ("  Start one with `pr-review daemon`.".into(), Role::Normal),
         (format!("  {reason}"), Role::Muted),
     ]
+}
+
+/// An empty inbox on a daemon that cannot review yet names what is missing and how to fix it.
+fn nothing_tracked(c: &Ctx) -> Vec<(String, Role)> {
+    let mut lines = vec![("  nothing tracked yet".to_string(), Role::Muted)];
+    let Some(server) = c.m.server.as_ref().filter(|s| s.missing().next().is_some()) else { return lines };
+    for check in server.missing() {
+        let (status, _) = super::check_status(c, check.status);
+        lines.push((format!("  {status} {}: {}", check.id, check.detail), Role::Fail));
+        if let Some(fix) = &check.fix {
+            lines.push((format!("    {fix}"), Role::Muted));
+        }
+    }
+    lines.push(("  Run `pr-review setup` to check and fix these.".into(), Role::Normal));
+    if let Some(off) = server.commands_off() {
+        lines.push((format!("  Write keys: {off}."), Role::Muted));
+    }
+    lines
 }
 
 /// Rows each PR takes; the spacer row goes when the list would not fit.
@@ -89,9 +107,11 @@ pub fn rail(c: &Ctx, f: &mut Frame, area: Rect, focused: bool) {
     }));
     if prs.is_empty() {
         let mut empty = empty_rail(c, total);
+        // Beside the reading column, which carries the reason in full.
         if area.width < c.m.size.0 && empty[0].1 == Role::Fail {
-            // Beside the reading column, which carries the reason in full.
             empty = vec![("  no daemon".into(), Role::Fail)];
+        } else if area.width < c.m.size.0 {
+            empty.truncate(1);
         }
         for (text, role) in empty {
             lines.push(Line::from(filled(vec![Span::styled(c.fit(&text, w), c.s(role).patch(bg))], w, bg)));

@@ -1,23 +1,24 @@
-import { existsSync, mkdirSync, readFileSync } from "node:fs";
+import { readFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
 import type { AuthInteraction, CredentialStore, Models } from "@earendil-works/pi-ai";
 import { createTypeSafeClient, createZenClient } from "jev-systemone";
 import { type Config, configPath, DEFAULT_CONFIG, loadConfig, saveConfig } from "../config/config.ts";
-import { findTui, runDaemon, runTui } from "../control/daemon.ts";
+import { runDaemon, runTui } from "../control/daemon.ts";
 import { EngineSource } from "../control/engine.ts";
-import { type Account, ACCOUNT_KEY, chooseAccount, detectGh, type Env, listAccounts, planGithubAuth, resolveGithubAuth } from "../github/accounts.ts";
+import { ACCOUNT_KEY, chooseAccount, detectGh, listAccounts, resolveGithubAuth } from "../github/accounts.ts";
 import { clientFor, type GitHubClient } from "../github/client.ts";
 import { GitHubPullSource, parsePullRef, parsePullUrl, type PullSource } from "../github/pulls.ts";
 import { type DecisionEngine, JevDecisionEngine, type JevRoute, jevSkipReason } from "../jev/decision.ts";
 import { PiAuthFileStore } from "../models/credential-store.ts";
-import { buildModels, detectModels, which } from "../models/detect.ts";
+import { buildModels, detectModels } from "../models/detect.ts";
 import { type AvailableModel, chooseModel, listAvailableModels, splitRef } from "../models/select.ts";
-import { AppStore } from "../persistence/store.ts";
+import { AppStore, withStore } from "../persistence/store.ts";
 import { reconcileOutbox } from "../publish/publisher.ts";
 import { finishReview, lockDataDir, openApp, startReview } from "../runtime/app.ts";
 import { approve as approvePublication, Refused, resumeApproved } from "../runtime/commands.ts";
 import { startService } from "../server/service.ts";
+import { type Check, gatherChecks, NO_TOKEN, using } from "./checks.ts";
 import { loadReport, renderJson, renderMarkdown } from "./report.ts";
 
 export const REVIEWER_CODE_VERSION = "m1";
@@ -84,7 +85,7 @@ export async function main(argv: string[], deps: CliDeps = {}): Promise<number> 
       case "login":
         return await login(rest, deps, out);
       case "daemon":
-        return await runDaemon(rest, dataDir, err, { openEngine: (dir) => openEngine(dir, deps, err), commandsConfigured: () => loadConfig().control.allow_commands });
+        return await runDaemon(rest, dataDir, err, { openEngine: (dir) => openEngine(dir, deps, err), commandsConfigured: () => loadConfig().control.allow_commands, checks: (dir) => gatherChecks(deps, dir) });
       case "tui":
         return runTui(rest);
       default:
@@ -418,29 +419,6 @@ async function models(args: string[], out: Out): Promise<number> {
   return 0;
 }
 
-async function withStore<T>(dataDir: string, fn: (store: AppStore) => Promise<T> | T): Promise<T> {
-  mkdirSync(dataDir, { recursive: true });
-  const store = AppStore.open(`${dataDir}/app.sqlite`);
-  try {
-    return await fn(store);
-  } finally {
-    store.close();
-  }
-}
-
-const NO_TOKEN = "no token, public repositories only";
-
-function using(list: Account[]): { ok: boolean; text: string } {
-  try {
-    const plan = planGithubAuth(list);
-    if (plan.source === "env") return { ok: true, text: `${plan.account.login} from the environment (overrides gh accounts)` };
-    if (plan.source === "none") return { ok: true, text: NO_TOKEN };
-    return { ok: true, text: `${plan.account.id} (${plan.source === "selected" ? "selected" : "gh active account"})` };
-  } catch (error) {
-    return { ok: false, text: error instanceof Error ? error.message : String(error) };
-  }
-}
-
 /** `pr-review accounts`: gh's accounts as this data dir sees them; `accounts use` selects one. Never fetches a token. */
 async function accounts(args: string[], dataDir: string, out: Out): Promise<number> {
   const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { json: { type: "boolean" } } });
@@ -498,55 +476,6 @@ async function login(args: string[], deps: CliDeps, out: (t: string) => void): P
   } finally {
     rl.close();
   }
-}
-
-/** `missing` means reviews cannot run; `warn` means they run with a limitation. */
-export type Check = { id: "git" | "config" | "model" | "github" | "jev" | "tui"; status: "ok" | "warn" | "missing"; detail: string; fix?: string };
-
-/** What a review needs, checked without prompting, fetching a GitHub token, or reading TYPESAFE_API_KEY's value. */
-export async function gatherChecks(deps: CliDeps, dataDir: string, env: Env = process.env): Promise<Check[]> {
-  const checks: Check[] = [];
-  const git = which("git", env.PATH ?? "");
-  checks.push(git ? { id: "git", status: "ok", detail: git } : { id: "git", status: "missing", detail: "not on PATH", fix: "install git" });
-
-  const path = configPath(env);
-  let config = DEFAULT_CONFIG;
-  try {
-    config = loadConfig(path);
-    checks.push({ id: "config", status: "ok", detail: existsSync(path) ? path : `defaults, no ${path}` });
-  } catch (error) {
-    checks.push({ id: "config", status: "missing", detail: error instanceof Error ? error.message : String(error) });
-  }
-
-  const available = await listAvailableModels(deps.models ?? buildModels(deps.credentials ?? new PiAuthFileStore(), env), config.models.preferred);
-  const choice = chooseModel({ env: env.PR_REVIEW_MODEL, config: config.models.default }, available, false);
-  if (choice.kind === "chosen") {
-    const from = choice.source === "config" ? `from ${path}` : choice.source === "default" ? "first available" : `from ${choice.source}`;
-    checks.push({ id: "model", status: "ok", detail: `${choice.ref} (${from})` });
-  } else {
-    if (choice.kind === "error" && available.length > 0) checks.push({ id: "model", status: "missing", detail: choice.message, fix: "run `pr-review setup` to pick an available model" });
-    else checks.push({ id: "model", status: "missing", detail: "no models available", fix: "run `pr-review login anthropic`, or set ANTHROPIC_API_KEY" });
-  }
-
-  const detection = await detectGh(env);
-  const use = using(await withStore(dataDir, (store) => listAccounts(detection, store.getMeta(ACCOUNT_KEY), env)));
-  if (!use.ok) checks.push({ id: "github", status: "missing", detail: use.text });
-  else if (use.text === NO_TOKEN) checks.push({ id: "github", status: "warn", detail: use.text, fix: "run `gh auth login`, or set GITHUB_TOKEN" });
-  else checks.push({ id: "github", status: "ok", detail: use.text });
-
-  const keyless = config.jev.allow_keyless_for_private;
-  if (env.TYPESAFE_API_KEY) checks.push({ id: "jev", status: "ok", detail: "TypeSafe (TYPESAFE_API_KEY set)" });
-  else
-    checks.push({
-      id: "jev",
-      status: "warn",
-      detail: keyless ? "OpenCode Zen free tier for every repository (jev.allow_keyless_for_private)" : "OpenCode Zen free tier for public repositories; private repositories skip Jev",
-      fix: keyless ? "set TYPESAFE_API_KEY to use TypeSafe" : "set TYPESAFE_API_KEY to use TypeSafe; without it, serve and daemon --allow-commands skip Jev for every repository",
-    });
-
-  const tui = findTui(env.PATH ?? "");
-  checks.push(tui ? { id: "tui", status: "ok", detail: tui } : { id: "tui", status: "warn", detail: "pr-review-tui not built (optional terminal client)", fix: "(cd tui && cargo build --release)" });
-  return checks;
 }
 
 const MARK = { ok: "✓", warn: "!", missing: "✗" } as const;

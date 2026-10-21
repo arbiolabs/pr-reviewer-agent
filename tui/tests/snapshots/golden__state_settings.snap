@@ -7,6 +7,8 @@ expression: text
 
   Settings
   socket unix:/run/user/501/pr-review/reviewer.sock · connected
+  Setup
+    checks                not reported by this daemon version
   GitHub accounts
     publishes as          not reported by this daemon
     accounts              not reported by this daemon version
@@ -23,6 +25,4 @@ expression: text
     resyncs / reconnects  0 / 0
     activity              2 feed entries (cap 2000); 1 tool event applied
   Display
-    glyphs                unicode
-    color                 on
    w watch live  r refresh  Esc back  ? help  q quit                  1 2 3 4 5
