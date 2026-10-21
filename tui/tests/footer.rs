@@ -133,7 +133,8 @@ fn body(m: &Model) -> ratatui::buffer::Buffer {
     buf
 }
 
-/// Keys the screen's own words name, as in "s starts one" or "… 6 more, J scrolls": a key, then a verb.
+/// Keys the screen's own words name, as in "s starts one", "… 6 more, J scrolls" or "n next finding": a key, then a
+/// verb.
 fn mentions(m: &Model) -> BTreeSet<String> {
     const KEYS: &str = "qjkgGhldtrAsRcpwJKnNfvPyom";
     let mut m = m.clone();
@@ -145,7 +146,8 @@ fn mentions(m: &Model) -> BTreeSet<String> {
         let words: Vec<&str> = row.split(|c: char| c.is_whitespace() || ",;·|(".contains(c)).collect();
         for pair in words.windows(2) {
             let key = matches!(pair[0], "Esc" | "Enter") || pair[0].len() == 1 && KEYS.contains(pair[0]);
-            let verb = pair[1].len() >= 4 && pair[1].ends_with('s') && pair[1].chars().all(|c| c.is_ascii_lowercase());
+            let lower = pair[1].chars().all(|c| c.is_ascii_lowercase());
+            let verb = lower && (pair[1].len() >= 4 && pair[1].ends_with('s') || pair[1] == "next");
             if key && verb {
                 out.insert(pair[0].to_string());
             }

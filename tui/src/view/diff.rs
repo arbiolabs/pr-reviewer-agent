@@ -319,10 +319,12 @@ fn annotations(c: &Ctx, stack: &[&Finding], w: usize, focus: Option<usize>) -> V
     }
     if let (Some(k), Some(x)) = (focus, focus.and_then(|k| stack.get(k))) {
         let role = c.t.severity(x.severity).2;
+        // n names the next finding only where there is one to turn to.
+        let next = if crate::update::can_turn(c.m) { "   n next finding" } else { "" };
         let hint = match stack.len() {
-            1 => "Enter reads the finding   n next finding",
-            _ if k + 1 < stack.len() => "Enter reads the bright one   n the next one here",
-            _ => "Enter reads the bright one   n next finding",
+            1 => format!("Enter reads the finding{next}"),
+            _ if k + 1 < stack.len() => "Enter reads the bright one   n the next one here".to_string(),
+            _ => format!("Enter reads the bright one{next}"),
         };
         out.push(Line::from(vec![c.span(format!("{pad}{bar} "), role), c.span(hint, Role::Muted)]));
     }

@@ -13,7 +13,7 @@ expression: text
     logo.png                                     41 +   if (slot.free && !slot.held) {
     assets                     binary   ▲        42 +     slot.held = true;
                                                      ┃ ▲ HIGH     Finding f-1
-    slots.ts                                         ┃ Enter reads the finding   n next finding
+    slots.ts                                         ┃ Enter reads the finding
     renamed  src                +0 -0       42   43     }
 
     schema.ts

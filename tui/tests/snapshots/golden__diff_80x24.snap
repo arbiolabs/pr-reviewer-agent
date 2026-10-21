@@ -13,7 +13,7 @@ expression: text
           41 +   if (slot.free && !slot.held) {
  ▲        42 +     slot.held = true;
               ┃ ▲ HIGH     Finding f-1
-              ┃ Enter reads the finding   n next finding
+              ┃ Enter reads the finding
      42   43     }
 
 
