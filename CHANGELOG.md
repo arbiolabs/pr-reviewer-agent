@@ -7,7 +7,7 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 ### Added
 
 - **Real-PR eval.** `pnpm eval:snapshot` saves the open PRs of a repository, their inline review comments and reviews, and a full bare clone to a gitignored dataset directory, using GitHub GET requests only. `pnpm eval:real` reviews each saved PR offline in dry run, and refuses to start when the publish mode is not `dry_run` or a review would get `--publish`. `pnpm eval:report` reports overlap with the human comments on the head commit, run-to-run stability, Jev routing, the verifier's discards and cost proxies, and writes a grading sheet whose verdicts give a precision number. See `bench/REAL.md` (#28).
-- **Eval: another AI reviewer as a comparator.** The real-PR eval sets apart comments from [pr-review-agent](https://github.com/vikrrantshah/pr-review-agent), which posts from a person's account and so read as human labels, compares its findings with pr-review's, and puts them on the grading sheet. The sheet also lists the candidates the verifier discarded (#TBD).
+- **Eval: another AI reviewer as a comparator.** The real-PR eval sets apart comments from [pr-review-agent](https://github.com/vikrrantshah/pr-review-agent), which posts from a person's account and so read as human labels, compares its findings with pr-review's, and puts them on the grading sheet. The sheet also lists the candidates the verifier discarded (#30).
 
 ## [1.2.0] - 2026-10-21
 
