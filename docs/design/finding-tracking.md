@@ -246,14 +246,16 @@ Each PR ships alone, leaves `main` green, and ends in a check that fails without
 3. **Content-addressed carry-over.** Adds migration 055, `github_review_id` as the record of posting, and then the `DETECTED` observation events in `FINDING_MACHINE`, which are safe only once the column exists. Also adds `ObservedLocation` with evidence text, the locate step, the carry rows for `same`, `changed` and `file_gone`, the new ID derivation, the journal replay fix at `appdb.ts:390`, and the protocol `basis` field with fixtures. Nothing reaches `RESOLVED` yet, which is the safe direction. The checks are unit tests over a real git fixture for move, rename, rewrite and delete, and a protocol playback fixture. Benchmark identity is kept on `move`.
 4. **Checked resolution.** Adds `priorFindingId` and `resolutions` to `submit_candidates`, the prior-findings section in the request, the resolution check, and `CONFIRMED_RESOLVED` and `OBSERVED_UNCERTAIN`. Adds the "resolved" summary section. The check is a verify test where every refusal reason has a case: wrong SHA, unchanged text, contradicting candidate, and wrong file. The PR merges only when the benchmark false-resolution rate is zero over three runs, and it reports resolution recall on `fix`.
 5. **TUI polish (optional).** Shows "first seen" and dims resolved findings. Golden snapshots change.
-6. **Thread replies (gated by decision 1).** Adds comment-ID capture, `reply_outbox`, and its reconciliation. Crash tests mirror `tests/publish-crash.test.ts` for the reply row.
-7. **Thread resolution (gated by decision 2).** Adds the GraphQL client call, the `isResolved` reconciliation, and a docs update to `docs/publishing.md`.
+6. **Thread replies (gated by decision 1, declined: not built).** Adds comment-ID capture, `reply_outbox`, and its reconciliation. Crash tests mirror `tests/publish-crash.test.ts` for the reply row.
+7. **Thread resolution (gated by decision 2, declined: not built).** Adds the GraphQL client call, the `isResolved` reconciliation, and a docs update to `docs/publishing.md`.
 
-PRs 1 through 4 deliver the README's "tracking a finding across commits" and "marking it resolved". PRs 6 and 7 deliver "replying in review threads" if the operator wants it. The README Limits line changes in PR 4.
+PRs 1 through 4 deliver the README's "tracking a finding across commits" and "marking it resolved". PRs 6 and 7 were declined, so "replying in review threads" stays a documented limit. The README Limits line changes in PR 4.
 
 ## Decisions for the operator
 
 These are product calls. Each has my default, and the build plan above assumes it.
+
+**Decided by the operator on 2026-10-21:** decisions 1, 2, 3 and 6 take the defaults below. The bot never replies in threads and never resolves them, so build plan steps 6 and 7 are not built. Decisions 4, 5 and 7 keep their defaults.
 
 1. **Does the bot reply in existing review threads?** Default: no. Carried status goes in the one review body per push. Replies add one GitHub write per finding per push, which is more noise, plus a second outbox to keep exactly-once. SPEC already accepts summary-only (`docs/SPEC.md:409`). Revisit if authors say they miss status changes that sit in the summary.
 2. **Does the bot ever resolve GitHub threads?** Default: never. Resolving collapses a conversation that humans may still be having, on the strength of a static check. A human resolves with one click. If you enable it, limit it to `RESOLVED` findings whose thread has no human reply.
