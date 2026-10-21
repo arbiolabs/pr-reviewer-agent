@@ -974,6 +974,8 @@ fn the_footer_offers_no_key_that_has_nothing_to_act_on() {
     assert_eq!(footer(&mut m), "? help  q quit", "no l findings");
     m.ui.screen = pr_review_tui::model::Screen::Diff;
     assert_eq!(footer(&mut m), "Esc back  ? help");
+    m.ui.screen = pr_review_tui::model::Screen::Timeline;
+    assert_eq!(footer(&mut m), "Esc back  ? help", "no timeline to move through or filter");
 }
 
 #[test]
