@@ -58,8 +58,15 @@ pub fn detect_palette() -> Palette {
 
 /// Keys typed while the query read the terminal's reply, handed to the input path once it starts.
 static TYPED: std::sync::Mutex<Vec<u8>> = std::sync::Mutex::new(Vec::new());
-/// The query gave up inside the OSC reply: the rest of it is on its way to the key reader.
-static REPLY_CUT: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// The query gave up inside a reply: the rest of it is on its way to the key reader.
+static REPLY_CUT: std::sync::Mutex<Option<Tail>> = std::sync::Mutex::new(None);
+
+/// Which reply a cut left its tail in: the OSC 11 one (or just past an ESC, which could start either), or DA1.
+#[derive(Clone, Copy, Debug, PartialEq)]
+enum Tail {
+    Osc,
+    Da1,
+}
 
 /// Sends OSC 11 and then DA1, which every terminal answers, so the DA1 reply marks the end of whatever the terminal
 /// had to say. A terminal that answers neither costs `timeout`. It reads one byte at a time and stops at the DA1
@@ -90,7 +97,9 @@ fn query_background(timeout: Duration) -> Option<Vec<u8>> {
     })();
     let _ = disable_raw_mode();
     let reply = reply?;
-    REPLY_CUT.store(inside_osc(&reply), std::sync::atomic::Ordering::Relaxed);
+    if let Ok(mut c) = REPLY_CUT.lock() {
+        *c = cut(&reply);
+    }
     let (answers, typed) = split_replies(&reply);
     if let Ok(mut t) = TYPED.lock() {
         *t = typed;
@@ -165,10 +174,11 @@ pub fn split_replies(buf: &[u8]) -> (Vec<u8>, Vec<u8>) {
 /// Drops a terminal reply that arrives after the query gave up: crossterm reads `ESC ]` as Alt+`]` and the reply's
 /// text as keys, ended by BEL (Ctrl+G) or ST (Alt+`\\`). Only in the first `WINDOW` after startup, and only keys
 /// that can belong to `11;rgb:RRRR/GGGG/BBBB` arriving within `BURST` of the Alt+`]`; any other key ends it and acts.
+/// A tail the query's deadline cut off (no ESC of its own) drops the same way, DA1's `[?62;22c` included.
 #[derive(Default)]
 pub struct LateReply {
-    /// When the reply's Alt+`]` came, and how many keys followed it.
-    open: Option<(Duration, usize)>,
+    /// When the reply's Alt+`]` came, how many keys followed it, and which reply they are in.
+    open: Option<(Duration, usize, Tail)>,
 }
 
 impl LateReply {
@@ -177,33 +187,43 @@ impl LateReply {
     const BURST: Duration = Duration::from_millis(200);
     const MAX: usize = 64;
 
-    /// The filter for the key reader that starts after the query: already open when the query gave up inside the
-    /// OSC reply, so the tail that follows, which has no Alt+`]` of its own, is swallowed too.
+    /// The filter for the key reader that starts after the query: already open when the query gave up inside a
+    /// reply, so the tail that follows, which has no ESC of its own, is swallowed too.
     pub fn after_query() -> LateReply {
-        let cut = REPLY_CUT.swap(false, std::sync::atomic::Ordering::Relaxed);
-        LateReply { open: cut.then_some((Duration::ZERO, 0)) }
+        let cut = REPLY_CUT.lock().ok().and_then(|mut c| c.take());
+        LateReply { open: cut.map(|tail| (Duration::ZERO, 0, tail)) }
     }
 
     /// True when `key`, `since_start` into the session, is part of a late reply and must not act.
     pub fn swallow(&mut self, key: &crossterm::event::KeyEvent, since_start: Duration) -> bool {
         use crossterm::event::{KeyCode, KeyModifiers};
         let alt = key.modifiers == KeyModifiers::ALT;
-        let Some((began, n)) = self.open.take() else {
+        let Some((began, n, tail)) = self.open.take() else {
             let starts = since_start < Self::WINDOW && alt && key.code == KeyCode::Char(']');
-            self.open = starts.then_some((since_start, 0));
+            self.open = starts.then_some((since_start, 0, Tail::Osc));
             return starts;
         };
         if since_start.saturating_sub(began) >= Self::BURST || n >= Self::MAX {
             return false;
         }
-        let end = (key.modifiers == KeyModifiers::CONTROL && key.code == KeyCode::Char('g'))
-            || (alt && key.code == KeyCode::Char('\\'));
-        let plain = !key.modifiers.intersects(KeyModifiers::ALT | KeyModifiers::CONTROL);
-        let part = plain && matches!(key.code, KeyCode::Char(c) if c.is_ascii_hexdigit() || "rgb:/;".contains(c));
-        if part {
-            self.open = Some((began, n + 1));
+        let KeyCode::Char(c) = key.code else { return false };
+        let control = key.modifiers == KeyModifiers::CONTROL;
+        if tail == Tail::Osc && (control && c == 'g' || alt && c == '\\') {
+            return true;
         }
-        end || part
+        if key.modifiers.intersects(KeyModifiers::ALT | KeyModifiers::CONTROL) {
+            return false;
+        }
+        // `ESC [ ? 62;22c`: DA1 ends at its `c`, and a plain `[` after a cut ESC starts it.
+        let then = match (tail, c) {
+            (Tail::Osc, '\\') | (Tail::Da1, 'c') => None,
+            (Tail::Osc, '[') => Some(Tail::Da1),
+            (Tail::Osc, c) if c.is_ascii_hexdigit() || "]rgb:/;".contains(c) => Some(Tail::Osc),
+            (Tail::Da1, c) if c.is_ascii_digit() || "?;".contains(c) => Some(Tail::Da1),
+            _ => return false,
+        };
+        self.open = then.map(|t| (began, n + 1, t));
+        true
     }
 }
 
@@ -227,6 +247,22 @@ fn readable(timeout: Duration) -> bool {
         libc::FD_SET(libc::STDIN_FILENO, &mut set);
         let mut tv = libc::timeval { tv_sec: timeout.as_secs() as _, tv_usec: timeout.subsec_micros() as _ };
         libc::select(libc::STDIN_FILENO + 1, &mut set, std::ptr::null_mut(), std::ptr::null_mut(), &mut tv) > 0
+    }
+}
+
+/// Where the deadline left the query's buffer: inside the OSC reply or just past an ESC, inside DA1 (`ESC [ ? 6`), or
+/// between replies.
+fn cut(buf: &[u8]) -> Option<Tail> {
+    let in_csi = buf
+        .windows(2)
+        .rposition(|w| w == b"\x1b[")
+        .is_some_and(|s| buf[s + 2..].iter().all(|b| b.is_ascii_digit() || b"?;".contains(b)));
+    if inside_osc(buf) || buf.last() == Some(&0x1b) {
+        Some(Tail::Osc)
+    } else if in_csi {
+        Some(Tail::Da1)
+    } else {
+        None
     }
 }
 
