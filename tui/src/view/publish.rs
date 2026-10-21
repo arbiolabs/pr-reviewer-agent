@@ -207,7 +207,7 @@ fn state(c: &Ctx, w: usize, run_id: &RunId, p: &PublicationPreview, publish: &Co
                 out.push(line(format!("  {url}"), Role::Accent));
             }
             if published_url(c.m, run_id).is_some() {
-                out.push(line("  o opens it in the browser".into(), Role::Muted));
+                out.push(line("  o opens it on GitHub".into(), Role::Muted));
             }
         }
         (Some(PublicationStatus::Publishing), _) => {

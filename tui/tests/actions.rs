@@ -369,6 +369,7 @@ fn y_sends_exactly_one_publish_naming_the_preview_and_only_published_reads_as_do
     server(&mut m, script("approval").remove(8));
     let f = frame(&mut m);
     assert!(f.contains("✓ published on GitHub as review 3141"), "{f}");
+    assert!(f.contains("o opens it on GitHub") && f.contains("o open on GitHub"), "the page and footer agree: {f}");
     assert!(f.lines().any(|l| l.trim() == "Published on GitHub") && !f.contains("Publish this review?"), "{f}");
     assert!(f.contains("https://github.com/acme/shop/pull/184#pullrequestreview-3141"), "{f}");
     assert_eq!(
