@@ -5,7 +5,7 @@ mod common;
 
 use common::*;
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-use pr_review_tui::model::{ConfirmState, Modal, Model, Preview};
+use pr_review_tui::model::{ConfirmState, Modal, Model, Preview, Screen};
 use pr_review_tui::protocol::{ClientMessage, Command, ServerMessage};
 use pr_review_tui::update::{Effect, Msg, NetEvent, update};
 
@@ -160,16 +160,18 @@ fn refusal(m: &Model) -> String {
 }
 
 #[test]
-fn a_start_on_a_head_whose_review_ended_is_refused_on_the_panel_before_sending_or_after_a_replay() {
+fn a_start_on_a_head_whose_review_ended_goes_to_the_daemon_which_may_start_it_under_another_policy() {
+    // #185 was reviewed, but perhaps as a dry run: after a switch to approval the daemon starts it anew.
     let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#185");
-    assert!(commands(&press(&mut m, KeyCode::Char('s'))).is_empty(), "the client knows #185 is reviewed");
-    assert_eq!(refusal(&m), "#185 at 5555555 is already reviewed");
-    assert!(commands(&press(&mut m, KeyCode::Char('y'))).is_empty(), "y has nothing to confirm");
-    let f = frame(&mut m);
-    assert!(f.contains("Can't start: #185 at 5555555 is already reviewed"), "{f}");
-    assert!(f.lines().last().unwrap().contains("Esc closes"), "{f}");
+    assert!(commands(&press(&mut m, KeyCode::Char('s'))).is_empty());
+    assert_eq!(prompt(&m), "Start a review of #185 at 5555555?");
+    let sent = press(&mut m, KeyCode::Char('y'));
+    let sent = commands(&sent);
+    assert_eq!(sent.len(), 1, "the daemon decides");
+    send(&mut m, &rejected(&sent[0].request_id, "CONFLICT", "#185 at 5555555 is already reviewed"));
+    assert_eq!(refusal(&m), "#185 at 5555555 is already reviewed", "and when it refuses, the panel says so");
 
-    // The run reached the client only after y: the daemon replays the start that made it, and the panel says so.
+    // The daemon replays the start that made a run the client has since seen end: the panel says why.
     for (status, why) in [("COMPLETED", "is already reviewed"), ("FAILED", "failed its review; retry it instead")] {
         let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#186");
         press(&mut m, KeyCode::Char('s'));
@@ -185,32 +187,26 @@ fn a_start_on_a_head_whose_review_ended_is_refused_on_the_panel_before_sending_o
 }
 
 #[test]
-fn a_start_on_a_head_under_review_is_refused_on_the_panel_before_sending_and_after_a_replay() {
+fn a_start_on_a_running_head_attaches_to_its_review_and_on_a_parked_one_is_refused_before_sending() {
     let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#184");
-    assert!(commands(&press(&mut m, KeyCode::Char('s'))).is_empty());
-    assert_eq!(refusal(&m), "#184 at 4444444 is already being reviewed");
-    press(&mut m, KeyCode::Esc);
-    assert_eq!(m.top_modal(), None, "Esc closes");
+    m.ui.screen = Screen::Inbox;
+    press(&mut m, KeyCode::Char('s'));
+    assert_eq!(prompt(&m), "Start a review of #184 at 4444444?", "the daemon takes a start for a running head in");
+    let rid = commands(&press(&mut m, KeyCode::Char('y')))[0].request_id.clone();
+    let attached =
+        r#"{"type":"command.result","requestId":"RID","status":"accepted","operationId":"review.start:rev-184-a"}"#;
+    send(&mut m, &attached.replace("RID", rid.as_str()));
+    assert_eq!(m.top_modal(), None, "no event will close the panel, so it gives way");
+    assert_eq!(m.notice.as_ref().unwrap().text, "Already running; showing that review.");
+    assert_eq!((m.ui.screen, m.ui.selected_pr.as_ref().map(|p| p.as_str())), (Screen::Review, Some("acme/shop#184")));
 
     let parked = r#"{"from":"VERIFY","to":"AWAITING_APPROVAL","event":"PREVIEW_STORED","detail":null}"#;
     send(&mut m, &event(109, "acme/shop#184", "rev-184-a", "review.phase_changed", parked));
-    press(&mut m, KeyCode::Char('s'));
+    assert!(commands(&press(&mut m, KeyCode::Char('s'))).is_empty());
     assert_eq!(refusal(&m), "#184 at 4444444 is waiting for your approval");
-
-    for (phase, why) in
-        [("ANALYZE", "is already being reviewed"), ("AWAITING_APPROVAL", "is waiting for your approval")]
-    {
-        let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#186");
-        press(&mut m, KeyCode::Char('s'));
-        let rid = commands(&press(&mut m, KeyCode::Char('y')))[0].request_id.clone();
-        let run: pr_review_tui::protocol::Run =
-            serde_json::from_str(&run_json("rev-186-a", "acme/shop#186", H186, phase, "RUNNING")).unwrap();
-        m.domain.runs.insert(run.id.clone(), run);
-        let replayed =
-            r#"{"type":"command.result","requestId":"RID","status":"accepted","operationId":"review.start:rev-186-a"}"#;
-        send(&mut m, &replayed.replace("RID", rid.as_str()));
-        assert_eq!(refusal(&m), format!("#186 at 6666666 {why}"), "{phase}: no event will close it");
-    }
+    assert!(commands(&press(&mut m, KeyCode::Char('y'))).is_empty(), "y has nothing to confirm");
+    press(&mut m, KeyCode::Esc);
+    assert_eq!(m.top_modal(), None, "Esc closes");
 }
 
 #[test]

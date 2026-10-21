@@ -112,6 +112,9 @@ const PUBLISH_POLICY = "+publish";
 /** Whether a revision was started to publish; recovery recreates its task the same way. */
 export const publishes = (revision: RevisionRow) => revision.policy_version.endsWith(PUBLISH_POLICY);
 
+/** Publishing is part of the policy: a dry run of a head never blocks publishing that head later (§2 invariant 3). */
+export const startPolicy = (basePolicyVersion: string, publish: boolean) => (publish ? `${basePolicyVersion}${PUBLISH_POLICY}` : basePolicyVersion);
+
 export type StartedReview = { revision: RevisionRow; taskId: TaskId<ReviewResult> | undefined };
 
 /**
@@ -127,8 +130,7 @@ export async function startReview(
   options: { retry?: boolean; publish?: boolean; retrySource?: string } = {},
 ): Promise<StartedReview> {
   const prId = app.store.upsertPull(pull);
-  // Publishing is part of the policy: a dry run of a head never blocks publishing that head later (§2 invariant 3).
-  const policyVersion = options.publish ? `${basePolicyVersion}${PUBLISH_POLICY}` : basePolicyVersion;
+  const policyVersion = startPolicy(basePolicyVersion, options.publish ?? false);
   const revision = app.store.ensureRevision({ prId, baseSha: pull.baseSha, headSha: pull.headSha, policyVersion, reviewerVersion: app.reviewerVersion });
   if (options.retry && TERMINAL_REVIEW_STATES.includes(revision.state)) return retryReview(app, revision, options.retrySource ?? "pr-review review --retry");
   const taskId = await ensureTask(app, revision, options.publish ?? false);

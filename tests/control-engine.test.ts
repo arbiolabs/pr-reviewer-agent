@@ -571,6 +571,28 @@ it("recovers an approval the daemon was stopped in the middle of, with one POST"
   expect(fake.postAttempts).toBe(1);
 }, 60_000);
 
+it("starts a head again under the same key once approval mode makes it a new revision", async () => {
+  const dryRun: Config = { ...approvalConfig, review: { ...approvalConfig.review, publish_mode: "dry_run" } };
+  const first = await host({ config: dryRun });
+  const { c } = await serve(first.source);
+  const prId = first.app.store.upsertPull(fixture.pull);
+  c.send({ type: "snapshot.get", requestId: "s" });
+  await c.waitFor((m) => m.type === "snapshot");
+  const dry = (await command(c, { command: "review.start", params: { prId, expectedHeadSha: fixture.headSha } })) as { operationId: string };
+  await c.waitFor((m) => m.type === "event" && m.eventType === "review.completed", 0, 20_000);
+  for (const fn of cleanup.splice(0).reverse()) await fn();
+
+  const second = await host({ dataDir: first.dataDir });
+  const again = await serve(second.source);
+  again.c.send({ type: "snapshot.get", requestId: "s" });
+  await again.c.waitFor((m) => m.type === "snapshot");
+  const started = await command(again.c, { command: "review.start", params: { prId, expectedHeadSha: fixture.headSha } });
+  expect(started).toMatchObject({ status: "accepted", operationId: expect.stringMatching(/^review\.start:[0-9a-f]{32}$/) });
+  expect((started as { operationId: string }).operationId).not.toBe(dry.operationId);
+  await again.c.waitFor((m) => m.type === "event" && m.eventType === "review.phase_changed" && (m.data as { to: string }).to === "AWAITING_APPROVAL", 0, 20_000);
+  expect(fake.postAttempts).toBe(0);
+}, 60_000);
+
 it("produced the M3 server messages, each passing the v1 schema", () => {
   for (const type of ["publication.preview", "event:review.publication_changed", "event:run.failed", "event:run.superseded", "command.result"]) expect(produced.has(type), type).toBe(true);
 });

@@ -225,28 +225,38 @@ fn waiting_confirm<'a>(m: &'a mut Model, id: &RequestId) -> Option<&'a mut Confi
     })
 }
 
-/// The daemon answers a start's own key with its recorded run, whatever became of it. A run the client already knows
-/// sends no run.started, so the panel turns into the refusal the client gives before sending.
+/// A start the daemon answers with a run the client already knows sends no run.started. A running run took the
+/// start in, so the panel gives way to that review; any other turns into the refusal its state means.
 fn settle_replayed_start(m: &mut Model) {
-    let refusal = m.ui.modals.iter().enumerate().find_map(|(i, modal)| match modal {
+    let known = m.ui.modals.iter().enumerate().find_map(|(i, modal)| match modal {
         Modal::Confirm { command: Command::Start(_), state: ConfirmState::Accepted { operation, .. }, .. } => {
             let run = m.domain.runs.get(&RunId::new(operation.as_str().strip_prefix("review.start:")?))?;
-            Some((i, start_refusal(m, run)))
+            Some((i, run.clone()))
         }
         _ => None,
     });
-    let Some((i, message)) = refusal else { return };
+    let Some((i, run)) = known else { return };
+    if run.status == RunStatus::Running && !run.parked() {
+        m.ui.modals.remove(i);
+        m.ui.screen = Screen::Review;
+        m.ui.focus = Pane::Main;
+        m.ui.selected_pr = Some(run.pr_id.clone());
+        return notice(m, "Already running; showing that review.");
+    }
+    let message = Text::new(&start_refusal(m, &run));
     if let Modal::Confirm { state, .. } = &mut m.ui.modals[i] {
-        *state = ConfirmState::Refused { code: ErrorCode::Conflict, message: Text::new(&message) };
+        *state = ConfirmState::Refused { code: ErrorCode::Conflict, message };
     }
 }
 
-/// The run that makes the daemon refuse a start of `pr` now. It keys a review on the base too, so a run on another
-/// base is none, and the start goes to the daemon.
-fn known_head<'a>(m: &'a Model, pr: &Pr) -> Option<&'a Run> {
-    m.domain.runs.values().find(|r| {
-        r.pr_id == pr.id && r.base_sha == pr.base_sha && r.head_sha == pr.head_sha && r.status != RunStatus::Unknown
-    })
+/// The run that makes the daemon refuse a start of `pr` for certain: a parked run on the same base and head. The
+/// daemon keys a revision on its policy and reviewer too, which the client does not know, so a start on any other
+/// head it has a run for goes to the daemon to decide; a running one it takes in.
+fn parked_head<'a>(m: &'a Model, pr: &Pr) -> Option<&'a Run> {
+    m.domain
+        .runs
+        .values()
+        .find(|r| r.pr_id == pr.id && r.base_sha == pr.base_sha && r.head_sha == pr.head_sha && r.parked())
 }
 
 /// The daemon's words for refusing a start at `run`'s head: `#184 at 4444444 is already being reviewed`.
@@ -1411,7 +1421,7 @@ fn mutation(m: &mut Model, mu: Mutation, fx: &mut Vec<Effect>) {
     };
     // A head the client knows the daemon refuses: the same refused panel a refusal from the daemon leaves.
     if mu == Mutation::Start
-        && let Some(run) = known_head(m, &p)
+        && let Some(run) = parked_head(m, &p)
     {
         let message = Text::new(&start_refusal(m, run));
         m.ui.modals.push(Modal::Confirm {
