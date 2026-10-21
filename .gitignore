@@ -4,3 +4,4 @@ dist/
 .data/
 todo.md
 tui/target/
+.claude/worktrees/
