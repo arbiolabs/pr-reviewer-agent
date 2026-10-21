@@ -14,7 +14,7 @@ use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
 use crate::net::NetCmd;
-use crate::protocol::{ClientMessage, Event, EventBody, SequencedEvent, ServerMessage};
+use crate::protocol::{ClientMessage, Event, EventBody, RunStatus, SequencedEvent, ServerMessage};
 use crate::update::{Msg, NetEvent};
 
 pub struct Step {
@@ -82,8 +82,17 @@ impl Player {
     }
 
     /// The line to play next and its delay: a gated line the reader opened plays first, wherever it sits; else the
-    /// next line, unless it waits on a gate.
-    pub fn next(&self) -> Option<(usize, Duration)> {
+    /// next line, unless it waits on a gate. An ungated line about a run that has since ended (the reader cancelled it)
+    /// drops.
+    pub fn upcoming(&mut self) -> Option<(usize, Duration)> {
+        let ended: Vec<crate::protocol::RunId> =
+            self.runs().into_iter().filter(|r| r.status != RunStatus::Running).map(|r| r.id).collect();
+        self.steps.retain(|s| match &s.message {
+            ServerMessage::Event(Event::Sequenced(e)) if s.after.is_none() => {
+                e.run_id.as_ref().is_none_or(|id| !ended.contains(id))
+            }
+            _ => true,
+        });
         let gated = self.steps.iter().position(|s| s.after.is_some() && self.open(s));
         let i = gated.or_else(|| self.steps.first().filter(|s| s.after.is_none()).map(|_| 0))?;
         Some((i, self.steps[i].delay))
@@ -109,11 +118,18 @@ impl Player {
     /// The replies to a client request: a command a gate names is accepted and opens it; any other is rejected,
     /// saying where the script plays that command.
     pub fn answer(&mut self, req: &ClientMessage) -> Vec<ServerMessage> {
-        use crate::protocol::{CommandOutcome, CommandResult, Text};
+        use crate::protocol::{CommandOutcome, CommandResult, ErrorCode, Text};
         let ClientMessage::Command(c) = req else { return answer(&self.fixtures, &self.played, req) };
         let key = c.idempotency_key.clone();
         let opened: Vec<String> = self.gates.iter().filter(|g| opens(g, &key)).cloned().collect();
-        let outcome = if opened.is_empty() {
+        let reviewed = match &c.command {
+            crate::protocol::Command::Start(p) if opened.is_empty() || self.sent.contains(&key) => self.reviewed(p),
+            _ => None,
+        };
+        let outcome = if let Some(message) = reviewed {
+            // As the daemon answers: a head whose review has ended is not started again.
+            CommandOutcome::Rejected { code: ErrorCode::Conflict, message: Text::new(&message) }
+        } else if opened.is_empty() {
             let name = c.command.name();
             let message = match self.gates.iter().find(|g| opens(name, g)).and_then(|g| self.target(g)) {
                 Some(target) => format!("the showcase plays {name} on {target} only"),
@@ -134,6 +150,45 @@ impl Player {
         vec![ServerMessage::CommandResult(CommandResult { request_id: c.request_id.clone(), outcome })]
     }
 
+    /// Every run as played so far: the snapshot's, then each run event's newer copy.
+    fn runs(&self) -> Vec<crate::protocol::Run> {
+        let mut runs: Vec<crate::protocol::Run> = Vec::new();
+        for m in &self.played {
+            let more = match m {
+                ServerMessage::Snapshot(s) => s.runs.clone(),
+                ServerMessage::Event(Event::Sequenced(e)) => match &e.body {
+                    EventBody::Run(_, r) => vec![r.clone()],
+                    _ => vec![],
+                },
+                _ => vec![],
+            };
+            for r in more {
+                runs.retain(|x| x.id != r.id);
+                runs.push(r);
+            }
+        }
+        runs
+    }
+
+    /// `#1287 at 647fb3b is already reviewed` when the latest run of the start's PR, at its head, has ended.
+    fn reviewed(&self, p: &crate::protocol::StartParams) -> Option<String> {
+        let runs = self.runs();
+        let latest = runs.iter().rev().find(|r| r.pr_id == p.pr_id && r.head_sha == p.expected_head_sha)?;
+        if latest.status == RunStatus::Running {
+            return None;
+        }
+        let pr = self.played.iter().rev().find_map(|m| match m {
+            ServerMessage::Snapshot(s) => s.prs.iter().find(|x| x.id == p.pr_id).map(|x| x.number),
+            ServerMessage::Event(Event::Sequenced(e)) => match &e.body {
+                EventBody::PrUpdated(x) if x.id == p.pr_id => Some(x.number),
+                _ => None,
+            },
+            _ => None,
+        });
+        let pr = pr.map_or(p.pr_id.to_string(), |n| format!("#{n}"));
+        Some(format!("{pr} at {} is already reviewed", p.expected_head_sha.short()))
+    }
+
     /// What a gate's target reads as to the reader: `#338` for a PR or a run, the account for an account.
     fn target(&self, gate: &str) -> Option<String> {
         let id = gate.split(':').nth(1)?;
@@ -152,7 +207,7 @@ pub async fn run(script: Script, tx: mpsc::Sender<Msg>, mut rx: mpsc::Receiver<N
         return;
     }
     loop {
-        let next = player.next();
+        let next = player.upcoming();
         tokio::select! {
             _ = tokio::time::sleep(next.map_or(Duration::MAX, |n| n.1)), if next.is_some() => {
                 let Some((i, _)) = next else { continue };

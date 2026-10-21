@@ -166,7 +166,7 @@ fn drive(p: &mut pr_review_tui::playback::Player, m: &mut pr_review_tui::model::
             }
         }
         if replies.is_empty() {
-            let Some((i, _)) = p.next() else { return };
+            let Some((i, _)) = p.upcoming() else { return };
             replies.push(p.play(i));
         }
         for r in replies {
@@ -192,7 +192,7 @@ fn drive_bounded(
             }
         }
         if replies.is_empty() {
-            let Some((i, _)) = p.next() else { return delivered };
+            let Some((i, _)) = p.upcoming() else { return delivered };
             replies.push(p.play(i));
         }
         for r in replies {
@@ -284,4 +284,96 @@ fn every_command_the_showcase_grants_plays_a_scripted_outcome() {
             }
         }
     }
+}
+
+#[test]
+fn the_showcases_started_retried_and_running_runs_reach_an_end_and_a_reviewed_head_is_refused() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use pr_review_tui::model::{Modal, Screen};
+    use pr_review_tui::playback::{Player, load};
+    use pr_review_tui::protocol::RunStatus;
+    let mut p = Player::new(load(&protocol_dir().join("playback/showcase.ndjson")).unwrap());
+    let mut m = model();
+    let fx = update(&mut m, Msg::Net(NetEvent::Opened));
+    drive(&mut p, &mut m, fx);
+    let latest = |m: &pr_review_tui::model::Model, number: u64| {
+        let pr = m.domain.prs.values().find(|p| p.number == number).unwrap().id.clone();
+        m.domain.latest_run(&pr).map(|r| (r.status, r.id.as_str().to_string())).unwrap()
+    };
+    assert_eq!(latest(&m, 338).0, RunStatus::Completed, "#338 reaches an end when nobody cancels it");
+    let before_start = latest(&m, 1287).1;
+    let mut keys = |m: &mut pr_review_tui::model::Model, number: u64, keys: &str| {
+        m.ui.modals.clear();
+        m.ui.screen = Screen::Review;
+        m.ui.selected_pr = m.domain.prs.values().find(|p| p.number == number).map(|p| p.id.clone());
+        for c in keys.chars() {
+            let fx = update(m, Msg::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)));
+            drive(&mut p, m, fx);
+        }
+    };
+    keys(&mut m, 1287, "sy");
+    assert_eq!(latest(&m, 1287).0, RunStatus::Completed);
+    assert_ne!(
+        latest(&m, 1287).1,
+        before_start,
+        "the started run, not the old one: {:?} {:?}",
+        m.notice,
+        m.top_modal()
+    );
+    keys(&mut m, 345, "Ry");
+    assert_eq!(latest(&m, 345).0, RunStatus::Completed, "the retried run");
+    for number in [1287, 341] {
+        keys(&mut m, number, "sy");
+        let Some(Modal::Confirm { state: pr_review_tui::model::ConfirmState::Failed(why), .. }) = m.top_modal() else {
+            panic!("#{number}: {:?}", m.top_modal())
+        };
+        assert!(why.as_str().starts_with(&format!("CONFLICT: #{number} at ")), "{why:?}");
+        assert!(why.as_str().ends_with(" is already reviewed"), "{why:?}");
+    }
+}
+
+#[test]
+fn a_cancelled_showcase_run_stays_cancelled_while_its_scripted_lines_drop() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use pr_review_tui::model::Screen;
+    use pr_review_tui::playback::{Player, load};
+    use pr_review_tui::protocol::RunStatus;
+    use pr_review_tui::protocol::{Event, ServerMessage};
+    let mut p = Player::new(load(&protocol_dir().join("playback/showcase.ndjson")).unwrap());
+    let mut m = model();
+    // The handshake and the first few lines, then a cancel of #338 while it is still analyzing.
+    let fx = update(&mut m, Msg::Net(NetEvent::Opened));
+    for _ in 0..12 {
+        let (i, _) = p.upcoming().unwrap();
+        let msg = p.play(i);
+        let fx = update(&mut m, Msg::Net(NetEvent::Message(msg)));
+        for e in fx {
+            if let Effect::Send(req) = e {
+                for r in p.answer(&req) {
+                    update(&mut m, Msg::Net(NetEvent::Message(r)));
+                }
+            }
+        }
+    }
+    drop(fx);
+    let pr = m.domain.prs.values().find(|p| p.number == 338).unwrap().id.clone();
+    m.ui.screen = Screen::Review;
+    m.ui.selected_pr = Some(pr.clone());
+    update(&mut m, Msg::Key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE)));
+    let fx = update(&mut m, Msg::Key(KeyEvent::new(KeyCode::Char('y'), KeyModifiers::NONE)));
+    drive(&mut p, &mut m, fx);
+    assert_eq!(m.domain.latest_run(&pr).unwrap().status, RunStatus::Failed, "cancelled");
+    let run = m.domain.latest_run(&pr).unwrap().id.clone();
+    let after_cancel: Vec<String> = p
+        .played
+        .iter()
+        .filter_map(|m| match m {
+            ServerMessage::Event(Event::Sequenced(e)) if e.run_id.as_ref() == Some(&run) => {
+                Some(format!("{:?}", e.body))
+            }
+            _ => None,
+        })
+        .skip_while(|b| !b.contains("Failed"))
+        .collect();
+    assert_eq!(after_cancel.len(), 2, "the cancel's two lines, and none of the run's scripted end: {after_cancel:#?}");
 }

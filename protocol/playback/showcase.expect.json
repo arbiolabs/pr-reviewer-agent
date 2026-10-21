@@ -1,8 +1,8 @@
 {
   "streamEpoch": "epoch-1",
-  "lastSequence": 91,
+  "lastSequence": 117,
   "resyncRequested": false,
-  "toolActivityCount": 29,
+  "toolActivityCount": 32,
   "prs": [
     {
       "id": "0c11e2592c6105aa27f93216e41c13bd",
@@ -38,8 +38,8 @@
     },
     {
       "id": "32720635888713e46dc1cf0581f60c2f",
-      "phase": "COLLECT_CONTEXT",
-      "status": "RUNNING"
+      "phase": "COMPLETED",
+      "status": "COMPLETED"
     },
     {
       "id": "554ffb5bdeae41d386b08a9038dd6058",
@@ -63,8 +63,8 @@
     },
     {
       "id": "e7451b06cf78ead5913962040f41cb76",
-      "phase": "COLLECT_CONTEXT",
-      "status": "RUNNING"
+      "phase": "COMPLETED",
+      "status": "COMPLETED"
     }
   ],
   "findings": [

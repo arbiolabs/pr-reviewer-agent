@@ -798,6 +798,26 @@ const signInPublication = (status: PublicationChange["status"], reviewId?: numbe
   );
 const SIGNIN_REVIEW_ID = 2209184;
 const ordersRerunId = stableId("revision", orders.id, orders.headSha, "rerun");
+const ordersRerun: Run = { ...started(ordersRun), id: ordersRerunId };
+const ledgerRetry: Run = { ...started(ledgerRun), failureReason: undefined, attempt: 2 };
+/** A run the reader started or retried, from its first tool call to COMPLETED in about 14 s, all behind `gate`. */
+const toTheEnd = (r: Run, gate: string, tool: [string, string], findings: FindingDetail[]): ShowStep[] => {
+  const steps: ShowStep[] = [
+    [900, (s) => activity(s, r, ...tool)],
+    [1600, (s) => phase(s, r, "COLLECT_CONTEXT", "TRIAGE", "CONTEXT_PERSISTED")],
+    [2200, (s) => phase(s, r, "TRIAGE", "ANALYZE", "ROUTING_PERSISTED")],
+    [3500, (s) => phase(s, r, "ANALYZE", "VERIFY", "CANDIDATES_PERSISTED")],
+    ...findings.map((d): ShowStep => [400, (s) => findingUpdated(s, { ...findingOf(d), runId: r.id, stale: false })]),
+    [2400, (s) => phase(s, r, "VERIFY", "PREPARE_PUBLICATION", "CANDIDATES_DISPOSED")],
+    [1200, (s) => phase(s, r, "PREPARE_PUBLICATION", "PUBLISH", "HEAD_VERIFIED")],
+    [900, (s) => phase(s, r, "PUBLISH", "COMPLETED", "NO_PUBLICATION_RECORDED")],
+  ];
+  // The run started 500 ms before these lines, when the reader's command played its run.started.
+  const took = (500 + steps.reduce((sum, [delay]) => sum + delay, 0)) / 1000;
+  const completed = { ...r, phase: "COMPLETED" as const, status: "COMPLETED" as const };
+  steps.push([40, (s) => runEvent(s, "review.completed", { ...completed, startedAt: at(s.t! - took), completedAt: at(s.t!) })]);
+  return steps.map(([delay, make]) => [delay, make, gate]);
+};
 const showSteps: ShowStep[] = [
   [600, (s) => runEvent(s, "run.started", signInRun)],
   [420, signInActivity("read_diff", "3 files changed (+6 -3): src/server/auth/callback.ts, src/server/auth/login.ts, src/client/pages/SignIn.tsx")],
@@ -836,10 +856,17 @@ const showSteps: ShowStep[] = [
   [380, (s) => findingUpdated(s, findingOf(openRedirect))],
   [580, signInActivity("git_history", "#1077 review thread: rotation required by the 2025 pen test (finding AC-14)")],
   [620, (s) => findingUpdated(s, findingOf(sessionFixation))],
-  [1100, (s) => phase(s, signInRun, "VERIFY", "PREPARE_PUBLICATION", "CANDIDATES_DISPOSED")],
+  [300, (s) => phase(s, drainRun, "ANALYZE", "VERIFY", "CANDIDATES_PERSISTED")],
+  [800, (s) => phase(s, signInRun, "VERIFY", "PREPARE_PUBLICATION", "CANDIDATES_DISPOSED")],
   // Approval mode: the review is stored and parks until the reader approves the preview.
   [800, (s) => phase(s, signInRun, "PREPARE_PUBLICATION", "AWAITING_APPROVAL", "APPROVAL_REQUIRED")],
   [40, signInPublication("awaiting_approval")],
+  // #338 ends on its own unless the reader cancels it first; playback drops a run's lines once it has ended.
+  [5000, drainActivity("read_file", "internal/webhooks/dispatcher_test.go:1-90")],
+  [3000, (s) => phase(s, drainRun, "VERIFY", "PREPARE_PUBLICATION", "CANDIDATES_DISPOSED")],
+  [1500, (s) => phase(s, drainRun, "PREPARE_PUBLICATION", "PUBLISH", "HEAD_VERIFIED")],
+  [800, (s) => phase(s, drainRun, "PUBLISH", "COMPLETED", "NO_PUBLICATION_RECORDED")],
+  [40, (s) => runEvent(s, "review.completed", { ...drainRun, phase: "COMPLETED", status: "COMPLETED", completedAt: at(s.t!) })],
   [600, (s) => phase(s, signInRun, "AWAITING_APPROVAL", "PUBLISH", "APPROVED"), "review.publish"],
   [300, signInPublication("publishing"), "review.publish"],
   [1200, signInPublication("published", SIGNIN_REVIEW_ID), "review.publish"],
@@ -850,10 +877,12 @@ const showSteps: ShowStep[] = [
   [4000, "heartbeat"],
   [4000, "heartbeat"],
   // What s, c and R do in the showcase, each on the one target it scripts: they play whenever the reader sends them.
-  [500, (s) => runEvent(s, "run.started", { ...started(ordersRun), id: ordersRerunId, startedAt: at(s.t!) }), `review.start:${orders.id}:${orders.headSha}`],
+  [500, (s) => runEvent(s, "run.started", { ...ordersRerun, startedAt: at(s.t!) }), `review.start:${orders.id}:${orders.headSha}`],
+  ...toTheEnd(ordersRerun, `review.start:${orders.id}:${orders.headSha}`, ["read_diff", "3 files changed (+41 -6): src/server/routes/orders.ts, src/server/orders/reserve.ts, src/server/orders/history.ts"], [refundAuthz, oversell, historyN1, pagerOffByOne]),
   [500, (s) => phase(s, drainRun, "ANALYZE", "FAILED", "CANCELLED"), `review.cancel:${drainRun.id}`],
   [40, (s) => runEvent(s, "run.failed", { ...drainRun, phase: "FAILED", status: "FAILED", completedAt: at(s.t!), failureReason: "cancelled from the TUI" }), `review.cancel:${drainRun.id}`],
-  [500, (s) => runEvent(s, "run.started", { ...started(ledgerRun), failureReason: undefined, attempt: 2, startedAt: at(s.t!) }), `review.retry:${ledgerRun.id}`],
+  [500, (s) => runEvent(s, "run.started", { ...ledgerRetry, startedAt: at(s.t!) }), `review.retry:${ledgerRun.id}`],
+  ...toTheEnd(ledgerRetry, `review.retry:${ledgerRun.id}`, ["read_diff", "4 files changed (+96 -12) once migrations/ is excluded as generated"], []),
   [300, (s) => accountsUpdated(s, showAccounts.map((a) => ({ ...a, selected: a.id === showPersonal.id }))), `account.select:${showPersonal.id}`],
 ];
 
@@ -1354,9 +1383,9 @@ export const playback: Record<string, { script: PlaybackLine[]; expect: Expect }
     script: showcaseScript(),
     expect: {
       streamEpoch: EPOCH,
-      lastSequence: 91,
+      lastSequence: 117,
       resyncRequested: false,
-      toolActivityCount: 29,
+      toolActivityCount: 32,
       prs: prRows(orders, requestIds, signIn, drain, ledger),
       runs: [
         runRow(ordersRun),
@@ -1364,8 +1393,8 @@ export const playback: Record<string, { script: PlaybackLine[]; expect: Expect }
         runRow(signInRun, "COMPLETED", "COMPLETED"),
         runRow(drainOldRun),
         runRow(drainRun, "FAILED", "FAILED"),
-        runRow(ledgerRun, "COLLECT_CONTEXT", "RUNNING"),
-        { id: ordersRerunId, phase: "COLLECT_CONTEXT", status: "RUNNING" },
+        runRow(ledgerRun, "COMPLETED", "COMPLETED"),
+        { id: ordersRerunId, phase: "COMPLETED", status: "COMPLETED" },
       ],
       findings: showDetails.map((f) => ({ id: f.id, title: f.title, status: f.runId === signInRun.id ? "PUBLISHED" : "DETECTED", stale: f.stale })),
       accounts: [
