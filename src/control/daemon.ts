@@ -3,6 +3,7 @@ import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
 import { which } from "../models/detect.ts";
+import type { SetupCheck } from "../protocol/v1.ts";
 import { AppDbSource } from "./appdb.ts";
 import type { EngineSource } from "./engine.ts";
 import { defaultSocketPath, startControlServer } from "./server.ts";
@@ -13,6 +14,8 @@ export type DaemonDeps = {
   openEngine?: (dataDir: string) => Promise<EngineSource>;
   /** `control.allow_commands` from the config: the other way, besides `--allow-commands`, to enable the engine. */
   commandsConfigured?: () => boolean;
+  /** `pr-review setup --check` for `dataDir`, which each welcome carries. */
+  checks?: (dataDir: string) => Promise<SetupCheck[]>;
 };
 
 export const COMMANDS_OFF = "review commands are off; start the daemon with --allow-commands or set control.allow_commands";
@@ -50,7 +53,9 @@ export async function runDaemon(args: string[], dataDir: string, err: (text: str
   const allowCommands = (values["allow-commands"] ?? false) || (deps.commandsConfigured?.() ?? false);
   const source: ControlSource = values.fixture ? FixtureSource.load(values.fixture) : await openSource(dir, allowCommands, deps, err);
   try {
-    const server = await startControlServer({ socketPath: values.socket ?? defaultSocketPath(), source, heartbeatMs: heartbeat * 1000 });
+    // The client asking is the TUI, so whether it is built says nothing; a fixture has no environment to check.
+    const checks = values.fixture || !deps.checks ? undefined : async () => (await deps.checks!(dir)).filter((c) => c.id !== "tui");
+    const server = await startControlServer({ socketPath: values.socket ?? defaultSocketPath(), source, heartbeatMs: heartbeat * 1000, checks });
     const where = values.fixture ? `fixture ${values.fixture}` : `data dir ${dir}, ${source.mode ?? "read-only"} mode`;
     err(`pr-review daemon: listening on ${server.path} (${where}${source.capabilities?.().length ? ", commands enabled" : ""})\n`);
     await new Promise((resolve) => {

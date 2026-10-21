@@ -3,7 +3,10 @@ import { tmpdir } from "node:os";
 import { delimiter, dirname, join } from "node:path";
 import { createModels } from "@earendil-works/pi-ai";
 import { afterEach, beforeEach, expect, it, vi } from "vitest";
+import { gatherChecks } from "../src/cli/checks.ts";
 import { main } from "../src/cli/main.ts";
+import { AppDbSource } from "../src/control/appdb.ts";
+import { lockDataDir } from "../src/runtime/app.ts";
 import { saveConfig } from "../src/config/config.ts";
 import { which } from "../src/models/detect.ts";
 import { fakeGh } from "./fake-gh.ts";
@@ -102,4 +105,17 @@ it("fails when models.default is not available and points at setup instead of lo
   expect(code).toBe(1);
   expect(lines).toContain("  ✗ model   model openai/nope (from config) is not available; available: faux/reviewer");
   expect(lines).toContain("            run `pr-review setup` to pick an available model");
+});
+
+it("checks a data dir that a running daemon holds locked and open", async () => {
+  const data = join(dir, "data");
+  const source = AppDbSource.open(data);
+  const release = await lockDataDir(data);
+  try {
+    const checks = await gatherChecks({ models: fauxModels([]) }, data);
+    expect(checks.find((c) => c.id === "github")).toEqual({ id: "github", status: "ok", detail: "github.com/diego-arbio-dev (gh active account)" });
+  } finally {
+    await release();
+    source.close();
+  }
 });

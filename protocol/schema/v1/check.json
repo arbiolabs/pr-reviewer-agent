@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "pr-review/protocol/v1/check.json",
+  "type": "object",
+  "required": [
+    "id",
+    "status",
+    "detail"
+  ],
+  "properties": {
+    "id": {
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "ok",
+        "warn",
+        "missing"
+      ]
+    },
+    "detail": {
+      "type": "string"
+    },
+    "fix": {
+      "type": "string",
+      "description": "what to run or set, for display; never a secret"
+    }
+  }
+}

@@ -1,4 +1,4 @@
-import { readdirSync, readFileSync } from "node:fs";
+import { mkdirSync, readdirSync, readFileSync } from "node:fs";
 import { DatabaseSync } from "node:sqlite";
 import { transition } from "../domain/machine.ts";
 import {
@@ -638,5 +638,16 @@ export class AppStore {
 
   releaseLease(prId: string, owner: string): void {
     this.db.prepare("DELETE FROM leases WHERE pr_id = ? AND owner = ?").run(prId, owner);
+  }
+}
+
+/** Run `fn` on the data dir's app DB, creating the dir and DB if needed. Takes no data-dir lock: WAL lets it share the DB. */
+export async function withStore<T>(dataDir: string, fn: (store: AppStore) => Promise<T> | T): Promise<T> {
+  mkdirSync(dataDir, { recursive: true });
+  const store = AppStore.open(`${dataDir}/app.sqlite`);
+  try {
+    return await fn(store);
+  } finally {
+    store.close();
   }
 }
