@@ -175,6 +175,65 @@ fn drive(p: &mut pr_review_tui::playback::Player, m: &mut pr_review_tui::model::
     }
 }
 
+/// `drive`, counting the messages it hands the client; a resync that never converges runs past `limit`.
+fn drive_bounded(
+    p: &mut pr_review_tui::playback::Player,
+    m: &mut pr_review_tui::model::Model,
+    mut fx: Vec<Effect>,
+    limit: usize,
+    name: &str,
+) -> usize {
+    let mut delivered = 0;
+    loop {
+        let mut replies = Vec::new();
+        for e in fx.drain(..) {
+            if let Effect::Send(req) = e {
+                replies.extend(p.answer(&req));
+            }
+        }
+        if replies.is_empty() {
+            let Some((i, _)) = p.next() else { return delivered };
+            replies.push(p.play(i));
+        }
+        for r in replies {
+            delivered += 1;
+            assert!(delivered <= limit, "{name} still resyncing after {limit} messages: {:?}", m.link);
+            fx.extend(update(m, Msg::Net(NetEvent::Message(r))));
+        }
+    }
+}
+
+#[test]
+fn every_script_played_by_the_player_settles_live_and_r_settles_again() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    use pr_review_tui::playback::{Player, load};
+    for name in [
+        "accounts",
+        "approval",
+        "burst",
+        "duplicate",
+        "epoch-change",
+        "gap",
+        "hostile",
+        "normal",
+        "showcase",
+        "superseded",
+    ] {
+        let mut p = Player::new(load(&protocol_dir().join(format!("playback/{name}.ndjson"))).unwrap());
+        let limit = 2 * script(name).len() + 20;
+        let mut m = model();
+        let fx = update(&mut m, Msg::Net(NetEvent::Opened));
+        drive_bounded(&mut p, &mut m, fx, limit, name);
+        assert_eq!(m.link, Link::Live, "{name}");
+        if name == "gap" {
+            assert_eq!(m.stream.last_applied, 14, "the resync caught up past the gap");
+        }
+        let fx = update(&mut m, Msg::Key(KeyEvent::new(KeyCode::Char('r'), KeyModifiers::NONE)));
+        drive_bounded(&mut p, &mut m, fx, limit, name);
+        assert_eq!(m.link, Link::Live, "{name} after r");
+    }
+}
+
 #[test]
 fn every_command_the_showcase_grants_plays_a_scripted_outcome() {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};

@@ -4,7 +4,8 @@
 //! before the session opened. A line with `after: "<gate>"` holds until the client sends a command the gate names,
 //! which the playback then accepts: the showcase's approval plays only once the reader approves it, and its start,
 //! cancel, retry and account switch play whenever the reader sends them. A `snapshot.get` (the `r`
-//! key) is answered with the last snapshot played and every event played after it, so the client catches up again.
+//! key) is answered with the last snapshot played and every event played after it, as one gap-free chain, so the
+//! client catches up again.
 
 use std::path::{Path, PathBuf};
 use std::time::Duration;
@@ -218,8 +219,21 @@ pub fn answer(fixtures: &Path, played: &[ServerMessage], req: &ClientMessage) ->
                 return vec![];
             };
             s.request_id = Some(request_id.clone());
-            let after = events.iter().filter(|e| e.stream_epoch == s.stream_epoch && e.sequence.get() > s.sequence);
-            let after: Vec<ServerMessage> = after.cloned().map(|e| ServerMessage::Event(Event::Sequenced(e))).collect();
+            let mut after: Vec<SequencedEvent> = Vec::new();
+            for e in events.iter().filter(|e| e.stream_epoch == s.stream_epoch && e.sequence.get() > s.sequence) {
+                if after.iter().all(|a| a.sequence != e.sequence) {
+                    after.push(e.clone());
+                }
+            }
+            // A script's deliberate gap must not come back in the answer, or the client resyncs forever: the events
+            // are renumbered into one chain that ends at the last sequence played, so later lines follow on.
+            let last = after.iter().map(|e| e.sequence.get()).max().unwrap_or(s.sequence);
+            s.sequence = last - after.len() as u64;
+            for (k, e) in after.iter_mut().enumerate() {
+                e.prev_sequence = s.sequence + k as u64;
+                e.sequence = std::num::NonZeroU64::new(s.sequence + k as u64 + 1).unwrap_or(e.sequence);
+            }
+            let after = after.into_iter().map(|e| ServerMessage::Event(Event::Sequenced(e)));
             return std::iter::once(ServerMessage::Snapshot(s)).chain(after).collect();
         }
         ClientMessage::DiffGet { pr_id, base_sha, head_sha, cursor, .. } => {
