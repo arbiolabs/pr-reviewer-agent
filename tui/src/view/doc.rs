@@ -344,7 +344,8 @@ fn summary_line(c: &Ctx, pr: &Pr, findings: &[&Finding], w: usize) -> Line<'stat
     let words = |compact: bool| {
         let mut left = vec![c.span(
             match live.len() {
-                0 if c.m.domain.latest_run(&pr.id).is_some_and(|r| r.status == RunStatus::Completed) => {
+                // "yet" only while a run can still add one.
+                0 if c.m.domain.latest_run(&pr.id).is_some_and(|r| r.status != RunStatus::Running) => {
                     "No findings".to_string()
                 }
                 0 => "No findings yet".to_string(),

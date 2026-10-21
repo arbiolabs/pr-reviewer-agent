@@ -1030,3 +1030,20 @@ fn the_timeline_counts_the_events_it_shows_and_a_filter_counts_against_them() {
     press(&mut m, KeyCode::Char('P'));
     assert_eq!(count(&mut m), "0 of 1 event", "tool calls in COLLECT_CONTEXT");
 }
+
+#[test]
+fn a_finished_run_with_no_findings_says_no_findings_and_only_a_running_one_says_yet() {
+    let mut m = review_184();
+    let pr = PrId::new("acme/shop#184");
+    m.domain.findings.retain(|_, f| f.pr_id != pr);
+    let run = m.domain.latest_run(&pr).unwrap().id.clone();
+    let says = |m: &mut Model, status: RunStatus| {
+        m.domain.runs.get_mut(&run).unwrap().status = status;
+        let (frame, _) = common::render(m, 120, 38);
+        let at = frame.find("No findings").unwrap();
+        frame[at..].split("   ").next().unwrap().trim().to_string()
+    };
+    assert_eq!(says(&mut m, RunStatus::Failed), "No findings", "cancelled or failed: nothing more will come");
+    assert_eq!(says(&mut m, RunStatus::Completed), "No findings");
+    assert_eq!(says(&mut m, RunStatus::Running), "No findings yet");
+}
