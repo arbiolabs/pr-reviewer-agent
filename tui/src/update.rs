@@ -921,29 +921,52 @@ fn timeline_query(m: &Model, scope: TimelineScope) -> TimelineQuery {
     }
 }
 
-/// The phase each event happened in: the `from` of the next later phase change of its run, else the run's phase now.
+/// The phase each event happened in (`events` newest first): the run's phase as the events before it left it, from
+/// phase changes and the runs that run events carry. An event older than every loaded phase change takes the `from`
+/// of the next later one, else the run's phase now.
 pub fn event_phases(m: &Model, events: &[SequencedEvent]) -> Vec<Option<Phase>> {
     let mut later_from: std::collections::BTreeMap<&RunId, Phase> = Default::default();
-    events
+    let fallback: Vec<Option<Phase>> = events
         .iter()
         .map(|e| {
             let run = e.run_id.as_ref()?;
+            let phase = later_from.get(run).copied().or_else(|| m.domain.runs.get(run).map(|r| r.phase));
             if let EventBody::PhaseChanged(p) = &e.body {
                 later_from.insert(run, p.from);
-                return Some(p.to);
             }
-            // The publisher's own statuses belong to PUBLISH, even when the journal wrote the run's next phase first.
-            if let EventBody::PublicationChanged(p) = &e.body
-                && matches!(
-                    p.status,
-                    PublicationStatus::Publishing | PublicationStatus::Published | PublicationStatus::Uncertain
-                )
-            {
-                return Some(Phase::Publish);
-            }
-            later_from.get(run).copied().or_else(|| m.domain.runs.get(run).map(|r| r.phase))
+            phase
         })
-        .collect()
+        .collect();
+    let mut now: std::collections::BTreeMap<&RunId, Phase> = Default::default();
+    let mut out: Vec<Option<Phase>> = events
+        .iter()
+        .zip(fallback)
+        .rev()
+        .map(|(e, fallback)| {
+            let run = e.run_id.as_ref()?;
+            match &e.body {
+                EventBody::PhaseChanged(p) => {
+                    now.insert(run, p.to);
+                }
+                EventBody::Run(_, r) => {
+                    now.insert(run, r.phase);
+                }
+                // The publisher's own statuses belong to PUBLISH, even when the journal wrote the run's next phase first.
+                EventBody::PublicationChanged(p)
+                    if matches!(
+                        p.status,
+                        PublicationStatus::Publishing | PublicationStatus::Published | PublicationStatus::Uncertain
+                    ) =>
+                {
+                    return Some(Phase::Publish);
+                }
+                _ => {}
+            }
+            now.get(run).copied().or(fallback)
+        })
+        .collect();
+    out.reverse();
+    out
 }
 
 /// The words `/` matches an event by: what it names, the way its row reads.

@@ -503,3 +503,42 @@ fn toasts_say_what_happened_in_plain_words_and_wrap_instead_of_cutting() {
     let text = frame.split_whitespace().collect::<Vec<_>>().join(" ");
     assert!(text.contains("keeps the attempt you asked for"), "the toast is cut:\n{frame}");
 }
+
+#[test]
+fn each_timeline_event_sits_under_the_phase_its_run_was_in_when_it_happened() {
+    use pr_review_tui::protocol::{Event, Phase, SequencedEvent};
+    let m = engine("fixtures/server.welcome.engine.json", "acme/shop#184");
+    let run = |phase: &str, status: &str| run_json("rev-184-a", "acme/shop#184", H186, phase, status);
+    let phase = |from: &str, to: &str| format!(r#"{{"from":"{from}","to":"{to}","event":"E","detail":null}}"#);
+    let finding = r#"{"id":"f-1","prId":"acme/shop#184","runId":"rev-184-a","fingerprint":"fp-f-1","title":"Finding f-1","category":"correctness","severity":"high","status":"PUBLISHED","confidence":0.82,"file":"src/booking.ts","line":42,"evidenceCount":1,"stale":false}"#;
+    let pub_ = |status: &str| format!(r#"{{"runId":"rev-184-a","status":"{status}"}}"#);
+    let oldest_first = [
+        event(109, "acme/shop#184", "rev-184-a", "review.publication_changed", &pub_("awaiting_approval")),
+        event(110, "acme/shop#184", "rev-184-a", "run.failed", &run("FAILED", "FAILED")),
+        event(111, "acme/shop#184", "rev-184-a", "run.started", &run("COLLECT_CONTEXT", "RUNNING")),
+        event(112, "acme/shop#184", "rev-184-a", "review.phase_changed", &phase("AWAITING_APPROVAL", "PUBLISH")),
+        event(113, "acme/shop#184", "rev-184-a", "finding.updated", finding),
+        event(114, "acme/shop#184", "rev-184-a", "review.completed", &run("COMPLETED", "COMPLETED")),
+    ];
+    let mut events: Vec<SequencedEvent> = oldest_first
+        .iter()
+        .map(|j| match ServerMessage::parse(j).unwrap() {
+            ServerMessage::Event(Event::Sequenced(e)) => e,
+            other => panic!("{other:?}"),
+        })
+        .collect();
+    events.reverse();
+    let mut phases = pr_review_tui::update::event_phases(&m, &events);
+    phases.reverse();
+    assert_eq!(
+        phases,
+        [
+            Some(Phase::AwaitingApproval),
+            Some(Phase::Failed),
+            Some(Phase::CollectContext),
+            Some(Phase::Publish),
+            Some(Phase::Publish),
+            Some(Phase::Completed),
+        ]
+    );
+}
