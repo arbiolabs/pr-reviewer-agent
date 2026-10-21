@@ -6,6 +6,8 @@ Each case is a small PR in TypeScript, Go or Python. Most cases have one seeded 
 
 Multi-commit cases measure how a finding is tracked when the PR gets more commits: whether a fixed bug is marked resolved, whether a bug that stays keeps its finding, and whether a later review posts the same comment again. See [Multi-commit cases](#multi-commit-cases).
 
+To review open PRs of a real repository instead, in dry run and offline from a local snapshot, see the [real-PR eval](REAL.md).
+
 The benchmark calls a real model, so every run costs money. It never runs in CI, and vitest does not load `bench/`. Only the scoring functions have a unit test, `tests/bench-score.test.ts`.
 
 ## Run it
