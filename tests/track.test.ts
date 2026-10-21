@@ -191,11 +191,21 @@ it("links a re-report in the finding's file and category by title words, by its 
   expect(linkOne(reported({ title: "Anyone can refund", newLine: 11 }, cites(11, 12)), [prior({ kind: "changed", file: FILE })])).toBe(undefined);
 });
 
-it("never links across files, even on the same text or the same title", () => {
-  const f = prior(same());
-  expect(linkOne(reported({ title: "Anyone can refund", file: "x.ts", newLine: 1 }, [{ path: "x.ts", start: 1, end: 4, text: normalize(EVIDENCE_LINES) }]), [f])).toBe(undefined);
-  expect(linkOne(reported({ title: "Anyone can refund", file: "x.ts", newLine: 1 }, [{ path: "x.ts", start: 1, end: 1, text: normalize([EVIDENCE_LINES[2]!]) }]), [f])).toBe(undefined);
-  expect(linkOne(reported({ file: "x.ts", newLine: 1 }, cites(9, 12, "x.ts")), [f])).toBe(undefined);
+it("never links across files while the finding's file exists, even on the same text or the same title", () => {
+  for (const located of [same(), { kind: "changed" as const, file: FILE }]) {
+    const f = prior(located);
+    expect(linkOne(reported({ title: "Anyone can refund", file: "x.ts", newLine: 1 }, [{ path: "x.ts", start: 1, end: 4, text: normalize(EVIDENCE_LINES) }]), [f])).toBe(undefined);
+    expect(linkOne(reported({ file: "x.ts", newLine: 1 }, cites(9, 12, "x.ts")), [f])).toBe(undefined);
+  }
+});
+
+it("links across files once the finding's file is gone, but only on a substantial equal cited text in the same category", () => {
+  const gone = prior({ kind: "file_gone" });
+  const moved = [{ path: "x.ts", start: 1, end: 4, text: normalize(EVIDENCE_LINES) }];
+  expect(linkOne(reported({ title: "Anyone can refund", file: "x.ts", newLine: 1 }, moved), [gone])).toBe("f-1");
+  expect(linkOne(reported({ title: "Anyone can refund", file: "x.ts", newLine: 1, category: "correctness" }, moved), [gone])).toBe(undefined);
+  expect(linkOne(reported({ title: "Anyone can refund", file: "x.ts", newLine: 1 }, [{ path: "x.ts", start: 1, end: 1, text: normalize([EVIDENCE_LINES[2]!]) }]), [gone])).toBe(undefined);
+  expect(linkOne(reported({ file: "x.ts", newLine: 1 }), [gone])).toBe(undefined);
 });
 
 it("assigns each open finding to at most one candidate, the best-scoring one, and leaves the rest fresh", () => {

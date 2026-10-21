@@ -168,18 +168,23 @@ type Report = { candidate: CandidateFinding; location: ObservedLocation };
 
 /**
  * How strongly a verified candidate reads as another report of an open finding, or undefined when it does not. Every
- * link needs the candidate in the finding's file at this head (after the rename the diff reports) and in its category.
+ * link needs the candidate in the finding's category and in its file at this head, after the rename the diff reports.
  * 3: the fingerprint agrees, so the title names the same defect. 2: a cited text agrees (substantial and equal).
  * 1: the anchor is within LINK_DISTANCE of the located anchor and the cited ranges overlap the located evidence.
+ * When the finding's file is gone and the diff names no rename (a file the PR added shows as added, not renamed),
+ * a substantial equal cited text is what says where the code went, so that link alone may cross files.
  * Two defects on neighbouring lines in one category are told apart by what they cite: a report that cites none of
  * the finding's code is a new finding. That can duplicate a comment; it never hides a defect.
  */
 function linkScore(candidate: CandidateFinding, location: ObservedLocation, fingerprintOf: Fingerprint, f: PriorFinding): number | undefined {
+  if (candidate.category !== f.candidate.category) return undefined;
+  const sameCitedText = location.evidence.some((e) => f.location.evidence.some((p) => sameText(e.text, p.text)));
   const file = currentFile(f);
-  if (file !== candidate.file || candidate.category !== f.candidate.category) return undefined;
+  if (file === undefined) return sameCitedText ? 2 : undefined;
+  if (file !== candidate.file) return undefined;
   // The file is settled above, so the fingerprint is compared without it: the finding's own was built from its first path.
   if (fingerprintOf({ ...candidate, file: "" }) === fingerprintOf({ ...f.candidate, file: "" })) return 3;
-  if (location.evidence.some((e) => f.location.evidence.some((p) => sameText(e.text, p.text)))) return 2;
+  if (sameCitedText) return 2;
   if (f.located.kind !== "same") return undefined;
   const at = f.located.location;
   const nearAnchor = candidate.newLine !== null && at.newLine !== null && Math.abs(candidate.newLine - at.newLine) <= LINK_DISTANCE;
