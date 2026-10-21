@@ -75,8 +75,8 @@ const step = (path: CandidateState[], event: CandidateEvent): CandidateState[] =
  * Deterministic VERIFY (spec §7): every candidate walks the candidate submachine to VERIFIED or DISCARDED.
  * There is no LLM second-pass verifier in M1; a candidate passes on anchoring, evidence, and policy alone.
  * The candidates that pass are then linked to the PR's open findings one-to-one (track.ts): a linked candidate
- * takes that finding's ID, and any other gets a new one. Two candidates with one new ID are one defect reported
- * twice, and the second is a duplicate; two that read as one open finding are never, the second is a new finding.
+ * takes that finding's ID, and any other gets a new one. Two candidates that get the same new ID are one defect
+ * reported twice, so the second is a duplicate. Two that read as the same open finding are not: the second is new.
  */
 export async function verifyCandidates(candidates: CandidateFinding[], ctx: VerifyContext): Promise<{ dispositions: Disposition[]; verified: VerifiedFinding[] }> {
   const dispositions: Disposition[] = [];

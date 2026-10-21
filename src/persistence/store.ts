@@ -98,7 +98,6 @@ export type FindingView = {
 /** An open finding at its latest observation before `excludeRevisionId`, with the head that observation was made on. */
 export type OpenFinding = {
   findingId: string;
-  fingerprint: string;
   status: FindingState;
   candidate: CandidateFinding;
   /** Rows written before migration 055 have no `headSha` and no `evidence`. */
@@ -581,11 +580,9 @@ export class AppStore {
          WHERE o.revision_id = ? ORDER BY o.created_at, f.id`,
       )
       .all(revisionId) as Record<string, string | null>[];
-    // Revision N can be posting while N+1 verifies (the coordinator aborts only states before PUBLISH). A finding counts
-    // as posted while an outbox may still put it on GitHub: one whose POST may have landed (`sending` or
-    // `needs_reconciliation`, whatever became of its revision, until reconciliation decides) or one a live revision is
-    // about to send. A missed comment is cheaper than a duplicate. A `pending` outbox of a finished revision was never
-    // sent, or was proven absent, so its findings are not posted and this revision comments on them.
+    // A finding counts as posted while an outbox may still put it on GitHub: its POST may have landed (`sending`,
+    // `needs_reconciliation`), or a live revision is about to send it. A missed comment is cheaper than a duplicate.
+    // A `pending` outbox of a finished revision was never sent or was proven absent, so its findings are not posted.
     const terminal = TERMINAL_REVIEW_STATES.map((s) => `'${s}'`).join(", ");
     const outboxes = this.db
       .prepare(
@@ -615,7 +612,7 @@ export class AppStore {
   openFindings(prId: string, excludeRevisionId: string): OpenFinding[] {
     const rows = this.db
       .prepare(
-        `SELECT f.id, f.fingerprint, f.status, o.evidence_json, o.location_json, r.head_sha FROM findings f
+        `SELECT f.id, f.status, o.evidence_json, o.location_json, r.head_sha FROM findings f
          JOIN finding_observations o ON o.id = (SELECT id FROM finding_observations WHERE finding_id = f.id AND revision_id != :exclude ORDER BY created_at DESC, id LIMIT 1)
          JOIN review_revisions r ON r.id = o.revision_id
          WHERE f.pr_id = :pr AND f.status != 'RESOLVED' ORDER BY f.created_at, f.id`,
@@ -623,7 +620,6 @@ export class AppStore {
       .all({ pr: prId, exclude: excludeRevisionId }) as Record<string, string>[];
     return rows.map((row) => ({
       findingId: row.id!,
-      fingerprint: row.fingerprint!,
       status: row.status as FindingState,
       candidate: JSON.parse(row.evidence_json!),
       location: JSON.parse(row.location_json!),

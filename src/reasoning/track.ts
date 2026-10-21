@@ -124,10 +124,12 @@ export async function locate(location: ObservedLocation, headSha: string, head: 
   };
   const findItem = async (item: EvidenceText): Promise<{ path: string; start: number } | undefined> => {
     const own = await present(item.path);
-    const ownLines = own === undefined ? undefined : (await linesOf(own))!;
-    // A snippet below the floor is found only where it was: moving it would pin the finding to any `}` in the file.
-    const inOwn = ownLines === undefined ? undefined : substantial(item.text) ? findSnippet(item.text, ownLines, item.start) : foundAt(item.text, ownLines, item.start) ? item.start : undefined;
-    if (own !== undefined && inOwn !== undefined) return { path: own, start: inOwn };
+    if (own !== undefined) {
+      const lines = (await linesOf(own))!;
+      // A snippet below the floor is found only where it was: moving it would pin the finding to any `}` in the file.
+      const start = substantial(item.text) ? findSnippet(item.text, lines, item.start) : foundAt(item.text, lines, item.start) ? item.start : undefined;
+      if (start !== undefined) return { path: own, start };
+    }
     if (!substantial(item.text) || !options.treeWide) return undefined;
     const snippetLines = item.text.split("\n");
     const query = snippetLines.reduce((a, b) => (b.length > a.length ? b : a));
