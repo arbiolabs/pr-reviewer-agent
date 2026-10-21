@@ -371,6 +371,14 @@ it("supersedes a parked review when the head moves before approval, with nothing
   const runId = started.operationId.slice("review.start:".length);
   await c.waitFor((m) => m.type === "event" && m.eventType === "review.phase_changed" && (m.data as { to: string }).to === "AWAITING_APPROVAL");
   const previewId = h.app.store.outboxForRevision(runId)!.payload_hash;
+  // A start for the parked head: its own key replays the run, any other key is refused in plain words.
+  expect(await command(c, { command: "review.start", params: { prId, expectedHeadSha: fixture.headSha } })).toMatchObject({ operationId: started.operationId });
+  const moveStartKey = (from: string, to: string) => h.app.store.db.prepare("UPDATE control_commands SET idempotency_key = ? WHERE idempotency_key = ?").run(to, from);
+  moveStartKey(`review.start:${prId}:${fixture.headSha}`, "elsewhere");
+  expect(await command(c, { command: "review.start", params: { prId, expectedHeadSha: fixture.headSha } })).toEqual(
+    rejected("CONFLICT", `#1 at ${fixture.headSha.slice(0, 7)} is waiting for your approval`),
+  );
+  moveStartKey("elsewhere", `review.start:${prId}:${fixture.headSha}`);
 
   fake.setPull({ ...fixture.pull, headSha: "f".repeat(40) });
   expect(await command(c, { command: "review.publish", params: { runId, previewId, expectedHeadSha: fixture.headSha } })).toEqual(

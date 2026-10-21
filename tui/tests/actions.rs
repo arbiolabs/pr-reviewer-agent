@@ -162,6 +162,37 @@ fn a_start_the_daemon_replays_for_a_run_that_already_ended_says_the_head_is_revi
 }
 
 #[test]
+fn a_start_on_a_head_under_review_is_refused_before_sending_and_closes_if_the_daemon_replays_it() {
+    let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#184");
+    assert!(commands(&press(&mut m, KeyCode::Char('s'))).is_empty());
+    assert_eq!(m.top_modal(), None, "no question to answer");
+    assert_eq!(m.notice.as_ref().unwrap().text, "Can't start a review: #184 at 4444444 is already being reviewed");
+
+    let parked = r#"{"from":"VERIFY","to":"AWAITING_APPROVAL","event":"PREVIEW_STORED","detail":null}"#;
+    send(&mut m, &event(109, "acme/shop#184", "rev-184-a", "review.phase_changed", parked));
+    press(&mut m, KeyCode::Char('s'));
+    assert_eq!(m.top_modal(), None);
+    assert_eq!(m.notice.as_ref().unwrap().text, "Can't start a review: #184 at 4444444 is waiting for your approval");
+
+    // The run reached the client only after the question was answered: the daemon replays the start that made it.
+    for (phase, why) in
+        [("ANALYZE", "is already being reviewed"), ("AWAITING_APPROVAL", "is waiting for your approval")]
+    {
+        let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#186");
+        press(&mut m, KeyCode::Char('s'));
+        let rid = commands(&press(&mut m, KeyCode::Char('y')))[0].request_id.clone();
+        let run: pr_review_tui::protocol::Run =
+            serde_json::from_str(&run_json("rev-186-a", "acme/shop#186", H186, phase, "RUNNING")).unwrap();
+        m.domain.runs.insert(run.id.clone(), run);
+        let replayed =
+            r#"{"type":"command.result","requestId":"RID","status":"accepted","operationId":"review.start:rev-186-a"}"#;
+        send(&mut m, &replayed.replace("RID", rid.as_str()));
+        assert_eq!(m.top_modal(), None, "{phase}: no event will close it");
+        assert_eq!(m.notice.as_ref().unwrap().text, format!("#186 at 6666666 {why}"));
+    }
+}
+
+#[test]
 fn cancel_and_retry_name_their_target_and_settle_on_the_run_ending_or_moving() {
     let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#184");
     press(&mut m, KeyCode::Char('R'));

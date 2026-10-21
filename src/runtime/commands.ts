@@ -48,7 +48,8 @@ export async function startFromHead(
   const started = await startReview(app, live, options.basePolicyVersion, { publish: options.publish });
   if (started.taskId === undefined) {
     refuseReviewed(app, started.revision.id);
-    throw new Refused("CONFLICT", `${live.fullName}#${live.number} at ${live.headSha.slice(0, 7)} has a review in ${started.revision.state}`);
+    const why = started.revision.state === "AWAITING_APPROVAL" ? "is waiting for your approval" : "is already being reviewed";
+    throw new Refused("CONFLICT", `#${live.number} at ${live.headSha.slice(0, 7)} ${why}`);
   }
   return started;
 }

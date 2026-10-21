@@ -134,7 +134,7 @@ impl Player {
             _ => None,
         };
         let outcome = if let Some(message) = reviewed {
-            // As the daemon answers: a head whose review has ended is not started again.
+            // As the daemon answers: a head under review, or whose review has ended, is not started again.
             CommandOutcome::Rejected { code: ErrorCode::Conflict, message: Text::new(&message) }
         } else if opened.is_empty() {
             let name = c.command.name();
@@ -160,7 +160,7 @@ impl Player {
         vec![ServerMessage::CommandResult(CommandResult { request_id: c.request_id.clone(), outcome })]
     }
 
-    /// Every run as played so far: the snapshot's, then each run event's newer copy.
+    /// Every run as played so far: the snapshot's, then each run event's newer copy and each phase change.
     fn runs(&self) -> Vec<crate::protocol::Run> {
         let mut runs: Vec<crate::protocol::Run> = Vec::new();
         for m in &self.played {
@@ -168,6 +168,10 @@ impl Player {
                 ServerMessage::Snapshot(s) => s.runs.clone(),
                 ServerMessage::Event(Event::Sequenced(e)) => match &e.body {
                     EventBody::Run(_, r) => vec![r.clone()],
+                    EventBody::PhaseChanged(c) => {
+                        runs.iter_mut().filter(|r| r.id == c.run_id).for_each(|r| r.phase = c.to);
+                        vec![]
+                    }
                     _ => vec![],
                 },
                 _ => vec![],
@@ -180,14 +184,11 @@ impl Player {
         runs
     }
 
-    /// Why a start is refused, as the daemon says it (`#1287 at 647fb3b is already reviewed`), every time, when the latest run of
-    /// the start's PR, at its head, has ended.
+    /// Why a start is refused, as the daemon says it (`#1287 at 647fb3b is already reviewed`), every time, when the
+    /// start's PR has a run at its head.
     fn reviewed(&self, p: &crate::protocol::StartParams) -> Option<String> {
         let runs = self.runs();
         let latest = runs.iter().rev().find(|r| r.pr_id == p.pr_id && r.head_sha == p.expected_head_sha)?;
-        if latest.status == RunStatus::Running {
-            return None;
-        }
         let pr = self.played.iter().rev().find_map(|m| match m {
             ServerMessage::Snapshot(s) => s.prs.iter().find(|x| x.id == p.pr_id).map(|x| x.number),
             ServerMessage::Event(Event::Sequenced(e)) => match &e.body {
@@ -198,6 +199,8 @@ impl Player {
         });
         let pr = pr.map_or(p.pr_id.to_string(), |n| format!("#{n}"));
         let why = match latest.status {
+            RunStatus::Running if latest.parked() => "is waiting for your approval",
+            RunStatus::Running => "is already being reviewed",
             RunStatus::Failed => "failed its review; retry it instead",
             RunStatus::Superseded => "is superseded by a newer head",
             _ => "is already reviewed",

@@ -225,23 +225,27 @@ fn waiting_confirm<'a>(m: &'a mut Model, id: &RequestId) -> Option<&'a mut Confi
     })
 }
 
-/// The daemon answers a start's own key with its recorded run, even once that run has ended: no event will follow,
-/// so the panel closes and says the head is reviewed.
+/// The daemon answers a start's own key with its recorded run, whatever became of it. A run the client already knows
+/// sends no run.started, so the panel closes and says where that head's review stands.
 fn settle_replayed_start(m: &mut Model) {
-    let ended = |modal: &Modal| match modal {
+    let known = |modal: &Modal| match modal {
         Modal::Confirm { command: Command::Start(_), state: ConfirmState::Accepted { operation, .. }, .. } => {
             let run = operation.as_str().strip_prefix("review.start:").unwrap_or_default();
-            m.domain.runs.get(&RunId::new(run)).is_some_and(|r| r.status != RunStatus::Running)
+            m.domain.runs.contains_key(&RunId::new(run))
         }
         _ => false,
     };
-    let Some(i) = m.ui.modals.iter().position(ended) else { return };
+    let Some(i) = m.ui.modals.iter().position(known) else { return };
     let Modal::Confirm { command: Command::Start(p), state: ConfirmState::Accepted { operation, .. }, .. } =
         m.ui.modals.remove(i)
     else {
         return;
     };
     let run = operation.as_str().strip_prefix("review.start:").map(RunId::new);
+    if let Some(why) = in_review(m, &p.pr_id, &p.expected_head_sha) {
+        notice(m, why);
+        return;
+    }
     // The daemon's words for a head whose review ended.
     let why = match run.and_then(|r| m.domain.runs.get(&r)).map(|r| r.status) {
         Some(RunStatus::Failed) => "failed its review; retry it instead",
@@ -250,6 +254,15 @@ fn settle_replayed_start(m: &mut Model) {
     };
     let pr = m.domain.prs.get(&p.pr_id).map_or(p.pr_id.to_string(), |x| format!("#{}", x.number));
     notice(m, format!("{pr} at {} {why}", p.expected_head_sha.short()));
+}
+
+/// Where a head's live review stands, as the daemon refuses a start for it: `#184 at 4444444 is already being reviewed`.
+fn in_review(m: &Model, pr: &PrId, head: &Sha) -> Option<String> {
+    let run =
+        m.domain.runs.values().find(|r| &r.pr_id == pr && &r.head_sha == head && r.status == RunStatus::Running)?;
+    let number = m.domain.prs.get(pr).map_or(pr.to_string(), |x| format!("#{}", x.number));
+    let why = if run.parked() { "is waiting for your approval" } else { "is already being reviewed" };
+    Some(format!("{number} at {} {why}", head.short()))
 }
 
 /// Clears the pending marker that waits on `id` and shows `message` there. False when nothing waits on it.
@@ -1393,6 +1406,12 @@ fn mutation(m: &mut Model, mu: Mutation, fx: &mut Vec<Effect>) {
         notice(m, format!("Can't {verb}: no PR is selected"));
         return;
     };
+    if mu == Mutation::Start
+        && let Some(why) = in_review(m, &p.id, &p.head_sha)
+    {
+        notice(m, format!("Can't {verb}: {why}"));
+        return;
+    }
     let run = m.domain.latest_run(&p.id).cloned();
     let (prompt, command) = match (mu, run) {
         (Mutation::Start, _) => (

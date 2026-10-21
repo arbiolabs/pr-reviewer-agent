@@ -433,3 +433,45 @@ fn a_cancelled_showcase_run_stays_cancelled_while_its_scripted_lines_drop() {
         .collect();
     assert_eq!(after_cancel.len(), 2, "the cancel's two lines, and none of the run's scripted end: {after_cancel:#?}");
 }
+
+/// The playback's answer to a start of PR `number` at its head, under its own key or `key`, and that head, short.
+fn start_answer(
+    p: &mut pr_review_tui::playback::Player,
+    m: &pr_review_tui::model::Model,
+    number: u64,
+    key: Option<&str>,
+) -> (pr_review_tui::protocol::CommandOutcome, String) {
+    use pr_review_tui::protocol::{Command, CommandRequest, RequestId, ServerMessage, StartParams};
+    let pr = m.domain.prs.values().find(|p| p.number == number).unwrap();
+    let command = Command::Start(StartParams { pr_id: pr.id.clone(), expected_head_sha: pr.head_sha.clone() });
+    let idempotency_key = key.map_or_else(|| command.idempotency_key(), String::from);
+    let req = ClientMessage::Command(CommandRequest { request_id: RequestId::new("t"), idempotency_key, command });
+    match &p.answer(&req)[..] {
+        [ServerMessage::CommandResult(r)] => (r.outcome.clone(), pr.head_sha.short().to_string()),
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn the_showcase_refuses_a_start_on_a_head_under_review_as_the_daemon_does() {
+    use pr_review_tui::playback::{Player, load};
+    use pr_review_tui::protocol::{CommandOutcome, ErrorCode, Event, EventBody, RunChange, ServerMessage, Text};
+    let mut p = Player::new(load(&protocol_dir().join("playback/showcase.ndjson")).unwrap());
+    let mut m = model();
+    let fx = update(&mut m, Msg::Net(NetEvent::Opened));
+    drive(&mut p, &mut m, fx);
+    let conflict =
+        |message: String| CommandOutcome::Rejected { code: ErrorCode::Conflict, message: Text::new(&message) };
+    let (outcome, head) = start_answer(&mut p, &m, 1291, None);
+    assert_eq!(outcome, conflict(format!("#1291 at {head} is waiting for your approval")));
+    let (outcome, _) = start_answer(&mut p, &m, 1296, None);
+    assert!(matches!(outcome, CommandOutcome::Accepted { .. }), "{outcome:?}");
+    let (i, _) = p.upcoming().unwrap();
+    let started = p.play(i);
+    assert!(
+        matches!(&started, ServerMessage::Event(Event::Sequenced(e)) if matches!(e.body, EventBody::Run(RunChange::Started, _))),
+        "{started:?}"
+    );
+    let (outcome, head) = start_answer(&mut p, &m, 1296, Some("another client"));
+    assert_eq!(outcome, conflict(format!("#1296 at {head} is already being reviewed")));
+}
