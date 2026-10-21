@@ -864,6 +864,22 @@ fn a_run_you_cancelled_says_so_and_a_real_failure_names_the_cause() {
 }
 
 #[test]
+fn the_header_names_what_its_counts_count_or_drops_them() {
+    let mut m = Sim::new(pr_review_tui::model::Look::default()).play("showcase", 40).m;
+    let (f, _) = render(&mut m, 120, 38);
+    assert!(f.lines().next().unwrap().contains("+1 more running"), "{f}");
+    for (w, h) in [(60, 16), (80, 24), (100, 30)] {
+        let (f, _) = render(&mut m, w, h);
+        let top = f.lines().next().unwrap().to_string();
+        for (at, _) in top.match_indices('+') {
+            let rest = &top[at + 1..];
+            let digits = rest.chars().take_while(|c| c.is_ascii_digit()).count();
+            assert!(digits == 0 || rest[digits..].starts_with(" more"), "{w}: {top}");
+        }
+    }
+}
+
+#[test]
 fn a_link_state_still_under_way_ends_in_an_ellipsis() {
     let mut m = model();
     update(&mut m, Msg::Net(NetEvent::Opened));

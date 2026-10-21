@@ -251,11 +251,6 @@ fn status_line(c: &Ctx, width: u16) -> Line<'static> {
     let newest = c.m.domain.activity.iter().rev().find(|a| active.iter().any(|r| a.pr_id.as_ref() == Some(&r.pr_id)));
     // The review the line names: the one with the newest activity, else the first running one.
     let named = newest.and_then(|a| active.iter().find(|r| a.pr_id.as_ref() == Some(&r.pr_id))).or(active.first());
-    let waiting = |n: usize| match n {
-        0 => String::new(),
-        n if w >= 100 => format!("  {} {n} waiting for you", g.pending),
-        n => format!("  {}{n}", g.pending),
-    };
     match named {
         // Off the stream, the cache is a photo: say how old it is rather than what it claims is running.
         _ if c.m.link != Link::Live => {
@@ -273,14 +268,29 @@ fn status_line(c: &Ctx, width: u16) -> Line<'static> {
                 left.push(c.span(format!("reviewing #{} ", p.number), Role::Normal));
             }
             left.push(c.span(format!("{} ", doc::phase_label(r.phase)), Role::Accent));
-            let more = match active.len() {
-                1 => String::new(),
-                n if w >= 100 => format!("  +{} more running", n - 1),
-                n => format!("  +{}", n - 1),
+            // Each count keeps a noun or goes: the longest pair of notes that fits, then shorter, then none.
+            let (others, n_parked) = (active.len() - 1, parked.len());
+            let notes = |level: usize| {
+                let more = match (others, level) {
+                    (0, _) | (_, 2..) => String::new(),
+                    (n, 0) => format!("  +{n} more running"),
+                    (n, _) => format!("  +{n} more"),
+                };
+                let parked_note = match (n_parked, level) {
+                    (0, _) | (_, 2..) => String::new(),
+                    (n, 0) => format!("  {} {n} waiting for you", g.pending),
+                    (n, _) => format!("  {} {n} waiting", g.pending),
+                };
+                (more, parked_note)
             };
-            let parked_note = waiting(parked.len());
             let used: usize = left.iter().chain(&right).map(|s| crate::text::width(&s.content)).sum();
-            let room = w.saturating_sub(used + crate::text::width(&more) + crate::text::width(&parked_note) + 2);
+            let width_of = |(a, b): &(String, String)| crate::text::width(a) + crate::text::width(b);
+            // Below 100 columns the short notes leave the activity words room.
+            let first = if w >= 100 { 0 } else { 1 };
+            let fits = |n: &(String, String)| used + width_of(n) + 2 <= w;
+            let chosen = (first..3).map(notes).find(fits).unwrap_or_else(|| notes(2));
+            let room = w.saturating_sub(used + width_of(&chosen) + 2);
+            let (more, parked_note) = chosen;
             let words = newest
                 .filter(|a| a.pr_id.as_ref() == Some(&r.pr_id))
                 .map_or(vec![], |a| activity_words(&a.kind, Some(r.phase)));
