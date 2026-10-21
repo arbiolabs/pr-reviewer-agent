@@ -26,9 +26,10 @@ pub fn lines(
     let pr = run.and_then(|r| c.m.domain.prs.get(&r.pr_id));
     let mut out = vec![Line::raw("")];
     let place = pr.map_or(format!("run {}", run_id.short()), |p| format!("{} #{}", p.repository, p.number));
+    let outcome = outcome(c, run_id, publish);
     out.push(Line::from(vec![
         c.span(format!("{place} {} ", g.arrow), Role::Muted),
-        c.span("publication preview", Role::Accent),
+        c.span(if outcome.is_some() { "publication" } else { "publication preview" }, Role::Accent),
     ]));
     out.push(Line::raw(""));
     let p = match preview {
@@ -43,7 +44,7 @@ pub fn lines(
         }
         Preview::Ready(p) => p,
     };
-    out.push(Line::from(c.span(heading(c, run_id, publish), Role::Title)));
+    out.push(Line::from(c.span(outcome.unwrap_or_else(|| "Publish this review?".into()), Role::Title)));
     let n = p.comments.len();
     let target = format!(
         "{place} at {} {} as event {} {} {n} inline comment{}",
@@ -156,11 +157,11 @@ fn body(c: &Ctx, text: &str, w: usize, raw: bool) -> Vec<Line<'static>> {
     out
 }
 
-/// The page's question while `y` can still publish, then what became of the answer. A refused approval posted
-/// nothing, whatever the daemon then marks the stored payload; only a post that failed reads as a failure.
-fn heading(c: &Ctx, run_id: &RunId, publish: &ConfirmState) -> String {
+/// What became of the approval, or `None` while `y` can still publish and the page is a preview. A refused approval
+/// posted nothing, whatever the daemon then marks the stored payload; only a post that failed reads as a failure.
+fn outcome(c: &Ctx, run_id: &RunId, publish: &ConfirmState) -> Option<String> {
     let status = c.m.domain.publications.get(run_id).map(|p| p.status);
-    match (status, publish) {
+    Some(match (status, publish) {
         (Some(PublicationStatus::Published), _) => "Published on GitHub".into(),
         (_, ConfirmState::Refused { .. }) => "Not published".into(),
         (Some(PublicationStatus::Failed), _) => "Publication failed".into(),
@@ -168,8 +169,8 @@ fn heading(c: &Ctx, run_id: &RunId, publish: &ConfirmState) -> String {
         (Some(PublicationStatus::Publishing), _) | (_, ConfirmState::Requested(_) | ConfirmState::Accepted { .. }) => {
             format!("Publishing{}", c.t.g().ellipsis)
         }
-        _ => "Publish this review?".into(),
-    }
+        _ => return None,
+    })
 }
 
 /// What `y` does now, or did: the key while it would publish, why it would not, then the request and the

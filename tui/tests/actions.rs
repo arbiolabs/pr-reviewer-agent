@@ -739,3 +739,17 @@ fn a_refused_approval_reads_not_published_and_only_a_failed_post_reads_publicati
     let f = frame(&mut m);
     assert!(f.contains("Publication failed") && !f.contains("Not published"), "{f}");
 }
+
+#[test]
+fn the_publication_page_is_a_preview_only_while_y_can_publish() {
+    let crumb = |m: &mut Model| frame(m).lines().find(|l| l.contains("acme/shop #184 →")).unwrap().trim().to_string();
+    let mut m = previewing();
+    assert_eq!(crumb(&mut m), "acme/shop #184 → publication preview");
+    let rid = commands(&press(&mut m, KeyCode::Char('y')))[0].request_id.clone();
+    assert_eq!(crumb(&mut m), "acme/shop #184 → publication", "requested");
+    send(&mut m, &read("fixtures/server.command.result.accepted.json").replace("req-cmd", rid.as_str()));
+    let seq = m.stream.last_applied + 1;
+    let published = r#"{"runId":"rev-184-a","status":"published","reviewId":3141}"#;
+    send(&mut m, &event(seq, "acme/shop#184", "rev-184-a", "review.publication_changed", published));
+    assert_eq!(crumb(&mut m), "acme/shop #184 → publication", "published");
+}
