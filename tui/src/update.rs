@@ -1468,7 +1468,7 @@ pub fn publish_block(m: &Model, p: &PublicationPreview) -> Option<String> {
     let Some(run) = m.domain.runs.get(&p.run_id) else { return Some("the run is no longer tracked".into()) };
     if run.phase != Phase::AwaitingApproval {
         return Some(format!(
-            "stale: the run is now {}, no longer awaiting approval",
+            "stale: the run is now {}, no longer waiting for approval",
             crate::theme::phase_name(run.phase)
         ));
     }

@@ -49,7 +49,7 @@ pub fn phase_label(p: Phase) -> &'static str {
         Phase::Analyze => "analyze",
         Phase::Verify => "verify",
         Phase::PreparePublication => "prepare",
-        Phase::AwaitingApproval => "awaiting you",
+        Phase::AwaitingApproval => "waiting for you",
         Phase::Publish => "publish",
         Phase::Reconcile => "reconcile",
         Phase::Completed => "done",

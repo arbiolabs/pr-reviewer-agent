@@ -176,7 +176,7 @@ fn pr_rows(c: &Ctx, pr: &Pr, w: usize, selected: bool, rh: usize) -> Vec<Line<'s
         vec![Span::styled(marker.to_string(), on(Role::Accent)), Span::styled(format!("   {repo} "), on(Role::Muted))];
     let right: Vec<Span<'static>> = match run {
         None => vec![Span::styled("not reviewed ", on(Role::Muted))],
-        Some(r) if r.parked() => vec![Span::styled(format!("{} awaiting you ", g.pending), on(Role::Pending))],
+        Some(r) if r.parked() => vec![Span::styled(format!("{} waiting for you ", g.pending), on(Role::Pending))],
         Some(r) if r.status == RunStatus::Running => {
             let rate = per_sec(c, Some(&pr.id));
             let mut s: Vec<Span<'static>> = stepper(c, r).into_iter().map(|s| s.patch_style(row_bg)).collect();

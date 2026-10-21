@@ -251,7 +251,7 @@ fn status_line(c: &Ctx, width: u16) -> Line<'static> {
     let named = newest.and_then(|a| active.iter().find(|r| a.pr_id.as_ref() == Some(&r.pr_id))).or(active.first());
     let waiting = |n: usize| match n {
         0 => String::new(),
-        n if w >= 100 => format!("  {} {n} awaiting you", g.pending),
+        n if w >= 100 => format!("  {} {n} waiting for you", g.pending),
         n => format!("  {}{n}", g.pending),
     };
     match named {

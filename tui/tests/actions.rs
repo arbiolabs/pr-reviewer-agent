@@ -386,7 +386,7 @@ fn a_stale_preview_turns_y_off_and_says_why() {
     let out = r#"{"from":"AWAITING_APPROVAL","to":"FAILED","event":"CANCELLED","detail":null}"#;
     send(&mut m, &event(14, "acme/shop#184", "rev-184-a", "review.phase_changed", out));
     assert!(commands(&press(&mut m, KeyCode::Char('y'))).is_empty());
-    assert!(frame(&mut m).contains("y is off: stale: the run is now FAILED, no longer awaiting approval"));
+    assert!(frame(&mut m).contains("y is off: stale: the run is now FAILED, no longer waiting for approval"));
 }
 
 #[test]
@@ -414,7 +414,8 @@ fn awaiting_approval_is_its_own_amber_state_in_the_stepper_the_rail_and_the_stat
     assert!(!top.contains("reviewing") && !top.contains("nothing running"), "{top}");
     assert!(f.contains("● Prepare ◔ Publish"), "{f}");
     assert!(f.contains("◔ waiting for you"), "{f}");
-    assert!(f.lines().any(|l| l.starts_with("▌   shop") && l.contains("◔ awaiting you")), "the rail row: {f}");
+    assert!(f.lines().any(|l| l.starts_with("▌   shop") && l.contains("◔ waiting for you")), "the rail row: {f}");
+    assert!(!f.contains("awaiting"), "one wording for a parked review: {f}");
     assert!(f.contains("◔ Ready to publish"), "{f}");
     assert!(!f.contains("failed") && !f.contains("✓ done"), "neither an error nor done: {f}");
     // Amber: the status line's glyph is drawn in the palette's warn color.
@@ -424,11 +425,11 @@ fn awaiting_approval_is_its_own_amber_state_in_the_stepper_the_rail_and_the_stat
 
     let (f, _) = parked_frame(Look { color: false, ..Look::default() });
     assert!(f.lines().next().unwrap().contains("◔ #184 waiting for you"), "NO_COLOR keeps the glyph and words: {f}");
-    assert!(f.contains("awaiting you"), "{f}");
+    assert!(f.lines().any(|l| l.starts_with("▌   shop") && l.contains("◔ waiting for you")), "{f}");
 
     let (f, _) = parked_frame(Look { ascii: true, ..Look::default() });
     assert!(f.lines().next().unwrap().contains("~ #184 waiting for you | p previews"), "{f}");
-    assert!(f.contains("~ awaiting you"), "{f}");
+    assert!(f.lines().any(|l| l.starts_with(">   shop") && l.contains("~ waiting for you")), "{f}");
     assert!(f.contains("+ Prepare ~ Publish"), "{f}");
     assert!(f.is_ascii(), "{f}");
 }
@@ -475,7 +476,7 @@ fn publication_events_show_in_the_timeline_and_a_pr_update_between_runs_is_under
         "{f}"
     );
     assert!(at("publication   publishing") > at("PUBLISH ─"), "{f}");
-    assert!(f.contains("publication   awaiting your approval"), "{f}");
+    assert!(f.contains("publication   waiting for your approval"), "{f}");
     let update = at("PR #184 updated");
     assert!(f.lines().nth(update - 1).unwrap().trim_start().starts_with("PR ─"), "{f}");
     assert!(!f.lines().skip(update.saturating_sub(2)).any(|l| l.contains("BEFORE THE RUN")), "{f}");

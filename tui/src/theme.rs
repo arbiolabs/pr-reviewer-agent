@@ -307,7 +307,7 @@ pub fn finding_status(s: FindingStatus) -> (&'static str, Role) {
 /// A publication's status in words. Only `published` reads as done.
 pub fn publication_status(s: PublicationStatus) -> (&'static str, Role) {
     match s {
-        PublicationStatus::AwaitingApproval => ("awaiting your approval", Role::Pending),
+        PublicationStatus::AwaitingApproval => ("waiting for your approval", Role::Pending),
         PublicationStatus::Publishing => ("publishing", Role::Active),
         PublicationStatus::Published => ("published", Role::Ok),
         PublicationStatus::Uncertain => ("uncertain: the daemon is checking GitHub", Role::Pending),
