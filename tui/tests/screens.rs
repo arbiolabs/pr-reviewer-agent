@@ -574,3 +574,22 @@ fn the_help_glyphs_name_waiting_for_you_and_hold_still() {
     }
     assert_eq!(glyphs.len(), 1, "the legend's spinner moves: {glyphs:?}");
 }
+
+#[test]
+fn diff_search_matches_are_kept_with_the_diff_not_recomputed_each_frame() {
+    use crossterm::event::KeyCode;
+    let mut s = mid_review(Look::default()).select("acme/shop#184").key(KeyCode::Enter).key(KeyCode::Char('d'));
+    s = s.key(KeyCode::Char('/'));
+    for ch in "slot".chars() {
+        s = s.key(KeyCode::Char(ch));
+    }
+    s = s.key(KeyCode::Enter);
+    let d = s.m.diff.as_ref().unwrap();
+    assert!(!d.matches.is_empty());
+    assert_eq!(d.matches, pr_review_tui::update::diff_matches(d, "slot"), "the cache is the matches of this diff");
+    let n = d.matches.len();
+    let (frame, _) = render(&mut s.m, 120, 38);
+    assert!(frame.contains(&format!("of {n} for \"slot\"")), "{frame}");
+    s = s.key(KeyCode::Esc);
+    assert!(s.m.diff.as_ref().unwrap().matches.is_empty(), "Esc clears the search and its matches");
+}

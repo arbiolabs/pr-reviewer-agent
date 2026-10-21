@@ -753,6 +753,7 @@ fn load_diff(m: &mut Model, key: DiffKey, anchor: Option<(Text, Option<u32>)>, f
         stack: 0,
         anchor,
         search: None,
+        matches: Vec::new(),
     });
     diff_get(m, None, fx);
 }
@@ -799,6 +800,7 @@ fn apply_diff_page(m: &mut Model, p: DiffPage, fx: &mut Vec<Effect>) {
     }
     d.next_cursor = p.next_cursor;
     d.truncated = p.truncated;
+    d.matches = d.search.as_ref().map_or(vec![], |q| diff_matches(d, q));
     if d.selected_file.is_none() {
         d.selected_file = d.files.first().map(|f| f.path.clone());
     }
@@ -1061,6 +1063,7 @@ fn act(m: &mut Model, a: Action, fx: &mut Vec<Effect>) {
                 && m.ui.modals.is_empty()
             {
                 d.search = None;
+                d.matches.clear();
             } else if m.ui.modals.pop().is_none() {
                 m.ui.screen = match m.ui.screen {
                     Screen::Diff | Screen::Timeline => Screen::Review,
@@ -1762,6 +1765,7 @@ pub fn diff_matches(d: &DiffView, query: &str) -> Vec<(usize, usize)> {
 fn diff_search(m: &mut Model, query: String) {
     if let Some(d) = &mut m.diff {
         d.search = Some(query).filter(|q| !q.is_empty());
+        d.matches = d.search.as_ref().map_or(vec![], |q| diff_matches(d, q));
     }
     walk_matches(m, 1, true);
 }
@@ -1771,7 +1775,7 @@ fn diff_search(m: &mut Model, query: String) {
 fn walk_matches(m: &mut Model, dir: isize, here: bool) {
     let Some(d) = &mut m.diff else { return };
     let Some(q) = d.search.clone() else { return };
-    let stops = diff_matches(d, &q);
+    let stops = d.matches.clone();
     let at = (d.selected_file.as_ref().and_then(|p| d.files.iter().position(|f| &f.path == p)).unwrap_or(0), d.cursor);
     let target = if dir > 0 {
         stops.iter().find(|s| **s > at || (here && **s == at)).or(stops.first())

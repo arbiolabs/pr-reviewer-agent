@@ -278,6 +278,8 @@ pub struct DiffView {
     pub anchor: Option<(Text, Option<u32>)>,
     /// The text `/` searched for; while set, `n`/`N` walk its matches instead of the findings.
     pub search: Option<String>,
+    /// `diff_matches` for `search` over these files, kept current by the reducer so a frame never rescans the diff.
+    pub matches: Vec<(usize, usize)>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
