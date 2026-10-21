@@ -210,6 +210,21 @@ it("records a p1 outbox's review only on the findings its payload commented on",
   ]);
 });
 
+it("leaves a retried VERIFY's first observation and status in place, with no second status change in the journal", () => {
+  const { store } = openFresh();
+  const prId = store.upsertPull(pull);
+  const key = { prId, baseSha: pull.baseSha, policyVersion: "1", reviewerVersion: "m" };
+  const [r1, r2] = [store.ensureRevision({ ...key, headSha: pull.headSha }), store.ensureRevision({ ...key, headSha: "2".repeat(40) })];
+  const location = { file: "src/x.ts", newLine: 5, headSha: pull.headSha, evidence: [] };
+  store.writeVerification(r1, [], [{ findingId: "f", fingerprint: "fp", candidate }], [{ findingId: "f", path: ["DETECTED"], basis: null, candidate, location }]);
+  store.writeVerification(r2, [], [], [{ findingId: "f", path: ["DETECTED", "STILL_PRESENT"], basis: "located", candidate, location }]);
+  const state = () => [store.db.prepare("SELECT status FROM findings").get(), store.db.prepare("SELECT count(*) AS n FROM audit_events WHERE event = 'FINDING_UPDATED'").get()];
+  expect(state()).toEqual([{ status: "STILL_PRESENT" }, { n: 1 }]);
+  // The retry's model run read the code differently; the first observation stands.
+  store.writeVerification(r2, [], [], [{ findingId: "f", path: ["DETECTED", "POTENTIALLY_RESOLVED"], basis: "changed", candidate, location }]);
+  expect([...state(), store.db.prepare("SELECT disposition FROM finding_observations WHERE revision_id = ?").get(r2.id)]).toEqual([{ status: "STILL_PRESENT" }, { n: 1 }, { disposition: "STILL_PRESENT" }]);
+});
+
 it("backfills the review of record at migration 055 only for findings a published payload commented on", () => {
   const path = join(mkdtempSync(join(tmpdir(), "store-")), "app.sqlite");
   const db = new DatabaseSync(path);

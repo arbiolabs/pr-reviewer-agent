@@ -560,13 +560,15 @@ export class AppStore {
     }
     for (const { findingId, path, basis, candidate, location } of observations) {
       const state = path.at(-1)!;
-      this.db
+      // A retried VERIFY meets its first attempt's observation and leaves it, status included: the observation that
+      // was journaled is the one that stands, so the retry adds no status change the history would call a publication.
+      const { changes } = this.db
         .prepare(
           `INSERT INTO finding_observations (id, finding_id, revision_id, disposition, evidence_json, location_json, created_at, path_json, basis)
            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (finding_id, revision_id) DO NOTHING`,
         )
         .run(stableId("observation", findingId, revision.id), findingId, revision.id, state, JSON.stringify(candidate), JSON.stringify(location), at, JSON.stringify(path), basis);
-      this.db.prepare("UPDATE findings SET status = ?, updated_at = ? WHERE id = ? AND status != ?").run(state, at, findingId, state);
+      if (Number(changes) === 1) this.db.prepare("UPDATE findings SET status = ?, updated_at = ? WHERE id = ? AND status != ?").run(state, at, findingId, state);
     }
   }
 
