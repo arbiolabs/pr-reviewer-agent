@@ -226,47 +226,40 @@ fn waiting_confirm<'a>(m: &'a mut Model, id: &RequestId) -> Option<&'a mut Confi
 }
 
 /// The daemon answers a start's own key with its recorded run, whatever became of it. A run the client already knows
-/// sends no run.started, so the panel closes and says where that head's review stands.
+/// sends no run.started, so the panel turns into the refusal the client gives before sending.
 fn settle_replayed_start(m: &mut Model) {
-    let known = |modal: &Modal| match modal {
+    let refusal = m.ui.modals.iter().enumerate().find_map(|(i, modal)| match modal {
         Modal::Confirm { command: Command::Start(_), state: ConfirmState::Accepted { operation, .. }, .. } => {
-            let run = operation.as_str().strip_prefix("review.start:").unwrap_or_default();
-            m.domain.runs.contains_key(&RunId::new(run))
+            let run = m.domain.runs.get(&RunId::new(operation.as_str().strip_prefix("review.start:")?))?;
+            Some((i, start_refusal(m, run)))
         }
-        _ => false,
-    };
-    let Some(i) = m.ui.modals.iter().position(known) else { return };
-    let Modal::Confirm { command: Command::Start(p), state: ConfirmState::Accepted { operation, .. }, .. } =
-        m.ui.modals.remove(i)
-    else {
-        return;
-    };
-    let run = operation.as_str().strip_prefix("review.start:").and_then(|r| m.domain.runs.get(&RunId::new(r)));
-    if let Some(why) = run.and_then(|r| in_review(m, &r.pr_id, &r.base_sha, &r.head_sha)) {
-        notice(m, format!("Can't start: {why}"));
-        return;
+        _ => None,
+    });
+    let Some((i, message)) = refusal else { return };
+    if let Modal::Confirm { state, .. } = &mut m.ui.modals[i] {
+        *state = ConfirmState::Refused { code: ErrorCode::Conflict, message: Text::new(&message) };
     }
-    // The daemon's words for a head whose review ended.
-    let why = match run.map(|r| r.status) {
-        Some(RunStatus::Failed) => "failed its review; retry it instead",
-        Some(RunStatus::Superseded) => "is superseded by a newer head",
-        _ => "is already reviewed",
-    };
-    let pr = m.domain.prs.get(&p.pr_id).map_or(p.pr_id.to_string(), |x| format!("#{}", x.number));
-    notice(m, format!("Can't start: {pr} at {} {why}", p.expected_head_sha.short()));
 }
 
-/// Where a head's live review stands, as the daemon refuses a start for it: `#184 at 4444444 is already being reviewed`.
-/// The daemon keys a review on the base too, so a run on another base says nothing and the start goes to it.
-fn in_review(m: &Model, pr: &PrId, base: &Sha, head: &Sha) -> Option<String> {
-    let run = m
-        .domain
-        .runs
-        .values()
-        .find(|r| &r.pr_id == pr && &r.base_sha == base && &r.head_sha == head && r.status == RunStatus::Running)?;
-    let number = m.domain.prs.get(pr).map_or(pr.to_string(), |x| format!("#{}", x.number));
-    let why = if run.parked() { "is waiting for your approval" } else { "is already being reviewed" };
-    Some(format!("{number} at {} {why}", head.short()))
+/// The run that makes the daemon refuse a start of `pr` now. It keys a review on the base too, so a run on another
+/// base is none, and the start goes to the daemon.
+fn known_head<'a>(m: &'a Model, pr: &Pr) -> Option<&'a Run> {
+    m.domain.runs.values().find(|r| {
+        r.pr_id == pr.id && r.base_sha == pr.base_sha && r.head_sha == pr.head_sha && r.status != RunStatus::Unknown
+    })
+}
+
+/// The daemon's words for refusing a start at `run`'s head: `#184 at 4444444 is already being reviewed`.
+fn start_refusal(m: &Model, run: &Run) -> String {
+    let why = match run.status {
+        RunStatus::Running if run.parked() => "is waiting for your approval",
+        RunStatus::Running => "is already being reviewed",
+        RunStatus::Failed => "failed its review; retry it instead",
+        RunStatus::Superseded => "is superseded by a newer head",
+        _ => "is already reviewed",
+    };
+    let number = m.domain.prs.get(&run.pr_id).map_or(run.pr_id.to_string(), |x| format!("#{}", x.number));
+    format!("{number} at {} {why}", run.head_sha.short())
 }
 
 /// Clears the pending marker that waits on `id` and shows `message` there. False when nothing waits on it.
@@ -1416,10 +1409,16 @@ fn mutation(m: &mut Model, mu: Mutation, fx: &mut Vec<Effect>) {
         notice(m, format!("Can't {verb}: no PR is selected"));
         return;
     };
+    // A head the client knows the daemon refuses: the same refused panel a refusal from the daemon leaves.
     if mu == Mutation::Start
-        && let Some(why) = in_review(m, &p.id, &p.base_sha, &p.head_sha)
+        && let Some(run) = known_head(m, &p)
     {
-        notice(m, format!("Can't {verb}: {why}"));
+        let message = Text::new(&start_refusal(m, run));
+        m.ui.modals.push(Modal::Confirm {
+            prompt: format!("Start a review of #{} at {}?", p.number, p.head_sha.short()),
+            command: Command::Start(StartParams { pr_id: p.id, expected_head_sha: p.head_sha }),
+            state: ConfirmState::Refused { code: ErrorCode::Conflict, message },
+        });
         return;
     }
     let run = m.domain.latest_run(&p.id).cloned();

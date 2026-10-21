@@ -151,32 +151,52 @@ fn a_rejection_reads_as_a_refusal_with_its_code_only_beside_the_command() {
     assert!(!f.contains("rejected"), "{f}");
 }
 
-#[test]
-fn a_start_the_daemon_replays_for_a_run_that_already_ended_says_the_head_is_reviewed() {
-    let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#185");
-    press(&mut m, KeyCode::Char('s'));
-    let rid = commands(&press(&mut m, KeyCode::Char('y')))[0].request_id.clone();
-    let replayed =
-        r#"{"type":"command.result","requestId":"RID","status":"accepted","operationId":"review.start:rev-185-a"}"#;
-    send(&mut m, &replayed.replace("RID", rid.as_str()));
-    assert_eq!(m.top_modal(), None, "nothing will happen, so nothing waits");
-    assert_eq!(m.notice.as_ref().unwrap().text, "Can't start: #185 at 5555555 is already reviewed");
+/// The refused panel's sentence, as the daemon would word it; it panics when no refused panel is up.
+fn refusal(m: &Model) -> String {
+    match m.top_modal() {
+        Some(Modal::Confirm { state: ConfirmState::Refused { message, .. }, .. }) => message.to_string(),
+        other => panic!("{other:?}"),
+    }
 }
 
 #[test]
-fn a_start_on_a_head_under_review_is_refused_before_sending_and_closes_if_the_daemon_replays_it() {
+fn a_start_on_a_head_whose_review_ended_is_refused_on_the_panel_before_sending_or_after_a_replay() {
+    let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#185");
+    assert!(commands(&press(&mut m, KeyCode::Char('s'))).is_empty(), "the client knows #185 is reviewed");
+    assert_eq!(refusal(&m), "#185 at 5555555 is already reviewed");
+    assert!(commands(&press(&mut m, KeyCode::Char('y'))).is_empty(), "y has nothing to confirm");
+    let f = frame(&mut m);
+    assert!(f.contains("Can't start: #185 at 5555555 is already reviewed"), "{f}");
+    assert!(f.lines().last().unwrap().contains("Esc closes"), "{f}");
+
+    // The run reached the client only after y: the daemon replays the start that made it, and the panel says so.
+    for (status, why) in [("COMPLETED", "is already reviewed"), ("FAILED", "failed its review; retry it instead")] {
+        let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#186");
+        press(&mut m, KeyCode::Char('s'));
+        let rid = commands(&press(&mut m, KeyCode::Char('y')))[0].request_id.clone();
+        let run: pr_review_tui::protocol::Run =
+            serde_json::from_str(&run_json("rev-186-a", "acme/shop#186", H186, status, status)).unwrap();
+        m.domain.runs.insert(run.id.clone(), run);
+        let replayed =
+            r#"{"type":"command.result","requestId":"RID","status":"accepted","operationId":"review.start:rev-186-a"}"#;
+        send(&mut m, &replayed.replace("RID", rid.as_str()));
+        assert_eq!(refusal(&m), format!("#186 at 6666666 {why}"), "{status}");
+    }
+}
+
+#[test]
+fn a_start_on_a_head_under_review_is_refused_on_the_panel_before_sending_and_after_a_replay() {
     let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#184");
     assert!(commands(&press(&mut m, KeyCode::Char('s'))).is_empty());
-    assert_eq!(m.top_modal(), None, "no question to answer");
-    assert_eq!(m.notice.as_ref().unwrap().text, "Can't start: #184 at 4444444 is already being reviewed");
+    assert_eq!(refusal(&m), "#184 at 4444444 is already being reviewed");
+    press(&mut m, KeyCode::Esc);
+    assert_eq!(m.top_modal(), None, "Esc closes");
 
     let parked = r#"{"from":"VERIFY","to":"AWAITING_APPROVAL","event":"PREVIEW_STORED","detail":null}"#;
     send(&mut m, &event(109, "acme/shop#184", "rev-184-a", "review.phase_changed", parked));
     press(&mut m, KeyCode::Char('s'));
-    assert_eq!(m.top_modal(), None);
-    assert_eq!(m.notice.as_ref().unwrap().text, "Can't start: #184 at 4444444 is waiting for your approval");
+    assert_eq!(refusal(&m), "#184 at 4444444 is waiting for your approval");
 
-    // The run reached the client only after the question was answered: the daemon replays the start that made it.
     for (phase, why) in
         [("ANALYZE", "is already being reviewed"), ("AWAITING_APPROVAL", "is waiting for your approval")]
     {
@@ -189,8 +209,7 @@ fn a_start_on_a_head_under_review_is_refused_before_sending_and_closes_if_the_da
         let replayed =
             r#"{"type":"command.result","requestId":"RID","status":"accepted","operationId":"review.start:rev-186-a"}"#;
         send(&mut m, &replayed.replace("RID", rid.as_str()));
-        assert_eq!(m.top_modal(), None, "{phase}: no event will close it");
-        assert_eq!(m.notice.as_ref().unwrap().text, format!("Can't start: #186 at 6666666 {why}"));
+        assert_eq!(refusal(&m), format!("#186 at 6666666 {why}"), "{phase}: no event will close it");
     }
 }
 
