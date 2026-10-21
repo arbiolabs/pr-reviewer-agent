@@ -784,6 +784,17 @@ impl Command {
         }
     }
 
+    /// What a refusal says cannot be done: `Can't start: …`.
+    pub fn verb(&self) -> &'static str {
+        match self {
+            Command::Start(_) => "start",
+            Command::Cancel(_) => "cancel",
+            Command::Retry(_) => "retry",
+            Command::Publish(_) => "publish",
+            Command::SelectAccount(_) => "switch accounts",
+        }
+    }
+
     /// Same command, same target, same key: a retried request cannot act twice.
     pub fn idempotency_key(&self) -> String {
         match self {

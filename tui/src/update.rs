@@ -400,24 +400,23 @@ fn server_message(m: &mut Model, msg: ServerMessage, fx: &mut Vec<Effect>) {
             }
         }
         ServerMessage::CommandResult(r) => {
-            if !m.commands_sent.contains(&r.request_id) {
-                return;
-            }
+            let Some(&verb) = m.commands_sent.get(&r.request_id) else { return };
             let now = m.now_ms;
             if let Some(state) = waiting_confirm(m, &r.request_id) {
                 *state = match r.outcome {
                     CommandOutcome::Accepted { operation_id } => {
                         ConfirmState::Accepted { operation: operation_id, at_ms: now }
                     }
-                    CommandOutcome::Rejected { code, message } => {
-                        ConfirmState::Failed(Text::new(&format!("{code}: {message}")))
-                    }
+                    CommandOutcome::Rejected { code, message } => ConfirmState::Refused { code, message },
                 };
                 return;
             }
             let text = match r.outcome {
                 CommandOutcome::Accepted { .. } => "Sent; waiting for the daemon to confirm it".to_string(),
-                CommandOutcome::Rejected { code, message } => format!("Refused ({code}): {message}"),
+                CommandOutcome::Rejected { code, message } => {
+                    m.diag.error(now, format!("{code}: {message}"));
+                    format!("Can't {verb}: {message}")
+                }
             };
             notice(m, text);
         }
@@ -658,7 +657,7 @@ fn settle_command(m: &mut Model, e: &SequencedEvent) {
     };
     let done = |modal: &Modal| match modal {
         Modal::Confirm { command, state, .. } => {
-            !matches!(state, ConfirmState::Asking | ConfirmState::Failed(_)) && shows(command)
+            !matches!(state, ConfirmState::Asking | ConfirmState::Refused { .. }) && shows(command)
         }
         _ => false,
     };
@@ -1429,12 +1428,13 @@ fn send_confirmed(m: &mut Model, fx: &mut Vec<Effect>) {
         _ => return,
     };
     let idempotency_key = command.idempotency_key();
+    let verb = command.verb();
     let Some(request_id) =
         send(m, fx, |request_id| ClientMessage::Command(CommandRequest { request_id, idempotency_key, command }))
     else {
         return;
     };
-    m.commands_sent.insert(request_id.clone());
+    m.commands_sent.insert(request_id.clone(), verb);
     if let Some(Modal::Confirm { state, .. } | Modal::Publication { publish: state, .. }) = m.ui.modals.last_mut() {
         *state = ConfirmState::Requested(request_id);
     }

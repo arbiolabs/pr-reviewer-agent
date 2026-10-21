@@ -11,13 +11,13 @@ use super::code::rich;
 use super::doc::{filled, reading};
 use crate::keymap::{Context, help_rows};
 use crate::model::{ACCEPTED_QUIET_MS, ConfirmState, Link, Modal};
-use crate::protocol::{Account, AccountState};
+use crate::protocol::{Account, AccountState, Command};
 use crate::theme::{Bg, Role};
 
 pub fn modal(c: &Ctx, f: &mut Frame, body: Rect, modal: &Modal) {
     match modal {
         Modal::Input { .. } => {}
-        Modal::Confirm { prompt, command, state } => confirm(c, f, body, prompt, command.name(), state),
+        Modal::Confirm { prompt, command, state } => confirm(c, f, body, prompt, command, state),
         Modal::Help { scroll } | Modal::Finding { scroll, .. } | Modal::Publication { scroll, .. } => {
             scrolled(c, f, body, page_lines(c, body, modal).unwrap_or_default(), *scroll)
         }
@@ -50,7 +50,7 @@ fn heading(c: &Ctx, text: &str) -> Line<'static> {
 
 /// The only place `y` acts: a page in the reading column, like the preview, asking the question in words, with the
 /// daemon command in a dim detail line and the answer wrapped in full.
-fn confirm(c: &Ctx, f: &mut Frame, body: Rect, prompt: &str, command: &str, state: &ConfirmState) {
+fn confirm(c: &Ctx, f: &mut Frame, body: Rect, prompt: &str, command: &Command, state: &ConfirmState) {
     let (status, role) = match state {
         ConfirmState::Asking => (format!("y confirms {} n or Esc cancels", c.t.g().sep), Role::Title),
         ConfirmState::Requested(_) => (format!("requested{} waiting for the server", c.t.g().ellipsis), Role::Pending),
@@ -62,13 +62,13 @@ fn confirm(c: &Ctx, f: &mut Frame, body: Rect, prompt: &str, command: &str, stat
         ConfirmState::Accepted { .. } => {
             ("accepted; waiting for the event that shows it happened".to_string(), Role::Active)
         }
-        ConfirmState::Failed(e) => (format!("rejected: {e}"), Role::Fail),
+        ConfirmState::Refused { message, .. } => (format!("Can't {}: {message}", command.verb()), Role::Fail),
         ConfirmState::TimedOut => ("request timed out; y sends it again, r refreshes".to_string(), Role::Fail),
     };
     let w = reading(body).width as usize;
     let mut lines = vec![Line::raw("")];
     lines.extend(rich(c, prompt, w, Role::Title).into_iter().map(Line::from));
-    lines.push(Line::from(c.span(c.fit(&format!("daemon command {command}"), w), Role::Muted)));
+    lines.push(Line::from(c.span(c.fit(&super::publish::command_detail(c, command.name(), state), w), Role::Muted)));
     lines.push(Line::raw(""));
     lines.extend(rich(c, &status, w, role).into_iter().map(Line::from));
     page(c, f, body, lines);

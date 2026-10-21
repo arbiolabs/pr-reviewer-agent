@@ -254,9 +254,10 @@ fn y_confirms_only_inside_the_confirmation_modal_and_sends_the_command_once() {
     let Some(Modal::Confirm { state, .. }) = m.top_modal() else { panic!() };
     assert_eq!(
         state,
-        &pr_review_tui::model::ConfirmState::Failed(pr_review_tui::protocol::Text::new(
-            "CAPABILITY_DENIED: review.start is not available in this version"
-        ))
+        &pr_review_tui::model::ConfirmState::Refused {
+            code: pr_review_tui::protocol::ErrorCode::CapabilityDenied,
+            message: pr_review_tui::protocol::Text::new("review.start is not available in this version"),
+        }
     );
     press(&mut m, KeyCode::Esc);
     assert_eq!(m.top_modal(), None);
@@ -398,8 +399,9 @@ fn a_rejected_account_select_shows_the_code_and_message_in_the_modal() {
     assert_eq!(c.idempotency_key, "account.select:github.com/diego-arbio-dev");
     let rejected = r#"{"type":"command.result","requestId":"RID","status":"rejected","code":"NOT_FOUND","message":"gh lists no account github.com/diego-arbio-dev"}"#;
     send(&mut m, &rejected.replace("RID", c.request_id.as_str()));
-    let Some(Modal::Confirm { state: ConfirmState::Failed(e), .. }) = m.top_modal() else { panic!() };
-    assert_eq!(e.as_str(), "NOT_FOUND: gh lists no account github.com/diego-arbio-dev");
+    let Some(Modal::Confirm { state: ConfirmState::Refused { code, message }, .. }) = m.top_modal() else { panic!() };
+    assert_eq!(code.to_string(), "NOT_FOUND");
+    assert_eq!(message.as_str(), "gh lists no account github.com/diego-arbio-dev");
 }
 
 #[test]

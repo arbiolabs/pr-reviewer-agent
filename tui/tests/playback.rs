@@ -324,10 +324,13 @@ fn the_showcases_started_retried_and_running_runs_reach_an_end_and_a_reviewed_he
     assert_eq!(latest(&m, 345).0, RunStatus::Completed, "the retried run");
     for number in [1287, 341] {
         keys(&mut m, number, "sy");
-        let Some(Modal::Confirm { state: pr_review_tui::model::ConfirmState::Failed(why), .. }) = m.top_modal() else {
+        let Some(Modal::Confirm { state: pr_review_tui::model::ConfirmState::Refused { code, message: why }, .. }) =
+            m.top_modal()
+        else {
             panic!("#{number}: {:?}", m.top_modal())
         };
-        assert!(why.as_str().starts_with(&format!("CONFLICT: #{number} at ")), "{why:?}");
+        assert_eq!(*code, pr_review_tui::protocol::ErrorCode::Conflict);
+        assert!(why.as_str().starts_with(&format!("#{number} at ")), "{why:?}");
         assert!(why.as_str().ends_with(" is already reviewed"), "{why:?}");
     }
     let mut p2 = Player::new(load(&protocol_dir().join("playback/showcase.ndjson")).unwrap());
@@ -340,7 +343,9 @@ fn the_showcases_started_retried_and_running_runs_reach_an_end_and_a_reviewed_he
         let fx = update(&mut m2, Msg::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)));
         drive(&mut p2, &mut m2, fx);
     }
-    let Some(Modal::Confirm { state: pr_review_tui::model::ConfirmState::Failed(why), .. }) = m2.top_modal() else {
+    let Some(Modal::Confirm { state: pr_review_tui::model::ConfirmState::Refused { message: why, .. }, .. }) =
+        m2.top_modal()
+    else {
         panic!("{:?}", m2.top_modal())
     };
     assert!(why.as_str().ends_with("failed its review; retry it instead"), "a failed head points at R: {why:?}");

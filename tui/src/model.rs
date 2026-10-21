@@ -257,7 +257,11 @@ pub enum ConfirmState {
         operation: Text,
         at_ms: u64,
     },
-    Failed(Text),
+    /// The daemon refused it: `message` is its sentence, `code` the detail beside the command name.
+    Refused {
+        code: ErrorCode,
+        message: Text,
+    },
     /// No reply in time; `y` sends the same command again, under the same idempotency key.
     TimedOut,
 }
@@ -503,7 +507,8 @@ pub struct Model {
     pub snapshot_request: Option<RequestId>,
     pub stale_snapshots: BTreeSet<RequestId>,
     /// Every command this client sent: a `command.result` for any other request is not this client's to show.
-    pub commands_sent: BTreeSet<RequestId>,
+    /// Each command request in flight, with the verb its refusal reads with.
+    pub commands_sent: BTreeMap<RequestId, &'static str>,
     pub dirty: bool,
 }
 
@@ -541,7 +546,7 @@ impl Model {
             request_timeout_ms: 15_000,
             snapshot_request: None,
             stale_snapshots: BTreeSet::new(),
-            commands_sent: BTreeSet::new(),
+            commands_sent: BTreeMap::new(),
             dirty: true,
         }
     }

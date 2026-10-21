@@ -6,9 +6,9 @@ expression: text
 
 
   Use octo-work on github.com for GitHub reads and publishing?
-  daemon command account.select
+  daemon command account.select · CONFLICT
 
-  rejected: CONFLICT: GITHUB_TOKEN is set in the daemon environment; it
+  Can't switch accounts: GITHUB_TOKEN is set in the daemon environment; it
   overrides any selection
 
 

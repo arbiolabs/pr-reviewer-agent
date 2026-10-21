@@ -206,13 +206,24 @@ fn state(c: &Ctx, w: usize, run_id: &RunId, p: &PublicationPreview, publish: &Co
             format!("Approved; publishing{}  not on GitHub until it says published", g.ellipsis),
             Role::Pending,
         )),
-        (_, ConfirmState::Failed(e)) => out.push(line(format!("{} rejected: {e}", g.fail), Role::Fail)),
+        (_, ConfirmState::Refused { message, .. }) => {
+            out.push(line(format!("{} Can't publish: {message}", g.fail), Role::Fail));
+            out.push(line(format!("  {}", command_detail(c, "review.publish", publish)), Role::Muted));
+        }
         (_, ConfirmState::TimedOut) => {
             out.push(line("request timed out; y sends the same approval again".into(), Role::Fail))
         }
         (_, ConfirmState::Asking) => {}
     }
     out
+}
+
+/// `daemon command review.start`, and once the daemon refused it, its code: `· CONFLICT`.
+pub fn command_detail(c: &Ctx, command: &str, state: &ConfirmState) -> String {
+    match state {
+        ConfirmState::Refused { code, .. } => format!("daemon command {command} {} {code}", c.t.g().sep),
+        _ => format!("daemon command {command}"),
+    }
 }
 
 /// GitHub places an inline comment only on a line of the diff: say which comments land and which cannot.

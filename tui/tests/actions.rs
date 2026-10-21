@@ -97,21 +97,56 @@ fn start_names_the_pr_and_head_sends_only_on_y_and_settles_on_run_started_not_on
     assert_eq!(m.notice.as_ref().unwrap().text, "Started reviewing #186 at 6666666");
 }
 
+fn rejected(rid: &pr_review_tui::protocol::RequestId, code: &str, message: &str) -> String {
+    format!(
+        r#"{{"type":"command.result","requestId":"{rid}","status":"rejected","code":"{code}","message":"{message}"}}"#
+    )
+}
+
 #[test]
-fn a_rejected_command_shows_its_code_and_message() {
+fn a_rejection_reads_as_a_refusal_with_its_code_only_beside_the_command() {
+    for (key, code, message, verb, command) in [
+        ('s', "CONFLICT", "#186 at 6666666 is already reviewed", "start", "review.start"),
+        ('s', "REVISION_STALE", "the head is now 7777777", "start", "review.start"),
+        ('s', "CAPABILITY_DENIED", "review.start is not available in this version", "start", "review.start"),
+        ('R', "NOT_FOUND", "no run rev-184-a", "retry", "review.retry"),
+    ] {
+        let pr = if key == 'R' { "acme/shop#184" } else { "acme/shop#186" };
+        let mut m = engine("fixtures/server.welcome.engine.json", pr);
+        if key == 'R' {
+            let failed =
+                run_json("rev-184-a", "acme/shop#184", "4444444444444444444444444444444444444444", "FAILED", "FAILED");
+            send(&mut m, &event(109, "acme/shop#184", "rev-184-a", "run.failed", &failed));
+        }
+        m.ui.screen = pr_review_tui::model::Screen::Review;
+        press(&mut m, KeyCode::Char(key));
+        let fx = press(&mut m, KeyCode::Char('y'));
+        let rid = commands(&fx)[0].request_id.clone();
+        send(&mut m, &rejected(&rid, code, message));
+        let (frame, _) = render(&mut m, 120, 38);
+        assert!(frame.contains(&format!("Can't {verb}: {message}")), "{code}:\n{frame}");
+        assert!(frame.contains(&format!("daemon command {command} · {code}")), "{code}:\n{frame}");
+        assert_eq!(frame.matches(code).count(), 1, "{code} only in the detail line:\n{frame}");
+        assert!(!frame.contains("rejected"), "{frame}");
+        let started = run_json("rev-186-a", "acme/shop#186", H186, "COLLECT_CONTEXT", "RUNNING");
+        send(&mut m, &event(110, "acme/shop#186", "rev-186-a", "run.started", &started));
+        assert!(matches!(m.top_modal(), Some(Modal::Confirm { .. })), "a refused panel stays until Esc");
+    }
+
     let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#186");
     press(&mut m, KeyCode::Char('s'));
-    let fx = press(&mut m, KeyCode::Char('y'));
-    let rid = commands(&fx)[0].request_id.clone();
-    let rejected = format!(
-        r#"{{"type":"command.result","requestId":"{rid}","status":"rejected","code":"REVISION_STALE","message":"the head is now 7777777"}}"#
-    );
-    send(&mut m, &rejected);
-    let ConfirmState::Failed(e) = confirm_state(&m) else { panic!() };
-    assert_eq!(e.as_str(), "REVISION_STALE: the head is now 7777777");
-    let started = run_json("rev-186-a", "acme/shop#186", H186, "COLLECT_CONTEXT", "RUNNING");
-    send(&mut m, &event(109, "acme/shop#186", "rev-186-a", "run.started", &started));
-    assert!(matches!(m.top_modal(), Some(Modal::Confirm { .. })), "a rejected panel stays until Esc");
+    let rid = commands(&press(&mut m, KeyCode::Char('y')))[0].request_id.clone();
+    press(&mut m, KeyCode::Esc);
+    send(&mut m, &rejected(&rid, "CONFLICT", "#186 at 6666666 is already reviewed"));
+    assert_eq!(m.notice.as_ref().unwrap().text, "Can't start: #186 at 6666666 is already reviewed", "the toast");
+
+    let mut m = previewing();
+    let rid = commands(&press(&mut m, KeyCode::Char('y')))[0].request_id.clone();
+    send(&mut m, &rejected(&rid, "REVISION_STALE", "the head is now 7777777"));
+    let f = frame(&mut m);
+    assert!(f.contains("✗ Can't publish: the head is now 7777777"), "{f}");
+    assert!(f.contains("daemon command review.publish · REVISION_STALE"), "{f}");
+    assert!(!f.contains("rejected"), "{f}");
 }
 
 #[test]
