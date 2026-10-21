@@ -150,6 +150,18 @@ fn a_rejection_reads_as_a_refusal_with_its_code_only_beside_the_command() {
 }
 
 #[test]
+fn a_start_the_daemon_replays_for_a_run_that_already_ended_says_the_head_is_reviewed() {
+    let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#185");
+    press(&mut m, KeyCode::Char('s'));
+    let rid = commands(&press(&mut m, KeyCode::Char('y')))[0].request_id.clone();
+    let replayed =
+        r#"{"type":"command.result","requestId":"RID","status":"accepted","operationId":"review.start:rev-185-a"}"#;
+    send(&mut m, &replayed.replace("RID", rid.as_str()));
+    assert_eq!(m.top_modal(), None, "nothing will happen, so nothing waits");
+    assert_eq!(m.notice.as_ref().unwrap().text, "#185 at 5555555 is already reviewed");
+}
+
+#[test]
 fn cancel_and_retry_name_their_target_and_settle_on_the_run_ending_or_moving() {
     let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#184");
     press(&mut m, KeyCode::Char('R'));

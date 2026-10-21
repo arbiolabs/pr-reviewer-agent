@@ -225,6 +225,33 @@ fn waiting_confirm<'a>(m: &'a mut Model, id: &RequestId) -> Option<&'a mut Confi
     })
 }
 
+/// The daemon answers a start's own key with its recorded run, even once that run has ended: no event will follow,
+/// so the panel closes and says the head is reviewed.
+fn settle_replayed_start(m: &mut Model) {
+    let ended = |modal: &Modal| match modal {
+        Modal::Confirm { command: Command::Start(_), state: ConfirmState::Accepted { operation, .. }, .. } => {
+            let run = operation.as_str().strip_prefix("review.start:").unwrap_or_default();
+            m.domain.runs.get(&RunId::new(run)).is_some_and(|r| r.status != RunStatus::Running)
+        }
+        _ => false,
+    };
+    let Some(i) = m.ui.modals.iter().position(ended) else { return };
+    let Modal::Confirm { command: Command::Start(p), state: ConfirmState::Accepted { operation, .. }, .. } =
+        m.ui.modals.remove(i)
+    else {
+        return;
+    };
+    let run = operation.as_str().strip_prefix("review.start:").map(RunId::new);
+    // The daemon's words for a head whose review ended.
+    let why = match run.and_then(|r| m.domain.runs.get(&r)).map(|r| r.status) {
+        Some(RunStatus::Failed) => "failed its review; retry it instead",
+        Some(RunStatus::Superseded) => "is superseded by a newer head",
+        _ => "is already reviewed",
+    };
+    let pr = m.domain.prs.get(&p.pr_id).map_or(p.pr_id.to_string(), |x| format!("#{}", x.number));
+    notice(m, format!("{pr} at {} {why}", p.expected_head_sha.short()));
+}
+
 /// Clears the pending marker that waits on `id` and shows `message` there. False when nothing waits on it.
 fn fail_request(m: &mut Model, id: &RequestId, message: Text) -> bool {
     let preview = m.ui.modals.iter_mut().find_map(|x| match x {
@@ -432,6 +459,7 @@ fn server_message(m: &mut Model, msg: ServerMessage, fx: &mut Vec<Effect>) {
                     }
                     CommandOutcome::Rejected { code, message } => ConfirmState::Refused { code, message },
                 };
+                settle_replayed_start(m);
                 return;
             }
             let text = match r.outcome {
