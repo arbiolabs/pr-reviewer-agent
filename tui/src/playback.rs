@@ -170,7 +170,8 @@ impl Player {
         runs
     }
 
-    /// `#1287 at 647fb3b is already reviewed` when the latest run of the start's PR, at its head, has ended.
+    /// Why a start is refused, as the daemon says it (`#1287 at 647fb3b is already reviewed`), when the latest run of
+    /// the start's PR, at its head, has ended.
     fn reviewed(&self, p: &crate::protocol::StartParams) -> Option<String> {
         let runs = self.runs();
         let latest = runs.iter().rev().find(|r| r.pr_id == p.pr_id && r.head_sha == p.expected_head_sha)?;
@@ -186,7 +187,12 @@ impl Player {
             _ => None,
         });
         let pr = pr.map_or(p.pr_id.to_string(), |n| format!("#{n}"));
-        Some(format!("{pr} at {} is already reviewed", p.expected_head_sha.short()))
+        let why = match latest.status {
+            RunStatus::Failed => "failed its review; retry it instead",
+            RunStatus::Superseded => "is superseded by a newer head",
+            _ => "is already reviewed",
+        };
+        Some(format!("{pr} at {} {why}", p.expected_head_sha.short()))
     }
 
     /// What a gate's target reads as to the reader: `#338` for a PR or a run, the account for an account.

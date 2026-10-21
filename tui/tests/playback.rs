@@ -330,6 +330,20 @@ fn the_showcases_started_retried_and_running_runs_reach_an_end_and_a_reviewed_he
         assert!(why.as_str().starts_with(&format!("CONFLICT: #{number} at ")), "{why:?}");
         assert!(why.as_str().ends_with(" is already reviewed"), "{why:?}");
     }
+    let mut p2 = Player::new(load(&protocol_dir().join("playback/showcase.ndjson")).unwrap());
+    let mut m2 = model();
+    let fx = update(&mut m2, Msg::Net(NetEvent::Opened));
+    drive(&mut p2, &mut m2, fx);
+    m2.ui.screen = Screen::Review;
+    m2.ui.selected_pr = m2.domain.prs.values().find(|p| p.number == 345).map(|p| p.id.clone());
+    for c in ['s', 'y'] {
+        let fx = update(&mut m2, Msg::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)));
+        drive(&mut p2, &mut m2, fx);
+    }
+    let Some(Modal::Confirm { state: pr_review_tui::model::ConfirmState::Failed(why), .. }) = m2.top_modal() else {
+        panic!("{:?}", m2.top_modal())
+    };
+    assert!(why.as_str().ends_with("failed its review; retry it instead"), "a failed head points at R: {why:?}");
 }
 
 #[test]
