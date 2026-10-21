@@ -711,3 +711,31 @@ fn an_accepted_command_with_no_event_after_15_s_says_so_and_esc_closes() {
     press(&mut m, KeyCode::Esc);
     assert_eq!(m.top_modal(), None);
 }
+
+#[test]
+fn a_refused_approval_reads_not_published_and_only_a_failed_post_reads_publication_failed() {
+    for (code, message) in [
+        ("REVISION_STALE", "the head of acme/shop#184 is now 7777777"),
+        ("INVALID_TRANSITION", "APPROVED is not legal in SUPERSEDED"),
+    ] {
+        let mut m = previewing();
+        let rid = commands(&press(&mut m, KeyCode::Char('y')))[0].request_id.clone();
+        send(&mut m, &rejected(&rid, code, message));
+        // The daemon marks the stored payload failed as it supersedes the run; still nothing was posted.
+        let failed = r#"{"runId":"rev-184-a","status":"failed"}"#;
+        let seq = m.stream.last_applied + 1;
+        send(&mut m, &event(seq, "acme/shop#184", "rev-184-a", "review.publication_changed", failed));
+        let f = frame(&mut m);
+        assert!(f.contains("Not published"), "{code}:\n{f}");
+        assert!(f.contains(&format!("Can't publish: {message}")), "{code}: the reason follows\n{f}");
+        assert!(!f.contains("Publication failed"), "{code}:\n{f}");
+    }
+    let mut m = previewing();
+    let rid = commands(&press(&mut m, KeyCode::Char('y')))[0].request_id.clone();
+    send(&mut m, &read("fixtures/server.command.result.accepted.json").replace("req-cmd", rid.as_str()));
+    let failed = r#"{"runId":"rev-184-a","status":"failed"}"#;
+    let seq = m.stream.last_applied + 1;
+    send(&mut m, &event(seq, "acme/shop#184", "rev-184-a", "review.publication_changed", failed));
+    let f = frame(&mut m);
+    assert!(f.contains("Publication failed") && !f.contains("Not published"), "{f}");
+}

@@ -156,12 +156,14 @@ fn body(c: &Ctx, text: &str, w: usize, raw: bool) -> Vec<Line<'static>> {
     out
 }
 
-/// The page's question while `y` can still publish, then what became of the answer.
+/// The page's question while `y` can still publish, then what became of the answer. A refused approval posted
+/// nothing, whatever the daemon then marks the stored payload; only a post that failed reads as a failure.
 fn heading(c: &Ctx, run_id: &RunId, publish: &ConfirmState) -> String {
     let status = c.m.domain.publications.get(run_id).map(|p| p.status);
     match (status, publish) {
         (Some(PublicationStatus::Published), _) => "Published on GitHub".into(),
-        (Some(PublicationStatus::Failed), _) | (_, ConfirmState::Refused { .. }) => "Publication failed".into(),
+        (_, ConfirmState::Refused { .. }) => "Not published".into(),
+        (Some(PublicationStatus::Failed), _) => "Publication failed".into(),
         (Some(PublicationStatus::Uncertain | PublicationStatus::Unknown), _) => "Publication uncertain".into(),
         (Some(PublicationStatus::Publishing), _) | (_, ConfirmState::Requested(_) | ConfirmState::Accepted { .. }) => {
             format!("Publishing{}", c.t.g().ellipsis)
@@ -193,6 +195,10 @@ fn state(c: &Ctx, w: usize, run_id: &RunId, p: &PublicationPreview, publish: &Co
     }
     let mut out = Vec::new();
     match (status.map(|s| s.status), publish) {
+        (s, ConfirmState::Refused { message, .. }) if s != Some(PublicationStatus::Published) => {
+            out.push(line(format!("{} Can't publish: {message}", g.fail), Role::Fail));
+            out.push(line(format!("  {}", command_detail(c, "review.publish", publish)), Role::Muted));
+        }
         (Some(PublicationStatus::Published), _) => {
             let id = status.and_then(|s| s.review_id).map_or(String::new(), |id| format!(" as review {id}"));
             out.push(line(format!("{} published on GitHub{id}", g.ok), Role::Ok));
@@ -220,14 +226,10 @@ fn state(c: &Ctx, w: usize, run_id: &RunId, p: &PublicationPreview, publish: &Co
             format!("Approved; publishing{}  not on GitHub until it says published", g.ellipsis),
             Role::Pending,
         )),
-        (_, ConfirmState::Refused { message, .. }) => {
-            out.push(line(format!("{} Can't publish: {message}", g.fail), Role::Fail));
-            out.push(line(format!("  {}", command_detail(c, "review.publish", publish)), Role::Muted));
-        }
         (_, ConfirmState::TimedOut) => {
             out.push(line("request timed out; y sends the same approval again".into(), Role::Fail))
         }
-        (_, ConfirmState::Asking) => {}
+        (_, ConfirmState::Asking | ConfirmState::Refused { .. }) => {}
     }
     out
 }
