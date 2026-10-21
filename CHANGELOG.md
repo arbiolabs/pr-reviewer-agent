@@ -4,6 +4,10 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 ## [Unreleased]
 
+### Fixed
+
+- **Jev skip reason.** `pr-review serve` and `pr-review daemon --allow-commands` record `jev_skipped_no_key` when they skip Jev for lack of `TYPESAFE_API_KEY`, instead of `jev_skipped_private_repo`, which was wrong for public repositories. A per-PR `review` of a private repository still records `jev_skipped_private_repo` (#TBD).
+
 ## [1.1.0] - 2026-10-21
 
 ### Added
