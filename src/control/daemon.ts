@@ -2,6 +2,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { parseArgs } from "node:util";
+import { which } from "../models/detect.ts";
 import { AppDbSource } from "./appdb.ts";
 import type { EngineSource } from "./engine.ts";
 import { defaultSocketPath, startControlServer } from "./server.ts";
@@ -65,14 +66,16 @@ export async function runDaemon(args: string[], dataDir: string, err: (text: str
 
 const RELEASE_BINARY = fileURLToPath(new URL("../../tui/target/release/pr-review-tui", import.meta.url));
 
-/** `pr-review tui`: run the Rust client from PATH, else from this checkout's release build, with the same args. */
+/** The Rust client on PATH, else this checkout's release build. */
+export function findTui(pathVar = process.env.PATH ?? ""): string | undefined {
+  return which("pr-review-tui", pathVar) ?? (existsSync(RELEASE_BINARY) ? RELEASE_BINARY : undefined);
+}
+
+/** `pr-review tui`: run the client `findTui` finds, with the same args. */
 export function runTui(args: string[]): number {
-  for (const bin of ["pr-review-tui", RELEASE_BINARY]) {
-    if (bin === RELEASE_BINARY && !existsSync(bin)) break;
-    const result = spawnSync(bin, args, { stdio: "inherit" });
-    if ((result.error as NodeJS.ErrnoException | undefined)?.code === "ENOENT") continue;
-    if (result.error) throw result.error;
-    return result.status ?? 1;
-  }
-  throw new Error(`pr-review-tui not found on PATH or at ${RELEASE_BINARY}; build it with: cargo build --release --manifest-path tui/Cargo.toml`);
+  const bin = findTui();
+  if (!bin) throw new Error(`pr-review-tui not found on PATH or at ${RELEASE_BINARY}; build it with: cargo build --release --manifest-path tui/Cargo.toml`);
+  const result = spawnSync(bin, args, { stdio: "inherit" });
+  if (result.error) throw result.error;
+  return result.status ?? 1;
 }
