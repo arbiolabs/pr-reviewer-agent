@@ -460,7 +460,7 @@ fn minimal(c: &Ctx, f: &mut Frame, area: Rect) {
         Line::from(vec![c.span("pr-review ", Role::Title), c.span(status, role)]),
         Line::from(c.span(format!("Terminal is {}x{}.", area.width, area.height), Role::Normal)),
         Line::from(c.span(format!("Resize to at least {MIN_W}x{MIN_H}."), Role::Pending)),
-        Line::from(c.span("q quit  ? help", Role::Muted)),
+        Line::from(c.span("q quit", Role::Muted)),
     ];
     let lines: Vec<Line> = lines
         .into_iter()
