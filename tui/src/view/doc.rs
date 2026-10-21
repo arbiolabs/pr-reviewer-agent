@@ -282,7 +282,13 @@ pub fn document(c: &Ctx, pr: &Pr, w: usize, height: usize) -> Doc {
             }
         }
         lines.push(Line::raw(""));
-        lines.push(Line::from(c.span("  R retries the run once the cause is fixed.", Role::Muted)));
+        // The daemon's reason for a cancel from this client (protocol/README.md, review.cancel).
+        let next = if r.failure_reason.as_ref().is_some_and(|x| x.as_str() == "cancelled from the TUI") {
+            "  You cancelled this review. R starts it again."
+        } else {
+            "  R retries the run once the cause is fixed."
+        };
+        lines.push(Line::from(c.span(next, Role::Muted)));
         lines.push(Line::raw(""));
     }
     if running && c.m.look.show_activity {

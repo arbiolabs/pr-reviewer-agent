@@ -847,6 +847,23 @@ fn the_stepper_takes_one_shape_per_width_whatever_the_run_state() {
 }
 
 #[test]
+fn a_run_you_cancelled_says_so_and_a_real_failure_names_the_cause() {
+    use pr_review_tui::protocol::{Phase, RunId, RunStatus, Text};
+    for (reason, want, not) in [
+        ("cancelled from the TUI", "You cancelled this review. R starts it again.", "once the cause is fixed"),
+        ("model timed out", "R retries the run once the cause is fixed.", "You cancelled"),
+    ] {
+        let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#185");
+        m.ui.screen = pr_review_tui::model::Screen::Review;
+        m.ui.focus = pr_review_tui::model::Pane::Main;
+        let r = m.domain.runs.get_mut(&RunId::new("rev-185-a")).unwrap();
+        (r.phase, r.status, r.failure_reason) = (Phase::Failed, RunStatus::Failed, Some(Text::new(reason)));
+        let (f, _) = render(&mut m, 120, 38);
+        assert!(f.contains(want) && !f.contains(not), "{reason}: {f}");
+    }
+}
+
+#[test]
 fn a_link_state_still_under_way_ends_in_an_ellipsis() {
     let mut m = model();
     update(&mut m, Msg::Net(NetEvent::Opened));
