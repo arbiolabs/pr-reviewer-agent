@@ -134,12 +134,6 @@ export class PinnedRepo {
     }
   }
 
-  async lineCount(sha: string, path: string): Promise<number | undefined> {
-    const text = await this.show(sha, path);
-    if (text === undefined) return undefined;
-    return text === "" ? 0 : text.split("\n").length - (text.endsWith("\n") ? 1 : 0);
-  }
-
   async grep(query: string, scope: string | undefined, cap = DEFAULT_OUTPUT_CAP): Promise<string> {
     const args = ["grep", "-n", "-I", "-F", "--max-count=50", "-e", query, this.headSha];
     if (scope !== undefined && scope !== "" && scope !== ".") args.push("--", assertSafePath(scope));
