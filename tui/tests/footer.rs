@@ -506,3 +506,15 @@ fn the_footer_offers_a_key_exactly_when_it_acts() {
         .collect();
     assert!(report.is_empty(), "{} disagreements:\n{}", report.len(), report.join("\n"));
 }
+
+/// On a parked run j and k also stop on the "Ready to publish" line, which is not a finding, so the hint says move.
+#[test]
+fn j_and_k_on_a_parked_review_are_offered_as_moves_not_findings() {
+    let label = |number: u64| {
+        let mut m = showcase_after(number, "");
+        update(&mut m, Msg::Resize(120, 38));
+        hints_of(&footer_row(&m)).into_iter().find(|h| h.starts_with("j/k")).unwrap()
+    };
+    assert_eq!(label(1291), "j/k move");
+    assert_eq!(label(1287), "j/k finding");
+}

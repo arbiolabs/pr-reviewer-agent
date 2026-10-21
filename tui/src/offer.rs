@@ -76,6 +76,8 @@ pub fn offered(m: &Model) -> Vec<Hint> {
             let page = matches!(screen, Screen::Inbox | Screen::Review);
             let rail = screen == Screen::Inbox || page && side;
             let moves = match (screen, side) {
+                // A parked run's "Ready to publish" line is a stop too.
+                (Screen::Review, false) if m.parked_run().is_some() => "move",
                 (Screen::Review, false) => "finding",
                 (Screen::Inbox | Screen::Review, _) => "pull request",
                 (Screen::Diff, true) => "file",

@@ -17,4 +17,4 @@ expression: ascii_text
   #
   # Enter  5 evidence items | the fix | the diff
 
-   j/k finding  Enter read  p publish  ? help  q quit
+   j/k move  Enter read  p publish  ? help  q quit
