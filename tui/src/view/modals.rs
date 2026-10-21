@@ -8,7 +8,7 @@ use ratatui::widgets::{Clear, Paragraph};
 
 use super::Ctx;
 use super::code::rich;
-use super::doc::{column, filled};
+use super::doc::{filled, reading};
 use crate::keymap::{Context, help_rows};
 use crate::model::{ACCEPTED_QUIET_MS, ConfirmState, Link, Modal};
 use crate::protocol::{Account, AccountState};
@@ -26,7 +26,7 @@ pub fn modal(c: &Ctx, f: &mut Frame, body: Rect, modal: &Modal) {
 
 /// The lines of a scrolling page, the help, the finding reader or the publication preview, before scrolling.
 pub fn page_lines(c: &Ctx, body: Rect, modal: &Modal) -> Option<Vec<Line<'static>>> {
-    let w = column(body).width as usize;
+    let w = reading(body).width as usize;
     match modal {
         Modal::Help { .. } => Some(help_lines(c, body)),
         Modal::Finding { id, .. } => Some(super::doc::finding_lines(c, w, id)),
@@ -41,7 +41,7 @@ pub fn page_lines(c: &Ctx, body: Rect, modal: &Modal) -> Option<Vec<Line<'static
 fn page(c: &Ctx, f: &mut Frame, area: Rect, lines: Vec<Line<'static>>) {
     f.render_widget(Clear, area);
     f.render_widget(Paragraph::new("").style(c.t.bg(Bg::Base)), area);
-    f.render_widget(Paragraph::new(lines), column(area));
+    f.render_widget(Paragraph::new(lines), reading(area));
 }
 
 fn heading(c: &Ctx, text: &str) -> Line<'static> {
@@ -65,7 +65,7 @@ fn confirm(c: &Ctx, f: &mut Frame, body: Rect, prompt: &str, command: &str, stat
         ConfirmState::Failed(e) => (format!("rejected: {e}"), Role::Fail),
         ConfirmState::TimedOut => ("request timed out; y sends it again, r refreshes".to_string(), Role::Fail),
     };
-    let w = column(body).width as usize;
+    let w = reading(body).width as usize;
     let mut lines = vec![Line::raw("")];
     lines.extend(rich(c, prompt, w, Role::Title).into_iter().map(Line::from));
     lines.push(Line::from(c.span(c.fit(&format!("daemon command {command}"), w), Role::Muted)));
@@ -99,7 +99,7 @@ fn scrolled(c: &Ctx, f: &mut Frame, body: Rect, mut lines: Vec<Line<'static>>, s
 /// Every key by where it works, then what the glyphs mean.
 pub fn help_lines(c: &Ctx, body: Rect) -> Vec<Line<'static>> {
     let g = c.t.g();
-    let col = column(body);
+    let col = reading(body);
     let rows: Vec<_> = help_rows().into_iter().filter(|r| r.0 != Context::ConfirmModal).collect();
     // Two columns from 100 columns up; below that one column, its key column as narrow as the longest keys.
     let two = body.width >= 100;
@@ -258,7 +258,7 @@ fn account_row(c: &Ctx, a: &Account, w: usize, cursor: bool) -> Line<'static> {
 
 pub fn settings(c: &Ctx, f: &mut Frame, area: Rect) {
     let m = c.m;
-    let col = column(area);
+    let col = reading(area);
     let w = col.width as usize;
     let tight = area.height < 30;
     let row = |k: &str, v: String, role: Role| {

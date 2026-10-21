@@ -215,7 +215,7 @@ fn event_line(c: &Ctx, e: &SequencedEvent, w: usize, selected: bool) -> Line<'st
 }
 
 pub fn timeline(c: &Ctx, f: &mut Frame, area: Rect) {
-    let col = super::doc::column(area);
+    let col = super::doc::reading(area);
     let Some(t) = &c.m.timeline else {
         let text = "No timeline loaded. Select a PR and press t.";
         f.render_widget(Paragraph::new(vec![Line::raw(""), Line::from(c.span(text, Role::Muted))]), col);
@@ -226,7 +226,7 @@ pub fn timeline(c: &Ctx, f: &mut Frame, area: Rect) {
 
 /// The event whose row, heading or open detail is at screen row `y` of a timeline drawn in `area`.
 pub fn hit(c: &Ctx, area: Rect, y: u16) -> Option<u64> {
-    let col = super::doc::column(area);
+    let col = super::doc::reading(area);
     let (_, owners) = page(c, c.m.timeline.as_ref()?, col);
     *owners.get(y.checked_sub(col.y)? as usize)?
 }

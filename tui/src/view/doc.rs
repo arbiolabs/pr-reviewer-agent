@@ -158,6 +158,15 @@ pub fn column(area: Rect) -> Rect {
     Rect { x: area.x + (area.width - w) / 2, width: w, ..area }
 }
 
+/// The reading column of a page over the whole body (Timeline, Settings, Help, the readers). Once the area right of
+/// the rail holds a full column, it sits where Review puts it, so switching views does not move the text.
+pub fn reading(area: Rect) -> Rect {
+    match split(area, false).1 {
+        Some(doc) if doc.width >= COLUMN + 4 => column(doc),
+        _ => column(area),
+    }
+}
+
 /// What a click at (`x`, `y`) on the Review or Inbox screen in `area` lands on.
 pub fn hit(c: &Ctx, area: Rect, x: u16, y: u16) -> Option<super::Hit> {
     let rail_focus = c.m.ui.screen == Screen::Inbox || c.focused(Pane::Sidebar);

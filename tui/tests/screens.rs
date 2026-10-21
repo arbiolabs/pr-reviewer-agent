@@ -629,3 +629,31 @@ fn a_diff_resized_narrow_shows_the_pane_its_footer_describes() {
     let footer = narrow.lines().rev().find(|l| !l.trim().is_empty()).unwrap();
     assert!(!narrow.contains("FILES") && footer.contains("j/k line"), "{narrow}");
 }
+
+#[test]
+fn at_200_columns_every_view_puts_the_reading_column_at_one_left_edge() {
+    use crossterm::event::KeyCode;
+    // The first non-blank column at or after `from` over the body rows: the reading column's left edge.
+    let edge = |frame: &str, from: usize| {
+        let rows: Vec<&str> = frame.lines().collect();
+        rows[3..rows.len() - 3]
+            .iter()
+            .filter_map(|l| l.chars().skip(from).position(|ch| ch != ' ').map(|p| p + from))
+            .min()
+            .unwrap()
+    };
+    let review = || mid_review(Look::default()).select("acme/shop#184").key(KeyCode::Enter);
+    let (frame, _) = render(&mut review().m, 200, 50);
+    let rail = 48;
+    let left = edge(&frame, rail + 1);
+    let views = [
+        ("timeline", review().key(KeyCode::Char('4'))),
+        ("settings", review().key(KeyCode::Char('5'))),
+        ("help", review().key(KeyCode::Char('?'))),
+        ("finding", review().key(KeyCode::Enter)),
+    ];
+    for (name, mut s) in views {
+        let (frame, _) = render(&mut s.m, 200, 50);
+        assert_eq!(edge(&frame, 0), left, "{name}:\n{frame}");
+    }
+}
