@@ -37,7 +37,7 @@ Each review runs as a durable task with fixed phases: collect context, triage, a
 
 ## The terminal client
 
-![The terminal client lands on a critical finding, scrolls its explanation, opens the diff at its line, watches a review park with two findings, opens its timeline, previews the publication, and approves it.](tui/demo/showcase.gif)
+![The terminal client lands on a critical finding, scrolls its explanation, opens the diff at its line, watches a review park with two findings, opens its timeline, previews the publication, approves it, starts the first review of a new PR and watches it finish, and cancels a running review.](tui/demo/showcase.gif)
 
 The client opens on the worst finding across the tracked PRs, and `w` follows a review while it runs. [The terminal client](docs/tui.md) covers its views, keys, and settings.
 
