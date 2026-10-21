@@ -46,10 +46,11 @@ export async function startFromHead(
   if (live.headSha !== params.expectedHeadSha) throw new Refused("REVISION_STALE", `the head of ${live.fullName}#${live.number} is now ${live.headSha}`);
   if (live.state !== "open") throw new Refused("CONFLICT", `${live.fullName}#${live.number} is ${live.merged ? "merged" : "closed"}`);
   const started = await startReview(app, live, options.basePolicyVersion, { publish: options.publish });
+  // No task means an idle revision: an ended one is refused here, and the only other idle state is parked.
+  // The message names the PR as #N, as refuseReviewed and the client's own refusals do; the TUI is its only reader.
   if (started.taskId === undefined) {
     refuseReviewed(app, started.revision.id);
-    const why = started.revision.state === "AWAITING_APPROVAL" ? "is waiting for your approval" : "is already being reviewed";
-    throw new Refused("CONFLICT", `#${live.number} at ${live.headSha.slice(0, 7)} ${why}`);
+    throw new Refused("CONFLICT", `#${live.number} at ${live.headSha.slice(0, 7)} is waiting for your approval`);
   }
   return started;
 }
