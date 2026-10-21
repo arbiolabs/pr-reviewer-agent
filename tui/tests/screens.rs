@@ -754,3 +754,21 @@ fn a_failed_run_with_no_diff_says_so_in_a_sentence_and_settings_keeps_the_daemon
     let (frame, _) = render(&mut s.m, 120, 38);
     assert!(frame.contains("NOT_FOUND: no diff for"), "{frame}");
 }
+
+#[test]
+fn settings_lists_a_disconnect_that_repeats_on_every_retry_once_with_its_count() {
+    use pr_review_tui::update::{Msg, NetEvent};
+    let mut s = Sim::new(Look::default());
+    for i in 0..7 {
+        s.apply(Msg::Tick(i * 1000));
+        s.apply(Msg::Net(NetEvent::Lost {
+            reason: "connect: No such file or directory".into(),
+            retry_in_ms: Some(1000),
+        }));
+    }
+    let mut s = s.key(crossterm::event::KeyCode::Char('5'));
+    let (frame, _) = render(&mut s.m, 120, 38);
+    let rows: Vec<&str> = frame.lines().filter(|l| l.contains(" ago ") && l.contains("No such file")).collect();
+    assert_eq!(rows.len(), 1, "{frame}");
+    assert!(rows[0].contains("(×7)"), "{}", rows[0]);
+}

@@ -375,8 +375,10 @@ pub fn settings(c: &Ctx, f: &mut Frame, area: Rect) {
     if errors.is_empty() {
         lines.push(Line::from(c.span("  none", Role::Muted)));
     }
-    for (at, e) in errors {
-        lines.push(row(&age(Some(*at)), e.clone(), Role::Fail));
+    let times = if c.t.ascii { "x" } else { "×" };
+    for (at, e, n) in errors {
+        let e = if *n > 1 { format!("{e} ({times}{n})") } else { e.clone() };
+        lines.push(row(&age(Some(*at)), e, Role::Fail));
     }
     f.render_widget(Paragraph::new(lines), col);
 }

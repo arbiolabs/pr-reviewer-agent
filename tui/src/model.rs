@@ -408,15 +408,23 @@ pub struct Diagnostics {
     pub reconnects: u32,
     pub last_heartbeat_ms: Option<u64>,
     pub last_snapshot_ms: Option<u64>,
-    pub errors: VecDeque<(u64, String)>,
+    /// When each error last came, its text, and how many times in a row it came.
+    pub errors: VecDeque<(u64, String, u32)>,
 }
 
 impl Diagnostics {
+    /// A repeat of the last error, as a disconnect is on every retry, counts on its row instead of adding one.
     pub fn error(&mut self, at_ms: u64, text: impl Into<String>) {
+        let text = crate::sanitize::sanitize(&text.into());
+        if let Some(last) = self.errors.back_mut().filter(|e| e.1 == text) {
+            last.0 = at_ms;
+            last.2 += 1;
+            return;
+        }
         if self.errors.len() == ERROR_CAP {
             self.errors.pop_front();
         }
-        self.errors.push_back((at_ms, crate::sanitize::sanitize(&text.into())));
+        self.errors.push_back((at_ms, text, 1));
     }
 }
 
