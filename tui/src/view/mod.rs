@@ -454,6 +454,9 @@ fn footer_line(c: &Ctx, width: u16) -> Line<'static> {
             "Esc back" | "? help" if matches!(c.m.ui.screen, Screen::Diff | Screen::Timeline) => true,
             _ if c.m.ui.screen == Screen::Diff && no_diff => false,
             _ if c.m.ui.screen == Screen::Timeline && c.m.timeline.is_none() => false,
+            "j/k move" | "Enter detail" | "Enter fold or read" if c.m.ui.screen == Screen::Timeline => {
+                c.m.timeline.as_ref().is_some_and(|t| !crate::update::timeline_shown(c.m, t).is_empty())
+            }
             "j/k pull request" | "Enter read" if list => shown > 0,
             "/ search" if list => !c.m.domain.prs.is_empty(),
             "j/k finding" | "Enter read" | "J/K scroll" if c.m.ui.screen == Screen::Review => findings > 0,

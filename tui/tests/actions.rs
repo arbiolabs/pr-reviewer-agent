@@ -976,6 +976,13 @@ fn the_footer_offers_no_key_that_has_nothing_to_act_on() {
     assert_eq!(footer(&mut m), "Esc back  ? help");
     m.ui.screen = pr_review_tui::model::Screen::Timeline;
     assert_eq!(footer(&mut m), "Esc back  ? help", "no timeline to move through or filter");
+
+    // A timeline whose filters hide every event: they still act, moving and opening do not.
+    let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#184");
+    press(&mut m, KeyCode::Char('4'));
+    m.timeline.as_mut().unwrap().text = "matches nothing".into();
+    let f = footer(&mut m);
+    assert!(!f.contains("j/k") && !f.contains("Enter") && f.contains("/ filter"), "{f}");
 }
 
 #[test]
