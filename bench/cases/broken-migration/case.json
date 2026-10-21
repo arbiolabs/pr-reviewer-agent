@@ -1,0 +1,13 @@
+{
+  "title": "Store a currency on each order",
+  "body": "We start selling in GBP next month, so orders need a currency. Every existing order is EUR, and new orders default to EUR.",
+  "labels": [
+    {
+      "file": "migrations/versions/0002_add_order_currency.py",
+      "line_range": [11, 11],
+      "severity_at_least": "high",
+      "category": "data_integrity",
+      "note": "The migration adds currency as NOT NULL with no server_default. On a table that already has rows, Postgres rejects the ALTER TABLE, so the deploy fails. The ORM default=\"EUR\" applies only to new inserts from Python and does not backfill. It needs server_default=\"EUR\", or a nullable add, a backfill and then NOT NULL."
+    }
+  ]
+}

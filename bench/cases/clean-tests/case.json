@@ -1,0 +1,5 @@
+{
+  "title": "Add tests for slugify",
+  "body": "slugify had no tests. Covers punctuation, accents, digits and the empty result.",
+  "labels": []
+}

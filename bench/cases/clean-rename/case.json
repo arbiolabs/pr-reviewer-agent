@@ -1,0 +1,5 @@
+{
+  "title": "Rename calc to subtotal",
+  "body": "calc did not say what it calculates. Renames it to subtotal. It is unexported and has no other callers.",
+  "labels": []
+}

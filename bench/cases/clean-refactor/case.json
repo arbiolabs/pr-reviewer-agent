@@ -1,0 +1,5 @@
+{
+  "title": "Extract the email check into one helper",
+  "body": "signup.ts repeated the same email regex in two places. Moves it into isValidEmail in email.ts. No behavior change.",
+  "labels": []
+}

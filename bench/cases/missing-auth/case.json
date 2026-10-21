@@ -1,0 +1,13 @@
+{
+  "title": "Let admins change a user's role",
+  "body": "Adds PUT /users/:id/role so support no longer has to edit roles in the database by hand.",
+  "labels": [
+    {
+      "file": "src/routes/users.ts",
+      "line_range": [15, 27],
+      "severity_at_least": "high",
+      "category": "security",
+      "note": "PUT /users/:id/role is registered with requireUser only. Every other admin route also has requireAdmin, so any signed-in member can make themselves admin."
+    }
+  ]
+}

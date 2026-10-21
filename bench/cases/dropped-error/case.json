@@ -1,0 +1,13 @@
+{
+  "title": "Save several settings at once",
+  "body": "The settings page saves the whole form in one request now. Adds Store.SetMany, which writes every value in one transaction, and PUT /settings.",
+  "labels": [
+    {
+      "file": "settings/store.go",
+      "line_range": [34, 37],
+      "severity_at_least": "medium",
+      "category": "data_integrity",
+      "note": "When tx.Commit fails, SetMany logs the error and returns nil. Put then answers 204, so the client believes settings were saved that the database rolled back."
+    }
+  ]
+}

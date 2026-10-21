@@ -1,0 +1,5 @@
+{
+  "title": "Document the configuration variables",
+  "body": "New team members kept asking which environment variables the service needs. Adds a Configuration section to the README.",
+  "labels": []
+}

@@ -1,0 +1,13 @@
+{
+  "title": "Add order search",
+  "body": "Support asked for a way to find orders by part of a customer name. Adds GET /orders/search?q=...&sort=...",
+  "labels": [
+    {
+      "file": "app/orders.py",
+      "line_range": [13, 14],
+      "severity_at_least": "high",
+      "category": "security",
+      "note": "search_orders formats the request's q and sort values straight into the SQL string. Both come from the query string in GET /orders/search, so a caller can inject SQL. The other queries in the file bind parameters with ?."
+    }
+  ]
+}

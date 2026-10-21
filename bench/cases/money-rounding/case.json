@@ -1,0 +1,13 @@
+{
+  "title": "Split a bill across several cards",
+  "body": "Group bookings want to pay with one card each. Adds splitBill and chargeSplit, which charges every card its share.",
+  "labels": [
+    {
+      "file": "src/money.ts",
+      "line_range": [12, 14],
+      "severity_at_least": "medium",
+      "category": "correctness",
+      "note": "Every share is Math.round(total / people), so the shares do not add up to the total whenever it does not divide evenly. 100.00 across 3 cards charges 3 x 33.33 = 99.99, and 0.05 across 2 charges 2 x 0.03 = 0.06. The docstring promises an exact sum; the remainder cents must go to some of the shares."
+    }
+  ]
+}
