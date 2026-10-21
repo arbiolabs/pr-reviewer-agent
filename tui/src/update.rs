@@ -981,8 +981,10 @@ fn finding_stops(m: &Model, d: &DiffView) -> Vec<(usize, usize, usize)> {
 // ---- timeline ----
 
 fn load_timeline(m: &mut Model, scope: TimelineScope, query: TimelineQuery, fx: &mut Vec<Effect>) {
-    let (category, phase, text) =
-        m.timeline.as_ref().map_or((None, None, String::new()), |t| (t.category, t.phase, t.text.clone()));
+    // Filters belong to the PR they were set on; another PR starts unfiltered, so its timeline is never empty
+    // for a reason set elsewhere.
+    let (category, phase, text) = (m.timeline.as_ref().filter(|t| t.query.pr == query.pr))
+        .map_or((None, None, String::new()), |t| (t.category, t.phase, t.text.clone()));
     let pending = send(m, fx, |request_id| ClientMessage::TimelineGet {
         request_id,
         pr_id: query.pr.clone(),

@@ -880,6 +880,28 @@ fn the_header_names_what_its_counts_count_or_drops_them() {
 }
 
 #[test]
+fn timeline_filters_hold_for_one_pr_and_reset_on_another() {
+    use pr_review_tui::protocol::PrId;
+    let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#184");
+    press(&mut m, KeyCode::Char('4'));
+    press(&mut m, KeyCode::Char('v'));
+    press(&mut m, KeyCode::Char('P'));
+    let t = m.timeline.as_ref().unwrap();
+    let set = (t.category, t.phase);
+    assert!(set.0.is_some() && set.1.is_some(), "{set:?}");
+    press(&mut m, KeyCode::Char('f'));
+    let t = m.timeline.as_ref().unwrap();
+    assert_eq!((t.category, t.phase), set, "a new scope on the same PR keeps them");
+
+    m.ui.selected_pr = Some(PrId::new("acme/shop#185"));
+    press(&mut m, KeyCode::Char('2'));
+    press(&mut m, KeyCode::Char('4'));
+    let t = m.timeline.as_ref().unwrap();
+    assert_eq!(t.query.pr, Some(PrId::new("acme/shop#185")));
+    assert_eq!((t.category, t.phase, t.text.as_str()), (None, None, ""), "another PR starts unfiltered");
+}
+
+#[test]
 fn a_link_state_still_under_way_ends_in_an_ellipsis() {
     let mut m = model();
     update(&mut m, Msg::Net(NetEvent::Opened));
