@@ -248,3 +248,14 @@ it("refuses a resolution while any of the finding's own-file code survives at he
   expect(await resolve(guarded, [item(A, BASE_A, 3, 6)], [[5, 5]])).toEqual([null, "RESOLVED"]);
   expect(await resolve(guarded, [item(A, BASE_A, 3, 6)], [[3, 8]])).toEqual([`evidence src/a.ts:3-8@${sha} contains the finding's code unchanged`, "POTENTIALLY_RESOLVED"]);
 });
+
+it("refuses a resolution when a candidate the verifier discards still cites the finding's code", async () => {
+  // Line 4 changed; a re-report cites the surviving lines 5-7 without naming the finding, and fails VERIFY on its own terms.
+  const partial = { [A]: BASE_A.with(3, "  const id = String(req.params.id);"), [HELPER]: BASE_HELPER };
+  const again = (over: Partial<CandidateFinding>) => candidate({ id: "c9", title: "Delete route lacks authorization", file: A, newLine: 5, codeEvidence: [{ path: A, start: 5, end: 7, refSha: ctx.headSha }], ...over });
+  for (const over of [{}, { evidenceKind: "suspected" as const }, { severity: "low" as const, confidence: 0.1 }]) {
+    expect(await resolve(partial, [item(A, BASE_A, 3, 6)], [[4, 4]], [again(over)])).toEqual(["candidate c9 still cites its code at src/a.ts:5-7", "POTENTIALLY_RESOLVED"]);
+  }
+  // A candidate whose evidence cannot be read says nothing.
+  expect(await resolve(partial, [item(A, BASE_A, 3, 6)], [[4, 4]], [again({ codeEvidence: [{ path: A, start: 5, end: 70, refSha: ctx.headSha }] })])).toEqual([null, "RESOLVED"]);
+});

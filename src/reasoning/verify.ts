@@ -151,7 +151,8 @@ const step = (path: CandidateState[], event: CandidateEvent): CandidateState[] =
  * takes that finding's ID, and any other gets a new one. Two candidates that get the same new ID are one defect
  * reported twice, so the second is a duplicate. Two that read as the same open finding are not: the second is new.
  * `unverified` names the open findings a candidate reported again (`priorFindingId`) without a verified link to it.
- * The resolution claims are checked last, because a finding any candidate reports again cannot be resolved.
+ * The resolution claims are checked last, because a finding any candidate reports again or still cites cannot be
+ * resolved, and a candidate whose evidence reads still cites it when its kind or severity discards it.
  */
 export async function verifyCandidates(
   candidates: CandidateFinding[],
@@ -160,6 +161,7 @@ export async function verifyCandidates(
 ): Promise<{ dispositions: Disposition[]; verified: VerifiedFinding[]; unverified: string[]; verdicts: ResolutionVerdict[] }> {
   const dispositions: Disposition[] = [];
   const passed: (Report & { index: number; path: CandidateState[] })[] = [];
+  const cited: Contradictions["cited"] = [];
   const named = (candidate: CandidateFinding) => ctx.prior.find((f) => f.findingId === candidate.priorFindingId);
   const discard = (index: number, candidate: CandidateFinding, path: CandidateState[], reason: string) => {
     dispositions[index] = { candidateId: candidate.id, state: "DISCARDED", path: step(path, "REJECT"), reason, findingId: null };
@@ -171,6 +173,8 @@ export async function verifyCandidates(
       discard(index, candidate, path, structural);
       continue;
     }
+    const location: ObservedLocation = { file: candidate.file, newLine: candidate.newLine, headSha: ctx.headSha, evidence: await evidenceTexts(candidate, ctx.headSha, ctx.read) };
+    cited.push({ candidate, location });
     if (candidate.evidenceKind !== "confirmed_by_static_trace") {
       discard(index, candidate, step(path, "EVIDENCE_INSUFFICIENT"), `evidence is ${candidate.evidenceKind}`);
       continue;
@@ -181,7 +185,6 @@ export async function verifyCandidates(
       discard(index, candidate, path, threshold);
       continue;
     }
-    const location: ObservedLocation = { file: candidate.file, newLine: candidate.newLine, headSha: ctx.headSha, evidence: await evidenceTexts(candidate, ctx.headSha, ctx.read) };
     // A candidate that names a finding whose code was not located says which file holds it now: look for its text there.
     const prior = named(candidate);
     const priorHits = prior && prior.located.kind !== "same" ? findOwnEvidence(prior, candidate.file, splitLines(await ctx.read(ctx.headSha, candidate.file)) ?? []) : [];
@@ -208,5 +211,5 @@ export async function verifyCandidates(
   for (const [i, c] of candidates.entries()) {
     for (const id of [dispositions[i]!.findingId, c.priorFindingId]) if (id && ctx.prior.some((p) => p.findingId === id) && !reported.has(id)) reported.set(id, c.id);
   }
-  return { dispositions, verified, unverified, verdicts: await checkResolutions(resolutions, ctx, { reported, cited: verified }) };
+  return { dispositions, verified, unverified, verdicts: await checkResolutions(resolutions, ctx, { reported, cited }) };
 }
