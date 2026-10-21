@@ -97,9 +97,13 @@ export class EngineSource extends AppDbSource {
     try {
       const publish = options.config.review.publish_mode !== "dry_run";
       // A start replays only for the revision it would start now: the same base, head, policy and reviewer, with the
-      // base read from GitHub. Otherwise it starts anew, which refuses a reviewed head.
+      // base read from GitHub. Otherwise it starts anew, which refuses a reviewed head. When GitHub can't be read, a
+      // new start couldn't run either, so the recorded result stands.
       const recorded = app.store.revision(replay?.operationId.slice("review.start:".length) ?? "");
-      const base = request.command === "review.start" && recorded ? (await livePull(app, options.pulls, request.params.prId)).baseSha : undefined;
+      const base =
+        request.command === "review.start" && recorded
+          ? await livePull(app, options.pulls, request.params.prId).then((pull) => pull.baseSha, () => recorded.base_sha)
+          : undefined;
       const replays =
         request.command !== "review.start" ||
         (recorded?.head_sha === request.params.expectedHeadSha &&

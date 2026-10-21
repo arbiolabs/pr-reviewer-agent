@@ -347,6 +347,10 @@ it("approves a review end to end over the socket: parked, previewed, published o
   // The start's own key replays its recorded result after the run finished: a true replay, not a new start.
   expect(operation(await command(c, { command: "review.start", params: { prId, expectedHeadSha: fixture.headSha } }))).toEqual(operation(started));
   expect(await taskStatuses(h.app)).toEqual(["terminal", "terminal"]);
+  // With GitHub unreachable the replay still answers with its recorded result.
+  fake.pulls.delete(`${fixture.pull.fullName}#${fixture.pull.number}`);
+  expect(operation(await command(c, { command: "review.start", params: { prId, expectedHeadSha: fixture.headSha } }))).toEqual(operation(started));
+  fake.setPull(fixture.pull);
   // Once the base moves, the same key starts a new revision on it instead of replaying the reviewed one.
   fake.setPull({ ...fixture.pull, baseSha: "e".repeat(40) });
   const rebased = await command(c, { command: "review.start", params: { prId, expectedHeadSha: fixture.headSha } });
