@@ -382,8 +382,16 @@ export class AppDbSource implements ControlSource {
       }
       case "PR_UPDATED":
         return { ...head, eventType: "pr.updated", data: this.pr(this.db.prepare("SELECT * FROM pull_requests WHERE id = ?").get(rev.pr_id) as PullRow, rev) };
-      case "FINDING_OBSERVED":
-        return { ...ids, eventType: "finding.updated", data: findingAt(rev.id) };
+      case "FINDING_OBSERVED": {
+        // DETECTED leaves only for PUBLISHED, which a FINDING_UPDATED row records: before one, the finding was DETECTED.
+        // ponytail: a FINDING_UPDATED row still replays the current status; give it a status column once later
+        // observations (STILL_PRESENT and on) are journaled.
+        const changed = this.db
+          .prepare("SELECT 1 FROM audit_events WHERE event = 'FINDING_UPDATED' AND detail = ? AND seq <= ? LIMIT 1")
+          .get(row.detail, row.seq);
+        const finding = findingAt(rev.id);
+        return { ...ids, eventType: "finding.updated", data: changed ? finding : { ...finding, status: "DETECTED" } };
+      }
       case "FINDING_UPDATED":
         return { ...ids, eventType: "finding.updated", data: findingAt(null) };
       case "PUBLICATION_CHANGED":

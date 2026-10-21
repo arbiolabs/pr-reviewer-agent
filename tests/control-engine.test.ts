@@ -314,6 +314,13 @@ it("approves a review end to end over the socket: parked, previewed, published o
     { runId, status: "published", reviewId: 1000, url: "https://github.com/acme/shop/pull/1#pullrequestreview-1000" },
   ]);
   const findingId = (c.events().findLast((e) => e.eventType === "finding.updated")!.data as { id: string }).id;
+  // Each finding row carries the status as of that row: detected at VERIFY, published at PUBLISH.
+  expect(
+    h.source
+      .eventsAfter(0, 1000)
+      .filter((e) => e.eventType === "finding.updated" && (e.data as { id: string }).id === findingId)
+      .map((e) => (e.data as { status: string }).status),
+  ).toEqual(["DETECTED", "PUBLISHED"]);
   expect((await h.source.finding(findingId)).history.map(({ runId: run, disposition }) => [run, disposition])).toEqual([
     [runId, "DETECTED"],
     [runId, "PUBLISHED"],
