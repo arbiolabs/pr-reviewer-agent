@@ -1,18 +1,18 @@
-import { mkdirSync, readFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
 import type { AuthInteraction, CredentialStore, Models } from "@earendil-works/pi-ai";
 import { createTypeSafeClient, createZenClient } from "jev-systemone";
-import { type Config, loadConfig, saveDefaultModel } from "../config/config.ts";
-import { runDaemon, runTui } from "../control/daemon.ts";
+import { type Config, configPath, DEFAULT_CONFIG, loadConfig, saveConfig } from "../config/config.ts";
+import { findTui, runDaemon, runTui } from "../control/daemon.ts";
 import { EngineSource } from "../control/engine.ts";
-import { type Account, ACCOUNT_KEY, chooseAccount, detectGh, listAccounts, planGithubAuth, resolveGithubAuth } from "../github/accounts.ts";
+import { type Account, ACCOUNT_KEY, chooseAccount, detectGh, type Env, listAccounts, planGithubAuth, resolveGithubAuth } from "../github/accounts.ts";
 import { clientFor, type GitHubClient } from "../github/client.ts";
 import { GitHubPullSource, parsePullRef, parsePullUrl, type PullSource } from "../github/pulls.ts";
 import { type DecisionEngine, JevDecisionEngine, type JevRoute, jevSkipReason } from "../jev/decision.ts";
 import { PiAuthFileStore } from "../models/credential-store.ts";
-import { buildModels, detectModels } from "../models/detect.ts";
-import { chooseModel, listAvailableModels, splitRef } from "../models/select.ts";
+import { buildModels, detectModels, which } from "../models/detect.ts";
+import { type AvailableModel, chooseModel, listAvailableModels, splitRef } from "../models/select.ts";
 import { AppStore } from "../persistence/store.ts";
 import { reconcileOutbox } from "../publish/publisher.ts";
 import { finishReview, lockDataDir, openApp, startReview } from "../runtime/app.ts";
@@ -36,6 +36,7 @@ export type CliDeps = {
 };
 
 const USAGE = `usage:
+  pr-review setup [--check] [--json]
   pr-review review <pr-url> [--dry-run | --publish] [--json] [--no-jev] [--model provider/id] [--retry]
   pr-review reconcile --revision <revision-id>
   pr-review approve --revision <revision-id> --preview <payload-hash>
@@ -64,6 +65,8 @@ export async function main(argv: string[], deps: CliDeps = {}): Promise<number> 
   const dataDir = process.env.PR_REVIEW_DATA_DIR || ".data";
   try {
     switch (command) {
+      case "setup":
+        return await setup(rest, deps, dataDir, out, err);
       case "review":
         return await review(rest, deps, dataDir, out, err);
       case "reconcile":
@@ -108,7 +111,7 @@ async function review(args: string[], deps: CliDeps, dataDir: string, out: Out, 
   const ref = parsePullUrl(positionals[0]!);
   // A test's fake pull source serves local repositories; only the real GitHub source needs the token.
   const auth = deps.pulls || deps.github ? undefined : await withStore(dataDir, (store) => resolveGithubAuth(store));
-  if (auth) err(`github: ${auth.account ?? "no token, public repositories only"} (${auth.source})\n`);
+  if (auth) err(`github: ${auth.account ?? NO_TOKEN} (${auth.source})\n`);
   const githubToken = auth?.token;
   if (values.publish && !deps.github && githubToken === undefined) throw new Error("--publish needs a GitHub token: set GITHUB_TOKEN, run gh auth login, or pick one with pr-review accounts use");
   const github = deps.github ?? clientFor(config.github, { kind: "token", token: githubToken });
@@ -213,7 +216,11 @@ async function resolveModel(config: Config, deps: CliDeps, flag: string | undefi
   const available = await listAvailableModels(models, config.models.preferred);
   let choice = chooseModel({ flag, env: process.env.PR_REVIEW_MODEL, config: config.models.default }, available, isTTY);
   if (choice.kind === "error") throw new Error(choice.message);
-  if (choice.kind === "pick") choice = { kind: "chosen", ref: await pickModel(available.map((m) => `${m.ref}  (${m.authSource})`), available.map((m) => m.ref)), source: "--model" };
+  if (choice.kind === "pick") {
+    const ref = await pickModel(available);
+    if (await confirm(`Save ${ref} as the default in ${configPath()}?`, false)) saveConfig({ models: { default: ref } });
+    choice = { kind: "chosen", ref, source: "--model" };
+  }
   if (choice.kind !== "chosen") throw new Error("no model chosen");
   err(`model: ${choice.ref} (${choice.source})\n`);
   return { models, ref: choice.ref };
@@ -347,20 +354,25 @@ async function serve(deps: CliDeps, dataDir: string, err: (t: string) => void): 
   return 0;
 }
 
-async function pickModel(labels: string[], refs: string[]): Promise<string> {
+async function ask(question: string): Promise<string> {
   const rl = createInterface({ input: process.stdin, output: process.stderr });
   try {
-    labels.forEach((label, i) => process.stderr.write(`${String(i + 1).padStart(3)}. ${label}\n`));
-    for (;;) {
-      const answer = Number(await rl.question(`Pick a model [1-${refs.length}]: `));
-      const ref = refs[answer - 1];
-      if (Number.isInteger(answer) && ref) {
-        if ((await rl.question(`Save ${ref} as the default in pr-review.config.json? [y/N] `)).trim().toLowerCase() === "y") saveDefaultModel(ref);
-        return ref;
-      }
-    }
+    return (await rl.question(question)).trim();
   } finally {
     rl.close();
+  }
+}
+
+async function confirm(question: string, yes: boolean): Promise<boolean> {
+  const answer = (await ask(`${question} [${yes ? "Y/n" : "y/N"}] `)).toLowerCase();
+  return answer ? answer === "y" || answer === "yes" : yes;
+}
+
+async function pickModel(available: AvailableModel[]): Promise<string> {
+  available.forEach((m, i) => process.stderr.write(`${String(i + 1).padStart(3)}. ${m.ref}  (${m.authSource})\n`));
+  for (;;) {
+    const ref = available[Number(await ask(`Pick a model [1-${available.length}]: `)) - 1]?.ref;
+    if (ref) return ref;
   }
 }
 
@@ -416,11 +428,13 @@ async function withStore<T>(dataDir: string, fn: (store: AppStore) => Promise<T>
   }
 }
 
+const NO_TOKEN = "no token, public repositories only";
+
 function using(list: Account[]): { ok: boolean; text: string } {
   try {
     const plan = planGithubAuth(list);
     if (plan.source === "env") return { ok: true, text: `${plan.account.login} from the environment (overrides gh accounts)` };
-    if (plan.source === "none") return { ok: true, text: "no token, public repositories only" };
+    if (plan.source === "none") return { ok: true, text: NO_TOKEN };
     return { ok: true, text: `${plan.account.id} (${plan.source === "selected" ? "selected" : "gh active account"})` };
   } catch (error) {
     return { ok: false, text: error instanceof Error ? error.message : String(error) };
@@ -484,6 +498,104 @@ async function login(args: string[], deps: CliDeps, out: (t: string) => void): P
   } finally {
     rl.close();
   }
+}
+
+/** `missing` means reviews cannot run; `warn` means they run with a limitation. */
+export type Check = { id: "git" | "config" | "model" | "github" | "jev" | "tui"; status: "ok" | "warn" | "missing"; detail: string; fix?: string };
+
+/** What a review needs, checked without prompting, fetching a GitHub token, or reading TYPESAFE_API_KEY's value. */
+export async function gatherChecks(deps: CliDeps, dataDir: string, env: Env = process.env): Promise<Check[]> {
+  const checks: Check[] = [];
+  const git = which("git", env.PATH ?? "");
+  checks.push(git ? { id: "git", status: "ok", detail: git } : { id: "git", status: "missing", detail: "not on PATH", fix: "install git" });
+
+  const path = configPath(env);
+  let config = DEFAULT_CONFIG;
+  try {
+    config = loadConfig(path);
+    checks.push({ id: "config", status: "ok", detail: existsSync(path) ? path : `defaults, no ${path}` });
+  } catch (error) {
+    checks.push({ id: "config", status: "missing", detail: error instanceof Error ? error.message : String(error) });
+  }
+
+  const available = await listAvailableModels(deps.models ?? buildModels(deps.credentials ?? new PiAuthFileStore(), env), config.models.preferred);
+  const choice = chooseModel({ env: env.PR_REVIEW_MODEL, config: config.models.default }, available, false);
+  if (choice.kind === "chosen") {
+    const from = choice.source === "config" ? `from ${path}` : choice.source === "default" ? "first available" : `from ${choice.source}`;
+    checks.push({ id: "model", status: "ok", detail: `${choice.ref} (${from})` });
+  } else {
+    if (choice.kind === "error" && available.length > 0) checks.push({ id: "model", status: "missing", detail: choice.message, fix: "run `pr-review setup` to pick an available model" });
+    else checks.push({ id: "model", status: "missing", detail: "no models available", fix: "run `pr-review login anthropic`, or set ANTHROPIC_API_KEY" });
+  }
+
+  const detection = await detectGh(env);
+  const use = using(await withStore(dataDir, (store) => listAccounts(detection, store.getMeta(ACCOUNT_KEY), env)));
+  if (!use.ok) checks.push({ id: "github", status: "missing", detail: use.text });
+  else if (use.text === NO_TOKEN) checks.push({ id: "github", status: "warn", detail: use.text, fix: "run `gh auth login`, or set GITHUB_TOKEN" });
+  else checks.push({ id: "github", status: "ok", detail: use.text });
+
+  const keyless = config.jev.allow_keyless_for_private;
+  if (env.TYPESAFE_API_KEY) checks.push({ id: "jev", status: "ok", detail: "TypeSafe (TYPESAFE_API_KEY set)" });
+  else
+    checks.push({
+      id: "jev",
+      status: "warn",
+      detail: keyless ? "OpenCode Zen free tier for every repository (jev.allow_keyless_for_private)" : "OpenCode Zen free tier for public repositories; private repositories skip Jev",
+      fix: keyless ? "set TYPESAFE_API_KEY to use TypeSafe" : "set TYPESAFE_API_KEY to use TypeSafe; without it, serve and daemon --allow-commands skip Jev for every repository",
+    });
+
+  const tui = findTui(env.PATH ?? "");
+  checks.push(tui ? { id: "tui", status: "ok", detail: tui } : { id: "tui", status: "warn", detail: "pr-review-tui not built (optional terminal client)", fix: "(cd tui && cargo build --release)" });
+  return checks;
+}
+
+const MARK = { ok: "✓", warn: "!", missing: "✗" } as const;
+
+function printChecks(out: Out, checks: Check[]): void {
+  for (const c of checks) out(`  ${MARK[c.status]} ${c.id.padEnd(7)} ${c.detail}\n${c.fix ? `${" ".repeat(12)}${c.fix}\n` : ""}`);
+}
+
+const PUBLISH_MODES = ["dry_run", "comment", "silent_no_findings", "approval"] as const satisfies readonly Config["review"]["publish_mode"][];
+
+/** `pr-review setup`: print the checks, then offer each fix setup can make. `--check` only prints, and never prompts. */
+async function setup(args: string[], deps: CliDeps, dataDir: string, out: Out, err: (t: string) => void): Promise<number> {
+  const { values } = parseArgs({ args, options: { check: { type: "boolean" }, json: { type: "boolean" } } });
+  let checks = await gatherChecks(deps, dataDir);
+  const exitCode = () => (checks.some((c) => c.status === "missing") ? 1 : 0);
+  const status = (id: Check["id"]) => checks.find((c) => c.id === id)!.status;
+  if (values.json) {
+    out.json({ checks });
+    return exitCode();
+  }
+  printChecks(out, checks);
+  if (values.check) return exitCode();
+  if (!(deps.isTTY ?? Boolean(process.stdin.isTTY && process.stdout.isTTY))) {
+    err("setup: not a terminal, so checking only (same as setup --check)\n");
+    return exitCode();
+  }
+
+  // A config file that fails to load is never rewritten; the user fixes it by hand first.
+  const config = status("config") === "ok" ? loadConfig() : undefined;
+  const available = () => listAvailableModels(deps.models ?? buildModels(deps.credentials ?? new PiAuthFileStore()), (config ?? DEFAULT_CONFIG).models.preferred);
+  if (status("model") === "missing" && (await available()).length === 0 && (await confirm("Log in to anthropic now?", true))) await login(["anthropic"], deps, out);
+  if (config) {
+    const models = await available();
+    const why = !config.models.default ? `No models.default in ${configPath()}.` : status("model") === "missing" ? `models.default ${config.models.default} is not available.` : undefined;
+    if (models.length > 0 && why && (await confirm(`${why} Pick one now?`, true))) saveConfig({ models: { default: await pickModel(models) } });
+    const current = config.review.publish_mode;
+    let mode: Config["review"]["publish_mode"] | undefined;
+    while (!mode) {
+      const answer = (await ask(`Publish mode (${PUBLISH_MODES.join(" / ")}) [${current}]: `)) || current;
+      mode = PUBLISH_MODES.find((m) => m === answer);
+    }
+    if (mode !== current) saveConfig({ review: { publish_mode: mode } });
+  }
+
+  checks = await gatherChecks(deps, dataDir);
+  out("\n");
+  printChecks(out, checks);
+  if (exitCode() === 0) out("\nnext: pr-review review <pr-url>\n");
+  return exitCode();
 }
 
 if (import.meta.main) process.exitCode = await main(process.argv.slice(2));

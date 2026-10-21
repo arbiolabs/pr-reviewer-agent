@@ -70,6 +70,8 @@ When Jev fails, times out, or is skipped, the review runs at standard depth. Jev
 
 `src/config/config.ts` lists every key and its default.
 
+`pr-review setup` reports the config file, the model, the GitHub account, and the Jev tier described on this page. It can write `models.default` and `review.publish_mode` into the config file and keeps the other keys. It writes to `PR_REVIEW_CONFIG` when that is set.
+
 ### Publish mode
 
 `review.publish_mode` decides what happens to a finished review:

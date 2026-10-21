@@ -88,7 +88,9 @@ export const DEFAULT_CONFIG: Config = {
 /** Overlay `pr-review.config.json` (or `PR_REVIEW_CONFIG`) onto the defaults; every key must exist in the defaults with the same JSON type. */
 export const CONFIG_FILE = "pr-review.config.json";
 
-export function loadConfig(path = process.env.PR_REVIEW_CONFIG || CONFIG_FILE): Config {
+export const configPath = (env: Record<string, string | undefined> = process.env) => env.PR_REVIEW_CONFIG || CONFIG_FILE;
+
+export function loadConfig(path = configPath()): Config {
   if (!existsSync(path)) return DEFAULT_CONFIG;
   return mergeChecked(DEFAULT_CONFIG, JSON.parse(readFileSync(path, "utf8")), path) as Config;
 }
@@ -105,9 +107,18 @@ function mergeChecked(base: unknown, override: unknown, at: string): unknown {
   return result;
 }
 
-/** Persist one model choice into the config file, keeping whatever else it holds. */
-export function saveDefaultModel(ref: string, path = CONFIG_FILE): void {
-  const current = existsSync(path) ? (JSON.parse(readFileSync(path, "utf8")) as Record<string, Record<string, unknown>>) : {};
-  current.models = { ...current.models, default: ref };
-  writeFileSync(path, `${JSON.stringify(current, null, 2)}\n`);
+export type ConfigPatch = { [K in keyof Config]?: Partial<Config[K]> };
+
+/** Merge `patch` into the config file, keeping whatever else it holds. */
+export function saveConfig(patch: ConfigPatch, path = configPath()): void {
+  const current: unknown = existsSync(path) ? JSON.parse(readFileSync(path, "utf8")) : {};
+  writeFileSync(path, `${JSON.stringify(mergePatch(current, patch), null, 2)}\n`);
+}
+
+function mergePatch(base: unknown, patch: unknown): unknown {
+  const isObject = (v: unknown): v is Record<string, unknown> => typeof v === "object" && v !== null && !Array.isArray(v);
+  if (!isObject(base) || !isObject(patch)) return patch;
+  const result = { ...base };
+  for (const [key, value] of Object.entries(patch)) result[key] = mergePatch(base[key], value);
+  return result;
 }

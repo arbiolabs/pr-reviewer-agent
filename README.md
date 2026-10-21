@@ -94,13 +94,15 @@ Press `?` for the keys and `q` to quit. To review your own PRs:
 	pnpm install
 	```
 
-2. List the models you can use:
+2. Check your setup:
 
 	```bash
-	node bin/pr-review.mjs models
+	node bin/pr-review.mjs setup
 	```
 
-	pr-review finds credentials in `~/.pi/agent/auth.json`, which it shares with the `pi` CLI, and in provider environment variables such as `ANTHROPIC_API_KEY`. If nothing is listed, run `node bin/pr-review.mjs login anthropic`.
+	`setup` checks git, the config file, the model, the GitHub account, Jev, and the terminal client. It offers to log in, to pick a default model, and to choose a publish mode. Rerun it at any time to see what is done. In CI or a container, run `setup --check`. It only prints the checks, and exits 1 when a review cannot run.
+
+	pr-review finds credentials in `~/.pi/agent/auth.json`, which it shares with the `pi` CLI, and in provider environment variables such as `ANTHROPIC_API_KEY`. `node bin/pr-review.mjs models` lists them. If no model is found, run `node bin/pr-review.mjs login anthropic`.
 
 3. Review a PR without posting anything:
 
@@ -173,6 +175,7 @@ To check what Jev decided, run `node bin/pr-review.mjs inspect --pr owner/repo#1
 
 | Command | What it does |
 |---|---|
+| `setup [--check] [--json]` | Check what a review needs and offer to fix it. `--check` never prompts, and exits 1 when a review cannot run. |
 | `review <pr-url> [--dry-run \| --publish] [--json] [--model provider/id] [--no-jev] [--retry]` | Review one PR. Dry run is the default. Rerunning resumes an interrupted review or prints the stored result. |
 | `inspect --pr owner/repo#N [--json]` | Show a PR's revisions, transitions, routing, findings, and discards. |
 | `reconcile --revision <id>` | Decide an uncertain publication by listing the PR's reviews. Never posts. |
