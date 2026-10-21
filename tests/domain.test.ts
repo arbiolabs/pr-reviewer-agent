@@ -102,7 +102,7 @@ matrix("review task machine", REVIEW_MACHINE, REVIEW_STATES, REVIEW_EVENTS, [
 ], ["COMPLETED", "SUPERSEDED"]);
 
 it("derives the publication status the TUI shows from the revision and its outbox", () => {
-  const cases: [string, string, string][] = [
+  const cases: [string, string, string | null][] = [
     ["AWAITING_APPROVAL", "pending", "awaiting_approval"],
     ["PUBLISH", "pending", "publishing"],
     ["PUBLISH", "sending", "publishing"],
@@ -111,6 +111,7 @@ it("derives the publication status the TUI shows from the revision and its outbo
     ["COMPLETED", "published", "published"],
     ["SUPERSEDED", "failed", "failed"],
     ["FAILED", "pending", "failed"],
+    ["COLLECT_CONTEXT", "pending", null],
   ];
   expect(cases.map(([state, outbox]) => publicationStatus(state as ReviewState, outbox as OutboxStatus))).toEqual(cases.map((c) => c[2]));
 });

@@ -272,7 +272,8 @@ export class AppStore {
    * for the control stream's `review.publication_changed`. Written from every outbox write and revision transition, and
    * deduplicated against the last row, so a replay of either converges.
    */
-  private journalPublication(revisionId: string, status: string, at: string): void {
+  private journalPublication(revisionId: string, status: string | null, at: string): void {
+    if (status === null) return;
     const last = this.db
       .prepare("SELECT detail FROM audit_events WHERE revision_id = ? AND event = 'PUBLICATION_CHANGED' ORDER BY seq DESC LIMIT 1")
       .get(revisionId) as { detail: string } | undefined;

@@ -129,6 +129,14 @@ it("cancels a parked revision, reopens it with retry as a fresh attempt, and app
   const reopened = await finishReview(h.app, await retry(h.app, revision.id, "tui via daemon"));
   expect([reopened.state, h.app.store.outbox(outbox.id)!.status, h.app.store.reopenings(revision.id)]).toEqual(["AWAITING_APPROVAL", "pending", ["MANUAL_RETRY"]]);
   expect(h.app.store.auditEvents(revision.id).find((e) => e.event === "MANUAL_RETRY")!.detail).toBe("manual override: tui via daemon (retry 1)");
+  // The reopened outbox is pending again, but the run is back in COLLECT_CONTEXT: the journal must not say publishing.
+  const publications = (
+    h.app.store.db.prepare("SELECT to_state, detail FROM audit_events WHERE revision_id = ? AND event = 'PUBLICATION_CHANGED' ORDER BY seq").all(revision.id) as {
+      to_state: string;
+      detail: string;
+    }[]
+  ).map((e) => `${e.to_state} ${e.detail}`);
+  expect(publications).toEqual(["AWAITING_APPROVAL awaiting_approval", "AWAITING_APPROVAL failed", "AWAITING_APPROVAL awaiting_approval"]);
   expect(await refused(retry(h.app, revision.id, "tui via daemon"))).toEqual(["INVALID_TRANSITION", "MANUAL_RETRY is not legal in AWAITING_APPROVAL"]);
 
   const done = await finishReview(h.app, await approve(h.app, h.pulls, { revisionId: revision.id, previewId: outbox.payload_hash }, "test"));

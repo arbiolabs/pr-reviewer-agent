@@ -284,7 +284,8 @@ export class AppDbSource implements ControlSource {
         body: payload.body,
         comments: payload.comments,
         event: payload.event,
-        status: publicationStatus(revision.state, outbox.status),
+        // A reopened run reviewing again still holds its old payload, which waits for an approval it must re-earn.
+        status: publicationStatus(revision.state, outbox.status) ?? "awaiting_approval",
       };
     });
   }

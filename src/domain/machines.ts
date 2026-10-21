@@ -79,12 +79,17 @@ export const IDLE_REVIEW_STATES: readonly ReviewState[] = [...TERMINAL_REVIEW_ST
 export const PUBLICATION_STATUSES = ["awaiting_approval", "publishing", "published", "uncertain", "failed"] as const;
 export type PublicationStatus = (typeof PUBLICATION_STATUSES)[number];
 
-export function publicationStatus(state: ReviewState, outbox: OutboxStatus): PublicationStatus {
+/**
+ * `null` when the outbox says nothing new: a retried run reopens its outbox to `pending` while it reviews again
+ * from COLLECT_CONTEXT, and that is not publishing.
+ */
+export function publicationStatus(state: ReviewState, outbox: OutboxStatus): PublicationStatus | null {
   if (outbox === "published") return "published";
   if (outbox === "failed") return "failed";
   if (outbox === "needs_reconciliation") return "uncertain";
   if (state === "AWAITING_APPROVAL") return "awaiting_approval";
-  return TERMINAL_REVIEW_STATES.includes(state) ? "failed" : "publishing";
+  if (state === "PUBLISH" || state === "RECONCILE") return "publishing";
+  return TERMINAL_REVIEW_STATES.includes(state) ? "failed" : null;
 }
 
 // §9.3 publication outbox. `sending` is committed before the POST, so a crash leaves proof that a write may have
