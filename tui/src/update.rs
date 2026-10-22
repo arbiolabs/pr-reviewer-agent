@@ -16,6 +16,10 @@ pub const OFFLINE: &str = "not connected; r retries";
 #[derive(Debug)]
 pub enum Msg {
     Key(KeyEvent),
+    /// What a key would do, without the key: ignored wherever no key reaches the action.
+    Action(Action),
+    /// What a click on this target would do, without the click's coordinates.
+    Pick(crate::view::Hit),
     /// A click or a wheel turn; the input thread drops every other mouse event.
     Mouse(MouseEvent),
     Resize(u16, u16),
@@ -127,6 +131,21 @@ pub fn update(m: &mut Model, msg: Msg) -> Vec<Effect> {
                 act(m, a, &mut fx);
                 forget_old_toast(m, before);
             }
+        }
+        Msg::Action(a) => {
+            if keymap::reachable(m.ui.screen, m.top_modal(), a) {
+                let before = (view_of(m), m.notice.clone());
+                act(m, a, &mut fx);
+                forget_old_toast(m, before);
+            }
+        }
+        // A click only lands on a finding of the selected PR; a stray id would leave the cursor on nothing.
+        Msg::Pick(crate::view::Hit::Finding(id))
+            if !m.ui.selected_pr.as_ref().is_some_and(|pr| m.domain.pr_findings(pr).iter().any(|f| f.id == id)) => {}
+        Msg::Pick(hit) => {
+            let before = (view_of(m), m.notice.clone());
+            pick(m, hit, &mut fx);
+            forget_old_toast(m, before);
         }
         Msg::Mouse(e) => {
             let before = (view_of(m), m.notice.clone());
@@ -1392,8 +1411,16 @@ fn mouse(m: &mut Model, e: MouseEvent, fx: &mut Vec<Effect>) {
 }
 
 fn click(m: &mut Model, x: u16, y: u16, fx: &mut Vec<Effect>) {
-    match crate::view::hit(m, x, y) {
-        Some(crate::view::Hit::Pr(id)) => {
+    if let Some(hit) = crate::view::hit(m, x, y) {
+        pick(m, hit, fx);
+    }
+}
+
+/// A click on `hit`: selects the PR or the finding, and a click on what is already selected opens it.
+fn pick(m: &mut Model, hit: crate::view::Hit, fx: &mut Vec<Effect>) {
+    use crate::view::Hit;
+    match hit {
+        Hit::Pr(id) => {
             if m.ui.selected_pr.as_ref() != Some(&id) {
                 m.ui.selected_pr = Some(id);
                 m.ui.selected_finding = None;
@@ -1401,7 +1428,7 @@ fn click(m: &mut Model, x: u16, y: u16, fx: &mut Vec<Effect>) {
                 reselect(m);
             }
         }
-        Some(crate::view::Hit::Ready) => {
+        Hit::Ready => {
             if let Some(r) = m.parked_run().cloned() {
                 m.ui.screen = Screen::Review;
                 m.ui.focus = Pane::Main;
@@ -1410,7 +1437,7 @@ fn click(m: &mut Model, x: u16, y: u16, fx: &mut Vec<Effect>) {
                 open_publication(m, r, fx);
             }
         }
-        Some(crate::view::Hit::Finding(id)) => {
+        Hit::Finding(id) => {
             m.ui.screen = Screen::Review;
             m.ui.focus = Pane::Main;
             if m.ui.selected_finding.as_ref() == Some(&id) {
@@ -1420,7 +1447,7 @@ fn click(m: &mut Model, x: u16, y: u16, fx: &mut Vec<Effect>) {
                 m.ui.doc_scroll = 0;
             }
         }
-        Some(crate::view::Hit::DiffFile(path)) => {
+        Hit::DiffFile(path) => {
             if let Some(d) = &mut m.diff
                 && d.selected_file.as_ref() != Some(&path)
             {
@@ -1430,7 +1457,7 @@ fn click(m: &mut Model, x: u16, y: u16, fx: &mut Vec<Effect>) {
             }
         }
         // A click puts the cursor on the row; a click on the cursor's row opens what Enter would.
-        Some(crate::view::Hit::DiffRow(row)) => {
+        Hit::DiffRow(row) => {
             m.ui.focus = Pane::Main;
             if let Some(d) = &mut m.diff {
                 if d.cursor == row {
@@ -1441,7 +1468,7 @@ fn click(m: &mut Model, x: u16, y: u16, fx: &mut Vec<Effect>) {
                 }
             }
         }
-        Some(crate::view::Hit::Event(seq)) => {
+        Hit::Event(seq) => {
             if let Some(t) = &mut m.timeline {
                 if t.selected == Some(seq) {
                     open(m, fx);
@@ -1450,8 +1477,7 @@ fn click(m: &mut Model, x: u16, y: u16, fx: &mut Vec<Effect>) {
                 }
             }
         }
-        Some(crate::view::Hit::View(s)) => goto(m, s, fx),
-        None => {}
+        Hit::View(s) => goto(m, s, fx),
     }
 }
 
