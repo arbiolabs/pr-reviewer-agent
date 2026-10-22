@@ -207,6 +207,32 @@ it("corrects a false resolution on the next push: the finding comes back as a ne
   expect(fake.reviews[3]!.body).toContain("Still present from an earlier commit:");
 }, 90_000);
 
+it("carries a reopening whose own review never reached GitHub into the next review as news, with its marker, once", async () => {
+  const silent: Config = { ...config, review: { ...config.review, publish_mode: "silent_no_findings" } };
+  const { app } = await open([readDiff(), submitDefect(fixture), readDiff(), submitNothing(), readDiff(), submitNothing(), readDiff(), submitNothing(), readDiff(), submitNothing()], silent);
+  const first = await review(app);
+  const [finding] = app.store.findingsForRevision(first.id);
+  const falsely = nextHead();
+  const second = await review(app);
+  app.store.db.prepare("UPDATE findings SET status = 'RESOLVED' WHERE id = ?").run(finding!.findingId);
+  app.store.db.prepare("UPDATE finding_observations SET disposition = 'RESOLVED', basis = 'resolution_checked' WHERE revision_id = ?").run(second.id);
+  // The push that reopens it is reviewed in dry run, the shape a superseded revision leaves: the new finding is in the store, and no review carries it.
+  nextHead();
+  const dry = await review(app, false);
+  const [reopened] = app.store.findingsForRevision(dry.id);
+  expect([dry.state, fake.reviews.length, reopened?.carried, reopened?.listed, reopened?.reopens]).toEqual(["COMPLETED", 1, false, false, { findingId: finding!.findingId, resolvedAt: falsely.headSha }]);
+  // The next push carries it, yet nobody has seen it: it is news, listed as new with its marker, and commented on once.
+  nextHead();
+  const next = await review(app);
+  expect([next.state, fake.reviews.length, inline()]).toEqual(["COMPLETED", 2, [{ path: DEFECT.file, line: DEFECT.line }, { path: DEFECT.file, line: DEFECT.line }]]);
+  expect(app.store.findingsForRevision(next.id).map((f) => [f.findingId, f.status, f.carried, f.listed, f.posted])).toEqual([[reopened!.findingId, "STILL_PRESENT", true, false, true]]);
+  expect(fake.reviews[1]!.body).toContain(`Found 1 actionable issue.\n\n- High: Order deletion endpoint skips the admin check (\`src/routes/orders.ts:5\`; looked resolved at \`${falsely.headSha.slice(0, 7)}\`, but its code is still here)`);
+  // Once that review is on GitHub the finding is carried like any other, and a quiet push posts nothing.
+  nextHead();
+  const after = await review(app);
+  expect([after.state, fake.reviews.length, app.store.findingsForRevision(after.id).map((f) => [f.carried, f.listed])]).toEqual(["COMPLETED", 2, [[true, true]]]);
+}, 90_000);
+
 it("keeps a finding open on a refused claim, with the refusal recorded, and posts nothing for it under silent_no_findings", async () => {
   const silent: Config = { ...config, review: { ...config.review, publish_mode: "silent_no_findings" } };
   const one = await open([readDiff(), submitDefect(fixture)], silent);

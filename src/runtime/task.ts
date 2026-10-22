@@ -22,7 +22,7 @@ import { evidenceTexts, type HeadReader, headReader, locate, observe, type Obser
 import { fingerprint, verifyCandidates } from "../reasoning/verify.ts";
 import { PinnedRepo, syncRepo } from "../source/git.ts";
 import type { GitHubClient } from "../github/client.ts";
-import { buildPayload, findReview, postReview, PUBLISHER_VERSION, type ReviewPayload, recordVerdict } from "../publish/publisher.ts";
+import { buildPayload, findReview, hasNews, postReview, PUBLISHER_VERSION, type ReviewPayload, recordVerdict } from "../publish/publisher.ts";
 import { parseDiff } from "../source/diff.ts";
 
 export const REVIEW_TASK_NAME = "pr-review.revision";
@@ -273,8 +273,7 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
     const snapshot = store.snapshot(revision.id)!;
     const { payload, hash, inlineFindingIds } = buildPayload({ revisionId: revision.id, headSha: revision.head_sha, findings, limitations: snapshot.limitations, files: parseDiff(snapshot.diff) });
     // silent_no_findings posts only a review that says something new: a new finding, a first comment on a carried one, or a newly resolved one.
-    const news = inlineFindingIds.length > 0 || findings.some((f) => !f.carried || f.status === "RESOLVED");
-    const publish = input.publish === true && !(config.review.publish_mode === "silent_no_findings" && !news);
+    const publish = input.publish === true && !(config.review.publish_mode === "silent_no_findings" && !hasNews(findings, inlineFindingIds));
     // Approval mode stores the payload the same way, then parks the revision for a human instead of posting.
     const approval = publish && config.review.publish_mode === "approval";
     if (revision.state === "PREPARE_PUBLICATION") {

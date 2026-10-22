@@ -61,11 +61,18 @@ const CARRIED_SECTIONS: [heading: string, states: string[]][] = [
 /** Carried findings listed per section before "and N more": a long PR's body stays readable and bounded. */
 const MAX_CARRIED_PER_SECTION = 20;
 
+/**
+ * A finding the reader has not seen: first found by this revision, or reopened by a revision whose review never reached
+ * GitHub, as when a newer push superseded it. It is listed as new, with the commit it looked resolved at, so the
+ * reopening is shown once whichever review carries it first.
+ */
+export const unseen = (f: FindingView) => !f.carried || (f.reopens !== null && !f.listed);
+
 /** The §12 body for a head; `incomplete` replaces the findings line for a run that did not finish. */
 export function renderSummary(headSha: string, findings: FindingView[], limitations: string[], incomplete?: string): string {
   const lines = ["## Automated PR review", "", `Reviewed commit: \`${headSha}\``, ""];
-  const fresh = findings.filter((f) => !f.carried);
-  const carried = findings.filter((f) => f.carried);
+  const fresh = findings.filter(unseen);
+  const carried = findings.filter((f) => !unseen(f));
   const where = (f: FindingView) => (f.anchored ? `${f.candidate.file}:${f.candidate.newLine}` : f.candidate.file);
   if (incomplete !== undefined) {
     lines.push(incomplete);

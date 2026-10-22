@@ -91,6 +91,8 @@ export type FindingView = {
   firstHeadSha: string;
   /** An inline comment is on GitHub, or in an outbox that may still reach it; such a finding is never commented again. */
   posted: boolean;
+  /** An earlier review that carries it in its body is on GitHub, or in an outbox that may still reach it: the reader has seen it. */
+  listed: boolean;
   /** `candidate.file` and `newLine` are valid at this revision's head, not carried from an older one. */
   anchored: boolean;
   /** The resolved finding this one reopens, when its code came back after a resolution, and the head it was resolved on. */
@@ -597,15 +599,21 @@ export class AppStore {
     // A finding counts as posted while an outbox may still put it on GitHub: its POST may have landed (`sending`,
     // `needs_reconciliation`), or a live revision is about to send it. A missed comment is cheaper than a duplicate.
     // A `pending` outbox of a finished revision was never sent or was proven absent, so its findings are not posted.
+    // It counts as listed once such an outbox, or a published one, belongs to a revision that observed it.
     const terminal = TERMINAL_REVIEW_STATES.map((s) => `'${s}'`).join(", ");
     const outboxes = this.db
       .prepare(
-        `SELECT o.revision_id, o.payload_json, o.inline_finding_ids_json FROM publication_outbox o JOIN review_revisions r ON r.id = o.revision_id
+        `SELECT o.revision_id, o.status, o.payload_json, o.inline_finding_ids_json FROM publication_outbox o JOIN review_revisions r ON r.id = o.revision_id
          WHERE r.pr_id = ? AND o.revision_id != ?
-         AND (o.status IN ('sending', 'needs_reconciliation') OR (o.status = 'pending' AND r.state NOT IN (${terminal})))`,
+         AND (o.status IN ('published', 'sending', 'needs_reconciliation') OR (o.status = 'pending' AND r.state NOT IN (${terminal})))`,
       )
-      .all(revision.pr_id, revisionId) as Pick<OutboxRow, "revision_id" | "payload_json" | "inline_finding_ids_json">[];
-    const inFlight = new Set(outboxes.flatMap((o) => this.inlineFindingIds(o)));
+      .all(revision.pr_id, revisionId) as Pick<OutboxRow, "revision_id" | "status" | "payload_json" | "inline_finding_ids_json">[];
+    const inFlight = new Set(outboxes.filter((o) => o.status !== "published").flatMap((o) => this.inlineFindingIds(o)));
+    const listed = new Set(
+      outboxes.length === 0
+        ? []
+        : (this.db.prepare(`SELECT DISTINCT finding_id FROM finding_observations WHERE revision_id IN (${outboxes.map(() => "?").join(", ")})`).all(...outboxes.map((o) => o.revision_id)) as { finding_id: string }[]).map((r) => r.finding_id),
+    );
     return rows.map((row) => {
       const location = JSON.parse(row.location_json!) as Partial<ObservedLocation>;
       return {
@@ -617,6 +625,7 @@ export class AppStore {
         carried: row.first_revision_id !== revisionId,
         firstHeadSha: row.first_head_sha!,
         posted: row.github_review_id !== null || inFlight.has(row.id!),
+        listed: listed.has(row.id!),
         anchored: location.headSha === undefined || location.headSha === revision.head_sha,
         reopens: row.reopens == null ? null : { findingId: row.reopens, resolvedAt: row.resolved_at! },
       };
