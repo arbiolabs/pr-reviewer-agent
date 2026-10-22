@@ -68,3 +68,22 @@ pub fn window(content_height: f32, scale: f32) -> Result<Image, String> {
 pub fn window(_: f32, _: f32) -> Result<Image, String> {
     Err("--snapshot captures on macOS only".into())
 }
+
+/// The app's own icon for the Dock and the app switcher: the binary runs without an app bundle, so nothing else gives
+/// macOS one.
+#[cfg(target_os = "macos")]
+pub fn set_app_icon() {
+    use objc2::{AllocAnyThread, MainThreadMarker};
+    use objc2_app_kit::{NSApplication, NSImage};
+    use objc2_foundation::NSData;
+
+    const ICON: &[u8] = include_bytes!("../assets/app-icon.png");
+    let Some(mtm) = MainThreadMarker::new() else { return };
+    let data = NSData::with_bytes(ICON);
+    if let Some(image) = NSImage::initWithData(NSImage::alloc(), &data) {
+        unsafe { NSApplication::sharedApplication(mtm).setApplicationIconImage(Some(&image)) };
+    }
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn set_app_icon() {}

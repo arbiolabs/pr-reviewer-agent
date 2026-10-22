@@ -232,6 +232,7 @@ fn run_app(
 ) {
     gpui_kit::application().with_assets(gpui_kit::assets::AllAssets).run(move |cx| {
         gpui_kit::init(cx);
+        capture::set_app_icon();
         match appearance {
             Some(mode) => Theme::change(mode, None, cx),
             None => Theme::sync_system_appearance(None, cx),

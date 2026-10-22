@@ -32,6 +32,8 @@ To play a scripted session with no daemon:
 desktop/target/release/pr-review-desktop --playback protocol/playback/showcase.ndjson
 ```
 
+The app runs as a plain binary, without an app bundle, so it sets its own Dock and app-switcher icon at launch from `assets/app-icon.png`. That file is the icon on Apple's 1024 px grid, with the artwork about 824 px wide so it sits at the same size as other apps' icons.
+
 ## The snapshot harness
 
 `--snapshot OUT.png` captures the app's own window to a PNG and quits with exit code 0. The capture needs no Screen Recording permission, because the app reads back a window it owns.
