@@ -744,13 +744,14 @@ fn titlebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         .border_b_1()
         .border_color(t.border)
         .window_control_area(WindowControlArea::Drag)
+        // Back as a macOS toolbar button: a chevron in a square that lights on hover, its shortcut in the tooltip.
         .when(away, |d| {
-            d.child(button(
+            d.child(crate::kit::icon_button(
                 t,
                 "back",
-                "Back",
-                Some("⌘["),
-                Tone::Ghost,
+                IconName::ChevronLeft,
+                "Back (⌘[)",
+                px(28.),
                 Some(click(cx, |s, cx| s.act(Action::Back, cx))),
             ))
         })

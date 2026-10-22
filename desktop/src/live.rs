@@ -137,7 +137,7 @@ pub fn live(s: &Shell, t: &Colors, pr: &Pr, run: &Run, cx: &Context<Shell>) -> D
                 .text_size(text::CAPTION)
                 .text_color(t.muted)
                 .child(div().size(px(6.)).rounded(radius::PILL).bg(t.ok))
-                .child(format!("Following · {} · click the track to replay", queue::count(total, "event")))
+                .child("Following · click the track to replay")
                 .into_any_element(),
         });
 
