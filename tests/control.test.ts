@@ -225,6 +225,20 @@ describe("fixture source", () => {
     const event = await c.waitFor((m) => m.type === "event" && m.streamEpoch === "epoch-2");
     expect(event).toMatchObject({ sequence: 4, prevSequence: 3, eventType: "review.phase_changed" });
   });
+  it("answers finding.get with the showcase's recorded explanation and evidence", async () => {
+    const c = await client(await serve({ source: FixtureSource.load("showcase") }));
+    await c.hello();
+    c.send({ type: "snapshot.get", requestId: "s" });
+    await c.waitFor((m) => m.type === "snapshot");
+    c.send({ type: "finding.get", requestId: "f", findingId: "ffadc4e5592b38cfb55eaa5e99afddd8" });
+    const detail = await c.waitFor((m) => m.type === "finding.detail");
+    expect(detail.type === "finding.detail" && detail.finding).toMatchObject({
+      title: "Order history runs one item query per order",
+      explanation: expect.stringMatching(/^orderHistory fetches a page of orders/),
+      evidence: [{ kind: "code_ref", path: "src/server/orders/history.ts", start: 15, end: 21 }, { kind: "tool_summary" }],
+      history: [{ disposition: "DETECTED" }],
+    });
+  });
 });
 
 describe("slow client", () => {
