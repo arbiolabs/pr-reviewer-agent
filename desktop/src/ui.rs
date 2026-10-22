@@ -683,9 +683,10 @@ fn sidebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
             m.ui.screen == Screen::Settings,
             click(cx, |s, cx| s.act(Action::Goto(Screen::Settings), cx)),
         ));
-    if stage == Stage::Ready {
+    let groups = queue::rows(m);
+    if stage == Stage::Ready && !groups.is_empty() {
         list = list.child(div().px(space::S2).pt(space::S5).pb(space::S1).child(overline(t, "Pull requests")));
-        for (repo, rows) in queue::rows(m) {
+        for (repo, rows) in groups {
             list = list.child(
                 div()
                     .px(space::S2)

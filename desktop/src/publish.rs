@@ -171,7 +171,7 @@ pub fn publication(
             ))
             .child(summary(t, sentence)),
     );
-    if let Some(c) = state_callout(m, t, run_id, p, publish, posted) {
+    if let Some(c) = state_callout(m, t, p, publish, posted) {
         body = body.child(c);
     }
     let frame = |head: Div, content: Div| {
@@ -295,13 +295,13 @@ pub fn publication(
                     .truncate()
                     .text_size(text::SMALL)
                     .text_color(t.muted)
-                    .child("Public and final once posted. Post asks once more before it sends."),
+                    .child("Public and final once posted."),
             )
             .child(button(t, "p-close", "Not now", Some("esc"), Tone::Ghost, on(cx, |s, cx| s.act(Action::Back, cx))))
             .child(button(
                 t,
                 "p-post",
-                "Post review to GitHub…",
+                "Post to GitHub…",
                 Some("⌘⏎"),
                 Tone::Primary,
                 ready.then(|| -> OnClick { Box::new(cx.listener(|s, _: &ClickEvent, _, cx| s.post(cx))) }),
@@ -313,14 +313,13 @@ pub fn publication(
 fn state_callout(
     m: &Model,
     t: &Colors,
-    run_id: &RunId,
     p: &PublicationPreview,
     publish: &ConfirmState,
     posted: Option<PublicationStatus>,
 ) -> Option<Div> {
     Some(match (posted, publish) {
         (Some(PublicationStatus::Published), _) => {
-            callout(t, t.ok, IconName::CircleCheck, "GitHub has this review", published_url(m, run_id))
+            callout(t, t.ok, IconName::CircleCheck, "GitHub has this review", None)
         }
         (Some(PublicationStatus::Publishing), _) => {
             callout(t, t.running, IconName::LoaderCircle, "Posting to GitHub…", None)

@@ -172,15 +172,29 @@ pub fn score(query: &str, title: &str) -> Option<u8> {
     fuzzy(query, title).then_some(3)
 }
 
+/// The entries `query` matches, best first. Groups stay together: a group sorts by its best entry, and its entries
+/// by their own score, runnable before blocked, then in the order `entries` gives.
 fn matching(s: &Shell, query: &str) -> Vec<Entry> {
-    let mut found: Vec<(u8, usize, Entry)> = entries(s)
+    let found: Vec<(u8, usize, Entry)> = entries(s)
         .into_iter()
         .enumerate()
-        .filter_map(|(i, e)| score(query, &format!("{} {}", e.group, e.title)).map(|sc| (sc, i, e)))
+        .filter_map(|(i, e)| score(query, &e.title).or_else(|| fuzzy(query, e.group).then_some(3)).map(|sc| (sc, i, e)))
         .collect();
-    if !query.trim().is_empty() {
-        found.sort_by_key(|(sc, i, e)| (*sc, e.blocked.is_some(), *i));
+    if query.trim().is_empty() {
+        return found.into_iter().map(|(_, _, e)| e).collect();
     }
+    let mut groups: Vec<(&'static str, u8, usize)> = Vec::new();
+    for (sc, i, e) in &found {
+        match groups.iter_mut().find(|g| g.0 == e.group) {
+            Some(g) => g.1 = g.1.min(*sc),
+            None => groups.push((e.group, *sc, *i)),
+        }
+    }
+    let mut found = found;
+    found.sort_by_key(|(sc, i, e)| {
+        let g = groups.iter().find(|g| g.0 == e.group).map_or((3, 0), |g| (g.1, g.2));
+        (g, *sc, e.blocked.is_some(), *i)
+    });
     found.into_iter().map(|(_, _, e)| e).collect()
 }
 

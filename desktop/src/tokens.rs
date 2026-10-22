@@ -233,6 +233,8 @@ pub mod layout {
     /// columns each code surface fits at 1280 points. ponytail: fixed counts instead of measuring the pane, so a
     /// narrower window wraps late; measure the pane if the window gets resizable.
     pub const COLS_EVIDENCE: usize = 60;
+    /// A code block inside the reading column.
+    pub const COLS_PROSE: usize = 48;
     pub const COLS_DIFF: usize = 84;
     pub const COLS_WIDE: usize = 108;
 }

@@ -231,11 +231,11 @@ fn face(c: &Card, selected: bool) -> Face {
                     format!("Also open: {}", queue::severity_summary(more))
                 },
                 meta: format!(
-                    "{}{} · {:.0}% sure · {}",
+                    "{}{} · {:.0}% sure · {} evidence",
                     file,
                     top.line.map_or(String::new(), |l| format!(":{l}")),
                     top.confidence * 100.,
-                    queue::count(top.evidence_count as usize, "evidence item")
+                    top.evidence_count
                 ),
                 action: "Open finding",
             }
@@ -330,12 +330,12 @@ fn card(_: &Shell, t: &Colors, c: &Card, i: usize, selected: bool, cx: &Context<
             d.child(
                 div()
                     .absolute()
-                    .right(px(-9.))
+                    .right(px(-14.))
                     .top_0()
                     .bottom_0()
                     .flex()
                     .items_center()
-                    .child(div().text_size(px(11.)).text_color(t.accent).child("▶")),
+                    .child(div().text_size(px(13.)).text_color(t.accent).child("▶")),
             )
         })
         .child(
@@ -361,6 +361,7 @@ fn card(_: &Shell, t: &Colors, c: &Card, i: usize, selected: bool, cx: &Context<
                 .line_height(px(20.))
                 .font_weight(FontWeight::SEMIBOLD)
                 .text_color(t.text)
+                .text_ellipsis()
                 .line_clamp(2)
                 .child(f.headline),
         )
@@ -371,6 +372,7 @@ fn card(_: &Shell, t: &Colors, c: &Card, i: usize, selected: bool, cx: &Context<
                 .text_size(text::LEAD)
                 .line_height(px(21.))
                 .text_color(t.text)
+                .text_ellipsis()
                 .line_clamp(2)
                 .child(format!("\u{201c}{q}\u{201d}"))
         }))
@@ -380,6 +382,7 @@ fn card(_: &Shell, t: &Colors, c: &Card, i: usize, selected: bool, cx: &Context<
                     .text_size(text::SMALL)
                     .line_height(text::LINE_TIGHT)
                     .text_color(t.muted)
+                    .text_ellipsis()
                     .line_clamp(2)
                     .child(crate::detail::md_line(t, &f.sub)),
             )

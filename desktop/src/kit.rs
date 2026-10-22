@@ -318,7 +318,7 @@ pub fn progress(t: &Colors, at: usize, hue: Hsla, failed: bool, gauge: Gauge) ->
             .when(gauge == Gauge::Full, |d| d.flex_1())
             .when(gauge != Gauge::Full, |d| d.w(w));
         if failed {
-            tick.bg(if i <= at.min(5) { t.danger.alpha(0.6) } else { t.border_strong.alpha(0.5) })
+            tick.bg(if i <= at.min(5) { t.danger.alpha(0.45) } else { t.border_strong.alpha(0.5) })
         } else if i < at {
             tick.bg(hue)
         } else if i == at {

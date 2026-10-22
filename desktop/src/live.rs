@@ -39,10 +39,7 @@ pub fn live(s: &Shell, t: &Colors, pr: &Pr, run: &Run, cx: &Context<Shell>) -> D
         .flex()
         .gap(space::S8)
         .child(stat(tools.to_string(), "tool calls"))
-        .child(stat(
-            if landed.is_empty() { "none yet".into() } else { queue::severity_summary(&landed) },
-            "findings kept",
-        ))
+        .child(stat(if landed.is_empty() { "0".into() } else { queue::severity_summary(&landed) }, "findings kept"))
         .child(stat(total.to_string(), "events"));
 
     // The track: one tick per event, colored by kind, dim past the held point. Click one to hold the log there.

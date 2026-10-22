@@ -419,7 +419,7 @@ pub fn setup_body(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
             t,
             t.danger,
             IconName::CircleX,
-            format!("{} before reviews can run", queue::count(issues, "fix")),
+            format!("{issues} {} before reviews can run", if issues == 1 { "fix" } else { "fixes" }),
             Some("Run the commands below in a terminal, then restart the daemon.".into()),
         )
     } else if let Some(why) = server.and_then(|s| s.commands_off()) {

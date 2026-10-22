@@ -59,6 +59,7 @@ snap() {
 
 # The design review's states, dark and light.
 for look in dark light; do
+  snap 00-connecting-$look     $look 600   "" desktop/playback/slow.ndjson
   snap 01-overview-$look       $look 20000 ""
   snap 02-pr-$look             $look 20000 "wait:19000,pr:1287,finding:2"
   snap 03-finding-$look        $look 20000 "wait:19000,pr:1287,finding:1,finding:1"

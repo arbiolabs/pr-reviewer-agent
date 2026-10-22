@@ -1,0 +1,2 @@
+{"delayMs":1500,"message":{"type":"welcome","requestId":"req-hello","protocolVersion":1,"serverVersion":"0.1.0","sessionId":"session-slow","capabilities":["account.select"],"mode":"engine","streamEpoch":"epoch-1","latestSequence":0}}
+{"delayMs":0,"message":{"type":"snapshot","requestId":"req-snapshot","streamEpoch":"epoch-1","sequence":0,"prs":[],"runs":[],"findings":[],"accounts":[]}}

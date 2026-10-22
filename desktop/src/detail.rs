@@ -53,11 +53,12 @@ pub fn page(id: &'static str, body: Div, footer: Option<Div>, t: &Colors, wide: 
                 .items_center()
                 .gap(space::S2)
                 .h(layout::BAR)
+                .min_w_0()
                 .px(space::S8)
                 .border_t_1()
                 .border_color(t.border)
                 .bg(t.raised)
-                .child(f)
+                .child(f.min_w_0())
         }))
 }
 
@@ -199,7 +200,7 @@ pub fn pr_sentence(m: &Model, pr: &Pr, run: Option<&Run>) -> String {
         let reason =
             r.failure_reason.as_ref().map_or("no reason given".to_string(), |x| crate::kit::lead(x.as_str(), 1));
         return if crate::cards::too_large(&reason) {
-            format!("Too large to review: {reason}")
+            reason
         } else {
             format!("The review failed{}: {reason}", r.attempt.map_or(String::new(), |a| format!(" on attempt {a}")))
         };
@@ -493,7 +494,7 @@ pub fn mutation_button(
 
 fn pr_actions(s: &Shell, t: &Colors, pr: &Pr, run: Option<&Run>, cx: &Context<Shell>) -> Div {
     let m = &s.model;
-    let mut bar = div().flex().items_center().gap(space::S2).flex_1();
+    let mut bar = div().flex().items_center().gap(space::S2).flex_1().min_w_0();
     match run {
         Some(r) if r.parked() => {
             bar = bar.child(mutation_button(s, t, "a-post", "Review post", "P", Tone::Primary, Mutation::Publish, cx))
@@ -520,17 +521,20 @@ fn pr_actions(s: &Shell, t: &Colors, pr: &Pr, run: Option<&Run>, cx: &Context<Sh
         bar = bar.child(mutation_button(s, t, "a-cancel", "Cancel", "C", Tone::Ghost, Mutation::Cancel, cx));
     }
     if let Some(why) = m.server.as_ref().and_then(|sv| sv.commands_off()) {
-        bar =
-            bar.child(div().ml(space::S2).text_size(text::SMALL).text_color(t.warn).child(format!("Read-only: {why}")));
+        bar = bar.child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .truncate()
+                .ml(space::S2)
+                .text_size(text::SMALL)
+                .text_color(t.warn)
+                .child(format!("Read-only: {why}")),
+        );
+    } else {
+        bar = bar.child(div().flex_1());
     }
-    bar.child(div().flex_1()).child(button(
-        t,
-        "a-gh",
-        "Open on GitHub",
-        Some("⌘O"),
-        Tone::Ghost,
-        on(cx, |s, cx| s.open_github(cx)),
-    ))
+    bar.child(button(t, "a-gh", "Open on GitHub", Some("⌘O"), Tone::Ghost, on(cx, |s, cx| s.open_github(cx))))
 }
 
 /// A finding's tracking status as a word and the sentence that explains it, in the reviewer's terms.
@@ -674,14 +678,10 @@ fn finding_page(s: &Shell, t: &Colors, id: &FindingId, cx: &Context<Shell>) -> D
         .flex()
         .items_center()
         .gap(space::S2)
-        .child(div().ml(px(-12.)).child(button(
+        .child(overline(
             t,
-            "f-back",
-            pr.map_or("Back".into(), |p| format!("#{} findings", p.number)).as_str(),
-            Some("esc"),
-            Tone::Ghost,
-            on(cx, |s, cx| s.act(Action::Back, cx)),
-        )))
+            pr.map_or("Finding".to_string(), |p| format!("#{} · finding {at} of {}", p.number, all.len())),
+        ))
         .child(div().flex_1())
         .child(icon_button(
             t,
@@ -1168,6 +1168,7 @@ pub fn fix_block(t: &Colors, fix: &str, path: &str) -> Div {
         out = out.child(if code {
             let mut lx = Lexer::for_path(path);
             let mut rows = div()
+                .max_w(layout::MEASURE)
                 .rounded(radius::LG)
                 .border_1()
                 .border_color(t.border)
@@ -1176,7 +1177,7 @@ pub fn fix_block(t: &Colors, fix: &str, path: &str) -> Div {
                 .font_family(text::MONO)
                 .text_size(text::CODE);
             for l in para.lines() {
-                for (run, cont) in runs(t, &mut lx, l, layout::COLS_EVIDENCE) {
+                for (run, cont) in runs(t, &mut lx, l, layout::COLS_PROSE) {
                     rows = rows.child(code_row(t, None, run, cont, Some(t.add_bg), Some(t.add_fg)));
                 }
             }
