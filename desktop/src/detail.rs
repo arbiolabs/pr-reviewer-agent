@@ -46,7 +46,7 @@ pub fn page(id: &'static str, body: Div, footer: Option<Div>, t: &Colors, wide: 
                             .gap(space::S6)
                             .px(space::S8)
                             .pt(space::S6)
-                            .pb(space::S8)
+                            .pb(space::S8 + space::S6)
                             .when(!wide, |d| d.max_w(px(760.)))
                             .child(body),
                     ),
@@ -95,7 +95,7 @@ impl Item {
 #[derive(Default)]
 pub struct Bar {
     pub lead: Vec<Item>,
-    pub note: Option<String>,
+    pub note: Option<(IconName, String)>,
     pub trail: Vec<Item>,
 }
 
@@ -158,15 +158,15 @@ fn item_button(t: &Colors, it: Item, keys: bool) -> Stateful<Div> {
 pub fn bar_view(s: &Shell, t: &Colors, bar: Bar, cx: &Context<Shell>) -> Div {
     let labels: Vec<(&str, Option<&str>)> =
         bar.lead.iter().chain(&bar.trail).map(|i| (i.label.as_str(), i.key)).collect();
-    let fit = fit(&labels, bar.note.as_deref(), bar_room(s));
+    let fit = fit(&labels, bar.note.as_ref().map(|(_, n)| n.as_str()), bar_room(s));
     let row = div().flex().items_center().gap(space::S2).flex_1().min_w_0();
-    let note = |n: String| {
+    let note = |(glyph, n): (IconName, String)| {
         div()
             .flex()
             .items_center()
             .gap(space::S2)
             .flex_none()
-            .child(icon(IconName::TriangleAlert, px(14.), t.faint))
+            .child(icon(glyph, px(14.), t.faint))
             .child(div().text_size(text::SMALL).text_color(t.muted).child(n))
     };
     if fit != Fit::More {
@@ -268,7 +268,10 @@ pub fn pane(s: &Shell, t: &Colors, _: &mut Window, cx: &Context<Shell>) -> Div {
         _ => {}
     }
     match queue::stage(m) {
-        Stage::Offline => return page("detail", crate::setup::offline(s, t, cx), None, t, false),
+        Stage::Offline => {
+            let column = div().flex().flex_col().flex_1().items_center().child(crate::setup::offline(s, t, cx));
+            return page("detail", column, None, t, true);
+        }
         Stage::Connecting => return page("detail", crate::setup::connecting(t, s.still), None, t, false),
         Stage::Ready => {}
     }
@@ -932,13 +935,17 @@ fn finding_page(s: &Shell, t: &Colors, id: &FindingId, cx: &Context<Shell>) -> D
     }
     let (conf_word, conf_why) = confidence_words(f.confidence);
     let mut left = div().flex().flex_col().flex_none().w(layout::MEASURE).gap(space::S6).child(
-        div().flex().flex_col().gap(space::S3).child(badges).child(display(t, f.title.to_string())).child(
-            div().font_family(text::MONO).text_size(text::SMALL).text_color(t.muted).child(format!(
+        div()
+            .flex()
+            .flex_col()
+            .gap(space::S3)
+            .child(badges)
+            .child(crate::kit::display_in(t, f.title.to_string(), 440.))
+            .child(div().font_family(text::MONO).text_size(text::SMALL).text_color(t.muted).child(format!(
                 "{}{}",
                 f.file,
                 f.line.map_or(String::new(), |l| format!(":{l}"))
-            )),
-        ),
+            ))),
     );
     let mut right = div().flex().flex_col().flex_1().min_w_0().gap(space::S6);
     match detail {
@@ -1325,7 +1332,7 @@ pub fn code_line(
                 .flex()
                 .when_some(wash, |d, w| d.bg(w))
                 .children(sign.map(|(g, c)| {
-                    div().w(px(14.)).flex_none().pl(space::S2).text_color(c).child(if k == 0 { g } else { " " })
+                    div().w(px(20.)).flex_none().pl(space::S2).text_color(c).child(if k == 0 { g } else { " " })
                 }))
                 .child(div().flex_1().min_w_0().child(code_row(t, number, run, cont, None, mark)))
         })

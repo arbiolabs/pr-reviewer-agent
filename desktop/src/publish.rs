@@ -298,7 +298,7 @@ pub fn publication(
         };
         Bar {
             lead: vec![],
-            note: Some("Public and final once posted.".into()),
+            note: Some((IconName::TriangleAlert, "Public and final once posted.".into())),
             trail: vec![
                 Item::new(
                     "p-close",

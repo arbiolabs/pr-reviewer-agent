@@ -65,7 +65,7 @@ pub fn view(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         .p(space::S3)
         .pb(space::S8)
         .gap(px(2.))
-        .child(div().px(space::S2).pb(space::S2).child(overline(t, format!("{} files", d.files.len()))))
+        .child(div().px(space::S2).pb(space::S2).child(overline(t, crate::queue::count(d.files.len(), "file"))))
         .children(d.files.iter().enumerate().map(|(i, f)| {
             let selected = d.selected_file.as_ref() == Some(&f.path);
             let here: Vec<_> = anchored.iter().filter(|x| x.file == f.path).collect();
@@ -307,7 +307,7 @@ pub fn view(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         .child(div().text_size(text::SMALL).text_color(t.muted).child(match (stop, in_file.len()) {
             (_, 0) => "No findings in this file".to_string(),
             (Some(i), n) => format!("Finding {} of {n} here", i + 1),
-            (None, n) => format!("{n} findings here"),
+            (None, n) => format!("{} here", crate::queue::count(n, "finding")),
         }));
     let pane = div().flex().flex_col().flex_1().min_w_0().child(header).child(
         div()
@@ -336,16 +336,14 @@ pub fn view(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
             })),
     );
     let bar = Bar {
-        lead: vec![
-            Item::new("d-back", "Back", "⌘[", Tone::Secondary, on(cx, |s, cx| s.act(Action::Back, cx))),
-            Item::new(
-                "d-next",
-                "Next finding",
-                "N",
-                Tone::Secondary,
-                (!in_file.is_empty()).then(|| crate::ui::click(cx, |s, cx| s.act(Action::NextFinding, cx))),
-            ),
-        ],
+        // Back lives in the title bar, once.
+        lead: vec![Item::new(
+            "d-next",
+            "Next finding",
+            "N",
+            Tone::Secondary,
+            (!in_file.is_empty()).then(|| crate::ui::click(cx, |s, cx| s.act(Action::NextFinding, cx))),
+        )],
         note: None,
         trail: vec![Item::new("d-gh", "Open on GitHub", "⌘⇧O", Tone::Ghost, on(cx, |s, cx| s.open_github(cx)))],
     };

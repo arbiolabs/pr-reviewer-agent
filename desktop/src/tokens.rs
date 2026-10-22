@@ -254,7 +254,7 @@ pub mod layout {
     /// the window gets resizable below 1280.
     pub const COLS_EVIDENCE: usize = 58;
     /// The finding's hunk, beside its sign column.
-    pub const COLS_HUNK: usize = 56;
+    pub const COLS_HUNK: usize = 55;
     /// A code block inside the reading column.
     pub const COLS_PROSE: usize = 48;
     pub const COLS_DIFF: usize = 84;

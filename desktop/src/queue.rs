@@ -203,6 +203,18 @@ pub fn outcome(m: &Model, pr: &Pr, run: Option<&Run>) -> String {
     }
 }
 
+/// A run's status as the log says it: "Review started", never "Run running".
+pub fn run_words(s: RunStatus) -> &'static str {
+    match s {
+        RunStatus::Running => "Review started",
+        RunStatus::Completed => "Review completed",
+        RunStatus::Failed => "Review failed",
+        RunStatus::Superseded => "Superseded by a newer head",
+        RunStatus::Unknown => "Review changed state",
+    }
+}
+
+/// "1 step", "2 steps": every count the window prints goes through here.
 pub fn count(n: usize, one: &str) -> String {
     format!("{n} {one}{}", if n == 1 { "" } else { "s" })
 }
@@ -384,7 +396,7 @@ pub fn summary(m: &Model) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{Card, RowState, Tier, cards, done, rows, running, summary};
+    use super::{Card, RowState, Tier, cards, count, done, rows, run_words, running, summary};
     use crate::script::{parse, play};
     use pr_review_tui::model::{Look, Model, Screen};
     use pr_review_tui::protocol::{Phase, Severity};
@@ -423,6 +435,14 @@ mod tests {
         assert_eq!(running(&m).iter().map(|(p, _)| p.number).collect::<Vec<_>>(), [338]);
         assert_eq!(done(&m).iter().map(|(p, _)| p.number).collect::<Vec<_>>(), [341]);
         assert_eq!(summary(&m), "One review is waiting on you. #1287 has a critical finding.");
+    }
+
+    #[test]
+    fn counts_agree_with_their_number() {
+        assert_eq!(count(1, "step"), "1 step");
+        assert_eq!(count(0, "finding"), "0 findings");
+        assert_eq!(count(7, "inline comment"), "7 inline comments");
+        assert_eq!(run_words(pr_review_tui::protocol::RunStatus::Running), "Review started");
     }
 
     #[test]

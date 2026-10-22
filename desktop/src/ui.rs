@@ -16,8 +16,8 @@ use pr_review_tui::view::Hit;
 use tokio::sync::mpsc;
 
 use crate::kit::{
-    Gauge, OnClick, Tone, button, count_badge, focusable, icon, keycap, lift, overline, progress, rail, severity_count,
-    step_of, tip,
+    Gauge, OnClick, STEPS, Tone, button, count_badge, focusable, icon, keycap, lift, overline, progress, rail,
+    severity_count, step_of, tip,
 };
 use crate::queue::{self, Card, RowState, Stage, phase_word};
 use crate::script::Desk;
@@ -595,7 +595,10 @@ fn titlebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         }
         // The home's title says how much waits, not the list's name the sidebar already shows.
         _ => match (queue::stage(m), queue::cards(m).len()) {
-            (Stage::Ready, 0) => ("You're clear".into(), queue::summary(m)),
+            (Stage::Ready, 0) => {
+                let rest = queue::summary(m);
+                ("You're clear".into(), crate::kit::sentence(rest.trim_start_matches("You're clear · ")))
+            }
             (Stage::Ready, n) => (format!("{} waiting", queue::count(n, "decision")), queue::summary(m)),
             _ => ("pr-review".into(), queue::summary(m)),
         },
@@ -684,6 +687,8 @@ fn nav_item(
     dim: bool,
     f: OnClick,
 ) -> Stateful<Div> {
+    // A list with nothing behind it (offline) is neither selected nor at full strength.
+    let active = active && !dim;
     let fg = if dim {
         t.disabled
     } else if active {
@@ -693,6 +698,7 @@ fn nav_item(
     };
     let row = div()
         .id(SharedString::from(format!("{id}-face")))
+        .when(dim, |d| d.opacity(0.55))
         .relative()
         .flex()
         .items_center()
@@ -1016,14 +1022,13 @@ fn strip_skeleton(t: &Colors) -> Div {
         .border_color(t.border)
         .bg(t.raised)
         .child(div().pr(space::S1).child(overline(t, "Live")))
-        .child(div().w(px(260.)).h(px(32.)).rounded(radius::PILL).border_1().border_color(t.border.alpha(0.6)))
+        .child(div().w(px(260.)).h(px(32.)).rounded(radius::PILL).bg(t.border.alpha(0.7)))
 }
 
 fn pill(s: &Shell, t: &Colors, p: &Pr, r: &Run, cx: &Context<Shell>) -> Stateful<Div> {
     let m = &s.model;
     let selected = m.ui.selected_pr.as_ref() == Some(&p.id) && matches!(m.ui.screen, Screen::Inbox | Screen::Review);
     let id = p.id.clone();
-    let tools = m.domain.activity.iter().filter(|a| a.pr_id.as_ref() == Some(&p.id)).count();
     let base = if selected { t.running.alpha(0.14) } else { t.surface };
     let pill = div()
         .id(SharedString::from(format!("pill-{}-face", p.number)))
@@ -1044,9 +1049,11 @@ fn pill(s: &Shell, t: &Colors, p: &Pr, r: &Run, cx: &Context<Shell>) -> Stateful
         .child(div().min_w_0().truncate().text_size(text::SMALL).text_color(t.muted).child(p.title.to_string()))
         .child(progress(t, step_of(r.phase), t.running, false, Gauge::Strip))
         .child(div().text_size(text::SMALL).text_color(t.running).child(phase_word(r.phase)))
-        .when(tools > 0, |d| {
-            d.child(div().text_size(text::CAPTION).text_color(t.faint).child(format!("{tools} steps")))
-        });
+        .child(crate::kit::tabular(div()).flex_none().text_size(text::CAPTION).text_color(t.faint).child(format!(
+            "step {} of {}",
+            (step_of(r.phase) + 1).min(STEPS.len()),
+            STEPS.len()
+        )));
     tip(
         focusable(
             SharedString::from(format!("pill-{}", p.number)),

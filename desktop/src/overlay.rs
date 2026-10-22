@@ -648,7 +648,7 @@ fn confirm(
         .flex()
         .items_start()
         .justify_center()
-        .pt(layout::TOOLBAR)
+        .top(layout::TOOLBAR)
         .child(
             drop_sheet(t, layout::SHEET)
                 .p(space::S6)
@@ -740,7 +740,7 @@ fn confirm_post(s: &Shell, t: &Colors, cx: &Context<Shell>) -> AnyElement {
         .flex()
         .items_start()
         .justify_center()
-        .pt(layout::TOOLBAR)
+        .top(layout::TOOLBAR)
         .child(
             drop_sheet(t, layout::SHEET)
                 .id("post-sheet")

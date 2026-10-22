@@ -20,7 +20,7 @@ fn check_name(id: &str) -> &str {
         "config" => "Configuration",
         "model" => "Model credentials",
         "github" => "GitHub token",
-        "jev" => "Jev tier",
+        "jev" => "Risk check (Jev)",
         other => other,
     }
 }
@@ -43,6 +43,20 @@ pub fn read_only_sentence(m: &pr_review_tui::model::Model) -> String {
     }
 }
 
+/// A check in a first-run reader's words where the daemon's assume what it is: Jev says what it does for a
+/// review and what its absence costs. Every other check keeps the daemon's detail and fix.
+fn plain(c: &pr_review_tui::protocol::SetupCheck) -> (String, Option<String>) {
+    match (c.id.as_str(), c.status) {
+        ("jev", CheckStatus::Warn | CheckStatus::Missing) => (
+            "Jev rates how risky each change is, so risky PRs get a deeper review. Without a key it is skipped, and \
+             every PR gets the standard review."
+                .into(),
+            Some("Set `TYPESAFE_API_KEY` in the daemon's environment to turn it on.".into()),
+        ),
+        _ => (c.detail.to_string(), c.fix.as_ref().map(|f| f.to_string())),
+    }
+}
+
 /// A fix from a setup check, with its `commands` as mono chips the reader can copy, and the prose between them.
 fn fix_line(t: &Colors, fix: &str) -> Div {
     let mut row = div().flex().flex_wrap().items_center().gap_x(space::S2).gap_y(space::S1).mt(space::S1);
@@ -51,8 +65,16 @@ fn fix_line(t: &Colors, fix: &str) -> Div {
             continue;
         }
         if i % 2 == 0 {
+            // Punctuation after a command sits against its chip, not a gap away from it.
+            let text = part.trim();
+            let glued = i > 0 && text.starts_with([',', '.', ';', ':']);
             row = row.child(
-                div().max_w(relative(1.)).text_size(text::SMALL).text_color(t.muted).child(part.trim().to_string()),
+                div()
+                    .max_w(relative(1.))
+                    .when(glued, |d| d.ml(px(-6.)))
+                    .text_size(text::SMALL)
+                    .text_color(t.muted)
+                    .child(text.to_string()),
             );
         } else {
             let copy = part.to_string();
@@ -111,7 +133,8 @@ pub fn offline(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         .flex_1()
         .justify_center()
         .gap(space::S6)
-        .max_w(px(560.))
+        .w_full()
+        .max_w(px(640.))
         .pb(px(96.))
         .child(
             div()
@@ -328,7 +351,7 @@ pub fn setup_body(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         )
     };
     let row =
-        || div().flex().items_start().gap(space::S3).px(space::S4).py(space::S3).border_b_1().border_color(t.border);
+        || div().flex().items_start().gap(space::S3).px(space::S4).py(px(10.)).border_b_1().border_color(t.border);
     let (hue, word) = crate::ui::link_word(m, t);
     let server = m.server.as_ref();
     let mode = match server.and_then(|s| s.mode) {
@@ -374,6 +397,7 @@ pub fn setup_body(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         }
         Some(cs) => {
             for c in cs {
+                let (detail, fix) = plain(c);
                 let (glyph, hue, word) = match c.status {
                     CheckStatus::Ok => (IconName::CircleCheck, t.ok, "Ready"),
                     CheckStatus::Warn => (IconName::TriangleAlert, t.warn, "Limited"),
@@ -400,8 +424,8 @@ pub fn setup_body(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                                     )
                                     .child(chip(t, word, hue)),
                             )
-                            .child(div().text_size(text::SMALL).text_color(t.muted).child(c.detail.to_string()))
-                            .children(c.fix.as_ref().map(|f| fix_line(t, f.as_str()))),
+                            .child(div().text_size(text::SMALL).text_color(t.muted).child(detail.to_string()))
+                            .children(fix.map(|f| fix_line(t, &f))),
                     ),
                 );
             }
@@ -522,7 +546,7 @@ pub fn setup_body(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
     div()
         .flex()
         .flex_col()
-        .gap(space::S6)
+        .gap(space::S5)
         .child(
             div()
                 .flex()
@@ -530,7 +554,7 @@ pub fn setup_body(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                 .gap(space::S2)
                 .child(overline(t, "Setup"))
                 .child(display(t, "What the reviewer needs"))
-                .child(summary(t, "The same checks as pr-review setup --check, read from the daemon.")),
+                .child(summary(t, "The checks pr-review setup --check runs, as the daemon reports them.")),
         )
         .child(lead)
         .child(card("Checks", list))

@@ -31,46 +31,74 @@ pub fn live(s: &Shell, t: &Colors, pr: &Pr, run: &Run, cx: &Context<Shell>) -> D
         div()
             .flex()
             .flex_col()
+            .flex_1()
+            .min_w_0()
             .child(tabular(div()).text_size(text::TITLE).font_weight(FontWeight::SEMIBOLD).child(value))
             .child(div().text_size(text::CAPTION).text_color(t.muted).child(label))
     };
     // Findings land in Verify: until then the count says where it stands, not only that it is zero.
+    let noun = |n: usize, one: &str| queue::count(n, one).split_once(' ').map_or(String::new(), |(_, w)| w.into());
     let kept = if landed.is_empty() {
-        if step_of(run.phase) < 3 { "findings kept · lands in Verify".to_string() } else { "findings kept".into() }
+        if step_of(run.phase) < 3 { "findings kept · land in Verify".to_string() } else { "findings kept".into() }
     } else {
-        format!("findings kept · {}", queue::severity_summary(&landed))
+        format!("{} kept · {}", noun(landed.len(), "finding"), queue::severity_summary(&landed))
     };
     let stats = div()
         .flex()
-        .gap(space::S8)
-        .child(stat(tools.to_string(), "tool calls".into()))
+        .gap(space::S6)
+        .child(stat(tools.to_string(), noun(tools, "tool call")))
         .child(stat(landed.len().to_string(), kept))
-        .child(stat(total.to_string(), "events".into()));
+        .child(stat(total.to_string(), noun(total, "event")));
 
-    let track = div().flex().items_end().gap(px(1.)).h(px(24.)).children(events.iter().enumerate().map(|(i, a)| {
-        let (h, c) = match &a.kind {
-            ActivityKind::Phase { .. } => (22., t.running),
-            ActivityKind::Finding { severity, .. } => (18., t.severity(*severity)),
-            ActivityKind::Run { .. } => (22., t.muted),
-            ActivityKind::Tool { .. } => (10., t.faint),
-        };
-        let tick = div()
-            .id(("tick", i))
-            .flex_1()
-            .h(px(24.))
-            .flex()
-            .items_end()
-            .justify_center()
-            .cursor_pointer()
-            .hover(|st| st.bg(t.hover))
-            .on_click(cx.listener(move |s, _: &ClickEvent, _, cx| {
-                s.scrub = Some(i);
-                cx.notify();
-            }))
-            .child(div().w(px(3.)).h(px(h)).rounded(px(1.)).bg(c).opacity(if i <= head { 1. } else { 0.3 }))
-            .when(held == Some(i), |d| d.border_b_2().border_color(t.text));
-        tip(tick, format!("{} · {}", clock_s(a.at.as_str()), event_words(t, a).2))
-    }));
+    // Each tick is a 3-point mark in a slot at least 12 points wide, the whole slot a hit target; its height and
+    // hue say its kind, and the legend under the track names them. While replaying, a handle stands on the
+    // held tick.
+    let track = div().id("track").flex().items_end().h(px(32.)).overflow_x_scroll().children(
+        events.iter().enumerate().map(|(i, a)| {
+            let (h, c) = tick_kind(t, a);
+            let at = held == Some(i);
+            let tick = div()
+                .id(("tick", i))
+                .relative()
+                .flex_1()
+                .min_w(px(12.))
+                .h(px(32.))
+                .flex()
+                .items_end()
+                .justify_center()
+                .rounded(px(3.))
+                .cursor_pointer()
+                .hover(|st| st.bg(t.hover))
+                .on_click(cx.listener(move |s, _: &ClickEvent, _, cx| {
+                    s.scrub = Some(i);
+                    cx.notify();
+                }))
+                .child(div().w(px(3.)).h(px(h)).rounded(px(1.)).bg(c).opacity(if i <= head { 1. } else { 0.3 }))
+                .when(at, |d| {
+                    d.child(
+                        div()
+                            .absolute()
+                            .top_0()
+                            .left(relative(0.5))
+                            .ml(px(-5.))
+                            .size(px(10.))
+                            .rounded(radius::PILL)
+                            .bg(t.text)
+                            .border_2()
+                            .border_color(t.bg),
+                    )
+                    .child(div().absolute().top(px(8.)).bottom_0().left(relative(0.5)).ml(px(-1.)).w(px(2.)).bg(t.text))
+                });
+            tip(tick, format!("{} · {}", clock_s(a.at.as_str()), event_words(t, a).2))
+        }),
+    );
+    let legend = div().flex().items_center().gap(space::S4).text_size(text::CAPTION).text_color(t.muted).children(
+        [("Phase", 14., t.running), ("Finding", 11., t.high), ("Run", 14., t.muted), ("Tool call", 7., t.faint)].map(
+            |(word, h, c)| {
+                div().flex().items_end().gap(px(5.)).child(div().w(px(3.)).h(px(h)).rounded(px(1.)).bg(c)).child(word)
+            },
+        ),
+    );
     // The row keeps one height whether it follows or replays, so entering replay moves nothing.
     let following = div()
         .flex()
@@ -109,7 +137,7 @@ pub fn live(s: &Shell, t: &Colors, pr: &Pr, run: &Run, cx: &Context<Shell>) -> D
                 .text_size(text::CAPTION)
                 .text_color(t.muted)
                 .child(div().size(px(6.)).rounded(radius::PILL).bg(t.ok))
-                .child(format!("Following · {total} events · click the track to replay"))
+                .child(format!("Following · {} · click the track to replay", queue::count(total, "event")))
                 .into_any_element(),
         });
 
@@ -207,7 +235,7 @@ pub fn live(s: &Shell, t: &Colors, pr: &Pr, run: &Run, cx: &Context<Shell>) -> D
                 ))),
         )
         .child(stats)
-        .child(div().flex().flex_col().gap(space::S2).child(following).child(track).child(log))
+        .child(div().flex().flex_col().gap(space::S2).child(following).child(track).child(legend).child(log))
         .child(section(
             t,
             &format!("Findings so far · {}", landed.len()),
@@ -222,11 +250,24 @@ pub fn live(s: &Shell, t: &Colors, pr: &Pr, run: &Run, cx: &Context<Shell>) -> D
         ));
     let footer = Bar {
         lead: vec![],
-        note: Some(format!("{} · findings land as the verifier keeps them.", phase_word(run.phase))),
+        note: Some((
+            gpui_kit::assets::IconName::Activity,
+            format!("{} · findings land as the verifier keeps them.", phase_word(run.phase)),
+        )),
         trail: vec![mutation_item(s, "l-cancel", "Cancel review", "C", Tone::Danger, Mutation::Cancel, cx)],
     };
     let footer = bar_view(s, t, footer, cx);
     page("detail-live", body, Some(footer), t, false)
+}
+
+/// A tick's height and hue, by its event's kind.
+fn tick_kind(t: &Colors, a: &Activity) -> (f32, Hsla) {
+    match &a.kind {
+        ActivityKind::Phase { .. } => (26., t.running),
+        ActivityKind::Finding { severity, .. } => (20., t.severity(*severity)),
+        ActivityKind::Run { .. } => (26., t.muted),
+        ActivityKind::Tool { .. } => (12., t.faint),
+    }
 }
 
 /// An event as its tag, the tag's hue and its words.
@@ -238,8 +279,6 @@ fn event_words(t: &Colors, a: &Activity) -> (String, Hsla, String) {
             let (mark, word) = severity_mark(*severity);
             (format!("{mark} {word}"), t.severity(*severity), format!("Finding landed: {title}"))
         }
-        ActivityKind::Run { status, .. } => {
-            ("run".into(), t.muted, format!("Run {}", format!("{status:?}").to_lowercase()))
-        }
+        ActivityKind::Run { status, .. } => ("run".into(), t.muted, crate::queue::run_words(*status).into()),
     }
 }

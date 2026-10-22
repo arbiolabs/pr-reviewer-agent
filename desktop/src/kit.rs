@@ -306,15 +306,37 @@ pub fn heading(t: &Colors, label: impl Into<SharedString>) -> Div {
     div().text_size(text::BODY).font_weight(FontWeight::SEMIBOLD).text_color(t.text).child(label.into())
 }
 
-/// What is said, set in the serif: a page or PR title.
+/// What is said, set in the serif: a page or PR title, in the detail pane's 696-point column.
 pub fn display(t: &Colors, title: impl Into<SharedString>) -> Div {
+    display_in(t, title, 696.)
+}
+
+/// The width a serif title wraps at so its lines come out even: GPUI wraps greedily, which can leave one word
+/// alone on the last line, so a title that needs more than one line gets a measure that splits its characters
+/// evenly, plus a little slack. `room` is the column's width in points. ponytail: an average glyph width instead
+/// of shaping the text; shape it if a title still orphans.
+pub fn balanced(title: &str, room: f32) -> Option<f32> {
+    const GLYPH: f32 = 13.5;
+    let chars = title.chars().count() as f32;
+    let per_line = (room / GLYPH).floor();
+    if chars <= per_line {
+        return None;
+    }
+    let lines = (chars / per_line).ceil();
+    Some(((chars / lines).ceil() + 5.) * GLYPH).map(|w| w.min(room))
+}
+
+/// A serif title balanced for a column `room` points wide.
+pub fn display_in(t: &Colors, title: impl Into<SharedString>, room: f32) -> Div {
+    let title = title.into();
     div()
+        .when_some(balanced(&title, room), |d, w| d.max_w(px(w)))
         .font_family(text::SERIF)
         .text_size(text::DISPLAY)
         .line_height(text::LINE_DISPLAY)
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(t.text)
-        .child(title.into())
+        .child(title)
 }
 
 /// The one-sentence state summary under a heading.
@@ -469,6 +491,14 @@ mod tests {
             "Socket directory does not exist: /tmp/x."
         );
         assert_eq!(super::sentence("Already a sentence."), "Already a sentence.");
+    }
+
+    #[test]
+    fn a_long_title_wraps_at_an_even_measure() {
+        // Greedy wrapping at 696 points left "from" alone on the second line.
+        let w = super::balanced("Sign-in: send users back to the page they started from", 696.).unwrap();
+        assert!((400. ..500.).contains(&w), "{w}");
+        assert_eq!(super::balanced("Gift cards: redeem a balance at checkout", 696.), None);
     }
 
     #[test]

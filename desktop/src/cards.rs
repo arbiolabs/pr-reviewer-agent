@@ -25,7 +25,8 @@ fn column(t: &Colors, id: &'static str, inner: Div) -> Div {
                 .id(id)
                 .size_full()
                 .overflow_y_scroll()
-                .child(inner.flex().flex_col().gap(space::S4).px(space::S4).pt(space::S4).pb(space::S8)),
+                // The first label sits on the detail page's first line: both columns start 24 points down.
+                .child(inner.flex().flex_col().gap(space::S4).px(space::S4).pt(space::S6).pb(space::S8 + space::S6)),
         )
         .child(div().absolute().bottom_0().left_0().right(px(1.)).h(space::S8).bg(linear_gradient(
             180.,
@@ -226,6 +227,8 @@ fn card(s: &Shell, t: &Colors, c: &Card, i: usize, selected: bool, cx: &Context<
     // A selected card whose PR page fills the pane docks: its title, quote, reason and button are all on that page,
     // so the card keeps only its kicker and its meta line, and the title is said once beside the sidebar.
     let docked = selected && matches!(c, Card::Findings { .. } | Card::Failed { .. } | Card::Start { .. });
+    let proof_open =
+        selected && matches!(crate::ui::front(&s.model), Some(pr_review_tui::model::Modal::Publication { .. }));
     // On a read-only daemon a card's command stays visible, dimmed, with the reason in its tooltip.
     let command = match c {
         Card::Start { .. } => Some(pr_review_tui::keymap::Mutation::Start),
@@ -325,7 +328,8 @@ fn card(s: &Shell, t: &Colors, c: &Card, i: usize, selected: bool, cx: &Context<
         .when(!f.meta.is_empty(), |d| {
             d.child(div().text_size(text::SMALL).line_height(text::LINE_TIGHT).text_color(t.muted).child(f.meta))
         })
-        .when(!docked, |d| {
+        // With its proof open beside it, a parked card's Review post has nothing left to open.
+        .when(!docked && !(proof_open && matches!(c, Card::Approve { .. })), |d| {
             let b = match refused {
                 Some(_) => crate::kit::locked_button(t, ("card-go", i), f.action),
                 None => button(

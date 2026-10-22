@@ -92,14 +92,24 @@ pub fn timeline(s: &Shell, t: &Colors, pr: &Pr, cx: &Context<Shell>) -> Div {
                     .text_color(t.muted)
                     .child(e.occurred_at.as_str().get(11..19).unwrap_or("").to_string()),
             )
-            .child(
-                div()
-                    .w(px(76.))
+            // The kind column holds a tool's name in place of the word "tool", so every row's words start at one x.
+            .child(match &e.body {
+                EventBody::ToolActivity(a) => div()
+                    .w(px(104.))
+                    .flex_none()
+                    .truncate()
+                    .pt(px(2.))
+                    .font_family(text::MONO)
+                    .text_size(px(11.))
+                    .text_color(t.accent)
+                    .child(a.tool.to_string()),
+                _ => div()
+                    .w(px(104.))
                     .flex_none()
                     .text_size(text::SMALL)
                     .text_color(t.muted)
                     .child(EventCategory::of(&e.body).label()),
-            )
+            })
             .child(event_line(t, e));
         list = list.child(crate::kit::focusable(
             ("ev", seq as usize),
@@ -162,6 +172,7 @@ fn event_line(t: &Colors, e: &SequencedEvent) -> Div {
             .text_size(text::BODY)
             .line_height(text::LINE_BODY)
             .text_color(t.text)
+            .text_ellipsis()
             .line_clamp(2)
             .child(s)
     };
@@ -186,19 +197,7 @@ fn event_line(t: &Colors, e: &SequencedEvent) -> Div {
                 crate::detail::status_sentence(f, &[]).0.to_lowercase()
             )))
         }
-        EventBody::ToolActivity(a) => plain
-            .child(
-                div()
-                    .w(px(96.))
-                    .flex_none()
-                    .truncate()
-                    .pt(px(3.))
-                    .font_family(text::MONO)
-                    .text_size(px(11.))
-                    .text_color(t.accent)
-                    .child(a.tool.to_string()),
-            )
-            .child(words(a.summary.to_string())),
+        EventBody::ToolActivity(a) => plain.child(words(a.summary.to_string())),
         EventBody::PublicationChanged(p) => {
             plain.child(words(format!("Publication {}", format!("{:?}", p.status).to_lowercase())))
         }
