@@ -71,29 +71,47 @@ export const splitLines = (text: string | undefined) => (text === undefined ? un
 /** One code token: its text, and the 1-based line it starts on in the text it was read from. */
 export type Token = { text: string; line: number };
 
+/** One way of reading the two markers no lexer can settle without knowing the language; see `VARIANTS`. */
+type Variant = { lineLocal: boolean; dashComment: boolean };
+/**
+ * A backtick or `/*` may open a string or a comment that runs on for lines, or sit in a regex or a shell glob and open
+ * nothing; `--` may start a comment or decrement. Code is compared under every reading, both sides read the same way,
+ * and any match counts. A reading can only find more code, never less, so each one keeps more findings open and lets
+ * no claim pass that failed without it. `lineLocal` closes a backtick and a `/*` at the line end; `dashComment` reads
+ * `--` after a space as a comment.
+ */
+const VARIANTS: Variant[] = [false, true].flatMap((lineLocal) => [true, false].map((dashComment) => ({ lineLocal, dashComment })));
+const DEFAULT_VARIANT = VARIANTS[0]!;
+
 const WORD = /[\p{L}\p{N}_$]/u;
 const isSpace = (code: number) => code === 32 || (code >= 9 && code <= 13) || (code > 127 && /\s/u.test(String.fromCharCode(code)));
 const isWord = (code: number) => (code >= 97 && code <= 122) || (code >= 65 && code <= 90) || (code >= 48 && code <= 57) || code === 95 || code === 36 || (code > 127 && WORD.test(String.fromCharCode(code)));
+const isDigit = (code: number) => code >= 48 && code <= 57;
 /** Brackets and separators say nothing about which code this is: without them `f(a);` and `f(a)` read the same. */
 const SEPARATORS = new Set([";", ",", "(", ")", "{", "}", "[", "]"].map((c) => c.charCodeAt(0)));
 const [NEWLINE, HASH, DASH, SLASH, STAR, LESS, DQUOTE, SQUOTE, BACKTICK, BACKSLASH] = [10, 35, 45, 47, 42, 60, 34, 39, 96, 92];
 
 /**
  * The code in `text` as tokens, read the same way for every language that uses these markers: words (letters, digits,
- * `_`, `$`), string literals as one token each with `'` folded to `"`, and every other character on its own.
- * Whitespace, `//` comments, `#` and `--` comments at a line start or after a space (so `i--` and `this.#x` stay
+ * `_`, `$`; a word that starts with a digit is lowercased, so `0XFF` is `0xff`), string literals as one token each
+ * with `'` folded to `"` and `\'` and `\"` to the bare quote (Prettier's rewrites), and every other character on its
+ * own. Whitespace, `//` comments, `#` and `--` comments at a line start or after a space (so `i--` and `this.#x` stay
  * code), `/* *\/` and `<!-- -->` comments, triple-quoted strings and separators drop out. A `"` or `'` string ends at
- * its line end when unterminated; a backtick string spans lines.
- * Limits, each the same on both sides of a comparison: `#include` and a CSS `#id` lose the rest of their line, as does
- * Python's `//` floor division; an apostrophe outside a string eats to the line end; a change inside a docstring is
- * invisible; a regex literal holding a quote or `//` is misread to its line end.
+ * its line end when unterminated; a backtick string spans lines unless `variant.lineLocal`.
+ * Limits, each the same on both sides of a comparison: `#include`, a CSS `#id` and a `#private` field at a line start
+ * lose the rest of their line, as does Python's `//` floor division; an apostrophe outside a string eats to the line
+ * end; a change inside a docstring is invisible. A line that reads as a comment is still found as written (`linesAt`).
  */
-export function tokenize(text: string): Token[] {
+export function tokenize(text: string, variant: Variant = DEFAULT_VARIANT): Token[] {
   const out: Token[] = [];
   const n = text.length;
   let line = 1;
   let i = 0;
   const at = (k: number) => text.charCodeAt(k);
+  const toLineEnd = () => {
+    const eol = text.indexOf("\n", i);
+    i = eol === -1 ? n : eol;
+  };
   const skipTo = (close: string, from: number) => {
     const found = text.indexOf(close, from);
     const stop = found === -1 ? n : found + close.length;
@@ -108,11 +126,11 @@ export function tokenize(text: string): Token[] {
       i++;
     } else if (isSpace(c)) {
       i++;
-    } else if ((c === SLASH && next === SLASH) || ((c === HASH || (c === DASH && next === DASH)) && (i === 0 || isSpace(at(i - 1))))) {
-      const eol = text.indexOf("\n", i);
-      i = eol === -1 ? n : eol;
+    } else if ((c === SLASH && next === SLASH) || ((c === HASH || (c === DASH && next === DASH && variant.dashComment)) && (i === 0 || isSpace(at(i - 1))))) {
+      toLineEnd();
     } else if (c === SLASH && next === STAR) {
-      skipTo("*/", i + 2);
+      if (variant.lineLocal) toLineEnd();
+      else skipTo("*/", i + 2);
     } else if (c === LESS && text.startsWith("<!--", i)) {
       skipTo("-->", i + 4);
     } else if (c === DQUOTE || c === SQUOTE || c === BACKTICK) {
@@ -122,20 +140,22 @@ export function tokenize(text: string): Token[] {
         continue;
       }
       const start = line;
+      const spans = c === BACKTICK && !variant.lineLocal;
       let j = i + 1;
-      while (j < n && at(j) !== c && (at(j) !== NEWLINE || c === BACKTICK)) {
+      while (j < n && at(j) !== c && (at(j) !== NEWLINE || spans)) {
         if (at(j) === BACKSLASH) j++;
         if (at(j) === NEWLINE) line++;
         j++;
       }
       const closed = j < n && at(j) === c;
       const shown = c === BACKTICK ? "`" : '"';
-      out.push({ text: `${shown}${text.slice(i + 1, j)}${closed ? shown : ""}`, line: start });
+      out.push({ text: `${shown}${text.slice(i + 1, j).replace(/\\(["'])/g, "$1")}${closed ? shown : ""}`, line: start });
       i = closed ? j + 1 : j;
     } else if (isWord(c)) {
       let j = i + 1;
       while (j < n && isWord(at(j))) j++;
-      out.push({ text: text.slice(i, j), line });
+      const word = text.slice(i, j);
+      out.push({ text: isDigit(c) ? word.toLowerCase() : word, line });
       i = j;
     } else {
       if (!SEPARATORS.has(c)) out.push({ text: text[i]!, line });
@@ -146,19 +166,19 @@ export function tokenize(text: string): Token[] {
 }
 
 /**
- * The token streams a stored text may stand for. A text cut from a file can begin inside a block comment, an HTML
- * comment, a docstring or a backtick string, whose tail would then read as code; when its closer comes before any
- * opener, the text is also read as that tail, so the code after it is still found.
+ * The token streams a stored text may stand for under one reading. A text cut from a file can begin inside a block
+ * comment, an HTML comment, a docstring or a backtick string, whose tail would then read as code; when its closer
+ * comes before any opener, the text is also read as that tail, so the code after it is still found.
  */
-function parses(text: string): Token[][] {
-  const out = [tokenize(text)];
+function parses(text: string, variant: Variant): Token[][] {
+  const out = [tokenize(text, variant)];
   const tailOf = (open: string, close: string) => {
     const at = text.indexOf(close);
     return at !== -1 && (text.indexOf(open) === -1 || at < text.indexOf(open));
   };
-  if (tailOf("/*", "*/")) out.push(tokenize(`/*${text}`));
-  if (tailOf("<!--", "-->")) out.push(tokenize(`<!--${text}`));
-  for (const q of ['"""', "'''", "`"]) if (text.split(q).length % 2 === 0) out.push(tokenize(`${q}${text}`).filter((t, k) => k > 0 || !t.text.startsWith(q)));
+  if (tailOf("/*", "*/")) out.push(tokenize(`/*${text}`, variant));
+  if (tailOf("<!--", "-->")) out.push(tokenize(`<!--${text}`, variant));
+  for (const q of ['"""', "'''", "`"]) if (text.split(q).length % 2 === 0) out.push(tokenize(`${q}${text}`, variant).filter((t, k) => k > 0 || !t.text.startsWith(q)));
   return out.filter((p) => p.length > 0);
 }
 
@@ -175,27 +195,43 @@ function indexOfRun(needle: string[], hay: string[], from = 0): number {
 
 export const hasCode = (text: string) => tokenize(text).length > 0;
 
-/** True when some parse of `a` sits whole in some parse of `b`: `a` is a piece of `b`'s code, unchanged. */
-export const within = (a: string, b: string) => parses(a).some((pa) => parses(b).some((pb) => indexOfRun(texts(pa), texts(pb)) !== -1));
+/** True when, under some reading, some parse of `a` sits whole in some parse of `b`: `a` is a piece of `b`'s code, unchanged. */
+export const within = (a: string, b: string) => VARIANTS.some((v) => parses(a, v).some((pa) => parses(b, v).some((pb) => indexOfRun(texts(pa), texts(pb)) !== -1)));
 
-/** True when some parse of `a` and the tokens of `b` share a run of MIN_TOKENS or more: `b` still holds a substantial piece of `a`'s code. */
-export const sharesCode = (a: string, b: string) => parses(a).some((pa) => commonRun(texts(pa), texts(tokenize(b))) >= MIN_TOKENS);
+/** True when, under some reading, some parse of `a` and the tokens of `b` share a run of MIN_TOKENS or more: `b` still holds a substantial piece of `a`'s code. */
+export const sharesCode = (a: string, b: string) =>
+  VARIANTS.some((v) => {
+    const hay = texts(tokenize(b, v));
+    return parses(a, v).some((pa) => commonRun(texts(pa), hay) >= MIN_TOKENS);
+  });
 
 /** A 1-based line range. */
 type Range = { start: number; end: number };
 
+/** A text's tokens under one reading, with their texts ready for comparison. */
+type Tokenized = { tokens: Token[]; texts: string[] };
+/** A text under every reading, in VARIANTS order. */
+const readings = (text: string): Tokenized[] =>
+  VARIANTS.map((v) => {
+    const tokens = tokenize(text, v);
+    return { tokens, texts: texts(tokens) };
+  });
+
 /**
- * Every line range of `file` where a parse of `text` sits whole, in file order. The range starts where the text's
- * first line would and ends where its last line would, so a comment inserted inside widens it by a line.
+ * Every line range of `file` where a parse of `text` sits whole under the same reading, in file order. The range
+ * starts where the text's first line would and ends where its last line would, so a comment inserted inside widens it
+ * by a line.
  */
-function occurrences(text: string, file: Token[]): Range[] {
-  const hay = texts(file);
+function occurrences(text: string, file: Tokenized[]): Range[] {
   const lines = text.split("\n").length;
   const found: Range[] = [];
-  for (const parse of parses(text)) {
-    const needle = texts(parse);
-    for (let i = indexOfRun(needle, hay); i !== -1; i = indexOfRun(needle, hay, i + 1)) {
-      found.push({ start: file[i]!.line - parse[0]!.line + 1, end: file[i + needle.length - 1]!.line + lines - parse.at(-1)!.line });
+  for (const [k, variant] of VARIANTS.entries()) {
+    const { tokens, texts: hay } = file[k]!;
+    for (const parse of parses(text, variant)) {
+      const needle = texts(parse);
+      for (let i = indexOfRun(needle, hay); i !== -1; i = indexOfRun(needle, hay, i + 1)) {
+        found.push({ start: tokens[i]!.line - parse[0]!.line + 1, end: tokens[i + needle.length - 1]!.line + lines - parse.at(-1)!.line });
+      }
     }
   }
   return found.sort((a, b) => a.start - b.start);
@@ -206,12 +242,21 @@ const nearest = (ranges: Range[], near: number) => ranges.reduce<Range | undefin
 /** Text with enough tokens to be looked for across the tree, or to say that two texts are the same code. */
 const substantial = (text: string) => tokenize(text).length >= MIN_TOKENS;
 
-/** True when the text's lines sit at `start` in `lines` as written: how a text with no code tokens, such as `}`, is found in place. */
-const foundAt = (text: string, lines: string[], start: number) => text.split("\n").every((line, k) => lines[start - 1 + k] !== undefined && normalizeLine(lines[start - 1 + k]!) === line);
+/**
+ * Every 1-based line of `lines`, already normalized, where the text's lines sit as written: how a text with no code
+ * tokens, such as `}` or a `#field` line, or a file too large to tokenize, is found. A text's tokens come from its
+ * normalized lines, so a line found this way is the same code under every reading.
+ */
+function linesAt(text: string, lines: string[]): number[] {
+  const want = text.split("\n");
+  const out: number[] = [];
+  for (let start = 0; start + want.length <= lines.length; start++) if (want.every((line, k) => lines[start + k] === line)) out.push(start + 1);
+  return out;
+}
 
-/** True when both texts are substantial and the same code: equal token by token, whatever their comments, spacing and separators. */
+/** True when both texts are substantial and, under some reading, the same code: equal token by token, whatever their comments, spacing and separators. */
 export function sameText(a: string, b: string): boolean {
-  return substantial(a) && texts(tokenize(a)).join("\0") === texts(tokenize(b)).join("\0");
+  return substantial(a) && VARIANTS.some((v) => texts(tokenize(a, v)).join("\0") === texts(tokenize(b, v)).join("\0"));
 }
 
 /**
@@ -235,29 +280,51 @@ export async function evidenceTexts(candidate: CandidateFinding, headSha: string
   return out;
 }
 
-type FileAt = { lines: string[]; tokens: Token[] };
+/**
+ * A file longer than this is compared by its lines as written only, never by tokens: a finding in it is found in place
+ * or at the one place its lines sit, it survives when its lines are found, and a claim on it is otherwise refused as
+ * code that may survive. Tokenizing such a file under every reading and searching each would cost seconds and hundreds
+ * of megabytes per finding, so the bound fails toward an open finding, never toward a resolution.
+ */
+export const MAX_FILE_CHARS = 4_000_000;
+
+/** A file at head: its normalized lines, and its tokens under every reading, or none past MAX_FILE_CHARS. */
+type FileAt = { lines: string[]; readings: Tokenized[] | undefined };
 type FilesOf = (path: string) => Promise<FileAt | undefined>;
-/** Each file at head, read and tokenized once. */
+const FILES = new WeakMap<HeadReader, Map<string, Promise<FileAt | undefined>>>();
+/** Each file at head, read and tokenized once per head, however many findings are checked against it. */
 const fileCache = (head: HeadReader): FilesOf => {
-  const files = new Map<string, Promise<FileAt | undefined>>();
+  const files = FILES.get(head) ?? new Map<string, Promise<FileAt | undefined>>();
+  FILES.set(head, files);
   const load = async (path: string) => {
-    const lines = splitLines(await head.read(path));
-    return lines && { lines, tokens: tokenize(lines.join("\n")) };
+    const raw = splitLines(await head.read(path));
+    if (!raw) return undefined;
+    const lines = raw.map(normalizeLine);
+    const text = lines.join("\n");
+    return { lines, readings: text.length > MAX_FILE_CHARS ? undefined : readings(text) };
   };
   return (path) => files.get(path) ?? files.set(path, load(path)).get(path)!;
 };
+
+/** Every range of `file` that holds `item`, one per start line: its tokens under any reading, or its lines as written. */
+function places(item: EvidenceText, file: FileAt): Range[] {
+  const byStart = new Map<number, Range>();
+  for (const r of file.readings ? occurrences(item.text, file.readings) : []) byStart.set(r.start, r);
+  for (const start of linesAt(item.text, file.lines)) if (!byStart.has(start)) byStart.set(start, { start, end: start + item.end - item.start });
+  return [...byStart.values()].sort((a, b) => a.start - b.start);
+}
 
 /** The longest word of a parse, the token a tree-wide search looks for: a word is written the same in every file that holds it, where a stored line is not once its spacing or separators changed. */
 const searchWord = (parse: Token[]) => texts(parse).filter((t) => WORD.test(t[0]!)).reduce((a, b) => (b.length > a.length ? b : a), "");
 
 /**
  * Every file at head where a substantial `item` sits, with the place nearest its old line, by one tree-wide search per
- * parse for its longest word and a token comparison of each file found, or undefined when a path list was cut at its
- * cap and so names no place.
+ * distinct longest word of its parses and a token comparison of each file found, or undefined when a path list was cut
+ * at its cap and so names no place.
  */
 async function treeHits(item: EvidenceText, head: HeadReader, filesOf: FilesOf): Promise<(Range & { path: string })[] | undefined> {
   const paths = new Set<string>();
-  for (const word of new Set(parses(item.text).map(searchWord))) {
+  for (const word of new Set(VARIANTS.flatMap((v) => parses(item.text, v).map(searchWord)))) {
     const found = word === "" ? [] : await head.grep(word);
     if (found === undefined) return undefined;
     for (const path of found) paths.add(path);
@@ -265,7 +332,7 @@ async function treeHits(item: EvidenceText, head: HeadReader, filesOf: FilesOf):
   const hits: (Range & { path: string })[] = [];
   for (const path of paths) {
     const file = await filesOf(path);
-    const hit = file && nearest(occurrences(item.text, file.tokens), item.start);
+    const hit = file && nearest(places(item, file), item.start);
     if (hit) hits.push({ path, ...hit });
   }
   return hits;
@@ -290,10 +357,11 @@ export async function locate(location: ObservedLocation, headSha: string, head: 
     const code = tokenize(item.text).length;
     if (own !== undefined) {
       const file = (await filesOf(own))!;
-      // No code tokens, as in `}`: found only as written, in place. Below the floor: found in place, since moving it would pin the finding to any `return x;` in the file.
-      if (code === 0) return foundAt(item.text, file.lines, item.start) ? { path: own, start: item.start, end: item.end } : undefined;
-      const found = occurrences(item.text, file.tokens);
-      const hit = code >= MIN_TOKENS ? nearest(found, item.start) : found.find((r) => r.start === item.start);
+      const found = places(item, file);
+      // Below the floor: found in place, since moving it would pin the finding to any `return x;` in the file. With no code
+      // tokens at all, as in `}` or a `#field` line, also at the one place its lines sit, when there is exactly one.
+      const inPlace = found.find((r) => r.start === item.start) ?? (code === 0 && found.length === 1 ? found[0] : undefined);
+      const hit = code >= MIN_TOKENS ? nearest(found, item.start) : inPlace;
       if (hit) return { path: own, ...hit };
     }
     if (code < MIN_TOKENS || !options.treeWide) return undefined;
@@ -318,33 +386,31 @@ export async function locate(location: ObservedLocation, headSha: string, head: 
 }
 
 /** The file an open finding sits in at the new head, when it still has one. */
-export const currentFile = (f: PriorFinding) => (f.located.kind === "same" ? f.located.location.file : f.located.kind === "changed" ? f.located.file : undefined);
+export const currentFile = (f: Pick<PriorFinding, "located">) => (f.located.kind === "same" ? f.located.location.file : f.located.kind === "changed" ? f.located.file : undefined);
+
+/** Where a finding's own-file code still sits at this head (`found`, with the item and the range that holds it), or why code cannot say it is gone. */
+export type Survival = { kind: "found"; item: EvidenceText; path: string; start: number; end: number } | { kind: "unknown"; reason: string };
 
 /**
- * Where the finding's own-file code still sits at this head, as "at path:line", or undefined when none of it does.
- * `located` says only that some item went missing, which a changed helper in another file or a short item shifted a
- * line also does, so a resolution check asks this instead: each own-file item's tokens are looked for anywhere in the
- * finding's current file, and a substantial item's anywhere in the tree. A tree-wide search cut at its cap counts as
- * found, since an open finding beats a false resolution.
+ * Where the finding's own-file code still sits at this head, or undefined when none of it does. `located` says only
+ * that some item went missing, which a changed helper in another file or a short item shifted a line also does, so a
+ * resolution check asks this instead: each own-file item is looked for anywhere in the finding's current file, by its
+ * tokens under any reading or by its lines as written, and a substantial item anywhere in the tree unless
+ * `treeWide: false`. A tree-wide search cut at its cap counts as found, since an open finding beats a false resolution.
  */
-export async function survivingCode(f: PriorFinding, head: HeadReader): Promise<string | undefined> {
+export async function survivingCode(f: Pick<PriorFinding, "location" | "located">, head: HeadReader, options: { treeWide: boolean } = { treeWide: true }): Promise<Survival | undefined> {
   const filesOf = fileCache(head);
   const file = currentFile(f);
   const at = file === undefined ? undefined : await filesOf(file);
   for (const item of f.location.evidence) {
     if (item.path !== f.location.file || item.text === "") continue;
-    const code = tokenize(item.text).length;
-    if (code === 0) {
-      if (at && foundAt(item.text, at.lines, item.start)) return `at ${file}:${item.start}`;
-      continue;
-    }
-    const hit = at && nearest(occurrences(item.text, at.tokens), item.start);
-    if (hit) return `at ${file}:${hit.start}`;
-    if (code < MIN_TOKENS) continue;
+    const hit = at && nearest(places(item, at), item.start);
+    if (hit) return { kind: "found", item, path: file!, ...hit };
+    if (tokenize(item.text).length < MIN_TOKENS || !options.treeWide) continue;
     const hits = await treeHits(item, head, filesOf);
-    if (hits === undefined) return "in more files than the search lists";
+    if (hits === undefined) return { kind: "unknown", reason: "in more files than the search lists" };
     const elsewhere = hits.find((h) => h.path !== file);
-    if (elsewhere) return `at ${elsewhere.path}:${elsewhere.start}`;
+    if (elsewhere) return { kind: "found", item, ...elsewhere };
   }
   return undefined;
 }
@@ -393,7 +459,11 @@ const commonRun = (a: string[], b: string[]) => longestShared(...numbered(a, b))
 function longestShared(x: number[], y: number[]): number {
   const shares = (length: number) => {
     const at = new Map<number, number[]>();
-    windowHashes(y, length).forEach((h, p) => at.set(h, [...(at.get(h) ?? []), p]));
+    windowHashes(y, length).forEach((h, p) => {
+      const positions = at.get(h);
+      if (positions) positions.push(p);
+      else at.set(h, [p]);
+    });
     return windowHashes(x, length).some((h, o) => at.get(h)?.some((p) => equalAt(x, y, o, p, length)) ?? false);
   };
   let lo = 0;
@@ -430,22 +500,27 @@ const SHORTER_RUNS = 64;
  * such run. A cited block often spans the code that moved and the code that changed next to it; the part that
  * survived is still the finding's code. A run that occurs twice names no place. A run at either end of the text
  * takes the text's leading or trailing comment and blank lines with it. Each shorter length costs one pass over both
- * texts, so after SHORTER_RUNS of them the search gives up and names no place, which leaves the finding unlinked.
+ * texts, so after SHORTER_RUNS of them the search gives up and names no place, which leaves the finding unlinked, as
+ * does a file past MAX_FILE_CHARS.
  */
 export function findLongestRun(text: string, lines: string[]): Omit<EvidenceText, "path"> | undefined {
   if (!substantial(text)) return undefined;
-  const file = tokenize(lines.join("\n"));
+  const normalized = normalize(lines);
+  if (normalized.length > MAX_FILE_CHARS) return undefined;
   const total = text.split("\n").length;
-  for (const parse of parses(text)) {
-    const [x, y] = numbered(texts(parse), texts(file));
-    const longest = longestShared(x, y);
-    for (let length = longest; length >= MIN_TOKENS && length > longest - SHORTER_RUNS; length--) {
-      const once = uniqueRun(x, y, length);
-      if (!once) continue;
-      const [o, p] = once;
-      const start = file[p]!.line - (o === 0 ? parse[0]!.line - 1 : 0);
-      const end = file[p + length - 1]!.line + (o + length === parse.length ? total - parse.at(-1)!.line : 0);
-      return { start, end, text: normalize(lines.slice(start - 1, end)) };
+  for (const variant of VARIANTS) {
+    const file = tokenize(normalized, variant);
+    for (const parse of parses(text, variant)) {
+      const [x, y] = numbered(texts(parse), texts(file));
+      const longest = longestShared(x, y);
+      for (let length = longest; length >= MIN_TOKENS && length > longest - SHORTER_RUNS; length--) {
+        const once = uniqueRun(x, y, length);
+        if (!once) continue;
+        const [o, p] = once;
+        const start = file[p]!.line - (o === 0 ? parse[0]!.line - 1 : 0);
+        const end = file[p + length - 1]!.line + (o + length === parse.length ? total - parse.at(-1)!.line : 0);
+        return { start, end, text: normalize(lines.slice(start - 1, end)) };
+      }
     }
   }
   return undefined;

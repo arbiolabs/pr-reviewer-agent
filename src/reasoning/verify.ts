@@ -100,7 +100,7 @@ async function refusal(claim: ResolutionClaim, ctx: VerifyContext, { reported, c
   }
   if (f.located.kind === "same") return `its cited code is unchanged at ${f.located.location.file}:${f.located.location.newLine ?? "?"}`;
   const survives = await survivingCode(f, ctx.head);
-  if (survives !== undefined) return `its code survives ${survives}`;
+  if (survives !== undefined) return `its code survives ${survives.kind === "found" ? `at ${survives.path}:${survives.start}` : survives.reason}`;
   if (claim.evidenceKind !== "confirmed_by_static_trace") return `evidence is ${claim.evidenceKind}`;
   if (claim.codeEvidence.length === 0) return "no code evidence";
   for (const evidence of claim.codeEvidence) {

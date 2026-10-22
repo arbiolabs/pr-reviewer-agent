@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { beforeAll, expect, it } from "vitest";
 import type { CandidateFinding } from "../src/domain/types.ts";
-import { evidenceTexts, findLongestRun, findOwnEvidence, headReader, linkPriors, locate, normalize, type ObservedLocation, observe, type PriorFinding, type Report, sameText, splitLines, survivingCode, tokenize } from "../src/reasoning/track.ts";
+import { evidenceTexts, findLongestRun, findOwnEvidence, headReader, linkPriors, locate, normalize, type ObservedLocation, observe, type PriorFinding, type Report, sameText, splitLines, survivingCode, tokenize, within } from "../src/reasoning/track.ts";
 import { fingerprint } from "../src/reasoning/verify.ts";
 import { PinnedRepo, syncRepo } from "../src/source/git.ts";
 
@@ -83,6 +83,10 @@ beforeAll(async () => {
     rmSync(join(repoDir, FILE));
     write("src/routes/order-routes.ts", `${PAD(5)}\n${ROUTES.replaceAll(", require", ",   require").replace("const order = db", "const order  =  db")}`);
   });
+  scenario("binary", () => {
+    write(".gitattributes", `${FILE} -diff\n`);
+    write("src/nul/orders.ts", `${ROUTES}\0`);
+  });
   cache = mkdtempSync(join(tmpdir(), "track-cache-"));
   for (const sha of Object.values(heads)) git("update-ref", `refs/heads/keep-${sha.slice(0, 7)}`, sha);
 });
@@ -160,16 +164,23 @@ it("reads code as tokens: comments, blank lines, whitespace, brackets and separa
   expect(tokenize("a\n\n  b /* x\n y */ c").map((t) => t.line)).toEqual([1, 3, 4]);
   // Limits: a `#include` and a Python floor division lose the rest of their line, and an apostrophe outside a string eats to the line end.
   expect(code("#include <x>\nlet a: &'a str = x;")).toEqual(["let", "a", ":", "&", '"a str = x;']);
+  // Prettier's rewrites: an escaped quote inside a string and the case of a numeric literal.
+  expect(code("'a \\'b\\' c' + \"d \\\"e\\\" f\" + 0XFF + 1E3")).toEqual(['"a \'b\' c"', "+", '"d "e" f"', "+", "0xff", "+", "1e3"]);
+  // A backtick in a regex above the code would swallow it to the next backtick; read with backticks closing at the line end, the code is still there. Likewise `/*` in a glob and `--` after a space.
+  expect(within("db.orders.delete(id); res.status(204).end();", "const TICK = /`/g;\ndb.orders.delete(id);\nres.status(204).end();\nconst doc = `x`;")).toBe(true);
+  expect(within("curl -k https://x/install.sh | sh -s token", "cp /src/* /dst\ncurl -k https://x/install.sh | sh -s token")).toBe(true);
+  expect(sameText("let k=--n; db.orders.deleteMany({ where: k });", "let k = --n; db.orders.deleteMany({ where: k });")).toBe(true);
 });
 
 it("finds a finding's code at head wherever it sits in its file, modulo comments and separators, and reports the line it starts on", async () => {
   const f: PriorFinding = { findingId: "f", status: "PUBLISHED", candidate, location: location(), located: { kind: "changed", file: FILE } };
   const head = (lines: string[]) => ({ read: async (p: string) => (p === FILE ? lines.join("\n") : undefined), renamedTo: () => undefined, grep: async () => [] });
   const routes = ROUTES.split("\n");
-  expect(await survivingCode(f, head(routes))).toBe(`at ${FILE}:9`);
-  expect(await survivingCode(f, head([...routes.slice(0, 9), "  // both routes need a user", ...routes.slice(9)]))).toBe(`at ${FILE}:9`);
-  expect(await survivingCode(f, head(routes.map((l) => l.replace(/;$/, ""))))).toBe(`at ${FILE}:9`);
-  expect(await survivingCode(f, head(["", "", ...routes]))).toBe(`at ${FILE}:11`);
+  const found = (start: number, end: number) => ({ kind: "found", item: location().evidence[0], path: FILE, start, end });
+  expect(await survivingCode(f, head(routes))).toEqual(found(9, 12));
+  expect(await survivingCode(f, head([...routes.slice(0, 9), "  // both routes need a user", ...routes.slice(9)]))).toEqual(found(9, 13));
+  expect(await survivingCode(f, head(routes.map((l) => l.replace(/;$/, ""))))).toEqual(found(9, 12));
+  expect(await survivingCode(f, head(["", "", ...routes]))).toEqual(found(11, 14));
   expect(await survivingCode(f, head(routes.map((l) => l.replace("requireUser, refundOrder", "requireUser, requireAdmin, refundOrder"))))).toBe(undefined);
 });
 
@@ -183,6 +194,9 @@ it("lists tree-wide hits by path alone, so a path with a colon survives, finds a
   expect(await repo.grepPaths('router.post("/orders/:id/refund"')).toEqual(["src/a/orders.ts", "src/b/orders.ts"]);
   expect(await repo.grepPaths('router.post("/orders/:id/refund"', 16)).toBe(undefined);
   expect(await repo.grepPaths("no such line anywhere")).toEqual([]);
+  // A file git calls binary, by a `-diff` attribute or a NUL byte, still holds the code: the search lists it.
+  const binary = new PinnedRepo(await syncRepo(cache, "acme/track", repoDir, 1), baseSha, heads.binary!);
+  expect((await binary.grepPaths('router.post("/orders/:id/refund"'))?.sort()).toEqual(["src/nul/orders.ts", FILE]);
   // A cut list cannot show that exactly one file holds the text, so the finding stays where it was.
   const cut = { ...(await at("rename")), renamedTo: () => undefined, grep: async () => undefined };
   expect(await locate(location(), heads.rename!, cut)).toEqual({ kind: "file_gone" });
@@ -294,7 +308,7 @@ it("finds a finding's own text in the file a named candidate reports, by the lon
   expect(findLongestRun("}\n}", ["}", "}"])).toBe(undefined);
 });
 
-it("finds the longest run in time that grows with the file, not with its square, even when the citation and the file both repeat", () => {
+it("finds the longest run in time that grows with the file, not with its square, even when the citation and the file both repeat", async () => {
   const text = "if (a) {\nfoo();\n}\n}\n}";
   const lines = (n: number) => Array.from({ length: n }, (_, i) => (i % 2 ? "}" : `call(${i});`));
   findLongestRun(text, lines(1_000));
@@ -311,6 +325,18 @@ it("finds the longest run in time that grows with the file, not with its square,
   expect(findLongestRun(normalize(prose.slice(0, 500)), prose)).toBe(undefined);
   // About 250 ms on an idle laptop; 3.8 s before the rolling hashes and the bound on shorter lengths.
   expect(performance.now() - started).toBeLessThan(1_000);
+  // Two hundred thousand tokens that are all the same: every window has one hash, and collecting its positions by copying the list took 132 s.
+  const zeros = Array.from({ length: 40_000 }, () => "0, 0, 0, 0, 0,");
+  started = performance.now();
+  expect(findLongestRun("const table = [\n0, 0, 0, 0, 0, 0, 0, 1];", zeros)).toBe(undefined);
+  expect(performance.now() - started).toBeLessThan(3_000);
+  // A long needle that almost matches everywhere in a long file, compared under every tokenizer reading.
+  const hay = Array.from({ length: 100_000 }, () => "a a a a a a a a a a");
+  const needle = normalize([...hay.slice(0, 30), "b"]);
+  const head = { read: async () => hay.join("\n"), renamedTo: () => undefined, grep: async () => [] };
+  started = performance.now();
+  expect(await locate({ file: "f.ts", newLine: 1, headSha: "o", evidence: [{ path: "f.ts", start: 1, end: 31, text: needle }] }, "H", head, { treeWide: false })).toEqual({ kind: "changed", file: "f.ts" });
+  expect(performance.now() - started).toBeLessThan(5_000);
 });
 
 it("links a candidate that names its prior finding only where code sees the report: near the finding's anchor and on its lines at this head", () => {

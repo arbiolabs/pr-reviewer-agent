@@ -294,6 +294,45 @@ it("searches the tree for a short item with enough tokens, and finds a moved blo
   expect(await resolve(moved, [item(A, aligned, 4, 6)], [[4, 4]])).toEqual(["its code survives at src/helper.ts:2", "POTENTIALLY_RESOLVED"]);
 });
 
+it("reads the head file and a stored text the same way, under every reading of a backtick, /* and --, so an unchanged or reformatted finding never resolves", async () => {
+  const unchanged = (line: number) => [`its cited code is unchanged at ${A}:${line}`, "STILL_PRESENT"];
+  const sql = ["import db;", "export async function get(req) {", "  const rows = await db.query(`", "    SELECT * FROM orders", "    WHERE id = ${req.params.id}", "  `);", "  return rows;", "}"];
+  const spaced = ["import db;", "export function get(req) {", '  return db.query("SELECT *  FROM orders WHERE id = " + req.params.id);', "}", "// x"];
+  const lifetime = ["impl Store {", "  fn name(&self) -> &'static str { self.db.exec(self.raw_query) }", "}"];
+  const jsx = ["export const P = () => (", "  <p onClick={() => db.orders.deleteAll()}>Don't click</p>", ");"];
+  const del = ["import db;", "export function del(req, res) {", "  const id = req.params.id;", "  db.orders.delete(id);", "  res.status(204).end();", "}", "// end"];
+  const sh = ["#!/bin/sh", "set -e", "curl -k https://example.com/install.sh | sh -s token", "echo done"];
+  const tick = ["export function del(req, res) {", '  const clean = req.params.id.replace(/`/g, "");', "  db.orders.delete(clean);", "}", "const doc = `x`;"];
+  const field = ["export class Client {", '  #apiKey = "sk_live_1234567890";', "  get() { return this.#apiKey; }", "}"];
+  const docker = ["docker run \\", "  --privileged \\", "  -v /:/host img", "# end"];
+  const css = [".a { color: red; }", "#admin { display: block; }", ".b { color: blue; }"];
+  const quotes = ["export function q(db, name) {", "  return db.query('SELECT * FROM users WHERE name = \\'' + name + '\\'');", "}"];
+  const hex = ["export function f(buf) {", "  if (buf[0] === 0XFF) return exec(buf.toString());", "}"];
+  const dash = ["export function f(db, n) {", "  let k=--n; db.orders.deleteMany({ where: k });", "}"];
+  const cases: [string, string[], [number, number], string[], number][] = [
+    ["a template literal that spans lines, byte-identical", sql, [3, 6], sql, 5],
+    ["the same under an added line", sql, [3, 6], ["import log;", ...sql], 6],
+    ["two spaces inside a string literal", spaced, [3, 3], spaced, 5],
+    ["an odd apostrophe with CRLF line endings", lifetime, [2, 2], lifetime.map((l) => `${l}\r`), 5],
+    ["an odd apostrophe with trailing spaces", lifetime, [2, 2], lifetime.map((l) => `${l}  `), 5],
+    ["JSX text with an apostrophe and a trailing space", jsx, [2, 2], jsx.map((l, i) => (i === 1 ? `${l} ` : l)), 5],
+    ["a regex holding a backtick added above", del, [3, 5], ["import db;", "const TICK = /`/g;", ...del.slice(1)], 6],
+    ["a regex holding /* added above", del, [3, 5], ["import db;", "const GLOB = /a\\/*/;", ...del.slice(1)], 6],
+    ["evidence holding a regex with a backtick, file unchanged", tick, [2, 3], tick, 5],
+    ["a private field at a line start, shifted a line", field, [2, 2], [field[0]!, "  // client", ...field.slice(1)], 6],
+    ["a --flag line, shifted a line", docker, [2, 2], ["# hi", ...docker], 6],
+    ["a CSS id selector, shifted a line", css, [2, 2], ["/* x */", ...css], 6],
+    ["Prettier's quote and escape changes", quotes, [2, 2], quotes.with(1, "  return db.query(\"SELECT * FROM users WHERE name = '\" + name + \"'\");"), 5],
+    ["Prettier's hex case", hex, [2, 2], hex.map((l) => l.replace("0XFF", "0xff")), 5],
+    ["a space before -- that turns it into a comment", dash, [2, 2], dash.with(1, "  let k = --n; db.orders.deleteMany({ where: k });"), 5],
+  ];
+  for (const [name, base, range, head, line] of cases) expect(await resolve({ [A]: head }, [item(A, base, ...range)], [[1, 1]]), name).toEqual(unchanged(line));
+  // Two copies of a line with no code tokens: locate cannot pick one, so the finding is doubted, and the survival check still finds the line as written.
+  expect(await resolve({ [A]: [field[0]!, "  // client", field[1]!, field[1]!, ...field.slice(2)] }, [item(A, field, 2, 2)], [[1, 1]])).toEqual([`its code survives at ${A}:3`, "POTENTIALLY_RESOLVED"]);
+  // A shell glob holding /* added above a curl line: `//` in the URL drops the rest of the line, so the item has five tokens and is not relocated, but it is found in the file and the claim is refused.
+  expect(await resolve({ [A]: [...sh.slice(0, 2), "cp /src/* /dst", ...sh.slice(2)] }, [item(A, sh, 3, 3)], [[1, 1]])).toEqual([`its code survives at ${A}:4`, "POTENTIALLY_RESOLVED"]);
+});
+
 it("reads what every candidate cites before any other check, so a discarded one still contradicts a claim", async () => {
   // Line 4 changed; a re-report cites the surviving lines 5-7 without naming the finding, and fails VERIFY on its own terms.
   const partial = { [A]: BASE_A.with(3, "  const id = String(req.params.id);"), [HELPER]: BASE_HELPER };

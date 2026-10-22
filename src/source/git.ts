@@ -149,10 +149,12 @@ export class PinnedRepo {
   /**
    * The head paths with a line that contains `query`, NUL-delimited by git so a colon in a path survives, or undefined
    * when the list runs past `cap` bytes: that many files hold the line, so no caller can call one of them unique.
+   * Files git calls binary, such as one holding a NUL byte, are searched too (`-a`): code moved into one must still be
+   * found, or a resolution claim on it would pass.
    */
   async grepPaths(query: string, cap = DEFAULT_OUTPUT_CAP): Promise<string[] | undefined> {
     try {
-      const out = await git(this.dir, ["grep", "-l", "-z", "-I", "-F", "-e", query, this.headSha]);
+      const out = await git(this.dir, ["grep", "-l", "-z", "-a", "-F", "-e", query, this.headSha]);
       if (Buffer.byteLength(out) > cap) return undefined;
       return out.split("\0").filter((p) => p !== "").map((p) => p.slice(this.headSha.length + 1));
     } catch (error) {
