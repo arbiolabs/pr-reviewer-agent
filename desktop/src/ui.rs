@@ -630,7 +630,7 @@ fn nav_item(
                 .text_color(if active { t.text } else { t.muted })
                 .child(label.to_string()),
         )
-        .when(count > 0, |d| d.child(count_badge(t, count, hue)));
+        .when(count > 0, |d| d.child(count_badge(count, hue)));
     focusable(row, t)
 }
 

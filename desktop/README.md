@@ -1,6 +1,6 @@
 # pr-review-desktop
 
-`pr-review-desktop` is a macOS client for pr-review, built on [GPUI](https://www.gpui.rs) through [gpui-kit](https://crates.io/crates/gpui-kit) 0.8.0. The window is a triage inbox: a queue of the decisions waiting on you, each with its detail beside it, a live strip of running reviews, the diff with findings anchored, and a command palette (⌘K). [DESIGN-C.md](DESIGN-C.md) describes the design and its tokens.
+`pr-review-desktop` is a macOS client for pr-review, built on [GPUI](https://www.gpui.rs) through [gpui-kit](https://crates.io/crates/gpui-kit) 0.8.0. The window is a triage inbox: a queue of the decisions waiting on you, each with its detail beside it, a live strip of running reviews, every PR in the sidebar, the diff with findings anchored, a timeline, and a command palette (⌘K). [DESIGN.md](DESIGN.md) describes the design and its tokens.
 
 The app links the terminal client in `../tui` as a library and runs its reducer, `update(&mut Model, Msg) -> Vec<Effect>`, and its network task unchanged. The protocol rules, the key guards and the playback all come from there. The terminal client stays as it is.
 
@@ -50,11 +50,11 @@ pr-review-desktop --playback protocol/playback/showcase.ndjson --snapshot out.pn
 | `--window WxH` | The window size in points. The default is 1280x800. |
 | `--appearance dark\|light` | The gpui-kit theme mode. The default follows the system. |
 
-The window must fit on the screen, because macOS shrinks a larger one and the capture then never matches the requested size. The PNG is the window's content area at the display's scale, so `--window 1280x800` gives a 2560x1600 image on a Retina display. The title bar is cropped off, because macOS draws it differently when the window is not focused.
+The window must fit on the screen, because macOS shrinks a larger one and the capture then never matches the requested size. The PNG is the window's content area at the display's scale, so `--window 1280x800` gives a 2560x1600 image on a Retina display. The title bar's chrome above the content area is cropped off; the app's own title bar, with the traffic lights, is in the capture.
 
 ### Determinism
 
-With `--playback`, the script plays in virtual time before the window opens. Script lines, the 125 ms ticks and the steps apply in time order up to `--snapshot-after-ms`, and the window then shows that model without further changes. The same flags give the same pixels on the same machine, however slow the build. The harness captures only after the window shows the same painted frame at its full size on two captures in a row. It retries a capture that is one flat color, and it exits with code 1 if the window never settles.
+With `--playback`, the script plays in virtual time before the window opens. Script lines, the 125 ms ticks and the steps apply in time order up to `--snapshot-after-ms`, and the window then shows that model without further changes. The same flags give the same pixels on the same machine, however slow the build, wherever the pointer is and whichever app is in front: a snapshot window ignores the keyboard, covers itself with a layer that takes the pointer so nothing under it hovers or presses, and activates itself before every capture so the traffic lights are colored. The harness captures only after the window shows the same painted frame at its full size on two captures in a row. It retries a capture that is one flat color, asks for another frame when one does not present within 1.5 s, and exits with code 1 if the window never settles. `snap.sh` retries a run that exits without its PNG or runs past 60 s, three times.
 
 The window shows the endpoint, so a path to the script that differs gives different pixels. `snap.sh` passes a relative path for this reason.
 
@@ -75,6 +75,8 @@ With `--socket`, the capture happens `--snapshot-after-ms` milliseconds after la
 | `tab:done`, `tab:queue` | Show the done list or the queue. |
 | `palette:TEXT` | Open the command palette with TEXT typed. |
 | `keys` | Open the shortcut sheet. |
+| `confirm-post` | Open the sheet that asks before posting the proof in front. |
+| `scrub:N` | Hold the live log at its Nth event, counted from 1. |
 
 The action names are `quit`, `up`, `down`, `page-up`, `page-down`, `top`, `bottom`, `left`, `right`, `focus-next`, `focus-prev`, `open`, `back`, `search`, `jump-to`, `open-diff`, `open-timeline`, `watch`, `scroll-down`, `scroll-up`, `next-finding`, `prev-finding`, `refresh`, `help`, `accounts`, `start`, `retry`, `cancel`, `publish`, `cycle-scope`, `cycle-category`, `cycle-phase`, `backspace`, `submit`, `cancel-input`, `confirm`, `open-url` and `toggle-raw`. Each one maps onto `keymap::Action` in the terminal client.
 
@@ -89,14 +91,15 @@ desktop/snap.sh                      # every state, into desktop/snapshots/
 desktop/snap.sh /tmp/snaps diff help # two states, into /tmp/snaps
 ```
 
-The states are listed at the end of `snap.sh`, one per line: a name, the appearance, the capture time, the steps and, optionally, another playback script. `08-disconnected` dials a socket that doesn't exist and captures in real time.
+The states are listed at the end of `snap.sh`, one per line: a name, the appearance, the capture time, the steps and, optionally, another playback script. `08-disconnected` dials a socket that doesn't exist and captures in real time. `00-connecting`, `11-empty-queue` and `12-readonly` play the sessions in `desktop/playback/` and a read-only rewrite of the showcase that `snap.sh` writes under `target/`.
 
 ## How the parts connect
 
 - A multi-threaded tokio runtime runs the terminal client's `net::run`, or `playback::run`, and a task that sends `Msg::Tick` every 125 ms, the terminal client's cadence. Both send into one `mpsc` channel.
 - A GPUI foreground task awaits that channel and applies each message to the `Model` inside the window's view on the main thread, through the terminal client's `app::dispatch`. The view re-renders when the model is dirty.
 - `dispatch` carries out the effects: `Effect::Send` goes to the network task, `Effect::OpenUrl` opens the URL with `open` (the reducer only emits `https://github.com/` URLs), and `Effect::Quit` quits the app.
-- A future view sends `Msg::Action(keymap::Action)` for an intent and `Msg::Pick(view::Hit)` for a click target. Both act only where the terminal client's key or click would.
+- A view sends `Msg::Action(keymap::Action)` for an intent and `Msg::Pick(view::Hit)` for a click target. Both act only where the terminal client's key or click would. The desktop keeps only its own view state: which list the home shows, what floats over the window, and where the live log is held.
+- The ⌘ shortcuts are GPUI actions bound to the menu bar, so the menus show them. Plain keys go through `Shell::on_key`.
 
 ## Develop
 

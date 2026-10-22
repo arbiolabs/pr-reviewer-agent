@@ -257,14 +257,13 @@ pub fn wrap(line: &str, cols: usize) -> Vec<Range<usize>> {
     let mut runs = Vec::new();
     let mut start = 0;
     let mut n = 0;
-    for (i, ch) in line.char_indices() {
+    for (i, _) in line.char_indices() {
         if n == cols {
             runs.push(start..i);
             start = i;
             n = 0;
         }
         n += 1;
-        let _ = ch;
     }
     runs.push(start..line.len());
     runs

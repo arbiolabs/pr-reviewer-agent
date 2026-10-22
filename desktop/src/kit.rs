@@ -152,8 +152,7 @@ pub fn chip(t: &Colors, label: impl Into<SharedString>, fg: Hsla) -> Div {
 }
 
 /// A count in a circle, in its meaning's hue.
-pub fn count_badge(t: &Colors, n: usize, hue: Hsla) -> Div {
-    let _ = t;
+pub fn count_badge(n: usize, hue: Hsla) -> Div {
     div()
         .flex()
         .flex_none()

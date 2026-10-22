@@ -319,7 +319,7 @@ pub fn layer(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Vec<AnyElement> {
 fn toast(glyph: IconName, words: String, bg: Hsla, fg: Hsla) -> AnyElement {
     div()
         .absolute()
-        .bottom(space::S6)
+        .bottom(layout::BAR + space::S4)
         .left_0()
         .right_0()
         .flex()

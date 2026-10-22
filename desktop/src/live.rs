@@ -42,7 +42,6 @@ pub fn live(s: &Shell, t: &Colors, pr: &Pr, run: &Run, cx: &Context<Shell>) -> D
         .child(stat(if landed.is_empty() { "0".into() } else { queue::severity_summary(&landed) }, "findings kept"))
         .child(stat(total.to_string(), "events"));
 
-    // The track: one tick per event, colored by kind, dim past the held point. Click one to hold the log there.
     let track = div().flex().items_end().gap(px(1.)).h(px(24.)).children(events.iter().enumerate().map(|(i, a)| {
         let (h, c) = match &a.kind {
             ActivityKind::Phase { .. } => (22., t.running),
@@ -105,7 +104,6 @@ pub fn live(s: &Shell, t: &Colors, pr: &Pr, run: &Run, cx: &Context<Shell>) -> D
             },
         );
 
-    // The log up to the held point, newest last, with a landed finding in its severity's wash.
     let lo = (head + 1).saturating_sub(SHOWN);
     let log = div().flex().flex_col().children(events.iter().enumerate().take(head + 1).skip(lo).map(|(i, a)| {
         let current = i == head;
