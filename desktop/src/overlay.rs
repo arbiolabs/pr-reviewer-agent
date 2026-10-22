@@ -68,7 +68,10 @@ fn entries(s: &Shell) -> Vec<Entry> {
             Card::Failed { pr, .. } => format!("Retry the failed review of #{}", pr.number),
             Card::Start { pr } => format!("Start a review of #{}", pr.number),
         };
-        out.push(Entry { group: "Needs you", title, key: None, blocked: None, run: Run::Card(i) });
+        // A card whose action is a command is refused on a read-only daemon, like the card's own button.
+        let command = matches!(c, Card::Failed { .. } | Card::Start { .. });
+        let blocked = (command && queue::read_only(m)).then(|| READ_ONLY.to_string());
+        out.push(Entry { group: "Needs you", title, key: None, blocked, run: Run::Card(i) });
     }
     for (p, _) in queue::running(m) {
         out.push(Entry {
