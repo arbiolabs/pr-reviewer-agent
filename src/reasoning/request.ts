@@ -10,11 +10,19 @@ const MODE_FOCUS: Record<ReviewMode, string> = {
     "This change touches a sensitive area. Trace every changed path through authorization, validation, persistence, and concurrency before concluding. A human will review this change regardless of your result.",
 };
 
-/** Model text cannot close the fence it sits in, in any case or spacing, so it cannot escape into the trusted part of the request. */
-const fence = (value: string, tag: string) => value.replace(new RegExp(`<\\s*/\\s*${tag}\\s*>`, "gi"), `&lt;/${tag}>`);
+/**
+ * Model text cannot close the fence it sits in, in any case or spacing, so it cannot escape into the trusted part of
+ * the request. Compatibility lookalikes, such as fullwidth `＜／`, are folded to ASCII (NFKC) first, so they cannot
+ * spell the tag either; the rest of the text is folded with them.
+ */
+const fence = (value: string, tag: string) => value.normalize("NFKC").replace(new RegExp(`<\\s*/\\s*${tag}\\s*>`, "gi"), `&lt;/${tag}>`);
 
-/** A value shown on one line of the request. A control character in it, such as a newline in a path, could forge the next line, so each is spelled out. */
-const oneLine = (value: string) => value.replace(/\p{Cc}/gu, (c) => `\\u${c.codePointAt(0)!.toString(16).padStart(4, "0")}`);
+/**
+ * A value shown on one line of the request. A control character in it, such as a newline in a path, could forge the
+ * next line, and a format character, such as a zero-width space or a bidi override, could hide a tag or reorder what
+ * the model reads, so each is spelled out.
+ */
+const oneLine = (value: string) => value.normalize("NFKC").replace(/[\p{Cc}\p{Cf}]/gu, (c) => `\\u${c.codePointAt(0)!.toString(16).padStart(4, "0")}`);
 
 /** Open findings listed in the request, the lines of cited code shown per finding and the length of each, and the section's size; the rest is one line and `previous_findings`. */
 const MAX_PRIOR = 20;
