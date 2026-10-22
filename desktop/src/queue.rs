@@ -74,7 +74,8 @@ impl<'a> Card<'a> {
     /// The queue's sections, so the eye finds the tier before the card.
     pub fn tier(&self) -> Tier {
         match self.rank() {
-            0..=2 => Tier::Decide,
+            0 => Tier::Setup,
+            1..=2 => Tier::Decide,
             3..=4 => Tier::Blocking,
             5..=6 => Tier::Unblock,
             _ => Tier::Later,
@@ -84,6 +85,7 @@ impl<'a> Card<'a> {
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Tier {
+    Setup,
     Decide,
     Blocking,
     Unblock,
@@ -93,6 +95,7 @@ pub enum Tier {
 impl Tier {
     pub fn label(self) -> &'static str {
         match self {
+            Tier::Setup => "Before reviews can run",
             Tier::Decide => "Decide now",
             Tier::Blocking => "Blocking findings",
             Tier::Unblock => "Unblock",
@@ -181,6 +184,11 @@ pub fn cards(m: &Model) -> Vec<Card<'_>> {
     }
     out.sort_by_key(Card::rank);
     out
+}
+
+/// The decisions in `cards`: every card but setup, which is a precondition for deciding, not a decision.
+pub fn decisions(cards: &[Card]) -> usize {
+    cards.iter().filter(|c| !matches!(c, Card::Setup { .. })).count()
 }
 
 /// Reviews the reviewer is working on now, oldest first.
@@ -575,6 +583,17 @@ mod tests {
         let m = at(30_000, "wait:20000,pr:1291,publish,wait:100,confirm");
         assert!(!shape(&m).iter().any(|(_, n)| *n == 1291), "{:?}", shape(&m));
         assert!(done(&m).iter().any(|(p, _)| p.number == 1291));
+    }
+
+    #[test]
+    fn setup_is_not_counted_as_a_decision() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../protocol/playback/setup.ndjson");
+        let mut m = Model::new("test", Look::default(), Screen::Review, None);
+        play(pr_review_tui::playback::load(&path).unwrap(), &mut m, &[], 1_000).unwrap();
+        let cards = cards(&m);
+        assert!(matches!(cards.first(), Some(Card::Setup { .. })));
+        assert_eq!(super::decisions(&cards), cards.len() - 1);
+        assert_eq!(super::decisions(&super::cards(&at(20_000, ""))), 4);
     }
 
     fn run_of(m: &Model, number: u64) -> pr_review_tui::protocol::Run {

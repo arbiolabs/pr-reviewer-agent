@@ -649,13 +649,12 @@ fn titlebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         _ if s.done_tab && !queue::cards(m).is_empty() => {
             ("Done".into(), format!("{} with nothing left for you.", queue::count(queue::done(m).len(), "PR")))
         }
-        // The home's title says how much waits, not the list's name the sidebar already shows.
-        _ => match (queue::stage(m), queue::cards(m).len()) {
-            (Stage::Ready, 0) => {
-                let rest = queue::summary(m);
-                ("You're clear".into(), crate::kit::sentence(rest.trim_start_matches("You're clear · ")))
-            }
-            (Stage::Ready, n) => (format!("{} waiting", queue::count(n, "decision")), queue::summary(m)),
+        // The home's title says how much waits, not the list's name the sidebar already shows, and nothing under
+        // it: the queue right below says what each decision is. Setup is a precondition, not a decision.
+        _ => match (queue::stage(m), queue::decisions(&queue::cards(m)), queue::setup_count(m).blocking) {
+            (Stage::Ready, 0, 0) => ("You're clear".into(), String::new()),
+            (Stage::Ready, 0, _) => ("Setup needed".into(), String::new()),
+            (Stage::Ready, n, _) => (format!("{} waiting", queue::count(n, "decision")), String::new()),
             _ => ("pr-review".into(), queue::summary(m)),
         },
     };
@@ -780,6 +779,17 @@ fn nav_item(
     focusable(id, row, t, radius::SM, f)
 }
 
+/// The pane shows setup: the Setup page, or the home with no PR selected while setup blocks reviews.
+pub fn setup_shown(s: &Shell) -> bool {
+    let m = &s.model;
+    m.ui.screen == Screen::Settings
+        || matches!(m.ui.screen, Screen::Inbox | Screen::Review)
+            && front(m).is_none()
+            && m.selected_pr().is_none()
+            && queue::stage(m) == Stage::Ready
+            && queue::setup_count(m).blocking > 0
+}
+
 /// The sidebar: the smart lists, then every PR grouped by repository with its state, then the connection.
 fn sidebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
     let m = &s.model;
@@ -806,9 +816,9 @@ fn sidebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
             "nav-queue",
             IconName::Inbox,
             "Needs you",
-            cards.len(),
+            queue::decisions(&cards),
             t.accent,
-            home && !s.done_tab && m.ui.screen != Screen::Timeline,
+            home && !s.shows_done() && !setup_shown(s),
             dim,
             click(cx, |s, cx| s.set_tab(false, cx)),
         ))
@@ -819,7 +829,7 @@ fn sidebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
             "Done",
             done.len(),
             t.ok,
-            home && s.done_tab,
+            home && s.shows_done(),
             dim,
             click(cx, |s, cx| s.set_tab(true, cx)),
         ))
@@ -830,7 +840,7 @@ fn sidebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
             "Setup",
             queue::setup_count(m).blocking,
             t.warn,
-            m.ui.screen == Screen::Settings,
+            setup_shown(s),
             false,
             click(cx, |s, cx| s.act(Action::Goto(Screen::Settings), cx)),
         ));

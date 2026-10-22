@@ -65,7 +65,9 @@ pub fn skeleton_column(t: &Colors) -> Div {
 pub fn queue_column(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
     let m = &s.model;
     let cards = queue::cards(m);
-    let selected = queue::card_of(&cards, m.ui.selected_pr.as_ref());
+    // With no PR selected and setup blocking, the pane shows setup: its card is the one selected.
+    let selected = queue::card_of(&cards, m.ui.selected_pr.as_ref())
+        .or_else(|| cards.iter().position(|c| setup_shown(s) && matches!(c, Card::Setup { .. })));
     let mut col = div();
     let mut tier: Option<Tier> = None;
     for (i, c) in cards.iter().enumerate() {
@@ -253,7 +255,8 @@ fn card(s: &Shell, t: &Colors, c: &Card, i: usize, selected: bool, cx: &Context<
     }
     // A selected card whose page fills the pane docks: its title, quote, reason and button are all on that page,
     // so the card keeps only its kicker and its meta line, and the title is said once beside the sidebar.
-    let docked = selected && matches!(c, Card::Findings { .. } | Card::Failed { .. } | Card::Start { .. })
+    let docked = selected
+        && matches!(c, Card::Findings { .. } | Card::Failed { .. } | Card::Start { .. } | Card::Setup { .. })
         || proof_open && matches!(c, Card::Approve { .. });
     // On a read-only daemon a card's command stays visible, dimmed, with the reason in its tooltip.
     let command = match c {
