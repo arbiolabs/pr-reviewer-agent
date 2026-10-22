@@ -363,7 +363,7 @@ pub fn layer(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Vec<AnyElement> {
     match &s.overlay {
         Some(Overlay::Palette { query, selected }) => out.push(palette(s, t, query, *selected, cx)),
         Some(Overlay::Keys) => out.push(keys(t, cx, false)),
-        Some(Overlay::ConfirmPost) => out.push(confirm_post(s, t, cx)),
+        Some(Overlay::ConfirmPost(_)) => out.push(confirm_post(s, t, cx)),
         None => {}
     }
     out

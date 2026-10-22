@@ -290,7 +290,7 @@ pub fn publication(
     body = body.child(section(t, &format!("Inline comments · {n}"), comments));
 
     // While the sheet asks, the page's own buttons step back, so the sheet holds the only live controls.
-    let asking = matches!(s.overlay, Some(Overlay::ConfirmPost));
+    let asking = matches!(s.overlay, Some(Overlay::ConfirmPost(_)));
     let ready = can_confirm(m) && !asking;
     let footer = if done {
         Bar {
@@ -324,7 +324,7 @@ pub fn publication(
                 "Post to GitHub…",
                 "⌘⏎",
                 Tone::Primary,
-                Some(Box::new(cx.listener(|s, _: &ClickEvent, _, cx| s.post(cx))) as OnClick),
+                Some(Box::new(cx.listener(|s, _: &ClickEvent, _, cx| s.post(false, cx))) as OnClick),
             ),
             false => Item {
                 why: (!asking).then(|| match publish_block(m, p) {

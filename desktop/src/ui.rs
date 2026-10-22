@@ -13,6 +13,7 @@ use pr_review_tui::net::NetCmd;
 use pr_review_tui::protocol::{Command, Pr, PrId, Run};
 use pr_review_tui::update::{Msg, can_confirm};
 use pr_review_tui::view::Hit;
+use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
 
 use crate::kit::{
@@ -96,7 +97,35 @@ pub enum Overlay {
     },
     Keys,
     /// The sheet that names what a post does before ⌘⏎ sends the reducer's `Confirm`.
-    ConfirmPost,
+    ConfirmPost(Arm),
+}
+
+/// The post sheet's guard against the chord that opened it. ⌘⏎ both opens the sheet and posts from it, so a
+/// double press would post before the sheet could be read. The sheet arms ⌘⏎ only once ⏎ has come up since it
+/// opened, and `DELAY` has passed: a double press, a held chord and its key repeat all land on an unarmed sheet.
+/// A sheet opened by a click or Y needs no release. The sheet's Post button acts at once: it sits far from the
+/// button that opened the sheet, so no double click reaches it.
+#[derive(Clone, Copy, Debug)]
+pub struct Arm {
+    opened: Instant,
+    released: bool,
+}
+
+impl Arm {
+    pub const DELAY: Duration = Duration::from_millis(500);
+
+    pub fn new(opened: Instant, by_chord: bool) -> Arm {
+        Arm { opened, released: !by_chord }
+    }
+
+    /// ⏎ came up.
+    pub fn release(&mut self) {
+        self.released = true;
+    }
+
+    pub fn ready(&self, now: Instant) -> bool {
+        self.released && now.duration_since(self.opened) >= Self::DELAY
+    }
 }
 
 pub struct Shell {
@@ -160,7 +189,7 @@ impl Shell {
                 Desk::Done(on) => s.done_tab = *on,
                 Desk::Palette(q) => s.overlay = Some(Overlay::Palette { query: q.clone(), selected: 0 }),
                 Desk::Keys => s.overlay = Some(Overlay::Keys),
-                Desk::ConfirmPost => s.post(cx),
+                Desk::ConfirmPost => s.post(false, cx),
                 Desk::Scrub(n) => s.scrub = Some(n.saturating_sub(1)),
             }
         }
@@ -286,9 +315,10 @@ impl Shell {
     }
 
     /// Posting is the one irreversible act: it opens the sheet that names what posts. Only `confirm_post` sends.
-    pub fn post(&mut self, cx: &mut Context<Self>) {
+    /// `chord` is true when ⌘⏎ opened it, so the same chord can't post until it is armed.
+    pub fn post(&mut self, chord: bool, cx: &mut Context<Self>) {
         if matches!(self.model.top_modal(), Some(Modal::Publication { .. })) && can_confirm(&self.model) {
-            self.overlay = Some(Overlay::ConfirmPost);
+            self.overlay = Some(Overlay::ConfirmPost(Arm::new(Instant::now(), chord)));
             cx.notify();
         }
     }
@@ -298,11 +328,15 @@ impl Shell {
         self.act(Action::Confirm, cx);
     }
 
-    /// ⌘⏎: posts the sheet in front, opens it over a preview, or confirms a reducer panel.
+    /// ⌘⏎: posts the sheet in front once it is armed, opens it over a preview, or confirms a reducer panel.
     fn post_key(&mut self, cx: &mut Context<Self>) {
         match (&self.overlay, self.model.top_modal()) {
-            (Some(Overlay::ConfirmPost), _) => self.confirm_post(cx),
-            (None, Some(Modal::Publication { .. })) => self.post(cx),
+            (Some(Overlay::ConfirmPost(arm)), _) => {
+                if arm.ready(Instant::now()) {
+                    self.confirm_post(cx)
+                }
+            }
+            (None, Some(Modal::Publication { .. })) => self.post(true, cx),
             (None, Some(Modal::Confirm { .. })) => self.act(Action::Confirm, cx),
             _ => {}
         }
@@ -380,7 +414,7 @@ impl Shell {
                 }
                 return;
             }
-            Some(Overlay::ConfirmPost) => {
+            Some(Overlay::ConfirmPost(_)) => {
                 // Cancel is the default: ⏎ and esc both close it. Only ⌘⏎ posts.
                 if matches!(key, "escape" | "enter") {
                     self.overlay = None;
@@ -437,7 +471,7 @@ impl Shell {
             {
                 return;
             }
-            (Some(Modal::Publication { .. }), _, _, "y") => return self.post(cx),
+            (Some(Modal::Publication { .. }), _, _, "y") => return self.post(false, cx),
             (Some(Modal::Publication { .. }), _, _, "m") => Action::ToggleRaw,
             (Some(Modal::Publication { .. }), _, _, "d") => Action::OpenDiff,
             (Some(Modal::Finding { .. }), _, _, "n") => Action::NextFinding,
@@ -522,6 +556,11 @@ impl Render for Shell {
             .key_context("pr-review")
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::on_key))
+            .on_key_up(cx.listener(|s, ev: &KeyUpEvent, _, _| {
+                if let (Some(Overlay::ConfirmPost(arm)), "enter") = (&mut s.overlay, ev.keystroke.key.as_str()) {
+                    arm.release();
+                }
+            }))
             .on_action(cx.listener(|s, _: &Palette, _, cx| s.toggle_palette(cx)))
             .on_action(cx.listener(|s, _: &Refresh, _, cx| s.act(Action::Refresh, cx)))
             .on_action(cx.listener(|s, _: &OpenGitHub, _, cx| s.open_github(cx)))
@@ -1104,4 +1143,24 @@ fn pill(s: &Shell, t: &Colors, p: &Pr, r: &Run, cx: &Context<Shell>) -> Stateful
         .min_w_0(),
         format!("Watch #{} live", p.number),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Arm;
+    use std::time::{Duration, Instant};
+
+    #[test]
+    fn a_double_cmd_return_opens_the_post_sheet_and_never_posts_from_it() {
+        let t0 = Instant::now();
+        let ms = |n| t0 + Duration::from_millis(n);
+        let mut arm = Arm::new(t0, true);
+        assert!(!arm.ready(ms(120)), "the second press of a double ⌘⏎");
+        assert!(!arm.ready(ms(900)), "the chord is still held: its key repeat");
+        arm.release();
+        assert!(!arm.ready(ms(300)), "released, but sooner than the sheet can be read");
+        assert!(arm.ready(ms(500)));
+        assert!(Arm::new(t0, false).ready(ms(500)), "a sheet opened by a click needs no release");
+        assert!(!Arm::new(t0, false).ready(ms(499)));
+    }
 }
