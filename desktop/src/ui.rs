@@ -564,6 +564,12 @@ impl Render for Shell {
             window.focus(&self.focus, cx);
         }
         let t = colors(cx);
+        {
+            use gpui_kit::component::scroll::ScrollbarMode;
+            if Theme::global(cx).scrollbar_mode != ScrollbarMode::Always {
+                Theme::set_scrollbar_mode(ScrollbarMode::Always, cx);
+            }
+        }
         let m = &self.model;
         let stage = queue::stage(m);
         let finding_open = matches!(front(m), Some(Modal::Finding { .. }));

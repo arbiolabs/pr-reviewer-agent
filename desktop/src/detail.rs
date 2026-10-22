@@ -3,6 +3,7 @@
 //! working live, and the setup checks.
 
 use gpui_kit::assets::IconName;
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use pr_review_tui::keymap::{Action, Mutation};
@@ -38,18 +39,23 @@ pub fn page(id: &'static str, body: Div, footer: Option<Div>, t: &Colors, wide: 
                 .flex_1()
                 .min_h_0()
                 .child(
-                    div().id(id).size_full().overflow_y_scroll().child(
-                        div()
-                            .flex()
-                            .flex_col()
-                            .min_h(relative(1.))
-                            .gap(space::S6)
-                            .px(space::S8)
-                            .pt(space::S6)
-                            .pb(space::S8 + space::S6)
-                            .when(!wide, |d| d.max_w(px(760.)))
-                            .child(body),
-                    ),
+                    div()
+                        .id(id)
+                        .size_full()
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .min_h(relative(1.))
+                                .gap(space::S6)
+                                .px(space::S8)
+                                .pt(space::S6)
+                                .pb(space::S8 + space::S6)
+                                .when(!wide, |d| d.max_w(px(760.)))
+                                .child(body),
+                        )
+                        // The scrollbar stays in view, so a page that goes on under the bar says so before it scrolls.
+                        .overflow_y_scrollbar(),
                 )
                 .child(scroll_fade(t)),
         )
@@ -946,13 +952,13 @@ fn finding_page(s: &Shell, t: &Colors, id: &FindingId, cx: &Context<Shell>) -> D
         badges = badges.child(chip(t, "From an earlier head", t.warn));
     }
     let (conf_word, conf_why) = confidence_words(f.confidence);
-    let mut left = div().flex().flex_col().flex_none().w(layout::MEASURE).gap(space::S6).child(
+    let mut left = div().flex().flex_col().flex_none().w(layout::ARGUMENT).gap(space::S6).child(
         div()
             .flex()
             .flex_col()
             .gap(space::S3)
             .child(badges)
-            .child(crate::kit::display_in(t, f.title.to_string(), 440.))
+            .child(crate::kit::display_in(t, f.title.to_string(), f32::from(layout::ARGUMENT)))
             .child(div().font_family(text::MONO).text_size(text::SMALL).text_color(t.muted).child(format!(
                 "{}{}",
                 f.file,

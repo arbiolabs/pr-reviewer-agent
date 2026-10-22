@@ -2,6 +2,7 @@
 //! place while the first snapshot loads.
 
 use gpui_kit::assets::IconName;
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use pr_review_tui::protocol::PublicationStatus;
@@ -24,9 +25,9 @@ fn column(t: &Colors, id: &'static str, inner: Div) -> Div {
             div()
                 .id(id)
                 .size_full()
-                .overflow_y_scroll()
                 // The first label sits on the detail page's first line: both columns start 24 points down.
-                .child(inner.flex().flex_col().gap(space::S4).px(space::S4).pt(space::S6).pb(space::S8 + space::S6)),
+                .child(inner.flex().flex_col().gap(space::S4).px(space::S4).pt(space::S6).pb(space::S8 + space::S6))
+                .overflow_y_scrollbar(),
         )
         .child(div().absolute().bottom_0().left_0().right(px(1.)).h(space::S8).bg(linear_gradient(
             180.,

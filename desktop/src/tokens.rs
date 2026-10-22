@@ -248,15 +248,18 @@ pub mod layout {
     pub const MEASURE: Pixels = px(440.);
     pub const PALETTE: Pixels = px(600.);
     pub const SHEET: Pixels = px(460.);
+    /// A finding's argument column: 360 points (55 characters), so the evidence beside it gets about 60 % of the
+    /// page and the lines that fit the diff mostly fit there too.
+    pub const ARGUMENT: Pixels = px(360.);
     /// Code never clips and never scrolls sideways: every block soft-wraps at these columns, the most Menlo 12
     /// (7.22 points a character) fits beside the gutter on each surface at 1280 points, less a few for safety.
     /// ponytail: fixed counts instead of measuring the pane, so a narrower window wraps late; measure the pane if
     /// the window gets resizable below 1280.
-    pub const COLS_EVIDENCE: usize = 58;
+    pub const COLS_EVIDENCE: usize = 71;
     /// The finding's hunk, beside its sign column.
-    pub const COLS_HUNK: usize = 55;
+    pub const COLS_HUNK: usize = 68;
     /// A code block inside the reading column.
-    pub const COLS_PROSE: usize = 48;
+    pub const COLS_PROSE: usize = 38;
     pub const COLS_DIFF: usize = 84;
     /// A proof comment's context.
     pub const COLS_WIDE: usize = 80;
