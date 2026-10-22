@@ -273,7 +273,7 @@ fn tick_kind(t: &Colors, a: &Activity) -> (f32, Hsla) {
 /// An event as its tag, the tag's hue and its words.
 fn event_words(t: &Colors, a: &Activity) -> (String, Hsla, String) {
     match &a.kind {
-        ActivityKind::Tool { tool, summary } => (tool.to_string(), t.accent, summary.to_string()),
+        ActivityKind::Tool { tool, summary } => (tool.to_string(), t.accent, crate::kit::middle(summary.as_str(), 64)),
         ActivityKind::Phase { to, .. } => ("phase".into(), t.running, format!("→ {}", phase_word(*to))),
         ActivityKind::Finding { title, severity, .. } => {
             let (mark, word) = severity_mark(*severity);

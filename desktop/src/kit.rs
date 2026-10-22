@@ -460,6 +460,32 @@ pub fn sentence(s: &str) -> String {
     out
 }
 
+/// `s` in at most `max` characters: a longer one keeps its head and its tail around " … ", each cut where a
+/// path or a list separates (a space, a slash, a comma), so a path is never split inside a name.
+pub fn middle(s: &str, max: usize) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    if chars.len() <= max {
+        return s.to_string();
+    }
+    let half = (max - 3) / 2;
+    // A space first (between list items), then a slash; a name is cut only when neither falls in range.
+    let at = |seps: &[char], range: std::ops::Range<usize>, back: bool| {
+        let mut r: Vec<usize> = range.filter(|&i| seps.contains(&chars[i])).collect();
+        if back {
+            r.reverse();
+        }
+        r.first().copied()
+    };
+    let head = at(&[' '], half / 2..half + 1, true).or(at(&['/'], half / 2..half + 1, true)).unwrap_or(half);
+    let from = chars.len() - half;
+    let tail = at(&[' '], from..chars.len() - half / 2, false)
+        .or(at(&['/'], from..chars.len() - half / 2, false))
+        .unwrap_or(from);
+    let head: String = chars[..head].iter().collect();
+    let tail: String = chars[tail..].iter().collect();
+    format!("{} … {}", head.trim_end_matches([',', ' ']), tail.trim_start_matches([',', ' ']))
+}
+
 /// `14:30` from an ISO timestamp, the wall-clock time the daemon reported.
 pub fn clock(iso: &str) -> String {
     iso.split('T').nth(1).map(|t| t.chars().take(5).collect()).unwrap_or_default()
@@ -499,6 +525,15 @@ mod tests {
         let w = super::balanced("Sign-in: send users back to the page they started from", 696.).unwrap();
         assert!((400. ..500.).contains(&w), "{w}");
         assert_eq!(super::balanced("Gift cards: redeem a balance at checkout", 696.), None);
+    }
+
+    #[test]
+    fn middle_keeps_whole_path_parts() {
+        let s = "3 files changed (+41 -6): src/server/routes/orders.ts, src/server/orders/reserve.ts, src/server/orders/history.ts";
+        let m = super::middle(s, 72);
+        assert!(m.chars().count() <= 72, "{m}");
+        assert_eq!(m, "3 files changed (+41 -6): … src/server/orders/history.ts");
+        assert_eq!(super::middle("short", 72), "short");
     }
 
     #[test]

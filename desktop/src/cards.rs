@@ -116,7 +116,7 @@ fn face(c: &Card, selected: bool) -> Face {
             },
             quote: None,
             sub: match missing.first().and_then(|c| c.fix.as_ref()) {
-                Some(f) => f.as_str().replace('`', ""),
+                Some(f) => crate::kit::sentence(&f.as_str().replace('`', "")),
                 None => "It can look, but not start, retry, cancel or post. Start it with --allow-commands.".into(),
             },
             meta: count.words(),

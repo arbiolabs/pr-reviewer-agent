@@ -540,9 +540,13 @@ fn run_block(s: &Shell, t: &Colors, run: Option<&Run>, current: &[&Finding]) -> 
         None => callout(
             t,
             t.muted,
-            IconName::Play,
+            IconName::CircleDashed,
             "No review yet",
-            Some("Start one and its progress shows live in the strip above.".into()),
+            Some(if m.server.as_ref().and_then(|sv| sv.commands_off()).is_some() {
+                "This daemon is read-only, so it can't start one. Restart it with --allow-commands.".into()
+            } else {
+                "Start one and it runs live here; its findings land below as the verifier keeps them.".into()
+            }),
         ),
         Some(r) if r.parked() => frame(
             div()
@@ -642,12 +646,8 @@ fn no_findings(t: &Colors, pr: &Pr, run: Option<&Run>) -> Option<Div> {
                 pr.head_sha.short()
             ),
         ),
-        None => (
-            IconName::CircleDashed,
-            t.faint,
-            "No findings yet",
-            "Start a review and its findings land here as the verifier keeps them.".to_string(),
-        ),
+        // The run block above already says no review has looked at it.
+        None => return None,
     };
     let card = div()
         .flex()

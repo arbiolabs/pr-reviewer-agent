@@ -14,6 +14,9 @@ use crate::queue::phase_word;
 use crate::tokens::{Colors, radius, severity_mark, space, text};
 use crate::ui::{Shell, on};
 
+/// The characters a tool summary keeps on its line at 1280 points; a longer one loses its middle.
+const SUMMARY: usize = 72;
+
 pub fn timeline(s: &Shell, t: &Colors, pr: &Pr, cx: &Context<Shell>) -> Div {
     let m = &s.model;
     let run = m.domain.latest_run(&pr.id);
@@ -188,16 +191,17 @@ fn event_line(t: &Colors, e: &SequencedEvent) -> Div {
         EventBody::PhaseChanged(p) => {
             plain.child(words(format!("{} → {}", phase_word(p.from), phase_word(p.to).to_lowercase())))
         }
+        // The glyph already says the severity; a status other than new follows the title.
         EventBody::FindingUpdated(f) => {
-            let (mark, word) = severity_mark(f.severity);
-            row().child(glyph(Some((mark, t.severity(f.severity))))).child(words(format!(
-                "{} · {} · {}",
-                f.title,
-                word.to_lowercase(),
-                crate::detail::status_sentence(f, &[]).0.to_lowercase()
-            )))
+            let (mark, _) = severity_mark(f.severity);
+            let status = crate::detail::status_sentence(f, &[]).0;
+            row().child(glyph(Some((mark, t.severity(f.severity))))).child(words(if status == "New" {
+                f.title.to_string()
+            } else {
+                format!("{} · {}", f.title, status.to_lowercase())
+            }))
         }
-        EventBody::ToolActivity(a) => plain.child(words(a.summary.to_string())),
+        EventBody::ToolActivity(a) => plain.child(words(crate::kit::middle(a.summary.as_str(), SUMMARY))),
         EventBody::PublicationChanged(p) => {
             plain.child(words(format!("Publication {}", format!("{:?}", p.status).to_lowercase())))
         }
