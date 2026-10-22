@@ -1,0 +1,50 @@
+{
+  "type": "finding.detail",
+  "requestId": "req-finding",
+  "finding": {
+    "id": "392e62ffc5f2782e10b220591b76f1df",
+    "prId": "241b38c26bccd93acf0a42d7fb9c840e",
+    "runId": "f9182e006aab8032b870ef25ac840dbc",
+    "fingerprint": "dd3732019357f228e587694c2da568c8",
+    "status": "RESOLVED",
+    "evidenceCount": 1,
+    "stale": true,
+    "title": "The payment webhook can confirm a released hold",
+    "category": "data_integrity",
+    "severity": "high",
+    "confidence": 0.89,
+    "file": "src/server/bookings/webhook.ts",
+    "line": 5,
+    "explanation": "onPaymentSucceeded books the slot for any hold it finds, released or not. A guest who pays after the hold expired gets a booking for a slot that may already be someone else's.",
+    "reasoningSummary": "The second head guarded it with `if (!hold || hold.releasedAt) return;`, and the reviewer verified that fixed. This head is back to `if (!hold) return;`, so the code that was fixed has returned.",
+    "suggestedFix": "Skip a released hold, and refund its payment instead of booking:\n\nif (!hold || hold.releasedAt) return refundLatePayment(event);",
+    "evidence": [
+      {
+        "kind": "code_ref",
+        "path": "src/server/bookings/webhook.ts",
+        "start": 4,
+        "end": 6,
+        "refSha": "7d1b8a6f16804fa3d9d5ae5fdd5877f2f330bad9",
+        "text": "  const hold = await db.hold.findUnique({ where: { paymentIntentId: event.intentId } });\n  if (!hold || hold.releasedAt) return;\n  await db.booking.create({ data: { slotId: hold.slotId, guestId: hold.guestId } });"
+      }
+    ],
+    "history": [
+      {
+        "runId": "32544c84ea9d13d27ff165430630d3fb",
+        "disposition": "DETECTED",
+        "at": "2026-10-20T13:04:30Z"
+      },
+      {
+        "runId": "32544c84ea9d13d27ff165430630d3fb",
+        "disposition": "PUBLISHED",
+        "at": "2026-10-20T13:04:30Z"
+      },
+      {
+        "runId": "f9182e006aab8032b870ef25ac840dbc",
+        "disposition": "RESOLVED",
+        "at": "2026-10-20T13:18:30Z",
+        "basis": "resolution_checked"
+      }
+    ]
+  }
+}

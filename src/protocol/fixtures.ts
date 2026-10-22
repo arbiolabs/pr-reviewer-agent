@@ -948,6 +948,418 @@ const welcomeChecks = {
   checks: setupChecks,
 } as ServerMessage;
 
+// ---------- tracking: one PR reviewed on three heads ----------
+// acme/shop#1302's first review posted three findings. The second saw two of them again, verified the third fixed and
+// found a fourth. The third saw one unchanged, one whose cited lines changed, one it could not settle, and the fixed
+// one's code back again, so that finding reopens. Every run's CANDIDATES_DISPOSED says how many candidates the
+// verifier discarded.
+
+const holdsBase = showPr("acme/shop", 1302, "Bookings: hold a slot while the guest pays", "lmoreau");
+const holdsAt = (n: number): Pr => ({ ...holdsBase, headSha: hexSha(`acme/shop#1302 head ${n + 1}`) });
+const HOLDS_T = [60, 900, 1740];
+const holdsRuns = HOLDS_T.map((t, n) => showRun(holdsAt(n), t, { completedAt: at(t + 240) }));
+const [holdsFirst, holdsSecond, holdsThird] = holdsRuns as [Run, Run, Run];
+const holdsHead = holdsAt(2);
+
+const holdsTs = diffFile(
+  "src/server/bookings/holds.ts",
+  [
+    hunk(0, 1, "", `
++import type { Clock, Db, Payments } from "../deps.ts";
++
++export const HOLD_MINUTES = 10;
++
++export async function placeHold(db: Db, clock: Clock, slotId: string, guestId: string) {
++  const hold = await db.hold.create({
++    data: { slotId, guestId, expiresAt: addMinutes(clock.now(), HOLD_MINUTES) },
++  });
++  setTimeout(() => releaseHold(db, hold.id), HOLD_MINUTES * 60_000);
++  return hold;
++}
++
++export async function releaseHold(db: Db, holdId: string) {
++  await db.hold.update({ where: { id: holdId }, data: { releasedAt: new Date() } });
++}
++
++export async function cancelHold(db: Db, payments: Payments, holdId: string) {
++  const hold = await db.hold.findUniqueOrThrow({ where: { id: holdId }, include: { deposit: true } });
++  await releaseHold(db, holdId);
++  if (hold.deposit?.capturedAt) await payments.refund(hold.deposit.providerId, hold.deposit.amountCents);
++}
+`),
+  ],
+  "added",
+);
+const holdsWebhook = diffFile(
+  "src/server/bookings/webhook.ts",
+  [
+    hunk(0, 1, "", `
++import type { Db, PaymentEvent } from "../deps.ts";
++
++export async function onPaymentSucceeded(db: Db, event: PaymentEvent) {
++  const hold = await db.hold.findUnique({ where: { paymentIntentId: event.intentId } });
++  if (!hold) return;
++  await db.booking.create({ data: { slotId: hold.slotId, guestId: hold.guestId } });
++  await db.hold.delete({ where: { id: hold.id } });
++}
+`),
+  ],
+  "added",
+);
+const holdsSlots = diffFile("src/server/bookings/slots.ts", [
+  hunk(8, 8, "export function slotsFor(venue: Venue, day: string) {", `
+ export function slotsFor(venue: Venue, day: string) {
+-  const start = startOfDay(parseISO(day));
++  const start = startOfDay(parseISO(\`\${day}T00:00:00\`), { in: tz(venue.timeZone) });
+   return venue.openings.map((o) => addMinutes(start, o.minuteOfDay));
+ }
+`),
+]);
+
+type Seen = { runId: string; disposition: FindingDetail["status"]; at: string; basis?: string };
+const seen = (r: Run, disposition: FindingDetail["status"], basis?: string): Seen => ({
+  runId: r.id,
+  disposition,
+  at: at(Date.parse(r.completedAt!) / 1000 - T0 / 1000 - 30),
+  ...(basis ? { basis } : {}),
+});
+const tracked = (r: Run, a: Authored, status: FindingDetail["status"], history: Seen[], extra: Partial<Finding> = {}): FindingDetail => ({
+  ...showDetail(r, 0, a, { status, ...extra }),
+  history,
+});
+
+const expiry: Authored = {
+  title: "Hold expiry lives in a timer in the web process",
+  category: "correctness",
+  severity: "high",
+  confidence: 0.91,
+  file: holdsTs.path,
+  line: lineOf(holdsTs, "setTimeout(() => releaseHold(db, hold.id), HOLD_MINUTES * 60_000);"),
+  explanation:
+    "placeHold releases the hold from a `setTimeout` in the process that served the request. A deploy, a crash or a scale-down drops the timer, and the slot stays held with nobody paying for it. The hold row has `expiresAt`, but nothing reads it.",
+  reasoningSummary:
+    "No job, cron or query reads hold.expiresAt (search_code). The web processes restart on every deploy (deploy/web.yaml rolls them), several times a day.",
+  suggestedFix: "Release expired holds from the worker: a scheduled job that releases every hold whose expiresAt has passed, and drop the timer.",
+  evidence: [
+    cite(holdsTs, holdsHead.headSha, "export async function placeHold(", "return hold;"),
+    { kind: "tool_summary", text: 'search_code "expiresAt": 2 matches, both writes; no reader in src/ or jobs/' },
+  ],
+};
+const zone: Authored = {
+  title: "Slot times ignore the venue's time zone",
+  category: "correctness",
+  severity: "medium",
+  confidence: 0.86,
+  file: holdsSlots.path,
+  line: lineOf(holdsSlots, "const start = startOfDay("),
+  explanation:
+    "slotsFor computed the day's start in the server's zone, so a venue east of UTC listed its slots shifted by its offset. On this head the line builds the start in `venue.timeZone`, which may fix it.",
+  reasoningSummary: "The cited line changed on the newest head. The reviewer did not verify the new line, so it reads as looking resolved, not resolved.",
+  suggestedFix: "Build the start of the day in the venue's zone, as this head now does, and add a test for a venue east of UTC.",
+  evidence: [cite(holdsSlots, holdsHead.headSha, "const start = startOfDay(", "return venue.openings.map(")],
+};
+const released: Authored = {
+  title: "The payment webhook can confirm a released hold",
+  category: "data_integrity",
+  severity: "high",
+  confidence: 0.89,
+  file: holdsWebhook.path,
+  line: lineOf(holdsWebhook, "if (!hold) return;"),
+  explanation:
+    "onPaymentSucceeded books the slot for any hold it finds, released or not. A guest who pays after the hold expired gets a booking for a slot that may already be someone else's.",
+  reasoningSummary:
+    "The second head guarded it with `if (!hold || hold.releasedAt) return;`, and the reviewer verified that fixed. This head is back to `if (!hold) return;`, so the code that was fixed has returned.",
+  suggestedFix: "Skip a released hold, and refund its payment instead of booking:\n\nif (!hold || hold.releasedAt) return refundLatePayment(event);",
+  evidence: [cite(holdsWebhook, holdsHead.headSha, "const hold = await db.hold.findUnique(", "await db.booking.create(")],
+};
+const deposit: Authored = {
+  title: "Cancelling a hold may leave an authorized deposit uncaptured and unreleased",
+  category: "correctness",
+  severity: "low",
+  confidence: 0.58,
+  file: holdsTs.path,
+  line: lineOf(holdsTs, "if (hold.deposit?.capturedAt)"),
+  explanation:
+    "cancelHold refunds a captured deposit, but an authorized one that was never captured is neither voided nor released, so the guest's card may show a pending charge for days.",
+  reasoningSummary:
+    "Whether the payment provider voids an uncaptured authorization on its own depends on the account's settings, which the reviewer can't read. It reported the finding again without verifying it.",
+  evidence: [cite(holdsTs, holdsHead.headSha, "export async function cancelHold(", "if (hold.deposit?.capturedAt)")],
+};
+
+const holdsExpiry = tracked(holdsThird, expiry, "STILL_PRESENT", [
+  seen(holdsFirst, "DETECTED"),
+  seen(holdsFirst, "PUBLISHED"),
+  seen(holdsSecond, "STILL_PRESENT", "located"),
+  seen(holdsThird, "STILL_PRESENT", "located"),
+]);
+const holdsZone = tracked(holdsThird, zone, "POTENTIALLY_RESOLVED", [
+  seen(holdsFirst, "DETECTED"),
+  seen(holdsFirst, "PUBLISHED"),
+  seen(holdsSecond, "STILL_PRESENT", "located"),
+  seen(holdsThird, "POTENTIALLY_RESOLVED", "changed"),
+]);
+// The fixed one keeps its row, resolved on the second head; the third head's reopening is a new finding seeded from it,
+// with the same fingerprint.
+const holdsFixed = tracked(
+  holdsSecond,
+  { ...released, line: 5, evidence: [{ kind: "code_ref", path: holdsWebhook.path, start: 4, end: 6, refSha: holdsAt(1).headSha, text: "  const hold = await db.hold.findUnique({ where: { paymentIntentId: event.intentId } });\n  if (!hold || hold.releasedAt) return;\n  await db.booking.create({ data: { slotId: hold.slotId, guestId: hold.guestId } });" }] },
+  "RESOLVED",
+  [seen(holdsFirst, "DETECTED"), seen(holdsFirst, "PUBLISHED"), seen(holdsSecond, "RESOLVED", "resolution_checked")],
+  { stale: true },
+);
+const holdsReopened = tracked(holdsThird, released, "DETECTED", [seen(holdsThird, "DETECTED", "reopened")]);
+const holdsDeposit = tracked(holdsThird, deposit, "UNCERTAIN", [seen(holdsSecond, "DETECTED"), seen(holdsThird, "UNCERTAIN", "reported_unverified")]);
+const holdsDetails = [holdsExpiry, holdsZone, holdsReopened, holdsDeposit, holdsFixed];
+
+const holdsDisposed = (s: Seq, r: Run, detail: string) =>
+  ev(s, "review.phase_changed", { from: "VERIFY", to: "PREPARE_PUBLICATION", event: "CANDIDATES_DISPOSED", detail }, { prId: r.prId, runId: r.id });
+/** One run on its head: the phases, its tool calls, then what the verifier kept and what it discarded. */
+const holdsRun = (r: Run, t: number, tools: [string, string][], disposed: string, findings: Finding[], end: "NO_PUBLICATION_RECORDED" | "REVIEW_RECONCILED"): Recorded[] => [
+  [t, (s) => runEvent(s, "run.started", started(r))],
+  [t + 20, (s) => phase(s, r, "COLLECT_CONTEXT", "TRIAGE", "CONTEXT_PERSISTED")],
+  [t + 40, (s) => phase(s, r, "TRIAGE", "ANALYZE", "ROUTING_PERSISTED")],
+  ...tools.map(([tool, summary], i): Recorded => [t + 50 + i * 10, (s) => activity(s, r, tool, summary)]),
+  [t + 150, (s) => phase(s, r, "ANALYZE", "VERIFY", "CANDIDATES_PERSISTED")],
+  ...findings.map((f, i): Recorded => [t + 170 + i * 4, (s) => findingUpdated(s, f)]),
+  [t + 220, (s) => holdsDisposed(s, r, disposed)],
+  [t + 226, (s) => phase(s, r, "PREPARE_PUBLICATION", "PUBLISH", "HEAD_VERIFIED")],
+  [t + 236, (s) => phase(s, r, "PUBLISH", "COMPLETED", end)],
+  [t + 240, (s) => runEvent(s, "review.completed", r)],
+];
+const asOf = (d: FindingDetail, r: Run, status: Finding["status"], stale = false): Finding => ({ ...findingOf(d), runId: r.id, status, stale });
+const holdsRecorded: Recorded[] = [
+  ...holdsRun(
+    holdsFirst,
+    HOLDS_T[0]!,
+    [["read_diff", "3 files changed (+34 -1): src/server/bookings/holds.ts, webhook.ts, slots.ts"], ["search_code", '"expiresAt": 2 matches, both writes']],
+    "3 verified, 3 discarded, 0 carried, 0 resolved, 0 reopened",
+    [asOf(holdsExpiry, holdsFirst, "DETECTED"), asOf(holdsZone, holdsFirst, "DETECTED"), asOf(holdsFixed, holdsFirst, "DETECTED")],
+    "REVIEW_RECONCILED",
+  ),
+  [
+    HOLDS_T[0]! + 232,
+    (s) =>
+      ev(
+        s,
+        "review.publication_changed",
+        { runId: holdsFirst.id, status: "published", reviewId: 2207711, url: `https://github.com/${holdsBase.repository}/pull/${holdsBase.number}#pullrequestreview-2207711` },
+        { prId: holdsBase.id, runId: holdsFirst.id },
+      ),
+  ],
+  [HOLDS_T[0]! + 234, (s) => findingUpdated(s, asOf(holdsExpiry, holdsFirst, "PUBLISHED"))],
+  [HOLDS_T[0]! + 234, (s) => findingUpdated(s, asOf(holdsZone, holdsFirst, "PUBLISHED"))],
+  [HOLDS_T[0]! + 234, (s) => findingUpdated(s, asOf(holdsFixed, holdsFirst, "PUBLISHED"))],
+  [HOLDS_T[1]! - 20, (s) => ev(s, "pr.updated", holdsAt(1), { prId: holdsBase.id })],
+  ...holdsRun(
+    holdsSecond,
+    HOLDS_T[1]!,
+    [["read_diff", "2 files changed (+3 -2): src/server/bookings/webhook.ts, holds.ts"], ["read_file", "src/server/bookings/webhook.ts:1-9"]],
+    "1 verified, 1 discarded, 2 carried, 1 resolved, 0 reopened",
+    [
+      asOf(holdsExpiry, holdsSecond, "STILL_PRESENT"),
+      asOf(holdsZone, holdsSecond, "STILL_PRESENT"),
+      asOf(holdsFixed, holdsSecond, "RESOLVED"),
+      asOf(holdsDeposit, holdsSecond, "DETECTED"),
+    ],
+    "NO_PUBLICATION_RECORDED",
+  ),
+  [HOLDS_T[2]! - 20, (s) => ev(s, "pr.updated", holdsHead, { prId: holdsBase.id })],
+  [HOLDS_T[2]! - 19, (s) => findingUpdated(s, asOf(holdsFixed, holdsSecond, "RESOLVED", true))],
+  ...holdsRun(
+    holdsThird,
+    HOLDS_T[2]!,
+    [["read_diff", "2 files changed (+2 -2): src/server/bookings/webhook.ts, slots.ts"], ["read_file", "src/server/bookings/slots.ts:1-20"], ["git_history", "webhook.ts: the releasedAt guard was reverted in 41e0c2a \"Simplify webhook\""]],
+    "0 verified, 2 discarded, 3 carried, 0 resolved, 1 reopened",
+    [
+      asOf(holdsExpiry, holdsThird, "STILL_PRESENT"),
+      asOf(holdsZone, holdsThird, "POTENTIALLY_RESOLVED"),
+      asOf(holdsDeposit, holdsThird, "UNCERTAIN"),
+      asOf(holdsReopened, holdsThird, "DETECTED"),
+    ],
+    "NO_PUBLICATION_RECORDED",
+  ),
+];
+const holdsDiff: ServerMessage = {
+  type: "diff.page",
+  requestId: "req-diff",
+  prId: holdsHead.id,
+  baseSha: holdsThird.baseSha,
+  headSha: holdsThird.headSha,
+  files: [holdsTs, holdsWebhook, holdsSlots],
+  truncated: false,
+};
+
+// ---------- a huge PR the reviewer could still read: about sixty files, a third of them generated ----------
+
+const tokensPr = showPr("acme/web", 1310, "Design system: move buttons, inputs and forms onto tokens", "jhalvorsen");
+const tokensRun = showRun(tokensPr, 2400, { completedAt: at(2700) });
+const COMPONENTS = ["Button", "Input", "Select", "Checkbox", "Radio", "Form", "Field", "Label", "Toggle", "TextArea"];
+const component = (name: string): DiffFile =>
+  diffFile(`src/components/${name}/${name}.tsx`, [
+    hunk(1, 1, "", `
+-import styles from "./${name}.module.css";
++import { tokens } from "../../tokens";
+
+ export function ${name}(props: ${name}Props) {
+-  return <${name.toLowerCase()}Base className={styles.root} {...props} />;
++  return <${name.toLowerCase()}Base style={tokens.${name.toLowerCase()}} {...props} />;
+ }
+`),
+  ]);
+const buttonTsx = diffFile("src/components/Button/Button.tsx", [
+  hunk(1, 1, "", `
+-import styles from "./Button.module.css";
++import { tokens } from "../../tokens";
+
+ export function Button({ disabled, onClick, ...props }: ButtonProps) {
+-  return <button className={styles.root} disabled={disabled} onClick={onClick} {...props} />;
++  return (
++    <button
++      style={tokens.button}
++      aria-disabled={disabled}
++      onClick={disabled ? undefined : onClick}
++      {...props}
++    />
++  );
+ }
+`),
+]);
+const inputTsx = diffFile("src/components/Input/Input.tsx", [
+  hunk(1, 1, "", `
+-import styles from "./Input.module.css";
++import { tokens } from "../../tokens";
+
+ export function Input({ invalid, ...props }: InputProps) {
+-  return <input className={invalid ? styles.invalid : styles.root} {...props} />;
++  const color = invalid ? tokens.color.danger : tokens.color.text;
++  return <input style={{ ...tokens.input, color, borderColor: color }} {...props} />;
+ }
+`),
+]);
+const fieldTsx = diffFile("src/components/Field/Field.tsx", [
+  hunk(1, 1, "", `
+ export function Field({ label, children }: FieldProps) {
++  const id = useId();
+   return (
+     <div style={tokens.field}>
+-      <label>{label}</label>
++      <label htmlFor={id}>{label}</label>
+       {children}
+     </div>
+   );
+ }
+`),
+]);
+const colorsTs = diffFile(
+  "src/tokens/colors.ts",
+  [
+    hunk(0, 1, "", `
++export const color = {
++  text: "#1d1d1f",
++  muted: "#6e6e73",
++  danger: "#ff6b6b",
++  accent: "#4247c8",
++};
+`),
+  ],
+  "added",
+);
+const small = (path: string, line: string, status: DiffFile["status"] = "modified"): DiffFile => {
+  const body = { added: hunk(0, 1, "", `\n+${line}\n`), deleted: hunk(1, 0, "", `\n-${line}\n`) }[status as "added" | "deleted"];
+  return diffFile(path, [body ?? hunk(1, 1, "", `\n-// ${path}\n+${line}\n`)], status);
+};
+const generated = (path: string, additions: number, line: string): DiffFile => ({ ...small(path, line, "added"), additions, truncated: true });
+const tokensFiles: DiffFile[] = [
+  colorsTs,
+  small("src/tokens/spacing.ts", "export const space = [0, 4, 8, 12, 16, 24, 32];", "added"),
+  small("src/tokens/typography.ts", 'export const type = { body: 13, small: 12, title: 18, family: "system-ui" };', "added"),
+  small("src/tokens/index.ts", 'export * as tokens from "./all";', "added"),
+  ...COMPONENTS.flatMap((name) => [
+    name === "Button" ? buttonTsx : name === "Input" ? inputTsx : name === "Field" ? fieldTsx : component(name),
+    small(`src/components/${name}/${name}.test.tsx`, `it("renders ${name} from tokens", () => expect(render(<${name} />)).toMatchSnapshot());`),
+    small(`src/components/${name}/${name}.stories.tsx`, `export const Default = { args: { tokens: "default" } };`),
+    small(`src/components/${name}/${name}.module.css`, ".root { color: #1d1d1f; }", "deleted"),
+  ]),
+  small("src/styles/global.css", ":root { color-scheme: light dark; }"),
+  small("src/styles/theme.css", '@import "../tokens/generated/tokens.css";'),
+  small(".storybook/preview.ts", 'import "../src/tokens/generated/tokens.css";'),
+  small("docs/design-system.md", "Every component reads its colors, spacing and type from src/tokens."),
+  small("package.json", '    "tokens": "style-dictionary build",'),
+  small("eslint.config.js", '  "no-restricted-imports": ["error", { patterns: ["*.module.css"] }],'),
+  generated("src/tokens/generated/tokens.css", 412, ":root { --color-text: #1d1d1f; }"),
+  generated("src/tokens/generated/tokens.json", 388, '{ "color": { "text": { "value": "#1d1d1f" } } }'),
+  generated("src/tokens/generated/tokens.d.ts", 96, "export declare const tokens: Tokens;"),
+  ...COMPONENTS.slice(0, 6).map((name) => generated(`src/components/${name}/__snapshots__/${name}.test.tsx.snap`, 40 + name.length * 3, `exports[\`renders ${name} from tokens 1\`] = \`<div />\`;`)),
+  generated("pnpm-lock.yaml", 1204, "  style-dictionary@4.3.0:"),
+];
+const tokensDetails = [
+  showDetail(tokensRun, 2650, {
+    title: "A disabled button still submits its form",
+    category: "correctness",
+    severity: "high",
+    confidence: 0.9,
+    file: buttonTsx.path,
+    line: lineOf(buttonTsx, "aria-disabled={disabled}"),
+    explanation:
+      "The button now sets `aria-disabled` instead of `disabled`, and drops only its own onClick. A button inside a form still submits it, on a click and on Enter, because the browser only skips submission for a truly disabled button.",
+    reasoningSummary: "Form.tsx renders children inside a <form>, and Button's default type is submit. aria-disabled has no effect on form submission.",
+    suggestedFix: "Keep the native attribute alongside the ARIA one: disabled={disabled} aria-disabled={disabled}.",
+    evidence: [cite(buttonTsx, tokensPr.headSha, "<button", "{...props}")],
+  }),
+  showDetail(tokensRun, 2655, {
+    title: "The invalid input's color fails contrast on white",
+    category: "general",
+    severity: "medium",
+    confidence: 0.87,
+    file: inputTsx.path,
+    line: lineOf(inputTsx, "const color = invalid ? tokens.color.danger : tokens.color.text;"),
+    explanation: "An invalid input sets its text to `color.danger`, #ff6b6b, which is 2.8:1 on white. The error state becomes the hardest one to read.",
+    reasoningSummary: "Computed the WCAG ratio of #ff6b6b on #ffffff: 2.78:1, under the 4.5:1 body-text minimum.",
+    suggestedFix: "Use a darker danger token for text, for example #c62828 (5.6:1), and keep #ff6b6b for borders and icons.",
+    evidence: [cite(inputTsx, tokensPr.headSha, "const color = invalid", "return <input"), cite(colorsTs, tokensPr.headSha, "export const color = {", "};")],
+  }),
+  showDetail(tokensRun, 2660, {
+    title: "Field's label points at an id its input never gets",
+    category: "correctness",
+    severity: "low",
+    confidence: 0.8,
+    file: fieldTsx.path,
+    line: lineOf(fieldTsx, "<label htmlFor={id}>{label}</label>"),
+    explanation: "Field creates an id for its label's htmlFor, but never passes it to the child input, so the label is not associated and clicking it does nothing.",
+    reasoningSummary: "children is rendered as given; nothing clones it with the id.",
+    suggestedFix: "Pass the id down: render children as a function of id, or clone the single child with id={id}.",
+    evidence: [cite(fieldTsx, tokensPr.headSha, "const id = useId();", "{children}")],
+  }),
+];
+const tokensDiff: ServerMessage = {
+  type: "diff.page",
+  requestId: "req-diff",
+  prId: tokensPr.id,
+  baseSha: tokensRun.baseSha,
+  headSha: tokensRun.headSha,
+  files: tokensFiles,
+  truncated: false,
+};
+const tokensRecorded: Recorded[] = [
+  prOpened(tokensPr, 2390),
+  ...fullRun(
+    tokensRun,
+    2400,
+    [[2410, "read_diff", `${tokensFiles.length} files changed; 10 generated files read as summaries only`]],
+    tokensDetails.map((d, i): [number, FindingDetail] => [2650 + i * 5, d]),
+  ),
+];
+
+/** A script that plays `recorded` in time order from an empty snapshot of `prs`, so every event is in the stream. */
+const replay = (prs: Pr[], recorded: Recorded[]): PlaybackLine[] => {
+  const rows = recorded.map(([t, make], k) => ({ t, k, make })).sort((a, b) => a.t - b.t || a.k - b.k);
+  return [
+    { delayMs: 0, message: welcome(0, EPOCH, ["account.select", ...REVIEW_COMMANDS], "engine") },
+    { delayMs: 0, message: snapshot(0, prs, [], [], EPOCH, showAccounts) },
+    ...rows.map(({ t, make }, i): PlaybackLine => ({ delayMs: 20, message: make({ seq: i + 1, t }) })),
+  ];
+};
+
 // ---------- message fixtures ----------
 
 const diffFiles: DiffFile[] = [
@@ -1148,6 +1560,11 @@ export const fixtures: Record<string, ClientMessage | ServerMessage | Record<str
   "server.error.protocol-mismatch": { type: "error", requestId: "req-hello", code: "PROTOCOL_MISMATCH", message: "unsupported protocolVersion 2", supported: [1] },
   "server.error.no-request-id": { type: "error", code: "INVALID_REQUEST", message: "line is not valid JSON" },
   ...showcaseFixtures,
+  ...Object.fromEntries(
+    [...holdsDetails, ...tokensDetails].map((d, i) => [`server.finding.detail.tracking-${i + 1}`, { type: "finding.detail", requestId: "req-finding", finding: d }]),
+  ),
+  "server.diff.page.tracking-shop-1302": holdsDiff,
+  "server.diff.page.tracking-web-1310": tokensDiff,
 };
 
 // ---------- negative fixtures: name -> [message, why] ----------
@@ -1535,4 +1952,37 @@ export const playback: Record<string, { script: PlaybackLine[]; expect: Expect }
     expect: { streamEpoch: EPOCH, lastSequence: 0, resyncRequested: false, toolActivityCount: 0, prs: [], runs: [], findings: [], accounts: [] },
   },
   burst: { script: burst, expect: baseExpect({ lastSequence: 5010, toolActivityCount: 5000 }) },
+  tracking: {
+    script: replay([holdsBase], holdsRecorded),
+    expect: {
+      streamEpoch: EPOCH,
+      lastSequence: holdsRecorded.length,
+      resyncRequested: false,
+      toolActivityCount: 7,
+      prs: prRows(holdsHead),
+      runs: holdsRuns.map((r) => runRow(r)),
+      findings: [
+        { ...holdsExpiry, status: "STILL_PRESENT" },
+        { ...holdsZone, status: "POTENTIALLY_RESOLVED" },
+        { ...holdsDeposit, status: "UNCERTAIN" },
+        { ...holdsReopened, status: "DETECTED" },
+        { ...holdsFixed, status: "RESOLVED" },
+      ].map((f) => ({ id: f.id, title: f.title, status: f.status, stale: f.stale })),
+      accounts: [...showAccounts].sort((a, b) => (a.id < b.id ? -1 : 1)).map((a) => ({ id: a.id, state: a.state, ghActive: a.ghActive, selected: a.selected })),
+      publications: [{ runId: holdsFirst.id, status: "published" }],
+    },
+  },
+  "big-diff": {
+    script: replay([tokensPr], tokensRecorded),
+    expect: {
+      streamEpoch: EPOCH,
+      lastSequence: tokensRecorded.length,
+      resyncRequested: false,
+      toolActivityCount: 1,
+      prs: prRows(tokensPr),
+      runs: [runRow(tokensRun)],
+      findings: tokensDetails.map((f) => ({ id: f.id, title: f.title, status: "DETECTED", stale: false })),
+      accounts: [...showAccounts].sort((a, b) => (a.id < b.id ? -1 : 1)).map((a) => ({ id: a.id, state: a.state, ghActive: a.ghActive, selected: a.selected })),
+    },
+  },
 };

@@ -1,0 +1,44 @@
+{
+  "type": "finding.detail",
+  "requestId": "req-finding",
+  "finding": {
+    "id": "19a271da18787f49dbfc50135603ffa4",
+    "prId": "241b38c26bccd93acf0a42d7fb9c840e",
+    "runId": "58a405ae197e618c81165e7f440edecc",
+    "fingerprint": "066b1988c9a53c09758debe126401d2e",
+    "status": "UNCERTAIN",
+    "evidenceCount": 1,
+    "stale": false,
+    "title": "Cancelling a hold may leave an authorized deposit uncaptured and unreleased",
+    "category": "correctness",
+    "severity": "low",
+    "confidence": 0.58,
+    "file": "src/server/bookings/holds.ts",
+    "line": 20,
+    "explanation": "cancelHold refunds a captured deposit, but an authorized one that was never captured is neither voided nor released, so the guest's card may show a pending charge for days.",
+    "reasoningSummary": "Whether the payment provider voids an uncaptured authorization on its own depends on the account's settings, which the reviewer can't read. It reported the finding again without verifying it.",
+    "evidence": [
+      {
+        "kind": "code_ref",
+        "path": "src/server/bookings/holds.ts",
+        "start": 17,
+        "end": 20,
+        "refSha": "b131fd06b1d67937237583d627fc65b51a5a0282",
+        "text": "export async function cancelHold(db: Db, payments: Payments, holdId: string) {\n  const hold = await db.hold.findUniqueOrThrow({ where: { id: holdId }, include: { deposit: true } });\n  await releaseHold(db, holdId);\n  if (hold.deposit?.capturedAt) await payments.refund(hold.deposit.providerId, hold.deposit.amountCents);"
+      }
+    ],
+    "history": [
+      {
+        "runId": "f9182e006aab8032b870ef25ac840dbc",
+        "disposition": "DETECTED",
+        "at": "2026-10-20T13:18:30Z"
+      },
+      {
+        "runId": "58a405ae197e618c81165e7f440edecc",
+        "disposition": "UNCERTAIN",
+        "at": "2026-10-20T13:32:30Z",
+        "basis": "reported_unverified"
+      }
+    ]
+  }
+}

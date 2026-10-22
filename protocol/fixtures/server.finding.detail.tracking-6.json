@@ -1,0 +1,39 @@
+{
+  "type": "finding.detail",
+  "requestId": "req-finding",
+  "finding": {
+    "id": "d3597174d0a52a4a95ecad6856a88c54",
+    "prId": "120d7293df440aea95dda1169f44ad64",
+    "runId": "fcde70b61bd57fc9c65daf3ae7b5ea5e",
+    "fingerprint": "e1a3e1f7c22aa5bab5943d190a34136b",
+    "status": "DETECTED",
+    "evidenceCount": 1,
+    "stale": false,
+    "title": "A disabled button still submits its form",
+    "category": "correctness",
+    "severity": "high",
+    "confidence": 0.9,
+    "file": "src/components/Button/Button.tsx",
+    "line": 7,
+    "explanation": "The button now sets `aria-disabled` instead of `disabled`, and drops only its own onClick. A button inside a form still submits it, on a click and on Enter, because the browser only skips submission for a truly disabled button.",
+    "reasoningSummary": "Form.tsx renders children inside a <form>, and Button's default type is submit. aria-disabled has no effect on form submission.",
+    "suggestedFix": "Keep the native attribute alongside the ARIA one: disabled={disabled} aria-disabled={disabled}.",
+    "evidence": [
+      {
+        "kind": "code_ref",
+        "path": "src/components/Button/Button.tsx",
+        "start": 5,
+        "end": 9,
+        "refSha": "eab709aa02d67bfc67da7aaa3a9e7e6d70283e43",
+        "text": "    <button\n      style={tokens.button}\n      aria-disabled={disabled}\n      onClick={disabled ? undefined : onClick}\n      {...props}"
+      }
+    ],
+    "history": [
+      {
+        "runId": "fcde70b61bd57fc9c65daf3ae7b5ea5e",
+        "disposition": "DETECTED",
+        "at": "2026-10-20T13:44:10Z"
+      }
+    ]
+  }
+}

@@ -1,0 +1,54 @@
+{
+  "streamEpoch": "epoch-1",
+  "lastSequence": 13,
+  "resyncRequested": false,
+  "toolActivityCount": 1,
+  "prs": [
+    {
+      "id": "120d7293df440aea95dda1169f44ad64",
+      "headSha": "eab709aa02d67bfc67da7aaa3a9e7e6d70283e43",
+      "title": "Design system: move buttons, inputs and forms onto tokens"
+    }
+  ],
+  "runs": [
+    {
+      "id": "fcde70b61bd57fc9c65daf3ae7b5ea5e",
+      "phase": "COMPLETED",
+      "status": "COMPLETED"
+    }
+  ],
+  "findings": [
+    {
+      "id": "c63d098bbc3453529f76849ae5ec96fd",
+      "title": "Field's label points at an id its input never gets",
+      "status": "DETECTED",
+      "stale": false
+    },
+    {
+      "id": "d3597174d0a52a4a95ecad6856a88c54",
+      "title": "A disabled button still submits its form",
+      "status": "DETECTED",
+      "stale": false
+    },
+    {
+      "id": "f906473359011f4ed5dfb8b4e8ad6a19",
+      "title": "The invalid input's color fails contrast on white",
+      "status": "DETECTED",
+      "stale": false
+    }
+  ],
+  "accounts": [
+    {
+      "id": "github.com/acme-review-bot",
+      "state": "ok",
+      "ghActive": false,
+      "selected": true
+    },
+    {
+      "id": "github.com/dperalta",
+      "state": "ok",
+      "ghActive": true,
+      "selected": false
+    }
+  ]
+}

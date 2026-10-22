@@ -1,0 +1,39 @@
+{
+  "type": "finding.detail",
+  "requestId": "req-finding",
+  "finding": {
+    "id": "c63d098bbc3453529f76849ae5ec96fd",
+    "prId": "120d7293df440aea95dda1169f44ad64",
+    "runId": "fcde70b61bd57fc9c65daf3ae7b5ea5e",
+    "fingerprint": "7d480b280c6a85e2d577b8649e8584fb",
+    "status": "DETECTED",
+    "evidenceCount": 1,
+    "stale": false,
+    "title": "Field's label points at an id its input never gets",
+    "category": "correctness",
+    "severity": "low",
+    "confidence": 0.8,
+    "file": "src/components/Field/Field.tsx",
+    "line": 5,
+    "explanation": "Field creates an id for its label's htmlFor, but never passes it to the child input, so the label is not associated and clicking it does nothing.",
+    "reasoningSummary": "children is rendered as given; nothing clones it with the id.",
+    "suggestedFix": "Pass the id down: render children as a function of id, or clone the single child with id={id}.",
+    "evidence": [
+      {
+        "kind": "code_ref",
+        "path": "src/components/Field/Field.tsx",
+        "start": 2,
+        "end": 6,
+        "refSha": "eab709aa02d67bfc67da7aaa3a9e7e6d70283e43",
+        "text": "  const id = useId();\n  return (\n    <div style={tokens.field}>\n      <label htmlFor={id}>{label}</label>\n      {children}"
+      }
+    ],
+    "history": [
+      {
+        "runId": "fcde70b61bd57fc9c65daf3ae7b5ea5e",
+        "disposition": "DETECTED",
+        "at": "2026-10-20T13:44:20Z"
+      }
+    ]
+  }
+}

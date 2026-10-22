@@ -1,0 +1,60 @@
+{
+  "type": "finding.detail",
+  "requestId": "req-finding",
+  "finding": {
+    "id": "b5e893697573b8c7474f859f2c63da97",
+    "prId": "241b38c26bccd93acf0a42d7fb9c840e",
+    "runId": "58a405ae197e618c81165e7f440edecc",
+    "fingerprint": "a32b09f0d712ee91c9963f1cec3aa74f",
+    "status": "STILL_PRESENT",
+    "evidenceCount": 2,
+    "stale": false,
+    "title": "Hold expiry lives in a timer in the web process",
+    "category": "correctness",
+    "severity": "high",
+    "confidence": 0.91,
+    "file": "src/server/bookings/holds.ts",
+    "line": 9,
+    "explanation": "placeHold releases the hold from a `setTimeout` in the process that served the request. A deploy, a crash or a scale-down drops the timer, and the slot stays held with nobody paying for it. The hold row has `expiresAt`, but nothing reads it.",
+    "reasoningSummary": "No job, cron or query reads hold.expiresAt (search_code). The web processes restart on every deploy (deploy/web.yaml rolls them), several times a day.",
+    "suggestedFix": "Release expired holds from the worker: a scheduled job that releases every hold whose expiresAt has passed, and drop the timer.",
+    "evidence": [
+      {
+        "kind": "code_ref",
+        "path": "src/server/bookings/holds.ts",
+        "start": 5,
+        "end": 10,
+        "refSha": "b131fd06b1d67937237583d627fc65b51a5a0282",
+        "text": "export async function placeHold(db: Db, clock: Clock, slotId: string, guestId: string) {\n  const hold = await db.hold.create({\n    data: { slotId, guestId, expiresAt: addMinutes(clock.now(), HOLD_MINUTES) },\n  });\n  setTimeout(() => releaseHold(db, hold.id), HOLD_MINUTES * 60_000);\n  return hold;"
+      },
+      {
+        "kind": "tool_summary",
+        "text": "search_code \"expiresAt\": 2 matches, both writes; no reader in src/ or jobs/"
+      }
+    ],
+    "history": [
+      {
+        "runId": "32544c84ea9d13d27ff165430630d3fb",
+        "disposition": "DETECTED",
+        "at": "2026-10-20T13:04:30Z"
+      },
+      {
+        "runId": "32544c84ea9d13d27ff165430630d3fb",
+        "disposition": "PUBLISHED",
+        "at": "2026-10-20T13:04:30Z"
+      },
+      {
+        "runId": "f9182e006aab8032b870ef25ac840dbc",
+        "disposition": "STILL_PRESENT",
+        "at": "2026-10-20T13:18:30Z",
+        "basis": "located"
+      },
+      {
+        "runId": "58a405ae197e618c81165e7f440edecc",
+        "disposition": "STILL_PRESENT",
+        "at": "2026-10-20T13:32:30Z",
+        "basis": "located"
+      }
+    ]
+  }
+}
