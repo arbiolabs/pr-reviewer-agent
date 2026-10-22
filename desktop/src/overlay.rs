@@ -40,7 +40,7 @@ struct Entry {
 const READ_ONLY: &str = "Read-only daemon";
 
 fn mutation(m: &Model, mu: Mutation, title: String, key: &'static str, otherwise: &str) -> Entry {
-    let read_only = m.server.as_ref().and_then(|s| s.commands_off()).is_some();
+    let read_only = queue::read_only(m);
     let blocked = (!can_mutate(m, mu)).then(|| match write_block(m, mu.capability()) {
         Some(_) if read_only => READ_ONLY.into(),
         Some(why) => why.to_string(),
@@ -366,9 +366,12 @@ pub fn layer(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Vec<AnyElement> {
 /// The reducer's refusal of a command on a read-only daemon, in the desktop's words: what is off and how to turn
 /// it on. `None` for any other notice.
 pub fn read_only_notice(m: &Model, text: &str) -> Option<String> {
-    let off = m.server.as_ref().and_then(|s| s.commands_off())?;
+    if !queue::read_only(m) {
+        return None;
+    }
     let (verb, why) = text.strip_prefix("Can't ")?.split_once(": ")?;
-    if why != off && why != "the daemon does not grant it" {
+    let off = m.server.as_ref().and_then(|s| s.commands_off());
+    if Some(why) != off && why != "the daemon does not grant it" {
         return None;
     }
     let what = match verb {

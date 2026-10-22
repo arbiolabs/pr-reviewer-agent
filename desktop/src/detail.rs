@@ -542,7 +542,7 @@ fn run_block(s: &Shell, t: &Colors, run: Option<&Run>, current: &[&Finding]) -> 
             t.muted,
             IconName::CircleDashed,
             "No review yet",
-            Some(if m.server.as_ref().and_then(|sv| sv.commands_off()).is_some() {
+            Some(if queue::read_only(m) {
                 "This daemon is read-only, so it can't start one. Restart it with --allow-commands.".into()
             } else {
                 "Start one and it runs live here; its findings land below as the verifier keeps them.".into()
@@ -685,13 +685,13 @@ pub fn mutation_item(
         let on = on(cx, move |s, cx| if direct { s.direct(mu, cx) } else { s.act(Action::Mutation(mu), cx) });
         return Item::new(id, label, key, tone, on);
     }
-    let locked = m.server.as_ref().and_then(|s| s.commands_off()).is_some();
+    let locked = queue::read_only(m);
     Item { why: Some(why_not(m, mu, label)), locked, ..Item::new(id, label, key, tone, None) }
 }
 
 /// Why a mutation can't act now, as a tooltip: the read-only daemon in the desktop's words, else the reducer's.
 pub fn why_not(m: &Model, mu: Mutation, label: &str) -> String {
-    if m.server.as_ref().and_then(|s| s.commands_off()).is_some() {
+    if queue::read_only(m) {
         return format!(
             "{} Restart the daemon with --allow-commands to {}.",
             "Read-only daemon.",

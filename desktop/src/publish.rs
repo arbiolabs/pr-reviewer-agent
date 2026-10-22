@@ -287,9 +287,7 @@ pub fn publication(
             ),
             false => Item {
                 why: (!asking).then(|| match publish_block(m, p) {
-                    Some(_) if m.server.as_ref().and_then(|s| s.commands_off()).is_some() => {
-                        why_not(m, pr_review_tui::keymap::Mutation::Publish, "post")
-                    }
+                    Some(_) if queue::read_only(m) => why_not(m, pr_review_tui::keymap::Mutation::Publish, "post"),
                     Some(w) => format!("Can't post: {w}"),
                     None => "Can't post right now.".into(),
                 }),

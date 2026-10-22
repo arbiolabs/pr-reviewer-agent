@@ -125,6 +125,15 @@ impl SetupCount {
     }
 }
 
+/// The daemon runs no review commands: it says it is read-only, or it answers live and grants none of them.
+pub fn read_only(m: &Model) -> bool {
+    let off = m.server.as_ref().is_some_and(|s| s.commands_off().is_some());
+    let none = m.link.accepts_events()
+        && m.server.is_some()
+        && !["review.start", "review.retry", "review.cancel", "review.publish"].iter().any(|c| m.may_write(c));
+    off || none
+}
+
 pub fn setup_count(m: &Model) -> SetupCount {
     let Some(s) = &m.server else { return SetupCount::default() };
     let missing = s.missing().count();
@@ -435,6 +444,19 @@ mod tests {
         assert_eq!(running(&m).iter().map(|(p, _)| p.number).collect::<Vec<_>>(), [338]);
         assert_eq!(done(&m).iter().map(|(p, _)| p.number).collect::<Vec<_>>(), [341]);
         assert_eq!(summary(&m), "One review is waiting on you. #1287 has a critical finding.");
+    }
+
+    #[test]
+    fn a_daemon_that_grants_no_command_reads_as_read_only() {
+        let mut m = at(20_000, "");
+        assert!(!super::read_only(&m));
+        assert_eq!(crate::overlay::read_only_notice(&m, "Can't start: the daemon does not grant it"), None);
+        m.server.as_mut().unwrap().capabilities.clear();
+        assert!(super::read_only(&m));
+        assert_eq!(
+            crate::overlay::read_only_notice(&m, "Can't start: the daemon does not grant it").as_deref(),
+            Some("Read-only daemon: starting reviews is off. Restart it with --allow-commands.")
+        );
     }
 
     #[test]

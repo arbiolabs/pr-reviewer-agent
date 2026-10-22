@@ -235,9 +235,8 @@ fn card(s: &Shell, t: &Colors, c: &Card, i: usize, selected: bool, cx: &Context<
         Card::Failed { .. } => Some(pr_review_tui::keymap::Mutation::Retry),
         _ => None,
     };
-    let refused = command
-        .filter(|_| s.model.server.as_ref().and_then(|sv| sv.commands_off()).is_some())
-        .map(|mu| crate::detail::why_not(&s.model, mu, f.action));
+    let refused =
+        command.filter(|_| queue::read_only(&s.model)).map(|mu| crate::detail::why_not(&s.model, mu, f.action));
     let hue = hue_of(t, c);
     let place = c.pr().map(|p| format!("{} #{}", p.repository, p.number)).unwrap_or_default();
     let lift = BoxShadow {

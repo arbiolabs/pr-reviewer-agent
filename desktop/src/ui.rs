@@ -603,7 +603,7 @@ fn titlebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
             _ => ("pr-review".into(), queue::summary(m)),
         },
     };
-    let read_only = m.server.as_ref().and_then(|sv| sv.commands_off()).is_some();
+    let read_only = queue::read_only(m);
     let away = s.away();
     let search = div()
         .id("search-face")
@@ -1001,13 +1001,11 @@ fn strip(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         .bg(t.raised);
     if running.is_empty() {
         return row.child(icon(IconName::CircleCheck, px(14.), t.faint)).child(
-            div().text_size(text::SMALL).text_color(t.faint).child(
-                if m.server.as_ref().and_then(|sv| sv.commands_off()).is_some() {
-                    "No reviews running. This daemon is read-only, so none can start here."
-                } else {
-                    "No reviews running. Start one from a card or ⌘K."
-                },
-            ),
+            div().text_size(text::SMALL).text_color(t.faint).child(if queue::read_only(m) {
+                "No reviews running. This daemon is read-only, so none can start here."
+            } else {
+                "No reviews running. Start one from a card or ⌘K."
+            }),
         );
     }
     row.min_w_0()
