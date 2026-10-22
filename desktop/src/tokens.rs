@@ -244,16 +244,18 @@ pub mod layout {
     pub const MEASURE: Pixels = px(440.);
     pub const PALETTE: Pixels = px(600.);
     pub const SHEET: Pixels = px(460.);
-    /// Code never clips. A code block scrolls sideways, and a line longer than this many characters earns the
-    /// fade at its right edge; the diff soft-wraps at a word or operator boundary instead, so a finding's card can
-    /// sit between its rows. These are the columns each surface fits at 1280 points. ponytail: fixed counts
-    /// instead of measuring the pane, so a narrower window fades late; measure the pane if the window gets
-    /// resizable.
-    pub const COLS_EVIDENCE: usize = 60;
+    /// Code never clips and never scrolls sideways: every block soft-wraps at these columns, the most Menlo 12
+    /// (7.22 points a character) fits beside the gutter on each surface at 1280 points, less a few for safety.
+    /// ponytail: fixed counts instead of measuring the pane, so a narrower window wraps late; measure the pane if
+    /// the window gets resizable below 1280.
+    pub const COLS_EVIDENCE: usize = 58;
+    /// The finding's hunk, beside its sign column.
+    pub const COLS_HUNK: usize = 56;
     /// A code block inside the reading column.
     pub const COLS_PROSE: usize = 48;
     pub const COLS_DIFF: usize = 84;
-    pub const COLS_WIDE: usize = 108;
+    /// A proof comment's context.
+    pub const COLS_WIDE: usize = 80;
     /// The inset after the traffic lights, which end 70 points in: the title bar's content starts 20 points later.
     pub const TRAFFIC_INSET: Pixels = px(90.);
 }

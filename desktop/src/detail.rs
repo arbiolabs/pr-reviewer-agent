@@ -901,7 +901,7 @@ fn history_rows(t: &Colors, f: &Finding, history: &[HistoryEntry]) -> Div {
 /// The cited code, each block pinned to its path, lines and commit, and the tool summaries between them.
 fn evidence_blocks(t: &Colors, f: &Finding, d: &pr_review_tui::protocol::FindingDetail) -> Div {
     let mut blocks = div().flex().flex_col().gap(space::S3);
-    for (i, e) in d.evidence.iter().enumerate() {
+    for e in &d.evidence {
         blocks = blocks.child(match (e.kind, &e.path) {
             (EvidenceKind::CodeRef, Some(path)) => {
                 let start = e.start.unwrap_or(1);
@@ -911,7 +911,6 @@ fn evidence_blocks(t: &Colors, f: &Finding, d: &pr_review_tui::protocol::Finding
                 let sha = e.ref_sha.as_ref().map(|s| format!("@{}", s.short()));
                 code_block(
                     t,
-                    ("ev", i),
                     &title,
                     sha,
                     e.text.as_str(),
@@ -992,23 +991,23 @@ fn in_the_diff(s: &Shell, t: &Colors, f: &Finding, cx: &Context<Shell>) -> Div {
             let mut rows = div().py(space::S2).font_family(text::MONO).text_size(text::CODE);
             for l in &lines {
                 let hit = l.new == anchor && l.kind != LineKind::Del;
-                let (wash, sign, sign_fg) = match l.kind {
-                    LineKind::Add => (Some(t.add_bg), "+", t.add_fg),
-                    LineKind::Del => (Some(t.del_bg), "−", t.del_fg),
-                    _ => (None, " ", t.faint),
+                let (wash, sign) = match l.kind {
+                    LineKind::Add => (Some(t.add_bg), ("+", t.add_fg)),
+                    LineKind::Del => (Some(t.del_bg), ("−", t.del_fg)),
+                    _ => (None, (" ", t.faint)),
                 };
                 let wash = if hit { Some(t.severity_wash(f.severity)) } else { wash };
-                let run = one_run(t, &mut lx, l.text.as_str());
-                rows = rows.child(
-                    div()
-                        .flex()
-                        .min_w(relative(1.))
-                        .when_some(wash, |d, w| d.bg(w))
-                        .child(div().w(px(14.)).flex_none().pl(space::S2).text_color(sign_fg).child(sign))
-                        .child(code_row(t, l.new.or(l.old), run, false, None, hit.then_some(hue))),
-                );
+                rows = rows.children(code_line(
+                    t,
+                    &mut lx,
+                    l.text.as_str(),
+                    layout::COLS_HUNK,
+                    l.new.or(l.old),
+                    Some(sign),
+                    wash,
+                    hit.then_some(hue),
+                ));
             }
-            let long = lines.iter().any(|l| l.text.as_str().chars().count() > layout::COLS_EVIDENCE);
             div()
                 .flex()
                 .flex_col()
@@ -1039,7 +1038,7 @@ fn in_the_diff(s: &Shell, t: &Colors, f: &Finding, cx: &Context<Shell>) -> Div {
                                 .child(header),
                         ),
                 )
-                .child(code_scroll(t, "f-hunk", rows, long))
+                .child(rows)
         }
         None => div()
             .text_size(text::SMALL)
@@ -1138,23 +1137,32 @@ pub fn runs(t: &Colors, lx: &mut Lexer, line: &str, cols: usize) -> Vec<(StyledT
         .collect()
 }
 
-/// One line of code, colored, never cut: for a block that scrolls sideways.
-pub fn one_run(t: &Colors, lx: &mut Lexer, line: &str) -> StyledText {
-    let line = line.replace('\t', "    ");
-    let marks: Vec<_> = lx.line(&line).into_iter().map(|(r, tok)| (r, style_of(t, tok))).collect();
-    StyledText::new(if line.is_empty() { " ".to_string() } else { line }).with_highlights(marks)
-}
-
-/// A block of code rows that scrolls sideways instead of wrapping. `long` adds the fade at the right edge that
-/// says there is more.
-pub fn code_scroll(t: &Colors, id: impl Into<ElementId>, rows: Div, long: bool) -> Div {
-    div().relative().min_w_0().child(div().id(id).overflow_x_scroll().child(rows.whitespace_nowrap())).when(long, |d| {
-        d.child(div().absolute().top_0().bottom_0().right_0().w(space::S8).bg(linear_gradient(
-            90.,
-            linear_color_stop(t.code_bg.alpha(0.), 0.),
-            linear_color_stop(t.code_bg, 1.),
-        )))
-    })
+/// One line of code as the rows it soft-wraps into at `cols`, by the diff's rule: each run is a code row, a
+/// continuation carries the `↳` in the gutter, and `sign` (a diff's + or −) shows on the first row only.
+#[allow(clippy::too_many_arguments)]
+pub fn code_line(
+    t: &Colors,
+    lx: &mut Lexer,
+    line: &str,
+    cols: usize,
+    number: Option<u32>,
+    sign: Option<(&'static str, Hsla)>,
+    wash: Option<Hsla>,
+    mark: Option<Hsla>,
+) -> Vec<Div> {
+    runs(t, lx, line, cols)
+        .into_iter()
+        .enumerate()
+        .map(|(k, (run, cont))| {
+            div()
+                .flex()
+                .when_some(wash, |d, w| d.bg(w))
+                .children(sign.map(|(g, c)| {
+                    div().w(px(14.)).flex_none().pl(space::S2).text_color(c).child(if k == 0 { g } else { " " })
+                }))
+                .child(div().flex_1().min_w_0().child(code_row(t, number, run, cont, None, mark)))
+        })
+        .collect()
 }
 
 /// A gutter, a marker and one run of a line. `cont` marks a run that continues the line above; `wash` tints the
@@ -1190,7 +1198,6 @@ pub fn code_row(
 #[allow(clippy::too_many_arguments)]
 pub fn code_block(
     t: &Colors,
-    id: impl Into<ElementId>,
     title: &str,
     sha: Option<String>,
     code: &str,
@@ -1206,10 +1213,17 @@ pub fn code_block(
     for (i, l) in code.lines().enumerate() {
         let n = start + i as u32;
         let hit = anchor == Some(n);
-        let run = one_run(t, &mut lx, l);
-        rows = rows.child(code_row(t, Some(n), run, false, hit.then(|| t.severity_wash(sev)), hit.then_some(hue)));
+        rows = rows.children(code_line(
+            t,
+            &mut lx,
+            l,
+            cols,
+            Some(n),
+            None,
+            hit.then(|| t.severity_wash(sev)),
+            hit.then_some(hue),
+        ));
     }
-    let long = code.lines().any(|l| l.chars().count() > cols);
     div()
         .flex()
         .flex_col()
@@ -1246,22 +1260,29 @@ pub fn code_block(
                     div().flex_none().font_family(text::MONO).text_size(px(11.)).text_color(t.faint).child(s)
                 })),
         )
-        .child(code_scroll(t, id, rows, long))
+        .child(rows)
 }
 
 /// A suggested fix: its prose paragraphs as prose, its code as code.
 pub fn fix_block(t: &Colors, fix: &str, path: &str) -> Div {
     let mut out = div().flex().flex_col().gap(space::S3);
-    for (i, para) in fix.split("\n\n").enumerate() {
+    for para in fix.split("\n\n") {
         let code = para.contains('\n') || para.trim_end().ends_with(['{', ';', ')', '}']);
         out = out.child(if code {
             let mut lx = Lexer::for_path(path);
             let mut rows = div().py(space::S2).font_family(text::MONO).text_size(text::CODE);
             for l in para.lines() {
-                let run = one_run(t, &mut lx, l);
-                rows = rows.child(code_row(t, None, run, false, Some(t.add_bg), Some(t.add_fg)));
+                rows = rows.children(code_line(
+                    t,
+                    &mut lx,
+                    l,
+                    layout::COLS_PROSE,
+                    None,
+                    None,
+                    Some(t.add_bg),
+                    Some(t.add_fg),
+                ));
             }
-            let long = para.lines().any(|l| l.chars().count() > layout::COLS_PROSE);
             div()
                 .max_w(layout::MEASURE)
                 .rounded(radius::LG)
@@ -1269,7 +1290,7 @@ pub fn fix_block(t: &Colors, fix: &str, path: &str) -> Div {
                 .border_color(t.border)
                 .bg(t.code_bg)
                 .overflow_hidden()
-                .child(code_scroll(t, ("fix", i), rows, long))
+                .child(rows)
         } else {
             prose(t, para)
         });

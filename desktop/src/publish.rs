@@ -221,14 +221,14 @@ pub fn publication(
         if let Some(lines) = context {
             let mut lx = Lexer::for_path(cm.path.as_str());
             let mut rows = div().py(space::S1).font_family(text::MONO).text_size(text::CODE);
-            let long = lines.iter().any(|(_, l, _)| l.chars().count() > layout::COLS_WIDE);
             for (n, l, hit) in lines {
-                let run = one_run(t, &mut lx, &l);
-                rows = rows.child(code_row(
+                rows = rows.children(code_line(
                     t,
+                    &mut lx,
+                    &l,
+                    layout::COLS_WIDE,
                     Some(n),
-                    run,
-                    false,
+                    None,
                     hit.then(|| t.accent.alpha(0.12)),
                     hit.then_some(t.accent),
                 ));
@@ -240,7 +240,7 @@ pub fn publication(
                     .border_color(t.border)
                     .bg(t.code_bg)
                     .overflow_hidden()
-                    .child(code_scroll(t, SharedString::from(format!("pc-{}-{}", cm.path, cm.line)), rows, long)),
+                    .child(rows),
             );
         }
         content = content.child(markdown(t, cm.body.as_str(), raw));
