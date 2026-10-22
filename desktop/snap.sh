@@ -103,7 +103,8 @@ for look in dark light; do
     capture "$out/08-disconnected-$look.png" --socket /private/tmp/prdc/s.sock --window 1280x800 \
       --appearance $look --snapshot-after-ms 1500 ;;
   esac
-  snap 09-published-$look      $look 30000 "wait:20000,pr:1291,publish,wait:200,confirm,wait:6000"
+  snap 09a-posting-$look       $look 20000 "wait:19900,pr:1291,publish,confirm"
+  snap 09-published-$look     $look 30000 "wait:20000,pr:1291,publish,wait:200,confirm,wait:6000"
   snap 10-timeline-$look       $look 20000 "wait:19000,pr:1287,open-timeline"
   snap 11-empty-queue-$look    $look 1000  "" desktop/playback/clear.ndjson
   snap 12-readonly-$look       $look 20000 "wait:19000,pr:1296" "$readonly_script"

@@ -237,12 +237,24 @@ fn hue_of(t: &Colors, c: &Card) -> Hsla {
 }
 
 fn card(s: &Shell, t: &Colors, c: &Card, i: usize, selected: bool, cx: &Context<Shell>) -> Stateful<Div> {
-    let f = face(&s.model, c, selected);
-    // A selected card whose PR page fills the pane docks: its title, quote, reason and button are all on that page,
+    let mut f = face(&s.model, c, selected);
+    let proof = match crate::ui::front(&s.model) {
+        Some(pr_review_tui::model::Modal::Publication { run_id, publish, .. }) if selected => {
+            Some(crate::publish::stage(&s.model, run_id, publish))
+        }
+        _ => None,
+    };
+    let proof_open = proof.is_some();
+    // The run stays parked until the daemon moves it, but the reader has approved: the card says so.
+    if let (Card::Approve { pr, .. }, Some(crate::publish::Stage::Posting)) = (c, proof) {
+        f.glyph = Some(IconName::LoaderCircle);
+        f.kicker = "Posting…".into();
+        f.meta = format!("Approved at {} · waiting for GitHub", pr.head_sha.short());
+    }
+    // A selected card whose page fills the pane docks: its title, quote, reason and button are all on that page,
     // so the card keeps only its kicker and its meta line, and the title is said once beside the sidebar.
-    let docked = selected && matches!(c, Card::Findings { .. } | Card::Failed { .. } | Card::Start { .. });
-    let proof_open =
-        selected && matches!(crate::ui::front(&s.model), Some(pr_review_tui::model::Modal::Publication { .. }));
+    let docked = selected && matches!(c, Card::Findings { .. } | Card::Failed { .. } | Card::Start { .. })
+        || proof_open && matches!(c, Card::Approve { .. });
     // On a read-only daemon a card's command stays visible, dimmed, with the reason in its tooltip.
     let command = match c {
         Card::Start { .. } => Some(pr_review_tui::keymap::Mutation::Start),

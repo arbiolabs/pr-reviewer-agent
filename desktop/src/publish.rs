@@ -73,6 +73,24 @@ fn event_words(event: &str) -> &'static str {
     }
 }
 
+/// Where a proof stands: nothing sent, an approval on its way to GitHub, or posted.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Stage {
+    Proof,
+    Posting,
+    Posted,
+}
+
+/// The stage of the proof for `run_id`, from what GitHub said and what the approval is doing.
+pub fn stage(m: &Model, run_id: &RunId, publish: &ConfirmState) -> Stage {
+    match m.domain.publications.get(run_id).map(|x| x.status) {
+        Some(PublicationStatus::Published) => Stage::Posted,
+        Some(PublicationStatus::Publishing) => Stage::Posting,
+        _ if matches!(publish, ConfirmState::Requested(_) | ConfirmState::Accepted { .. }) => Stage::Posting,
+        _ => Stage::Proof,
+    }
+}
+
 pub fn publication(
     s: &Shell,
     t: &Colors,
@@ -86,24 +104,21 @@ pub fn publication(
     let run = m.domain.runs.get(run_id);
     let pr = run.and_then(|r| m.domain.prs.get(&r.pr_id));
     let posted = m.domain.publications.get(run_id).map(|x| x.status);
-    let done = posted == Some(PublicationStatus::Published);
+    let at = stage(m, run_id, publish);
+    let done = at == Stage::Posted;
+    let posting = at == Stage::Posting;
     let url = published_url(m, run_id);
+    let (glyph, hue, words) = match at {
+        Stage::Posted => (IconName::CircleCheck, t.ok, "PUBLISHED"),
+        Stage::Posting => (IconName::LoaderCircle, t.running, "POSTING…"),
+        Stage::Proof => (IconName::Send, t.accent, "PROOF · NOTHING IS POSTED YET"),
+    };
     let kicker = div()
         .flex()
         .items_center()
         .gap(space::S2)
-        .child(icon(
-            if done { IconName::CircleCheck } else { IconName::Send },
-            px(12.),
-            if done { t.ok } else { t.accent },
-        ))
-        .child(
-            div()
-                .text_size(text::CAPTION)
-                .font_weight(FontWeight::BOLD)
-                .text_color(if done { t.ok } else { t.accent })
-                .child(if done { "PUBLISHED" } else { "PROOF · NOTHING IS POSTED YET" }),
-        )
+        .child(icon(glyph, px(12.), hue))
+        .child(div().text_size(text::CAPTION).font_weight(FontWeight::BOLD).text_color(hue).child(words))
         .children(url.as_ref().filter(|_| done).map(|u| {
             div().font_family(text::MONO).text_size(text::CAPTION).text_color(t.faint).truncate().child(u.clone())
         }));
@@ -145,6 +160,13 @@ pub fn publication(
     let n = p.comments.len();
     let sentence = if done {
         format!("As {} at {}: one review with {}.", who(m), p.head_sha.short(), queue::count(n, "inline comment"))
+    } else if posting {
+        format!(
+            "Sending one review with {} as {} at {}. This page says Published once GitHub confirms it.",
+            queue::count(n, "inline comment"),
+            who(m),
+            p.head_sha.short()
+        )
     } else {
         format!(
             "One review with {}, posted as {}, at {}. It posts as {}, and only when you choose Post.",
@@ -162,7 +184,11 @@ pub fn publication(
             .child(kicker)
             .child(crate::kit::display(
                 t,
-                if done { format!("Posted to {target}") } else { format!("What will be posted to {target}") },
+                match at {
+                    Stage::Posted => format!("Posted to {target}"),
+                    Stage::Posting => format!("Posting to {target}"),
+                    Stage::Proof => format!("What will be posted to {target}"),
+                },
             ))
             .child(summary(t, sentence)),
     );
@@ -200,7 +226,11 @@ pub fn publication(
             div()
                 .child(icon(IconName::Bot, px(13.), t.faint))
                 .child(div().font_weight(FontWeight::SEMIBOLD).text_color(t.text).child(who.clone()))
-                .child(if done { "commented" } else { "will comment" })
+                .child(match at {
+                    Stage::Posted => "commented",
+                    Stage::Posting => "is commenting…",
+                    Stage::Proof => "will comment",
+                })
                 .child(div().flex_1())
                 .child(button(
                     t,
@@ -217,7 +247,8 @@ pub fn publication(
     let mut comments = div().flex().flex_col().gap(space::S3);
     for cm in &p.comments {
         let context = key.as_ref().and_then(|k| diff_context(m, k, cm.path.as_str(), cm.line.get()));
-        let mut content = div().flex().flex_col().gap(space::S3);
+        // The comment first, as GitHub shows it in the conversation, then the lines it sits on.
+        let mut content = div().flex().flex_col().gap(space::S3).child(markdown(t, cm.body.as_str(), raw));
         if let Some(lines) = context {
             let mut lx = Lexer::for_path(cm.path.as_str());
             let mut rows = div().py(space::S1).font_family(text::MONO).text_size(text::CODE);
@@ -237,7 +268,6 @@ pub fn publication(
                 div().rounded(radius::SM).border_1().border_color(t.border).bg(t.code_bg).overflow_hidden().child(rows),
             );
         }
-        content = content.child(markdown(t, cm.body.as_str(), raw));
         comments = comments.child(frame(
             div()
                 .child(icon(IconName::FileText, px(13.), t.faint))
@@ -275,6 +305,17 @@ pub fn publication(
                     Box::new(cx.listener(|s, _: &ClickEvent, _, cx| s.act(Action::OpenUrl, cx)))
                 }),
             )],
+        }
+    } else if posting {
+        // Nothing on the bar can change what is already on its way.
+        let wait = || Some("GitHub is answering. This page changes once it does.".to_string());
+        Bar {
+            lead: vec![],
+            note: None,
+            trail: vec![
+                Item { why: wait(), ..Item::new("p-close", "Not now", "esc", Tone::Ghost, None) },
+                Item { why: wait(), ..Item::new("p-post", "Posting…", "⌘⏎", Tone::Primary, None) },
+            ],
         }
     } else {
         let post = match ready {
@@ -380,4 +421,29 @@ fn diff_context(m: &Model, key: &DiffKey, path: &str, line: u32) -> Option<Vec<(
             .map(|l| (l.new.unwrap_or(0), l.text.to_string(), l.new == Some(line)))
             .collect(),
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Stage, stage};
+    use crate::script::{parse, play};
+    use pr_review_tui::model::{Look, Modal, Model, Screen};
+    use std::path::Path;
+
+    fn at(ms: u64, steps: &str) -> Stage {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../protocol/playback/showcase.ndjson");
+        let mut m = Model::new("test", Look::default(), Screen::Review, None);
+        play(pr_review_tui::playback::load(&path).unwrap(), &mut m, &parse(steps).unwrap(), ms).unwrap();
+        match crate::ui::front(&m) {
+            Some(Modal::Publication { run_id, publish, .. }) => stage(&m, run_id, publish),
+            other => panic!("no proof in front: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn the_proof_says_posting_from_the_approval_until_github_confirms() {
+        assert_eq!(at(20_000, "wait:19000,pr:1291,publish"), Stage::Proof);
+        assert_eq!(at(20_000, "wait:19900,pr:1291,publish,confirm"), Stage::Posting);
+        assert_eq!(at(30_000, "wait:20000,pr:1291,publish,wait:200,confirm,wait:6000"), Stage::Posted);
+    }
 }

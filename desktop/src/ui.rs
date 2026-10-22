@@ -23,7 +23,6 @@ use crate::queue::{self, Card, RowState, Stage, phase_word};
 use crate::script::Desk;
 use crate::tokens::{self, Colors, layout, motion, radius, space, text};
 use crate::{detail, diff, overlay};
-use pr_review_tui::protocol::PublicationStatus;
 
 gpui_kit::actions!(
     pr_review,
@@ -432,6 +431,12 @@ impl Shell {
             (Some(Modal::Confirm { command: Command::Cancel(_), .. }), _, "enter", _) => Action::Back,
             (Some(Modal::Confirm { .. }), _, "enter", _) | (Some(Modal::Confirm { .. }), _, _, "y") => Action::Confirm,
             (Some(Modal::Confirm { .. }), _, _, "n") => Action::Back,
+            // While the approval is on its way, esc does not walk away from it, as its Not now button can't.
+            (Some(Modal::Publication { run_id, publish, .. }), _, "escape", _)
+                if crate::publish::stage(m, run_id, publish) == crate::publish::Stage::Posting =>
+            {
+                return;
+            }
             (Some(Modal::Publication { .. }), _, _, "y") => return self.post(cx),
             (Some(Modal::Publication { .. }), _, _, "m") => Action::ToggleRaw,
             (Some(Modal::Publication { .. }), _, _, "d") => Action::OpenDiff,
@@ -591,9 +596,13 @@ fn titlebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
             let at = all.iter().position(|f| &f.id == id).map_or(0, |i| i + 1);
             (format!("{number} · finding {at} of {}", all.len()), pr_title)
         }
-        (_, Some(Modal::Publication { run_id, .. })) => {
-            let posted = m.domain.publications.get(run_id).is_some_and(|p| p.status == PublicationStatus::Published);
-            (format!("{number} · {}", if posted { "posted" } else { "proof" }), pr_title)
+        (_, Some(Modal::Publication { run_id, publish, .. })) => {
+            let word = match crate::publish::stage(m, run_id, publish) {
+                crate::publish::Stage::Posted => "posted",
+                crate::publish::Stage::Posting => "posting…",
+                crate::publish::Stage::Proof => "proof",
+            };
+            (format!("{number} · {word}"), pr_title)
         }
         (Screen::Diff, _) => (format!("{number} diff"), pr_title),
         (Screen::Timeline, _) => (format!("{number} timeline"), pr_title),
@@ -820,6 +829,18 @@ fn sidebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         .child(connection(m, t))
 }
 
+/// The reader approved `pr`'s proof and it is on its way, while the run still reads as parked.
+fn posting(s: &Shell, pr: &Pr) -> bool {
+    let m = &s.model;
+    m.ui.modals.iter().any(|x| match x {
+        Modal::Publication { run_id, publish, .. } => {
+            m.domain.runs.get(run_id).is_some_and(|r| r.pr_id == pr.id)
+                && crate::publish::stage(m, run_id, publish) == crate::publish::Stage::Posting
+        }
+        _ => false,
+    })
+}
+
 fn pr_row(s: &Shell, t: &Colors, pr: &Pr, state: RowState, on: bool, cx: &Context<Shell>) -> Stateful<Div> {
     let id = pr.id.clone();
     let (glyph, hue): (AnyElement, Hsla) = match state {
@@ -842,51 +863,54 @@ fn pr_row(s: &Shell, t: &Colors, pr: &Pr, state: RowState, on: bool, cx: &Contex
         RowState::Running(p) => Some(progress(t, queue::running_marks(p), t.running, Gauge::Pip).into_any_element()),
         _ => None,
     };
-    let row = div()
-        .id(SharedString::from(format!("nav-pr-{}-face", pr.number)))
-        .relative()
-        .flex()
-        .items_start()
-        .gap(space::S2)
-        .h(px(44.))
-        .px(space::S2)
-        .py(px(5.))
-        .rounded(radius::SM)
-        .when(on, |d| d.bg(t.selected).child(rail(t)))
-        .hover(move |d| d.bg(if on { lift(t, t.selected) } else { t.hover }))
-        .active(|d| d.bg(t.press))
-        .child(div().w(px(14.)).h(px(18.)).flex().items_center().justify_center().flex_none().child(glyph))
-        .child(
-            div()
-                .flex()
-                .flex_col()
-                .flex_1()
-                .min_w_0()
-                .gap(px(2.))
-                // The title takes the row's whole width on one line; the number, the state and the badge share
-                // the line under it, so a title is cut only at its end.
-                .child(
-                    div()
-                        .text_size(text::BODY)
-                        .line_height(px(18.))
-                        .font_weight(FontWeight::MEDIUM)
-                        .text_color(t.text)
-                        .truncate()
-                        .child(pr.title.to_string()),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .h(px(16.))
-                        .gap(px(6.))
-                        .text_size(text::CAPTION)
-                        .child(div().flex_none().text_color(t.muted).child(format!("#{}", pr.number)))
-                        .child(div().flex_none().text_color(hue).child(state.word()))
-                        .child(div().flex_1())
-                        .children(badge),
-                ),
-        );
+    let row =
+        div()
+            .id(SharedString::from(format!("nav-pr-{}-face", pr.number)))
+            .relative()
+            .flex()
+            .items_start()
+            .gap(space::S2)
+            .h(px(44.))
+            .px(space::S2)
+            .py(px(5.))
+            .rounded(radius::SM)
+            .when(on, |d| d.bg(t.selected).child(rail(t)))
+            .hover(move |d| d.bg(if on { lift(t, t.selected) } else { t.hover }))
+            .active(|d| d.bg(t.press))
+            .child(div().w(px(14.)).h(px(18.)).flex().items_center().justify_center().flex_none().child(glyph))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .flex_1()
+                    .min_w_0()
+                    .gap(px(2.))
+                    // The title takes the row's whole width on one line; the number, the state and the badge share
+                    // the line under it, so a title is cut only at its end.
+                    .child(
+                        div()
+                            .text_size(text::BODY)
+                            .line_height(px(18.))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(t.text)
+                            .truncate()
+                            .child(pr.title.to_string()),
+                    )
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .h(px(16.))
+                            .gap(px(6.))
+                            .text_size(text::CAPTION)
+                            .child(div().flex_none().text_color(t.muted).child(format!("#{}", pr.number)))
+                            .child(div().flex_none().text_color(hue).child(
+                                if state == RowState::Parked && posting(s, pr) { "Posting" } else { state.word() },
+                            ))
+                            .child(div().flex_1())
+                            .children(badge),
+                    ),
+            );
     focusable(
         SharedString::from(format!("nav-pr-{}", pr.number)),
         row,
