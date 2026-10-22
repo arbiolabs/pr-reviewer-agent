@@ -996,6 +996,7 @@ const detail: FindingDetail = {
     { kind: "scenario", text: "Two clients POST /book for slot 9 within 5 ms." },
     { kind: "link", text: "https://example.com/docs/locking" },
   ],
+  evidenceCount: 5,
   history: [{ runId: run1.id, disposition: "DETECTED", at: at(30) }],
 };
 
@@ -1123,7 +1124,7 @@ export const fixtures: Record<string, ClientMessage | ServerMessage | Record<str
   "server.finding.detail.minimal": {
     type: "finding.detail",
     requestId: "req-finding",
-    finding: { ...f2, explanation: "e", reasoningSummary: "r", evidence: [], history: [] },
+    finding: { ...f2, evidenceCount: 0, explanation: "e", reasoningSummary: "r", evidence: [], history: [] },
   },
   "server.timeline.page": {
     type: "timeline.page",
