@@ -106,7 +106,7 @@ export const FindingDetail = Type.Object({
       basis: Type.Optional(
         Type.String({
           description:
-            "why the run observed this state: reverified, located, changed, file_gone, resolution_checked, resolution_refused or reported_unverified; absent on a first observation and a publication",
+            "why the run observed this state: reverified, located, changed, file_gone, resolution_checked, resolution_refused, reported_unverified, or reopened for the first observation of a finding seeded from a resolved one whose code came back; absent on any other first observation and on a publication",
         }),
       ),
     }),

@@ -28,7 +28,8 @@ type CaseResult = {
   discarded: Disposition[];
 };
 type TrackedStep = Review & Step;
-type TrackedResult = { id: string; steps: TrackedStep[] } & TrackScore;
+/** `reopened` counts findings seeded from a resolved one whose code came back: a true regress, or a false resolution corrected. */
+type TrackedResult = { id: string; steps: TrackedStep[]; reopened: number } & TrackScore;
 type Rates = Omit<TrackScore, "outcomes">;
 type RunResult = { cases: CaseResult[]; tracked: TrackedResult[]; tracking: Rates; tp: number; fn: number; fp: number; precision: number | undefined; recall: number | undefined };
 
@@ -117,7 +118,7 @@ async function runTracked(id: string, model: string): Promise<TrackedResult> {
       const comments = fake.reviews.slice(posted).flatMap((rv) => (rv.comments as InlineComment[]).map(({ path, line }) => ({ path, line })));
       steps.push({ ...r, statuses: await statuses(id), comments });
     }
-    return { id, steps, ...scoreTracking(spec.labels as TrackedLabel[], commits, steps) };
+    return { id, steps, reopened: steps.flatMap((s) => s.findings).filter((f) => f.reopens).length, ...scoreTracking(spec.labels as TrackedLabel[], commits, steps) };
   } finally {
     await fake.close();
   }
@@ -188,18 +189,18 @@ function print(runs: RunResult[], model: string) {
   }
   if (runs[0]!.tracked.length === 0) return;
   console.log("");
-  const rows = [["case", "run", "expected -> status (id kept)", "findings per step", "inline comments per step", "duplicates", "states"]];
+  const rows = [["case", "run", "expected -> status (id kept)", "findings per step", "inline comments per step", "duplicates", "reopened", "states"]];
   for (const [i, r] of runs.entries()) {
     for (const t of r.tracked) {
       const outcomes = t.outcomes.map((o) => `${o.label}@${o.step} ${o.expected}->${o.status ?? "unmatched"}${o.idKept === undefined ? "" : o.idKept ? " (kept)" : " (lost)"}`).join("; ");
       const states = [...new Set(t.steps.map((s) => `${s.state}/${s.outboxStatus ?? "-"}`))].join(",");
-      rows.push([t.id, String(i + 1), outcomes, t.steps.map((s) => s.findings.length).join(","), t.steps.map((s) => s.comments.length).join(","), String(t.duplicateComments.n), states]);
+      rows.push([t.id, String(i + 1), outcomes, t.steps.map((s) => s.findings.length).join(","), t.steps.map((s) => s.comments.length).join(","), String(t.duplicateComments.n), String(t.reopened), states]);
     }
   }
   table(rows);
   for (const [i, r] of runs.entries()) {
     const t = r.tracking;
-    console.log(`run ${i + 1}: false resolution ${frac(t.falseResolution)}  identity kept ${frac(t.identityKept)}  duplicate comments ${frac(t.duplicateComments)}  resolution recall ${frac(t.resolutionRecall)}  new labels found ${frac(t.newFound)}`);
+    console.log(`run ${i + 1}: false resolution ${frac(t.falseResolution)}  identity kept ${frac(t.identityKept)}  duplicate comments ${frac(t.duplicateComments)}  resolution recall ${frac(t.resolutionRecall)}  new labels found ${frac(t.newFound)}  reopened ${r.tracked.reduce((n, c) => n + c.reopened, 0)}`);
   }
   for (const [i, r] of runs.entries()) {
     for (const t of r.tracked) {

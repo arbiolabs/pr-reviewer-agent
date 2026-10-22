@@ -74,7 +74,10 @@ export function renderSummary(headSha: string, findings: FindingView[], limitati
   } else {
     const n = fresh.length;
     lines.push(`Found ${n} actionable ${n === 1 ? "issue" : "issues"}.`, "");
-    for (const { candidate: c } of fresh) lines.push(`- ${capitalize(c.severity)}: ${c.title} (\`${c.file}:${c.newLine}\`)`);
+    for (const { candidate: c, reopens } of fresh) {
+      const back = reopens ? `; looked resolved at \`${reopens.resolvedAt.slice(0, 7)}\`, but its code is still here` : "";
+      lines.push(`- ${capitalize(c.severity)}: ${c.title} (\`${c.file}:${c.newLine}\`${back})`);
+    }
   }
   const sectioned = new Set(CARRIED_SECTIONS.flatMap(([, states]) => states));
   for (const [heading, states] of CARRIED_SECTIONS) {
@@ -99,7 +102,7 @@ export function renderJson(report: ReviewReport) {
     reviewMode: report.mode,
     reviewModeReasons: report.modeReasons,
     limitations: report.limitations,
-    findings: report.findings.map((f) => ({ findingId: f.findingId, fingerprint: f.fingerprint, status: f.status, ...f.candidate })),
+    findings: report.findings.map((f) => ({ findingId: f.findingId, fingerprint: f.fingerprint, status: f.status, reopens: f.reopens, ...f.candidate })),
     discarded: report.dispositions.filter((d) => d.state === "DISCARDED"),
     resolutions: report.resolutions,
     published: report.outbox?.status === "published",

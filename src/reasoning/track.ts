@@ -3,7 +3,7 @@
 // compared as code tokens so that comments, blank lines, spacing and separators never count as a change.
 import { transition } from "../domain/machine.ts";
 import { FINDING_MACHINE, type FindingEvent, type FindingState } from "../domain/machines.ts";
-import type { CandidateFinding, ChangedFile, ResolutionVerdict } from "../domain/types.ts";
+import { type CandidateFinding, type ChangedFile, type ResolutionVerdict, stableId } from "../domain/types.ts";
 import type { PinnedRepo } from "../source/git.ts";
 
 /** The text a finding points at, enough to find it again without the old commit. */
@@ -20,21 +20,27 @@ export type Located =
 
 /**
  * Why an observation ended where it did. A first observation has none. `resolution_checked` is a resolution claim
- * code accepted, `resolution_refused` one it refused, and `reported_unverified` a re-report of the finding that
- * failed VERIFY, which leaves a doubted finding UNCERTAIN.
+ * code accepted, `resolution_refused` one it refused, `reported_unverified` a re-report of the finding that failed
+ * VERIFY, which leaves a doubted finding UNCERTAIN, and `reopened` the first observation of a finding seeded from a
+ * resolved one whose code came back (`reopen`).
  */
-export type Basis = "reverified" | "located" | "changed" | "file_gone" | "resolution_checked" | "resolution_refused" | "reported_unverified";
+export type Basis = "reverified" | "located" | "changed" | "file_gone" | "resolution_checked" | "resolution_refused" | "reported_unverified" | "reopened";
 
+/** The resolved finding a new finding reopens, and the head it was resolved on. */
+export type Reopened = { findingId: string; resolvedAt: string };
+
+/** An open finding at this head, or a finding this head reopens (`reopens` set), which is new to the store. */
 export type PriorFinding = {
   findingId: string;
   status: FindingState;
   candidate: CandidateFinding;
   location: ObservedLocation;
   located: Located;
+  reopens?: Reopened;
 };
 
 /** One observation per finding per revision: the states it walked and the candidate and location it ended with. */
-export type Observation = { findingId: string; path: FindingState[]; basis: Basis | null; candidate: CandidateFinding; location: ObservedLocation };
+export type Observation = { findingId: string; path: FindingState[]; basis: Basis | null; candidate: CandidateFinding; location: ObservedLocation; reopens?: Reopened };
 
 /** Reads one head: file contents, the head path of a rename, and the paths whose text contains a literal word (undefined when too many to list). */
 export type HeadReader = {
@@ -415,6 +421,36 @@ export async function survivingCode(f: Pick<PriorFinding, "location" | "located"
   return undefined;
 }
 
+/**
+ * A resolved finding whose own-file code is back at this head, as a new finding seeded from it: the stored candidate
+ * and evidence relocated to where the code sits now, under an id derived from this revision, so a retried VERIFY
+ * derives the same one. A resolution is a claim code checked once; this is the same check run again on every later
+ * head, so a false resolution corrects itself on the next push. Only the finding's own file and its rename are read:
+ * code that came back elsewhere is a new defect for the model to report.
+ */
+export async function reopen(resolved: { findingId: string; candidate: CandidateFinding; location: ObservedLocation; observedAt: string }, prId: string, revisionId: string, headSha: string, head: HeadReader): Promise<PriorFinding | undefined> {
+  const { location } = resolved;
+  const located = await locate(location, headSha, head, { treeWide: false });
+  let at = located.kind === "same" ? located.location : undefined;
+  if (!at) {
+    const survival = await survivingCode({ location, located }, head, { treeWide: false });
+    if (survival?.kind !== "found") return undefined;
+    const { item, path, start, end } = survival;
+    // The anchor keeps its offset inside the item that survived, as far as that item still reaches.
+    const offset = location.newLine !== null && item.start <= location.newLine && location.newLine <= item.end ? Math.min(location.newLine - item.start, end - start) : 0;
+    at = { file: path, newLine: start + offset, headSha, evidence: [{ ...item, path, start, end }] };
+  }
+  const candidate = { ...resolved.candidate, file: at.file, newLine: at.newLine, codeEvidence: at.evidence.map(({ path, start, end }) => ({ path, start, end, refSha: headSha })) };
+  return {
+    findingId: stableId("finding", prId, revisionId, "reopens", resolved.findingId),
+    status: "DETECTED",
+    candidate,
+    location: at,
+    located: { kind: "same", location: at },
+    reopens: { findingId: resolved.findingId, resolvedAt: resolved.observedAt },
+  };
+}
+
 const overlaps = (a: EvidenceText[], b: EvidenceText[]) => a.some((x) => b.some((y) => x.path === y.path && x.start <= y.end && y.start <= x.end));
 
 type Fingerprint = (c: Pick<CandidateFinding, "category" | "file" | "title">) => string;
@@ -656,7 +692,8 @@ export type Claims = { verdicts: ResolutionVerdict[]; unverified: Iterable<strin
  * One observation per finding this revision touched: a verified candidate that links to an open finding re-observes
  * it as present, every other open finding is observed as located, and a candidate linked to nothing is a new finding.
  * A located finding then takes what the model claimed about it, as far as code confirmed it: an accepted resolution
- * claim resolves a doubted finding, and an unverified re-report leaves a doubted finding UNCERTAIN.
+ * claim resolves a doubted finding, and an unverified re-report leaves a doubted finding UNCERTAIN. A finding this
+ * head reopens is first observed here, as DETECTED, with the linked candidate's report when the model made one.
  */
 export function observe(prior: PriorFinding[], verified: { findingId: string; candidate: CandidateFinding; location: ObservedLocation }[], claims: Claims = { verdicts: [], unverified: [] }): Observation[] {
   const linked = new Map(verified.map((v) => [v.findingId, v]));
@@ -666,6 +703,7 @@ export function observe(prior: PriorFinding[], verified: { findingId: string; ca
   const unverified = new Set(claims.unverified);
   const carried = prior.map((f): Observation => {
     const link = linked.get(f.findingId);
+    if (f.reopens) return { findingId: f.findingId, path: ["DETECTED"], basis: "reopened", candidate: link?.candidate ?? f.candidate, location: link?.location ?? f.location, reopens: f.reopens };
     if (link) return { findingId: f.findingId, path: walk(f.status, "OBSERVED_PRESENT"), basis: "reverified", candidate: link.candidate, location: link.location };
     const [event, located] = CARRY[f.located.kind];
     let path = walk(f.status, event);

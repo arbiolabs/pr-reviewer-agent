@@ -16,7 +16,7 @@ import {
 } from "../domain/machines.ts";
 import { type CandidateFinding, type ChangedFile, type Disposition, type PullInfo, type ResolutionClaim, type ResolutionVerdict, stableId } from "../domain/types.ts";
 import { sanitize } from "../protocol/sanitize.ts";
-import type { Observation, ObservedLocation } from "../reasoning/track.ts";
+import type { Observation, ObservedLocation, Reopened } from "../reasoning/track.ts";
 
 const MIGRATIONS_DIR = new URL("../../migrations/", import.meta.url);
 
@@ -93,6 +93,8 @@ export type FindingView = {
   posted: boolean;
   /** `candidate.file` and `newLine` are valid at this revision's head, not carried from an older one. */
   anchored: boolean;
+  /** The resolved finding this one reopens, when its code came back after a resolution, and the head it was resolved on. */
+  reopens: Reopened | null;
 };
 
 /** An open finding at its latest observation before `excludeRevisionId`, with the head that observation was made on. */
@@ -566,7 +568,7 @@ export class AppStore {
         )
         .run(findingId, revision.pr_id, revision.id, fingerprint, candidate.severity, at, at);
     }
-    for (const { findingId, path, basis, candidate, location } of observations) {
+    for (const { findingId, path, basis, candidate, location, reopens } of observations) {
       const state = path.at(-1)!;
       // A retried VERIFY meets its first attempt's observation and leaves it, status included: the observation that
       // was journaled is the one that stands, so the retry adds no status change the history would call a publication.
@@ -577,6 +579,7 @@ export class AppStore {
         )
         .run(stableId("observation", findingId, revision.id), findingId, revision.id, state, JSON.stringify(candidate), JSON.stringify(location), at, JSON.stringify(path), basis);
       if (Number(changes) === 1) this.db.prepare("UPDATE findings SET status = ?, updated_at = ? WHERE id = ? AND status != ?").run(state, at, findingId, state);
+      if (reopens) this.db.prepare("UPDATE findings SET reopens = ? WHERE id = ? AND reopens IS NULL").run(reopens.findingId, findingId);
     }
   }
 
@@ -584,7 +587,9 @@ export class AppStore {
     const revision = this.revision(revisionId)!;
     const rows = this.db
       .prepare(
-        `SELECT f.id, f.fingerprint, f.status, f.current_severity, f.first_revision_id, f.github_review_id, o.evidence_json, o.location_json, fr.head_sha AS first_head_sha
+        `SELECT f.id, f.fingerprint, f.status, f.current_severity, f.first_revision_id, f.github_review_id, f.reopens, o.evidence_json, o.location_json, fr.head_sha AS first_head_sha,
+           (SELECT rr.head_sha FROM finding_observations ro JOIN review_revisions rr ON rr.id = ro.revision_id
+            WHERE ro.finding_id = f.reopens AND ro.disposition = 'RESOLVED' ORDER BY ro.created_at DESC LIMIT 1) AS resolved_at
          FROM finding_observations o JOIN findings f ON f.id = o.finding_id JOIN review_revisions fr ON fr.id = f.first_revision_id
          WHERE o.revision_id = ? ORDER BY o.created_at, f.id`,
       )
@@ -613,20 +618,35 @@ export class AppStore {
         firstHeadSha: row.first_head_sha!,
         posted: row.github_review_id !== null || inFlight.has(row.id!),
         anchored: location.headSha === undefined || location.headSha === revision.head_sha,
+        reopens: row.reopens == null ? null : { findingId: row.reopens, resolvedAt: row.resolved_at! },
       };
     });
   }
 
   /** Every finding of the PR not yet RESOLVED, as last observed by a revision other than `excludeRevisionId`. */
   openFindings(prId: string, excludeRevisionId: string): OpenFinding[] {
+    return this.findingsAsLastObserved("f.status != 'RESOLVED'", { pr: prId, exclude: excludeRevisionId, limit: -1 });
+  }
+
+  /**
+   * The RESOLVED findings of the PR that no revision other than `excludeRevisionId` has reopened, most recently
+   * resolved first and at most `limit` of them, as last observed: the location is where the code was last seen and
+   * `observedAt` the head it was resolved on. The revision that reopened one still sees it, so its retry derives the
+   * same successor.
+   */
+  resolvedFindings(prId: string, excludeRevisionId: string, limit: number): OpenFinding[] {
+    return this.findingsAsLastObserved("f.status = 'RESOLVED' AND NOT EXISTS (SELECT 1 FROM findings n WHERE n.reopens = f.id AND n.first_revision_id != :exclude)", { pr: prId, exclude: excludeRevisionId, limit }, "f.updated_at DESC, f.id");
+  }
+
+  private findingsAsLastObserved(where: string, params: { pr: string; exclude: string; limit: number }, order = "f.created_at, f.id"): OpenFinding[] {
     const rows = this.db
       .prepare(
         `SELECT f.id, f.status, o.evidence_json, o.location_json, r.head_sha FROM findings f
          JOIN finding_observations o ON o.id = (SELECT id FROM finding_observations WHERE finding_id = f.id AND revision_id != :exclude ORDER BY created_at DESC, id LIMIT 1)
          JOIN review_revisions r ON r.id = o.revision_id
-         WHERE f.pr_id = :pr AND f.status != 'RESOLVED' ORDER BY f.created_at, f.id`,
+         WHERE f.pr_id = :pr AND ${where} ORDER BY ${order} LIMIT :limit`,
       )
-      .all({ pr: prId, exclude: excludeRevisionId }) as Record<string, string>[];
+      .all(params) as Record<string, string>[];
     return rows.map((row) => ({
       findingId: row.id!,
       status: row.status as FindingState,

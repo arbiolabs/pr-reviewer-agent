@@ -26,6 +26,7 @@ const view = (i: number, over: Partial<FindingView> = {}): FindingView => ({
   firstHeadSha: "a".repeat(40),
   posted: true,
   anchored: true,
+  reopens: null,
   ...over,
 });
 const many = (n: number, over: Partial<FindingView> = {}) => Array.from({ length: n }, (_, i) => view(i, over));
