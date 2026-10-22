@@ -106,6 +106,12 @@ pub fn open_finding(f: &Finding) -> bool {
     !f.stale && matches!(f.status, FindingStatus::Detected | FindingStatus::StillPresent | FindingStatus::Uncertain)
 }
 
+/// How much evidence a finding cites, as every surface prints it: the loaded detail's own list once it is here,
+/// and the summary's count until then, so a row and the page it opens never disagree.
+pub fn evidence_count(m: &Model, f: &Finding) -> usize {
+    m.details.get(&f.id).map_or(f.evidence_count as usize, |d| d.evidence.len())
+}
+
 /// What setup still wants, in the one vocabulary the sidebar badge, the setup card and the setup page share:
 /// `blocking` checks keep reviews from running (a missing check, or commands that are off on a daemon with nothing
 /// missing), `limited` checks let them run with less.
@@ -585,6 +591,19 @@ mod tests {
         assert_eq!(super::marks(&m, &run_of(&m, 338)), [Done, Done, Done, Now, Waiting, Waiting]);
         let posted = at(30_000, "wait:20000,pr:1291,publish,wait:100,confirm");
         assert_eq!(super::marks(&posted, &run_of(&posted, 1291)), [Done; 6]);
+    }
+
+    #[test]
+    fn a_finding_row_and_its_page_count_the_same_evidence() {
+        let mut m = at(20_000, "wait:19000,pr:1287,finding:1,finding:1,finding:3,finding:3");
+        assert!(m.details.len() >= 2, "the playback answers finding.get");
+        for (id, d) in &m.details {
+            let f = &m.domain.findings[id];
+            assert_eq!((f.evidence_count as usize, super::evidence_count(&m, f)), (d.evidence.len(), d.evidence.len()));
+        }
+        let id = m.details.keys().next().unwrap().clone();
+        m.details.get_mut(&id).unwrap().evidence.clear();
+        assert_eq!(super::evidence_count(&m, &m.domain.findings[&id]), 0, "the loaded detail wins over the summary");
     }
 
     #[test]

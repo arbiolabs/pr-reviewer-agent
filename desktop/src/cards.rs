@@ -99,7 +99,7 @@ struct Face {
     action: &'static str,
 }
 
-fn face(c: &Card, selected: bool) -> Face {
+fn face(m: &pr_review_tui::model::Model, c: &Card, selected: bool) -> Face {
     match c {
         Card::Setup { missing, count, .. } => Face {
             glyph: Some(IconName::TriangleAlert),
@@ -171,7 +171,7 @@ fn face(c: &Card, selected: bool) -> Face {
                     file,
                     top.line.map_or(String::new(), |l| format!(":{l}")),
                     top.confidence * 100.,
-                    top.evidence_count
+                    queue::evidence_count(m, top)
                 ),
                 action: "Open finding",
             }
@@ -237,7 +237,7 @@ fn hue_of(t: &Colors, c: &Card) -> Hsla {
 }
 
 fn card(s: &Shell, t: &Colors, c: &Card, i: usize, selected: bool, cx: &Context<Shell>) -> Stateful<Div> {
-    let f = face(c, selected);
+    let f = face(&s.model, c, selected);
     // A selected card whose PR page fills the pane docks: its title, quote, reason and button are all on that page,
     // so the card keeps only its kicker and its meta line, and the title is said once beside the sidebar.
     let docked = selected && matches!(c, Card::Findings { .. } | Card::Failed { .. } | Card::Start { .. });

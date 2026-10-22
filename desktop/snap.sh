@@ -16,18 +16,34 @@ script=protocol/playback/showcase.ndjson
 
 # Derived sessions, kept under target/ at paths every checkout shares. A script under target/playback answers
 # requests from target/fixtures, a copy of protocol/fixtures with one change: the showcase's third finding cites
-# no code, so the empty evidence state renders.
+# no code, so the empty evidence state renders. The script's own summaries of that finding say so too, so the
+# list and the detail count the same evidence.
 mkdir -p desktop/target/playback
 rm -rf desktop/target/fixtures
 cp -R protocol/fixtures desktop/target/fixtures
+derived_script=desktop/target/playback/showcase.ndjson
 python3 -c 'import json, sys
-p = sys.argv[1]
+p, src, out = sys.argv[1:]
 d = json.load(open(p))
 d["finding"]["evidence"] = []
 d["finding"]["evidenceCount"] = 0
-json.dump(d, open(p, "w"))' desktop/target/fixtures/server.finding.detail.showcase-3.json
-cp "$script" desktop/target/playback/showcase.ndjson
-derived_script=desktop/target/playback/showcase.ndjson
+json.dump(d, open(p, "w"))
+fid = d["finding"]["id"]
+def zero(x):
+    if isinstance(x, dict):
+        if x.get("id") == fid and "evidenceCount" in x:
+            x["evidenceCount"] = 0
+        for v in x.values():
+            zero(v)
+    elif isinstance(x, list):
+        for v in x:
+            zero(v)
+with open(out, "w") as w:
+    for line in open(src):
+        o = json.loads(line)
+        zero(o)
+        w.write(json.dumps(o, separators=(",", ":")) + "\n")' \
+  desktop/target/fixtures/server.finding.detail.showcase-3.json "$script" "$derived_script"
 # A read-only daemon: the showcase with its welcome rewritten.
 sed '1s/"capabilities":\["account.select","review.start","review.retry","review.cancel","review.publish"\],"mode":"engine"/"capabilities":["account.select"],"mode":"read-only","readOnlyReason":"another pr-review holds the data directory; start this daemon with --allow-commands"/' \
   "$script" > desktop/target/playback/readonly.ndjson

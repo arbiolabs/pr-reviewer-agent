@@ -843,7 +843,7 @@ pub fn finding_row(s: &Shell, t: &Colors, f: &Finding, cx: &Context<Shell>) -> S
                     "{} · {:.0}% sure · {} evidence",
                     f.category.label(),
                     f.confidence * 100.,
-                    f.evidence_count
+                    queue::evidence_count(m, f)
                 )),
         )
         .when(selected, |d| {
@@ -976,7 +976,7 @@ fn finding_page(s: &Shell, t: &Colors, id: &FindingId, cx: &Context<Shell>) -> D
                 .child(section(t, "History", history_rows(t, f, history)));
             right = right.child(section(
                 t,
-                &format!("Evidence · {}", d.evidence.len()),
+                &format!("Evidence · {}", queue::evidence_count(m, f)),
                 if d.evidence.is_empty() { no_evidence(t) } else { evidence_blocks(t, f, d) },
             ));
             right = right.child(in_the_diff(s, t, f, cx));
