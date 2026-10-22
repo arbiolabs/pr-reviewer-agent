@@ -23,6 +23,7 @@ use crate::queue::{self, Card, RowState, Stage, phase_word};
 use crate::script::Desk;
 use crate::tokens::{self, Colors, layout, motion, radius, space, text};
 use crate::{detail, diff, overlay};
+use pr_review_tui::protocol::PublicationStatus;
 
 gpui_kit::actions!(
     pr_review,
@@ -50,7 +51,7 @@ pub fn bindings() -> Vec<KeyBinding> {
         KeyBinding::new("cmd-w", CloseWindow, None),
         KeyBinding::new("cmd-k", Palette, None),
         KeyBinding::new("cmd-r", Refresh, None),
-        KeyBinding::new("cmd-o", OpenGitHub, None),
+        KeyBinding::new("cmd-shift-o", OpenGitHub, None),
         KeyBinding::new("cmd-,", Setup, None),
         KeyBinding::new("cmd-shift-/", Shortcuts, None),
         KeyBinding::new("cmd-enter", Post, None),
@@ -111,6 +112,11 @@ pub struct Shell {
     pub scrub: Option<usize>,
 }
 
+/// A page the reader went into: a finding, the proof, the diff or setup. The live strip steps aside there.
+pub fn deep(m: &Model) -> bool {
+    front(m).is_some() || matches!(m.ui.screen, Screen::Diff | Screen::Settings)
+}
+
 /// The theme's tokens for the window's current appearance.
 pub fn colors(cx: &App) -> Colors {
     use gpui_kit::component::ActiveTheme;
@@ -151,6 +157,18 @@ impl Shell {
             }
         }
         s
+    }
+
+    /// The home shows the done list: the reader asked for it, or a live queue is empty and the done list is what
+    /// there is to show, under a line that says the reader is clear.
+    pub fn shows_done(&self) -> bool {
+        self.done_tab || (queue::stage(&self.model) == Stage::Ready && queue::cards(&self.model).is_empty())
+    }
+
+    /// A color for the sidebar and the title bar: a little see-through where the window blurs what is behind it,
+    /// and solid in a snapshot, whose pixels must not depend on the desktop.
+    pub fn glass(&self, c: Hsla) -> Hsla {
+        if self.snapshot { c } else { c.alpha(0.9) }
     }
 
     pub fn send(&mut self, msg: Msg, cx: &mut Context<Self>) {
@@ -393,6 +411,8 @@ impl Shell {
         let modal = m.top_modal().cloned();
         let screen = m.ui.screen;
         let a = match (modal.as_ref(), screen, key, ch) {
+            // A sheet's safe button is its default: ⏎ keeps a review running, and only ⌘⏎ or Y cancels it.
+            (Some(Modal::Confirm { command: Command::Cancel(_), .. }), _, "enter", _) => Action::Back,
             (Some(Modal::Confirm { .. }), _, "enter", _) | (Some(Modal::Confirm { .. }), _, _, "y") => Action::Confirm,
             (Some(Modal::Confirm { .. }), _, _, "n") => Action::Back,
             (Some(Modal::Publication { .. }), _, _, "y") => return self.post(cx),
@@ -456,7 +476,7 @@ impl Render for Shell {
                 .flex_1()
                 .min_h_0()
                 .when(stage == Stage::Ready && !finding_open, |d| {
-                    d.child(if self.done_tab {
+                    d.child(if self.shows_done() {
                         crate::cards::done_column(self, &t, cx)
                     } else {
                         crate::cards::queue_column(self, &t, cx)
@@ -497,7 +517,6 @@ impl Render for Shell {
             .size_full()
             .flex()
             .flex_col()
-            .bg(t.bg)
             .font_family(text::UI)
             .text_size(text::BODY)
             .text_color(t.text)
@@ -509,8 +528,10 @@ impl Render for Shell {
                         .flex_col()
                         .flex_1()
                         .min_w_0()
+                        .bg(t.bg)
                         .children(banner(m, &t))
-                        .when(stage == Stage::Ready, |d| d.child(strip(self, &t, cx)))
+                        .when(stage == Stage::Ready && !deep(m), |d| d.child(strip(self, &t, cx)))
+                        .when(stage == Stage::Connecting, |d| d.child(strip_skeleton(&t)))
                         .child(body),
                 ),
             )
@@ -540,11 +561,14 @@ fn titlebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
             let at = all.iter().position(|f| &f.id == id).map_or(0, |i| i + 1);
             (format!("{number} · finding {at} of {}", all.len()), pr_title)
         }
-        (_, Some(Modal::Publication { .. })) => (format!("{number} · proof"), pr_title),
+        (_, Some(Modal::Publication { run_id, .. })) => {
+            let posted = m.domain.publications.get(run_id).is_some_and(|p| p.status == PublicationStatus::Published);
+            (format!("{number} · {}", if posted { "posted" } else { "proof" }), pr_title)
+        }
         (Screen::Diff, _) => (format!("{number} diff"), pr_title),
         (Screen::Timeline, _) => (format!("{number} timeline"), pr_title),
         (Screen::Settings, _) => ("Setup".into(), "What the reviewer needs to run".into()),
-        _ if s.done_tab => {
+        _ if s.done_tab && !queue::cards(m).is_empty() => {
             ("Done".into(), format!("{} with nothing left for you.", queue::count(queue::done(m).len(), "PR")))
         }
         _ => ("Needs you".into(), queue::summary(m)),
@@ -555,29 +579,29 @@ fn titlebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         .flex()
         .items_center()
         .gap(space::S2)
-        .w(px(280.))
-        .h(px(32.))
+        .w(px(220.))
+        .h(px(30.))
         .px(space::S3)
         .rounded(radius::SM)
         .bg(t.surface)
         .border_1()
         .border_color(t.border)
         .cursor_pointer()
-        .hover(|d| d.border_color(t.border_strong).bg(t.hover))
+        .hover(|d| d.bg(t.hover))
         .active(|d| d.bg(t.press))
         .on_click(cx.listener(|s, _: &ClickEvent, _, cx| s.toggle_palette(cx)))
-        .child(icon(IconName::Search, px(14.), t.faint))
-        .child(div().flex_1().text_size(text::BODY).text_color(t.faint).child("Search or run a command"))
-        .child(keycap(t, "⌘K", false));
+        .child(icon(IconName::Search, px(14.), t.muted))
+        .child(div().flex_1().text_size(text::SMALL).text_color(t.muted).child("Search or command"))
+        .child(keycap(t, "⌘K", None, false));
     div()
         .flex()
         .flex_none()
         .items_center()
         .gap(space::S3)
         .h(layout::TOOLBAR)
-        .pl(layout::TRAFFIC)
+        .pl(layout::TRAFFIC_INSET)
         .pr(space::S4)
-        .bg(t.raised)
+        .bg(s.glass(t.raised))
         .border_b_1()
         .border_color(t.border)
         .window_control_area(WindowControlArea::Drag)
@@ -591,8 +615,8 @@ fn titlebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                 .gap(space::S3)
                 .flex_1()
                 .min_w_0()
-                .child(div().flex_none().text_size(text::LEAD).font_weight(FontWeight::BOLD).child(title))
-                .child(div().min_w_0().truncate().text_size(text::BODY).text_color(t.muted).child(sub)),
+                .child(div().flex_none().text_size(text::LEAD).font_weight(FontWeight::SEMIBOLD).child(title))
+                .child(div().min_w_0().truncate().text_size(text::SMALL).text_color(t.muted).child(sub)),
         )
         .child(tip(focusable(search, t), "Search PRs and findings, or run a command"))
 }
@@ -606,8 +630,16 @@ fn nav_item(
     count: usize,
     hue: Hsla,
     active: bool,
+    dim: bool,
     f: OnClick,
 ) -> Stateful<Div> {
+    let fg = if dim {
+        t.disabled
+    } else if active {
+        t.text
+    } else {
+        t.muted
+    };
     let row = div()
         .id(id)
         .flex()
@@ -621,16 +653,16 @@ fn nav_item(
         .hover(|d| d.bg(t.hover))
         .active(|d| d.bg(t.press))
         .on_click(f)
-        .child(icon(glyph, px(15.), if active { t.accent } else { t.muted }))
+        .child(icon(glyph, px(15.), if active && !dim { t.accent } else { fg }))
         .child(
             div()
                 .flex_1()
                 .text_size(text::BODY)
                 .font_weight(if active { FontWeight::SEMIBOLD } else { FontWeight::NORMAL })
-                .text_color(if active { t.text } else { t.muted })
+                .text_color(fg)
                 .child(label.to_string()),
         )
-        .when(count > 0, |d| d.child(count_badge(count, hue)));
+        .when(count > 0, |d| d.child(count_badge(t, count, hue)));
     focusable(row, t)
 }
 
@@ -641,6 +673,8 @@ fn sidebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
     let cards = queue::cards(m);
     let done = queue::done(m);
     let home = matches!(m.ui.screen, Screen::Inbox | Screen::Review | Screen::Timeline) && front(m).is_none();
+    // Nothing sits behind the lists while the window is offline, so they step back.
+    let dim = stage == Stage::Offline;
     let selected = m.ui.selected_pr.clone();
     let mut list = div()
         .id("sidebar")
@@ -661,6 +695,7 @@ fn sidebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
             cards.len(),
             t.accent,
             home && !s.done_tab && m.ui.screen != Screen::Timeline,
+            dim,
             click(cx, |s, cx| s.set_tab(false, cx)),
         ))
         .child(nav_item(
@@ -671,6 +706,7 @@ fn sidebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
             done.len(),
             t.ok,
             home && s.done_tab,
+            dim,
             click(cx, |s, cx| s.set_tab(true, cx)),
         ))
         .child(nav_item(
@@ -678,9 +714,10 @@ fn sidebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
             "nav-setup",
             IconName::Settings,
             "Setup",
-            queue::setup_issues(m),
+            queue::setup_count(m).blocking,
             t.warn,
             m.ui.screen == Screen::Settings,
+            false,
             click(cx, |s, cx| s.act(Action::Goto(Screen::Settings), cx)),
         ));
     let groups = queue::rows(m);
@@ -694,7 +731,7 @@ fn sidebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                     .pb(space::S1)
                     .font_family(text::MONO)
                     .text_size(text::CAPTION)
-                    .text_color(t.faint)
+                    .text_color(t.muted)
                     .child(repo),
             );
             for r in rows {
@@ -709,7 +746,7 @@ fn sidebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         .flex_none()
         .w(layout::SIDEBAR)
         .h_full()
-        .bg(t.sidebar)
+        .bg(s.glass(t.sidebar))
         .border_r_1()
         .border_color(t.border)
         .child(list)
@@ -740,43 +777,49 @@ fn pr_row(s: &Shell, t: &Colors, pr: &Pr, state: RowState, on: bool, cx: &Contex
     let row = div()
         .id(SharedString::from(format!("nav-pr-{}", pr.number)))
         .flex()
-        .items_center()
+        .items_start()
         .gap(space::S2)
-        .h(px(44.))
+        .min_h(px(44.))
         .px(space::S2)
+        .py(px(6.))
         .rounded(radius::SM)
         .cursor_pointer()
         .when(on, |d| d.bg(t.selected))
-        .hover(|d| d.bg(t.hover))
+        .hover(|d| d.bg(if on { t.selected } else { t.hover }))
         .active(|d| d.bg(t.press))
         .on_click(cx.listener(move |s, _: &ClickEvent, _, cx| {
             s.done_tab = queue::done(&s.model).iter().any(|(p, _)| p.id == id);
             s.select_pr(id.clone(), cx)
         }))
-        .child(div().w(px(14.)).flex().justify_center().flex_none().child(glyph))
+        .child(div().w(px(14.)).h(px(18.)).flex().items_center().justify_center().flex_none().child(glyph))
         .child(
             div()
                 .flex()
                 .flex_col()
                 .flex_1()
                 .min_w_0()
+                .gap(px(2.))
+                .child(
+                    div()
+                        .text_size(text::BODY)
+                        .line_height(px(18.))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(t.text)
+                        .text_ellipsis()
+                        .line_clamp(2)
+                        .child(pr.title.to_string()),
+                )
                 .child(
                     div()
                         .flex()
                         .items_baseline()
-                        .gap(space::S2)
-                        .child(
-                            div()
-                                .text_size(text::BODY)
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(t.text)
-                                .child(format!("#{}", pr.number)),
-                        )
-                        .child(div().min_w_0().truncate().text_size(text::CAPTION).text_color(hue).child(state.word())),
-                )
-                .child(div().truncate().text_size(text::SMALL).text_color(t.muted).child(pr.title.to_string())),
+                        .gap(px(6.))
+                        .text_size(text::CAPTION)
+                        .child(div().text_color(t.muted).child(format!("#{}", pr.number)))
+                        .child(div().min_w_0().truncate().text_color(hue).child(state.word())),
+                ),
         )
-        .children(badge);
+        .child(div().w(px(44.)).h(px(18.)).flex_none().flex().items_center().justify_end().children(badge));
     focusable(row, t)
 }
 
@@ -839,23 +882,28 @@ fn banner(m: &Model, t: &Colors) -> Option<Div> {
     Some(
         div()
             .flex()
-            .items_center()
+            .items_start()
             .gap(space::S3)
-            .h(px(36.))
+            .min_h(px(36.))
             .px(space::S5)
+            .py(space::S2)
             .bg(hue.alpha(0.10))
             .border_b_1()
             .border_color(hue.alpha(0.30))
-            .child(icon(IconName::TriangleAlert, px(14.), hue))
-            .child(div().text_size(text::BODY).font_weight(FontWeight::SEMIBOLD).text_color(t.text).child(title))
+            .child(div().pt(px(2.)).child(icon(IconName::TriangleAlert, px(14.), hue)))
             .child(
                 div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .text_size(text::SMALL)
-                    .text_color(t.muted)
-                    .child(format!("{detail}. What you see is the last state the daemon sent.")),
+                    .flex_none()
+                    .text_size(text::BODY)
+                    .line_height(text::LINE_BODY)
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(t.text)
+                    .child(title),
+            )
+            .child(
+                div().flex_1().min_w_0().text_size(text::SMALL).line_height(text::LINE_BODY).text_color(t.muted).child(
+                    format!("{} What you see is the last state the daemon sent.", crate::kit::sentence(&detail)),
+                ),
             ),
     )
 }
@@ -891,8 +939,25 @@ fn strip(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
             div().text_size(text::SMALL).text_color(t.faint).child("No reviews running. Start one from a card or ⌘K."),
         );
     }
-    row.child(div().pr(space::S1).child(overline(t, "Live")))
+    row.min_w_0()
+        .child(div().pr(space::S1).child(overline(t, "Live")))
         .children(running.into_iter().map(|(p, r)| pill(s, t, p, r, cx)))
+}
+
+/// The strip's place while the first snapshot loads, so nothing jumps when it lands.
+fn strip_skeleton(t: &Colors) -> Div {
+    div()
+        .flex()
+        .flex_none()
+        .items_center()
+        .gap(space::S2)
+        .h(layout::STRIP)
+        .px(space::S5)
+        .border_b_1()
+        .border_color(t.border)
+        .bg(t.raised)
+        .child(div().pr(space::S1).child(overline(t, "Live")))
+        .child(div().w(px(260.)).h(px(32.)).rounded(radius::PILL).border_1().border_color(t.border.alpha(0.6)))
 }
 
 fn pill(s: &Shell, t: &Colors, p: &Pr, r: &Run, cx: &Context<Shell>) -> Stateful<Div> {
@@ -908,16 +973,17 @@ fn pill(s: &Shell, t: &Colors, p: &Pr, r: &Run, cx: &Context<Shell>) -> Stateful
         .h(px(32.))
         .px(space::S3)
         .rounded(radius::PILL)
+        .min_w_0()
         .bg(if selected { t.running.alpha(0.14) } else { t.surface })
         .border_1()
         .border_color(if selected { t.running.alpha(0.6) } else { t.border })
         .cursor_pointer()
-        .hover(|d| d.border_color(t.running.alpha(0.6)).bg(t.hover))
+        .hover(|d| d.bg(t.hover))
         .active(|d| d.bg(t.press))
         .on_click(cx.listener(move |s, _: &ClickEvent, _, cx| s.select_pr(id.clone(), cx)))
         .child(live_dot(t, s.still, ("pill-dot", p.number as usize)))
         .child(div().text_size(text::SMALL).font_weight(FontWeight::SEMIBOLD).child(format!("#{}", p.number)))
-        .child(div().max_w(px(180.)).truncate().text_size(text::SMALL).text_color(t.muted).child(p.title.to_string()))
+        .child(div().min_w_0().truncate().text_size(text::SMALL).text_color(t.muted).child(p.title.to_string()))
         .child(progress(t, step_of(r.phase), t.running, false, Gauge::Strip))
         .child(div().text_size(text::SMALL).text_color(t.running).child(phase_word(r.phase)))
         .when(tools > 0, |d| {

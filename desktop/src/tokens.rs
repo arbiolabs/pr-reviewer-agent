@@ -42,6 +42,13 @@ pub struct Colors {
     pub syn_comment: Hsla,
     pub syn_fn: Hsla,
     pub syn_type: Hsla,
+    /// Text on a danger fill: the destructive primary of a sheet.
+    pub on_danger: Hsla,
+    /// Text of a control or a palette row that can't act now: the text color dimmed to about half, as one opaque
+    /// color so it still meets AA on every surface.
+    pub disabled: Hsla,
+    /// The alpha of a chip's or a badge's wash under its hue.
+    pub tint: f32,
     pub scrim: Hsla,
     pub shadow: Hsla,
     /// The hover wash over any surface: 4 % of the text color.
@@ -78,13 +85,13 @@ pub fn dark() -> Colors {
         running: c(0x52CBDD),
         ok: c(0x4FC98F),
         warn: c(0xE6BA4E),
-        danger: c(0xF4646A),
+        danger: c(0xF9757C),
         critical: c(0xFF6B86),
         high: c(0xFFA05A),
         medium: c(0xE8C95A),
         low: c(0x98AAC4),
         add_bg: ca(0x3FB97A, 0.13),
-        del_bg: ca(0xF4646A, 0.13),
+        del_bg: ca(0xF9757C, 0.13),
         add_fg: c(0x63D69C),
         del_fg: c(0xFF8A8F),
         code_bg: c(0x0C0F13),
@@ -94,7 +101,10 @@ pub fn dark() -> Colors {
         syn_comment: c(0x7F8A99),
         syn_fn: c(0x82C8FF),
         syn_type: c(0x6FD6E4),
-        scrim: ca(0x05070A, 0.62),
+        on_danger: c(0x0B0D14),
+        disabled: c(0x8A8E94),
+        tint: 0.14,
+        scrim: ca(0x05070A, 0.5),
         shadow: ca(0x000000, 0.45),
         hover: ca(0xE9EDF2, 0.04),
         press: ca(0xE9EDF2, 0.08),
@@ -114,19 +124,19 @@ pub fn light() -> Colors {
         text: c(0x1A1E24),
         muted: c(0x4F5866),
         faint: c(0x566070),
-        accent: c(0x4A51D4),
-        accent_hover: c(0x3D44C4),
-        accent_press: c(0x343AAE),
+        accent: c(0x4247C8),
+        accent_hover: c(0x383DB8),
+        accent_press: c(0x2F33A2),
         on_accent: c(0xFFFFFF),
-        running: c(0x086D80),
-        ok: c(0x187247),
-        warn: c(0x8C6200),
-        danger: c(0xC2303A),
-        critical: c(0xC21F48),
-        high: c(0xA24A08),
-        medium: c(0x876400),
-        low: c(0x52627A),
-        add_bg: ca(0x2DA44E, 0.12),
+        running: c(0x07606F),
+        ok: c(0x14603B),
+        warn: c(0x7A5500),
+        danger: c(0xB0202C),
+        critical: c(0xB01640),
+        high: c(0x8F4007),
+        medium: c(0x735500),
+        low: c(0x4A5870),
+        add_bg: ca(0x4F8A62, 0.14),
         del_bg: ca(0xCF222E, 0.10),
         add_fg: c(0x16743A),
         del_fg: c(0xB3242E),
@@ -137,12 +147,19 @@ pub fn light() -> Colors {
         syn_comment: c(0x667080),
         syn_fn: c(0x0B5FAD),
         syn_type: c(0x0B6E82),
-        scrim: ca(0x1A1E24, 0.28),
+        on_danger: c(0xFFFFFF),
+        disabled: c(0x63666A),
+        tint: 0.12,
+        scrim: ca(0x1A1E24, 0.4),
         shadow: ca(0x1A1E24, 0.16),
         hover: ca(0x1A1E24, 0.04),
         press: ca(0x1A1E24, 0.08),
     }
 }
+
+/// The alpha of `disabled` that outlines a control that can't act now: 3:1 on every surface, so the control reads
+/// as a control.
+pub const DISABLED_OUTLINE: f32 = 0.8;
 
 impl Colors {
     pub fn severity(&self, s: Severity) -> Hsla {
@@ -223,20 +240,22 @@ pub mod layout {
     pub const STRIP: Pixels = px(44.);
     /// The pinned action bar under a page.
     pub const BAR: Pixels = px(56.);
-    /// Where the traffic lights end, so the title bar's content starts after them.
-    pub const TRAFFIC: Pixels = px(84.);
     /// Reading measure for prose: 68 characters at 13 points.
     pub const MEASURE: Pixels = px(440.);
     pub const PALETTE: Pixels = px(600.);
     pub const SHEET: Pixels = px(460.);
-    /// Code never clips: a line longer than this many characters wraps with a continuation mark. These are the
-    /// columns each code surface fits at 1280 points. ponytail: fixed counts instead of measuring the pane, so a
-    /// narrower window wraps late; measure the pane if the window gets resizable.
+    /// Code never clips. A code block scrolls sideways, and a line longer than this many characters earns the
+    /// fade at its right edge; the diff soft-wraps at a word or operator boundary instead, so a finding's card can
+    /// sit between its rows. These are the columns each surface fits at 1280 points. ponytail: fixed counts
+    /// instead of measuring the pane, so a narrower window fades late; measure the pane if the window gets
+    /// resizable.
     pub const COLS_EVIDENCE: usize = 60;
     /// A code block inside the reading column.
     pub const COLS_PROSE: usize = 48;
     pub const COLS_DIFF: usize = 84;
     pub const COLS_WIDE: usize = 108;
+    /// The inset after the traffic lights, which end 70 points in: the title bar's content starts 20 points later.
+    pub const TRAFFIC_INSET: Pixels = px(90.);
 }
 
 /// Motion: short, eased, and only where it says something changed. Reduce Motion turns every one off.
@@ -252,7 +271,7 @@ pub mod motion {
 
 #[cfg(test)]
 mod tests {
-    use super::{Colors, dark, light};
+    use super::{Colors, DISABLED_OUTLINE, dark, light};
     use gpui_kit::Hsla;
 
     fn luminance(c: Hsla) -> f64 {
@@ -269,8 +288,16 @@ mod tests {
         (x.max(y) + 0.05) / (x.min(y) + 0.05)
     }
 
+    /// `fg` at `alpha` over `bg`, as the screen shows it.
+    fn over(fg: Hsla, alpha: f32, bg: Hsla) -> Hsla {
+        let (f, b) = (fg.to_rgb(), bg.to_rgb());
+        let mix = |x: f32, y: f32| x * alpha + y * (1. - alpha);
+        gpui_kit::Rgba { r: mix(f.r, b.r), g: mix(f.g, b.g), b: mix(f.b, b.b), a: 1. }.into()
+    }
+
     #[test]
     fn every_text_token_meets_aa_on_every_surface() {
+        let mut bad: Vec<String> = Vec::new();
         for (name, t) in [("dark", dark()), ("light", light())] {
             let Colors { bg, surface, selected, sidebar, raised, code_bg, .. } = t;
             let texts = [
@@ -294,7 +321,9 @@ mod tests {
             for (tn, fg) in texts {
                 for (sn, back) in surfaces {
                     let r = contrast(fg, back);
-                    assert!(r >= 4.5, "{name}: {tn} on {sn} is {r:.2}:1");
+                    if r < 4.5 {
+                        bad.push(format!("{name}: {tn} on {sn} is {r:.2}:1"));
+                    }
                 }
             }
             let code = [
@@ -309,9 +338,61 @@ mod tests {
             ];
             for (tn, fg) in code {
                 let r = contrast(fg, code_bg);
-                assert!(r >= 4.5, "{name}: syntax {tn} on code_bg is {r:.2}:1");
+                if r < 4.5 {
+                    bad.push(format!("{name}: syntax {tn} on code_bg is {r:.2}:1"));
+                }
             }
-            assert!(contrast(t.on_accent, t.accent) >= 4.5, "{name}: on_accent");
+            if contrast(t.on_accent, t.accent) < 4.5 {
+                bad.push(format!("{name}: on_accent"));
+            }
+            if contrast(t.on_danger, t.danger) < 4.5 {
+                bad.push(format!("{name}: on_danger"));
+            }
+            // A dimmed control or palette row keeps AA text; the outline of a disabled control keeps 3:1.
+            for (sn, back) in surfaces {
+                let r = contrast(t.disabled, back);
+                if r < 4.5 {
+                    bad.push(format!("{name}: disabled on {sn} is {r:.2}:1"));
+                }
+                let r = contrast(over(t.disabled, DISABLED_OUTLINE, back), back);
+                if r < 3.0 {
+                    bad.push(format!("{name}: disabled outline on {sn} is {r:.2}:1"));
+                }
+            }
+            // A chip or a count badge: its hue as text over its own wash, on the surfaces that carry one.
+            let hues = [
+                ("accent", t.accent),
+                ("running", t.running),
+                ("ok", t.ok),
+                ("warn", t.warn),
+                ("danger", t.danger),
+                ("critical", t.critical),
+                ("high", t.high),
+                ("medium", t.medium),
+                ("low", t.low),
+            ];
+            for (hn, hue) in hues {
+                for (sn, back) in [("surface", surface), ("sidebar", sidebar), ("selected", selected), ("bg", bg)] {
+                    let r = contrast(hue, over(hue, t.tint, back));
+                    if r < 4.5 {
+                        bad.push(format!("{name}: {hn} chip on {sn} is {r:.2}:1"));
+                    }
+                }
+            }
+            // The gutter and the dim rows of a code block.
+            if contrast(t.muted, code_bg) < 4.5 {
+                bad.push(format!("{name}: muted on code_bg"));
+            }
+            if contrast(t.add_fg, over(t.add_bg, t.add_bg.a, code_bg)) < 4.5 {
+                bad.push(format!("{name}: add_fg on add_bg"));
+            }
+            if contrast(t.del_fg, over(t.del_bg, t.del_bg.a, code_bg)) < 4.5 {
+                bad.push(format!("{name}: del_fg on del_bg"));
+            }
+            if contrast(t.text, over(t.add_bg, t.add_bg.a, code_bg)) < 4.5 {
+                bad.push(format!("{name}: text on add_bg"));
+            }
         }
+        assert!(bad.is_empty(), "{}", bad.join("\n"));
     }
 }

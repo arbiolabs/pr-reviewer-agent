@@ -17,16 +17,15 @@ use pr_review_tui::view::Hit;
 use crate::code::{Inline, Lexer, Tok, clip, inline_markdown, wrap};
 use crate::kit::{
     Gauge, OnClick, Tone, button, callout, chip, clock, display, heading, icon, icon_button, overline, progress,
-    severity_badge, step_of, summary, tip,
+    severity_badge, step_of, summary, tabular, tip,
 };
 use crate::queue::{self, Stage, phase_word};
 use crate::tokens::{Colors, layout, radius, severity_mark, space, text};
 use crate::ui::{Shell, on};
 
-/// The scrolling page and the action bar under it. The page keeps a bottom inset the height of the bar, so the
-/// last row never sits under it.
+/// The scrolling page and the action bar under it. The bar is a row of the layout, opaque, with a hairline on
+/// top; where the page scrolls on under it, a fade says so.
 pub fn page(id: &'static str, body: Div, footer: Option<Div>, t: &Colors, wide: bool) -> Div {
-    let has_bar = footer.is_some();
     div()
         .flex()
         .flex_col()
@@ -34,32 +33,52 @@ pub fn page(id: &'static str, body: Div, footer: Option<Div>, t: &Colors, wide: 
         .min_w_0()
         .h_full()
         .child(
-            div().id(id).flex_1().min_h_0().overflow_y_scroll().child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap(space::S6)
-                    .px(space::S8)
-                    .pt(space::S6)
-                    .pb(if has_bar { layout::BAR + space::S6 } else { space::S8 })
-                    .when(!wide, |d| d.max_w(px(760.)))
-                    .child(body),
-            ),
-        )
-        .children(footer.map(|f| {
             div()
-                .flex()
-                .flex_none()
-                .items_center()
-                .gap(space::S2)
-                .h(layout::BAR)
-                .min_w_0()
-                .px(space::S8)
-                .border_t_1()
-                .border_color(t.border)
-                .bg(t.raised)
-                .child(f.min_w_0())
-        }))
+                .relative()
+                .flex_1()
+                .min_h_0()
+                .child(
+                    div().id(id).size_full().overflow_y_scroll().child(
+                        div()
+                            .flex()
+                            .flex_col()
+                            .min_h(relative(1.))
+                            .gap(space::S6)
+                            .px(space::S8)
+                            .pt(space::S6)
+                            .pb(space::S8)
+                            .when(!wide, |d| d.max_w(px(760.)))
+                            .child(body),
+                    ),
+                )
+                .child(scroll_fade(t)),
+        )
+        .children(footer.map(|f| action_bar(t, f)))
+}
+
+/// The pinned row of actions under a page.
+pub fn action_bar(t: &Colors, f: Div) -> Div {
+    div()
+        .flex()
+        .flex_none()
+        .items_center()
+        .gap(space::S2)
+        .h(layout::BAR)
+        .min_w_0()
+        .px(space::S8)
+        .border_t_1()
+        .border_color(t.border)
+        .bg(t.raised)
+        .child(f.min_w_0())
+}
+
+/// A fade along the bottom edge of a scroll area: what it covers continues under it.
+pub fn scroll_fade(t: &Colors) -> Div {
+    div().absolute().bottom_0().left_0().right_0().h(space::S6).bg(linear_gradient(
+        180.,
+        linear_color_stop(t.bg.alpha(0.), 0.),
+        linear_color_stop(t.bg, 1.),
+    ))
 }
 
 pub fn pane(s: &Shell, t: &Colors, _: &mut Window, cx: &Context<Shell>) -> Div {
@@ -73,13 +92,17 @@ pub fn pane(s: &Shell, t: &Colors, _: &mut Window, cx: &Context<Shell>) -> Div {
     }
     match queue::stage(m) {
         Stage::Offline => return page("detail", crate::setup::offline(s, t, cx), None, t, false),
-        Stage::Connecting => return page("detail", crate::setup::connecting(t), None, t, false),
+        Stage::Connecting => return page("detail", crate::setup::connecting(t, s.still), None, t, false),
         Stage::Ready => {}
     }
     let Some(pr) = m.selected_pr() else {
         return page(
             "detail",
-            if queue::setup_issues(m) > 0 { crate::setup::setup_body(s, t, cx) } else { crate::setup::board(s, t) },
+            if queue::setup_count(m).blocking > 0 {
+                crate::setup::setup_body(s, t, cx)
+            } else {
+                crate::setup::board(s, t)
+            },
             None,
             t,
             false,
@@ -197,12 +220,12 @@ pub fn pr_sentence(m: &Model, pr: &Pr, run: Option<&Run>) -> String {
         );
     }
     if r.status == RunStatus::Failed {
-        let reason =
-            r.failure_reason.as_ref().map_or("no reason given".to_string(), |x| crate::kit::lead(x.as_str(), 1));
-        return if crate::cards::too_large(&reason) {
-            reason
+        // The reason itself sits in the run block below, once.
+        let large = r.failure_reason.as_ref().is_some_and(|x| crate::cards::too_large(x.as_str()));
+        return if large {
+            "Too large to review. Shrink the PR, then retry.".into()
         } else {
-            format!("The review failed{}: {reason}", r.attempt.map_or(String::new(), |a| format!(" on attempt {a}")))
+            "The review did not finish. Retry for a verdict.".into()
         };
     }
     let posted = m.domain.publications.get(&r.id).map(|p| p.status);
@@ -277,6 +300,10 @@ pub fn tabs(t: &Colors, findings: usize, timeline: bool, cx: &Context<Shell>) ->
                 }
             }),
         ))
+        .when(!timeline && findings > 1, |d| {
+            d.child(div().flex_1())
+                .child(div().text_size(text::SMALL).text_color(t.muted).child("N / ⇧N walk · ⏎ opens"))
+        })
 }
 
 fn pr_page(s: &Shell, t: &Colors, pr: &Pr, run: Option<&Run>, cx: &Context<Shell>) -> Div {
@@ -296,19 +323,7 @@ fn pr_page(s: &Shell, t: &Colors, pr: &Pr, run: Option<&Run>, cx: &Context<Shell
             .flex()
             .flex_col()
             .gap(space::S2)
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(space::S2)
-                    .child(heading(t, "Findings"))
-                    .child(div().text_size(text::SMALL).text_color(t.faint).child(current.len().to_string()))
-                    .child(div().flex_1())
-                    .when(current.len() > 1, |d| {
-                        d.child(div().text_size(text::SMALL).text_color(t.faint).child("n / N to walk · ⏎ opens"))
-                    }),
-            )
-            .when(current.is_empty(), |d| d.child(no_findings(t, pr, run)))
+            .children(current.is_empty().then(|| no_findings(t, pr, run)).flatten())
             .children(current.iter().map(|f| finding_row(s, t, f, cx))),
     );
     if !stale.is_empty() {
@@ -370,7 +385,7 @@ fn run_block(s: &Shell, t: &Colors, run: Option<&Run>, current: &[&Finding]) -> 
                     .flex()
                     .flex_col()
                     .gap(space::S3)
-                    .child(progress(t, step_of(r.phase), t.danger, true, Gauge::Full))
+                    .child(progress(t, failed_at(m, r), t.danger, true, Gauge::Full))
                     .child(callout(
                         t,
                         t.danger,
@@ -420,24 +435,42 @@ fn run_block(s: &Shell, t: &Colors, run: Option<&Run>, current: &[&Finding]) -> 
     }
 }
 
-/// A reviewed PR with nothing to judge: a designed state, not a blank.
-fn no_findings(t: &Colors, pr: &Pr, run: Option<&Run>) -> Div {
-    let (title, body) = match run {
-        Some(r) if r.status == RunStatus::Failed => {
-            ("No findings: the review did not finish", "Retry it to get a verdict on this head.".to_string())
-        }
+/// The phase a failed run stopped in, from the last phase change the window saw for it; Collect when it saw none.
+fn failed_at(m: &Model, r: &Run) -> usize {
+    m.domain
+        .activity
+        .iter()
+        .rev()
+        .filter(|a| a.pr_id.as_ref() == Some(&r.pr_id))
+        .find_map(|a| match &a.kind {
+            pr_review_tui::model::ActivityKind::Phase { to, .. } if step_of(*to) < 6 => Some(step_of(*to)),
+            _ => None,
+        })
+        .unwrap_or(0)
+}
+
+/// A reviewed PR with nothing to judge: a designed state, not a blank. A failed run says why in its run block, so
+/// it gets no second card.
+fn no_findings(t: &Colors, pr: &Pr, run: Option<&Run>) -> Option<Div> {
+    let (glyph, hue, title, body) = match run {
+        Some(r) if r.status == RunStatus::Failed => return None,
         Some(_) => (
+            IconName::Check,
+            t.ok,
             "Nothing found on this head",
             format!(
                 "The reviewer read the diff at {} with read-only tools and verified no defect.",
                 pr.head_sha.short()
             ),
         ),
-        None => {
-            ("No findings yet", "Start a review and its findings land here as the verifier keeps them.".to_string())
-        }
+        None => (
+            IconName::CircleDashed,
+            t.faint,
+            "No findings yet",
+            "Start a review and its findings land here as the verifier keeps them.".to_string(),
+        ),
     };
-    div()
+    let card = div()
         .flex()
         .gap(space::S3)
         .p(space::S4)
@@ -445,7 +478,7 @@ fn no_findings(t: &Colors, pr: &Pr, run: Option<&Run>) -> Div {
         .border_1()
         .border_color(t.border)
         .bg(t.surface)
-        .child(div().pt(px(1.)).child(icon(IconName::Check, px(16.), t.ok)))
+        .child(div().pt(px(1.)).child(icon(glyph, px(16.), hue)))
         .child(
             div()
                 .flex()
@@ -453,7 +486,8 @@ fn no_findings(t: &Colors, pr: &Pr, run: Option<&Run>) -> Div {
                 .gap(space::S1)
                 .child(div().text_size(text::BODY).font_weight(FontWeight::SEMIBOLD).child(title))
                 .child(div().text_size(text::BODY).line_height(text::LINE_BODY).text_color(t.muted).child(body)),
-        )
+        );
+    Some(card)
 }
 
 /// A button for a mutation: live when the reducer allows it, dimmed with the reducer's reason when not.
@@ -520,21 +554,23 @@ fn pr_actions(s: &Shell, t: &Colors, pr: &Pr, run: Option<&Run>, cx: &Context<Sh
     if pr.lifecycle == Lifecycle::Active && run.is_some_and(|r| r.parked()) {
         bar = bar.child(mutation_button(s, t, "a-cancel", "Cancel", "C", Tone::Ghost, Mutation::Cancel, cx));
     }
-    if let Some(why) = m.server.as_ref().and_then(|sv| sv.commands_off()) {
-        bar = bar.child(
+    if m.server.as_ref().and_then(|sv| sv.commands_off()).is_some() {
+        bar = bar.child(tip(
             div()
-                .flex_1()
-                .min_w_0()
-                .truncate()
+                .id("read-only")
+                .flex()
+                .items_center()
+                .gap(px(6.))
                 .ml(space::S2)
                 .text_size(text::SMALL)
                 .text_color(t.warn)
-                .child(format!("Read-only: {why}")),
-        );
-    } else {
-        bar = bar.child(div().flex_1());
+                .child(icon(IconName::Lock, px(13.), t.warn))
+                .child("Read-only daemon"),
+            crate::setup::read_only_sentence(m),
+        ));
     }
-    bar.child(button(t, "a-gh", "Open on GitHub", Some("⌘O"), Tone::Ghost, on(cx, |s, cx| s.open_github(cx))))
+    bar = bar.child(div().flex_1());
+    bar.child(button(t, "a-gh", "Open on GitHub", Some("⌘⇧O"), Tone::Ghost, on(cx, |s, cx| s.open_github(cx))))
 }
 
 /// A finding's tracking status as a word and the sentence that explains it, in the reviewer's terms.
@@ -585,14 +621,14 @@ pub fn finding_row(s: &Shell, t: &Colors, f: &Finding, cx: &Context<Shell>) -> S
         .flex()
         .flex_col()
         .gap(space::S2)
-        .px(space::S3)
+        .px(space::S4)
         .py(px(10.))
         .rounded(radius::LG)
         .border_1()
-        .border_color(if selected { t.accent.alpha(0.75) } else { t.border })
+        .border_color(if selected { t.border_strong } else { t.border })
         .bg(if selected { t.selected } else { t.surface })
         .cursor_pointer()
-        .hover(|d| d.bg(t.hover).border_color(if selected { t.accent } else { t.border_strong }))
+        .hover(|d| d.bg(if selected { t.selected } else { t.hover }))
         .active(|d| d.bg(t.press))
         .when(f.stale, |d| d.opacity(0.75))
         .on_click(cx.listener(move |s, _: &ClickEvent, _, cx| s.send(Msg::Pick(Hit::Finding(id.clone())), cx)))
@@ -628,16 +664,18 @@ pub fn finding_row(s: &Shell, t: &Colors, f: &Finding, cx: &Context<Shell>) -> S
         .child(
             div()
                 .flex()
-                .gap(space::S3)
+                .flex_wrap()
+                .gap_x(space::S3)
+                .gap_y(space::S1)
                 .pl(px(88.))
                 .text_size(text::SMALL)
-                .text_color(t.faint)
+                .text_color(t.muted)
                 .child(div().font_family(text::MONO).text_size(px(11.)).child(place))
                 .child(format!(
-                    "{} · {:.0}% sure · {}",
+                    "{} · {:.0}% sure · {} evidence",
                     f.category.label(),
                     f.confidence * 100.,
-                    queue::count(f.evidence_count as usize, "evidence item")
+                    f.evidence_count
                 )),
         )
         .when(selected, |d| {
@@ -678,10 +716,7 @@ fn finding_page(s: &Shell, t: &Colors, id: &FindingId, cx: &Context<Shell>) -> D
         .flex()
         .items_center()
         .gap(space::S2)
-        .child(overline(
-            t,
-            pr.map_or("Finding".to_string(), |p| format!("#{} · finding {at} of {}", p.number, all.len())),
-        ))
+        .child(overline(t, pr.map_or("Finding".to_string(), |p| format!("{} #{}", p.repository, p.number))))
         .child(div().flex_1())
         .child(icon_button(
             t,
@@ -696,8 +731,7 @@ fn finding_page(s: &Shell, t: &Colors, id: &FindingId, cx: &Context<Shell>) -> D
             IconName::ChevronDown,
             "Next finding (N)",
             (at < all.len()).then(|| crate::ui::click(cx, |s, cx| s.act(Action::NextFinding, cx))),
-        ))
-        .child(div().text_size(text::SMALL).text_color(t.faint).child(format!("{at} of {}", all.len())));
+        ));
     let detail = m.details.get(id);
     let history: &[HistoryEntry] = detail.map_or(&[], |d| &d.history);
     let (status, why) = status_sentence(f, history);
@@ -754,7 +788,11 @@ fn finding_page(s: &Shell, t: &Colors, id: &FindingId, cx: &Context<Shell>) -> D
                 ))
                 .child(section(t, "Confidence", confidence(t, f.confidence, conf_word, conf_why)))
                 .child(section(t, "History", history_rows(t, f, history)));
-            right = right.child(section(t, &format!("Evidence · {}", d.evidence.len()), evidence_blocks(t, f, d)));
+            right = right.child(section(
+                t,
+                &format!("Evidence · {}", d.evidence.len()),
+                if d.evidence.is_empty() { no_evidence(t) } else { evidence_blocks(t, f, d) },
+            ));
             right = right.child(in_the_diff(s, t, f, cx));
         }
     }
@@ -796,8 +834,31 @@ fn finding_page(s: &Shell, t: &Colors, id: &FindingId, cx: &Context<Shell>) -> D
             on(cx, |s, cx| s.act(Action::OpenTimeline, cx)),
         ))
         .child(div().flex_1())
-        .child(button(t, "f-gh", "Open on GitHub", Some("⌘O"), Tone::Ghost, on(cx, |s, cx| s.open_github(cx))));
+        .child(button(t, "f-gh", "Open on GitHub", Some("⌘⇧O"), Tone::Ghost, on(cx, |s, cx| s.open_github(cx))));
     page("detail-f", body, Some(footer), t, true)
+}
+
+/// A finding that cites no code: say so, and point at the diff, which still shows its line.
+fn no_evidence(t: &Colors) -> Div {
+    div()
+        .flex()
+        .gap(space::S3)
+        .p(space::S4)
+        .rounded(radius::LG)
+        .border_1()
+        .border_color(t.border)
+        .bg(t.surface)
+        .child(div().pt(px(1.)).child(icon(IconName::FileCode, px(16.), t.faint)))
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(space::S1)
+                .child(div().text_size(text::BODY).font_weight(FontWeight::SEMIBOLD).child("No code cited"))
+                .child(div().text_size(text::BODY).line_height(text::LINE_BODY).text_color(t.muted).child(
+                    "The reviewer gave no code ranges for this finding. The full diff shows the line it names.",
+                )),
+        )
 }
 
 fn history_rows(t: &Colors, f: &Finding, history: &[HistoryEntry]) -> Div {
@@ -838,7 +899,7 @@ fn history_rows(t: &Colors, f: &Finding, history: &[HistoryEntry]) -> Div {
 /// The cited code, each block pinned to its path, lines and commit, and the tool summaries between them.
 fn evidence_blocks(t: &Colors, f: &Finding, d: &pr_review_tui::protocol::FindingDetail) -> Div {
     let mut blocks = div().flex().flex_col().gap(space::S3);
-    for e in &d.evidence {
+    for (i, e) in d.evidence.iter().enumerate() {
         blocks = blocks.child(match (e.kind, &e.path) {
             (EvidenceKind::CodeRef, Some(path)) => {
                 let start = e.start.unwrap_or(1);
@@ -848,6 +909,7 @@ fn evidence_blocks(t: &Colors, f: &Finding, d: &pr_review_tui::protocol::Finding
                 let sha = e.ref_sha.as_ref().map(|s| format!("@{}", s.short()));
                 code_block(
                     t,
+                    ("ev", i),
                     &title,
                     sha,
                     e.text.as_str(),
@@ -934,27 +996,17 @@ fn in_the_diff(s: &Shell, t: &Colors, f: &Finding, cx: &Context<Shell>) -> Div {
                     _ => (None, " ", t.faint),
                 };
                 let wash = if hit { Some(t.severity_wash(f.severity)) } else { wash };
-                for (k, (run, cont)) in runs(t, &mut lx, l.text.as_str(), layout::COLS_EVIDENCE).into_iter().enumerate()
-                {
-                    rows = rows.child(
-                        div()
-                            .flex()
-                            .child(div().w(px(14.)).flex_none().pl(space::S2).text_color(sign_fg).child(if k == 0 {
-                                sign
-                            } else {
-                                " "
-                            }))
-                            .child(div().flex_1().min_w_0().child(code_row(
-                                t,
-                                l.new.or(l.old),
-                                run,
-                                cont,
-                                wash,
-                                hit.then_some(hue),
-                            ))),
-                    );
-                }
+                let run = one_run(t, &mut lx, l.text.as_str());
+                rows = rows.child(
+                    div()
+                        .flex()
+                        .min_w(relative(1.))
+                        .when_some(wash, |d, w| d.bg(w))
+                        .child(div().w(px(14.)).flex_none().pl(space::S2).text_color(sign_fg).child(sign))
+                        .child(code_row(t, l.new.or(l.old), run, false, None, hit.then_some(hue))),
+                );
             }
+            let long = lines.iter().any(|l| l.text.as_str().chars().count() > layout::COLS_EVIDENCE);
             div()
                 .flex()
                 .flex_col()
@@ -974,9 +1026,18 @@ fn in_the_diff(s: &Shell, t: &Colors, f: &Finding, cx: &Context<Shell>) -> Div {
                         .border_color(t.border)
                         .bg(t.surface)
                         .child(icon(IconName::FileDiff, px(13.), t.faint))
-                        .child(div().font_family(text::MONO).text_size(px(11.)).text_color(t.muted).child(header)),
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .truncate()
+                                .font_family(text::MONO)
+                                .text_size(px(11.))
+                                .text_color(t.muted)
+                                .child(header),
+                        ),
                 )
-                .child(rows)
+                .child(code_scroll(t, "f-hunk", rows, long))
         }
         None => div()
             .text_size(text::SMALL)
@@ -1056,23 +1117,47 @@ fn style_of(t: &Colors, tok: Tok) -> HighlightStyle {
     }
 }
 
-/// One line of code as the runs it wraps into at `cols`, each colored, with whether it continues the line.
+/// One line of code as the runs it soft-wraps into at `cols`, each colored, with whether it continues the line. A
+/// continuation starts at the line's indent plus two, so the eye finds it under the line's own words.
 pub fn runs(t: &Colors, lx: &mut Lexer, line: &str, cols: usize) -> Vec<(StyledText, bool)> {
     let line = line.replace('\t', "    ");
     let toks = lx.line(&line);
-    wrap(&line, cols)
+    let w = wrap(&line, cols);
+    w.runs
         .into_iter()
         .enumerate()
         .map(|(i, r)| {
-            let marks: Vec<_> = clip(&toks, &r).into_iter().map(|(r, tok)| (r, style_of(t, tok))).collect();
-            let s = if r.is_empty() { " ".to_string() } else { line[r].to_string() };
+            let pad = if i > 0 { w.indent } else { 0 };
+            let marks: Vec<_> =
+                clip(&toks, &r).into_iter().map(|(r, tok)| (r.start + pad..r.end + pad, style_of(t, tok))).collect();
+            let s = if r.is_empty() { " ".to_string() } else { format!("{}{}", " ".repeat(pad), &line[r]) };
             (StyledText::new(s).with_highlights(marks), i > 0)
         })
         .collect()
 }
 
+/// One line of code, colored, never cut: for a block that scrolls sideways.
+pub fn one_run(t: &Colors, lx: &mut Lexer, line: &str) -> StyledText {
+    let line = line.replace('\t', "    ");
+    let marks: Vec<_> = lx.line(&line).into_iter().map(|(r, tok)| (r, style_of(t, tok))).collect();
+    StyledText::new(if line.is_empty() { " ".to_string() } else { line }).with_highlights(marks)
+}
+
+/// A block of code rows that scrolls sideways instead of wrapping. `long` adds the fade at the right edge that
+/// says there is more.
+pub fn code_scroll(t: &Colors, id: impl Into<ElementId>, rows: Div, long: bool) -> Div {
+    div().relative().min_w_0().child(div().id(id).overflow_x_scroll().child(rows.whitespace_nowrap())).when(long, |d| {
+        d.child(div().absolute().top_0().bottom_0().right_0().w(space::S8).bg(linear_gradient(
+            90.,
+            linear_color_stop(t.code_bg.alpha(0.), 0.),
+            linear_color_stop(t.code_bg, 1.),
+        )))
+    })
+}
+
 /// A gutter, a marker and one run of a line. `cont` marks a run that continues the line above; `wash` tints the
-/// row; `mark` draws the anchor bar in the gutter.
+/// row; `mark` draws the anchor bar in the gutter. The row is at least as wide as its block, and as wide as its
+/// code.
 pub fn code_row(
     t: &Colors,
     number: Option<u32>,
@@ -1081,8 +1166,9 @@ pub fn code_row(
     wash: Option<Hsla>,
     mark: Option<Hsla>,
 ) -> Div {
-    div()
+    tabular(div())
         .flex()
+        .min_w(relative(1.))
         .h(text::LINE_CODE)
         .items_center()
         .when_some(wash, |d, w| d.bg(w))
@@ -1094,14 +1180,15 @@ pub fn code_row(
                 .pr(space::S3)
                 .text_right()
                 .text_color(if mark.is_some() { t.text } else { t.faint })
-                .child(if cont { "⤷".to_string() } else { number.map_or(String::new(), |n| n.to_string()) }),
+                .child(if cont { "↳".to_string() } else { number.map_or(String::new(), |n| n.to_string()) }),
         )
-        .child(div().flex_1().min_w_0().whitespace_nowrap().text_color(t.text).child(run))
+        .child(div().flex_none().pr(space::S4).whitespace_nowrap().text_color(t.text).child(run))
 }
 
 #[allow(clippy::too_many_arguments)]
 pub fn code_block(
     t: &Colors,
+    id: impl Into<ElementId>,
     title: &str,
     sha: Option<String>,
     code: &str,
@@ -1117,10 +1204,10 @@ pub fn code_block(
     for (i, l) in code.lines().enumerate() {
         let n = start + i as u32;
         let hit = anchor == Some(n);
-        for (run, cont) in runs(t, &mut lx, l, cols) {
-            rows = rows.child(code_row(t, Some(n), run, cont, hit.then(|| t.severity_wash(sev)), hit.then_some(hue)));
-        }
+        let run = one_run(t, &mut lx, l);
+        rows = rows.child(code_row(t, Some(n), run, false, hit.then(|| t.severity_wash(sev)), hit.then_some(hue)));
     }
+    let long = code.lines().any(|l| l.chars().count() > cols);
     div()
         .flex()
         .flex_col()
@@ -1157,31 +1244,30 @@ pub fn code_block(
                     div().flex_none().font_family(text::MONO).text_size(px(11.)).text_color(t.faint).child(s)
                 })),
         )
-        .child(rows)
+        .child(code_scroll(t, id, rows, long))
 }
 
 /// A suggested fix: its prose paragraphs as prose, its code as code.
 pub fn fix_block(t: &Colors, fix: &str, path: &str) -> Div {
     let mut out = div().flex().flex_col().gap(space::S3);
-    for para in fix.split("\n\n") {
+    for (i, para) in fix.split("\n\n").enumerate() {
         let code = para.contains('\n') || para.trim_end().ends_with(['{', ';', ')', '}']);
         out = out.child(if code {
             let mut lx = Lexer::for_path(path);
-            let mut rows = div()
+            let mut rows = div().py(space::S2).font_family(text::MONO).text_size(text::CODE);
+            for l in para.lines() {
+                let run = one_run(t, &mut lx, l);
+                rows = rows.child(code_row(t, None, run, false, Some(t.add_bg), Some(t.add_fg)));
+            }
+            let long = para.lines().any(|l| l.chars().count() > layout::COLS_PROSE);
+            div()
                 .max_w(layout::MEASURE)
                 .rounded(radius::LG)
                 .border_1()
                 .border_color(t.border)
                 .bg(t.code_bg)
-                .py(space::S2)
-                .font_family(text::MONO)
-                .text_size(text::CODE);
-            for l in para.lines() {
-                for (run, cont) in runs(t, &mut lx, l, layout::COLS_PROSE) {
-                    rows = rows.child(code_row(t, None, run, cont, Some(t.add_bg), Some(t.add_fg)));
-                }
-            }
-            rows
+                .overflow_hidden()
+                .child(code_scroll(t, ("fix", i), rows, long))
         } else {
             prose(t, para)
         });

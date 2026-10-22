@@ -89,7 +89,8 @@ pub fn timeline(s: &Shell, t: &Colors, pr: &Pr, cx: &Context<Shell>) -> Div {
                     .flex_none()
                     .font_family(text::MONO)
                     .text_size(px(11.))
-                    .text_color(t.faint)
+                    .pt(px(2.))
+                    .text_color(t.muted)
                     .child(e.occurred_at.as_str().get(11..19).unwrap_or("").to_string()),
             )
             .child(
@@ -97,7 +98,7 @@ pub fn timeline(s: &Shell, t: &Colors, pr: &Pr, cx: &Context<Shell>) -> Div {
                     .w(px(76.))
                     .flex_none()
                     .text_size(text::SMALL)
-                    .text_color(t.faint)
+                    .text_color(t.muted)
                     .child(EventCategory::of(&e.body).label()),
             )
             .child(event_line(t, e));
@@ -131,13 +132,24 @@ pub fn timeline(s: &Shell, t: &Colors, pr: &Pr, cx: &Context<Shell>) -> Div {
         .child(button(t, "tl-back", "Findings", Some("esc"), Tone::Secondary, on(cx, |s, cx| s.act(Action::Back, cx))))
         .child(button(t, "tl-filter", "Filter", Some("F"), Tone::Ghost, on(cx, |s, cx| s.act(Action::Search, cx))))
         .child(div().flex_1())
-        .child(button(t, "tl-gh", "Open on GitHub", Some("⌘O"), Tone::Ghost, on(cx, |s, cx| s.open_github(cx))));
+        .child(button(t, "tl-gh", "Open on GitHub", Some("⌘⇧O"), Tone::Ghost, on(cx, |s, cx| s.open_github(cx))));
     page("detail-tl", body, Some(footer), t, false)
 }
 
 /// An event in words, its severity or tool set the way the rest of the window sets them.
 fn event_line(t: &Colors, e: &SequencedEvent) -> Div {
-    let row = div().flex_1().min_w_0().flex().items_start().gap(space::S2);
+    // Every row starts with the same 16-point glyph slot, so the words line up whether or not a row has a glyph.
+    let glyph = |mark: Option<(&'static str, Hsla)>| {
+        div()
+            .w(px(16.))
+            .flex_none()
+            .text_center()
+            .text_size(px(10.))
+            .line_height(text::LINE_BODY)
+            .children(mark.map(|(m, hue)| div().text_color(hue).child(m)))
+    };
+    let row = || div().flex_1().min_w_0().flex().items_start().gap(space::S2);
+    let plain = row().child(glyph(None));
     let words = |s: String| {
         div()
             .flex_1()
@@ -149,7 +161,7 @@ fn event_line(t: &Colors, e: &SequencedEvent) -> Div {
             .child(s)
     };
     match &e.body {
-        EventBody::Run(change, r) => row.child(words(match change {
+        EventBody::Run(change, r) => plain.child(words(match change {
             RunChange::Started => format!("Review started at {}", r.head_sha.short()),
             RunChange::Completed => "Review completed".into(),
             RunChange::Superseded => "Superseded by a newer head".into(),
@@ -158,34 +170,34 @@ fn event_line(t: &Colors, e: &SequencedEvent) -> Div {
             }
         })),
         EventBody::PhaseChanged(p) => {
-            row.child(words(format!("{} → {}", phase_word(p.from), phase_word(p.to).to_lowercase())))
+            plain.child(words(format!("{} → {}", phase_word(p.from), phase_word(p.to).to_lowercase())))
         }
         EventBody::FindingUpdated(f) => {
             let (mark, word) = severity_mark(f.severity);
-            row.child(div().pt(px(4.)).text_size(px(10.)).text_color(t.severity(f.severity)).child(mark)).child(words(
-                format!(
-                    "{} · {} · {}",
-                    f.title,
-                    word.to_lowercase(),
-                    crate::detail::status_sentence(f, &[]).0.to_lowercase()
-                ),
-            ))
+            row().child(glyph(Some((mark, t.severity(f.severity))))).child(words(format!(
+                "{} · {} · {}",
+                f.title,
+                word.to_lowercase(),
+                crate::detail::status_sentence(f, &[]).0.to_lowercase()
+            )))
         }
-        EventBody::ToolActivity(a) => row
+        EventBody::ToolActivity(a) => plain
             .child(
                 div()
+                    .w(px(96.))
+                    .flex_none()
+                    .truncate()
                     .pt(px(3.))
                     .font_family(text::MONO)
                     .text_size(px(11.))
                     .text_color(t.accent)
-                    .flex_none()
                     .child(a.tool.to_string()),
             )
             .child(words(a.summary.to_string())),
         EventBody::PublicationChanged(p) => {
-            row.child(words(format!("Publication {}", format!("{:?}", p.status).to_lowercase())))
+            plain.child(words(format!("Publication {}", format!("{:?}", p.status).to_lowercase())))
         }
-        EventBody::PrUpdated(p) => row.child(words(format!("PR updated, head now {}", p.head_sha.short()))),
-        _ => row.child(words(event_text(e))),
+        EventBody::PrUpdated(p) => plain.child(words(format!("PR updated, head now {}", p.head_sha.short()))),
+        _ => plain.child(words(event_text(e))),
     }
 }

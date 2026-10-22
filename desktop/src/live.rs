@@ -9,7 +9,7 @@ use pr_review_tui::protocol::{Finding, Pr, Run};
 use pr_review_tui::update::can_mutate;
 
 use crate::detail::*;
-use crate::kit::{Gauge, OnClick, Tone, button, clock_s, overline, progress, step_of, tip};
+use crate::kit::{Gauge, OnClick, Tone, button, clock_s, overline, progress, step_of, tabular, tip};
 use crate::queue::{self, phase_word};
 use crate::tokens::{Colors, motion, radius, severity_mark, space, text};
 use crate::ui::{Shell, live_dot};
@@ -28,19 +28,25 @@ pub fn live(s: &Shell, t: &Colors, pr: &Pr, run: &Run, cx: &Context<Shell>) -> D
     );
     let landed: Vec<&Finding> = m.domain.findings.values().filter(|f| f.run_id == run.id).collect();
     let tools = events.iter().filter(|a| matches!(a.kind, ActivityKind::Tool { .. })).count();
-    let stat = |value: String, label: &str| {
+    let stat = |value: String, label: String| {
         div()
             .flex()
             .flex_col()
-            .child(div().font_family(text::MONO).text_size(text::TITLE).font_weight(FontWeight::MEDIUM).child(value))
-            .child(div().text_size(text::CAPTION).text_color(t.faint).child(label.to_string()))
+            .child(tabular(div()).text_size(text::TITLE).font_weight(FontWeight::SEMIBOLD).child(value))
+            .child(div().text_size(text::CAPTION).text_color(t.muted).child(label))
+    };
+    // Findings land in Verify: until then the count says where it stands, not only that it is zero.
+    let kept = if landed.is_empty() {
+        if step_of(run.phase) < 3 { "findings kept · lands in Verify".to_string() } else { "findings kept".into() }
+    } else {
+        format!("findings kept · {}", queue::severity_summary(&landed))
     };
     let stats = div()
         .flex()
         .gap(space::S8)
-        .child(stat(tools.to_string(), "tool calls"))
-        .child(stat(if landed.is_empty() { "0".into() } else { queue::severity_summary(&landed) }, "findings kept"))
-        .child(stat(total.to_string(), "events"));
+        .child(stat(tools.to_string(), "tool calls".into()))
+        .child(stat(landed.len().to_string(), kept))
+        .child(stat(total.to_string(), "events".into()));
 
     let track = div().flex().items_end().gap(px(1.)).h(px(24.)).children(events.iter().enumerate().map(|(i, a)| {
         let (h, c) = match &a.kind {
@@ -66,43 +72,47 @@ pub fn live(s: &Shell, t: &Colors, pr: &Pr, run: &Run, cx: &Context<Shell>) -> D
             .when(held == Some(i), |d| d.border_b_2().border_color(t.text));
         tip(tick, format!("{} · {}", clock_s(a.at.as_str()), event_words(t, a).2))
     }));
-    let following =
-        div().flex().items_center().gap(space::S2).child(overline(t, "Activity")).child(div().flex_1()).child(
-            match held {
-                Some(i) => div()
-                    .flex()
-                    .items_center()
-                    .gap(space::S2)
-                    .child(
-                        div()
-                            .font_family(text::MONO)
-                            .text_size(text::CAPTION)
-                            .text_color(t.muted)
-                            .child(format!("replaying {} of {total}", i + 1)),
-                    )
-                    .child(button(
-                        t,
-                        "follow-live",
-                        "Follow live",
-                        None,
-                        Tone::Secondary,
-                        Some(Box::new(cx.listener(|s, _: &ClickEvent, _, cx| {
-                            s.scrub = None;
-                            cx.notify();
-                        })) as OnClick),
-                    ))
-                    .into_any_element(),
-                None => div()
-                    .flex()
-                    .items_center()
-                    .gap(px(6.))
-                    .text_size(text::CAPTION)
-                    .text_color(t.faint)
-                    .child(div().size(px(6.)).rounded(radius::PILL).bg(t.ok))
-                    .child(format!("following · {total} events · click the track to replay"))
-                    .into_any_element(),
-            },
-        );
+    // The row keeps one height whether it follows or replays, so entering replay moves nothing.
+    let following = div()
+        .flex()
+        .items_center()
+        .h(px(32.))
+        .gap(space::S2)
+        .child(overline(t, "Activity"))
+        .child(div().flex_1())
+        .child(match held {
+            Some(i) => div()
+                .flex()
+                .items_center()
+                .gap(space::S2)
+                .child(
+                    tabular(div())
+                        .text_size(text::CAPTION)
+                        .text_color(t.muted)
+                        .child(format!("Replaying {} of {total}", i + 1)),
+                )
+                .child(button(
+                    t,
+                    "follow-live",
+                    "Follow live",
+                    None,
+                    Tone::Secondary,
+                    Some(Box::new(cx.listener(|s, _: &ClickEvent, _, cx| {
+                        s.scrub = None;
+                        cx.notify();
+                    })) as OnClick),
+                ))
+                .into_any_element(),
+            None => tabular(div())
+                .flex()
+                .items_center()
+                .gap(px(6.))
+                .text_size(text::CAPTION)
+                .text_color(t.muted)
+                .child(div().size(px(6.)).rounded(radius::PILL).bg(t.ok))
+                .child(format!("Following · {total} events · click the track to replay"))
+                .into_any_element(),
+        });
 
     let lo = (head + 1).saturating_sub(SHOWN);
     let log = div().flex().flex_col().children(events.iter().enumerate().take(head + 1).skip(lo).map(|(i, a)| {
@@ -124,7 +134,8 @@ pub fn live(s: &Shell, t: &Colors, pr: &Pr, run: &Run, cx: &Context<Shell>) -> D
             .when(current, |d| d.bg(t.selected))
             .when_some(landed_hue, |d, h| d.bg(h))
             .when(matches!(a.kind, ActivityKind::Phase { .. }), |d| d.border_t_1().border_color(t.border))
-            .when(current && fresh, |d| d.bg(t.running.alpha(0.08)))
+            // The newest row wears the running hue on its left edge: this is where the reviewer is now.
+            .when(current && held.is_none(), |d| d.border_l_2().border_color(t.running).bg(t.running.alpha(0.08)))
             .cursor_pointer()
             .hover(|st| st.bg(t.hover))
             .on_click(cx.listener(move |s, _: &ClickEvent, _, cx| {
@@ -137,7 +148,7 @@ pub fn live(s: &Shell, t: &Colors, pr: &Pr, run: &Run, cx: &Context<Shell>) -> D
                     .flex_none()
                     .font_family(text::MONO)
                     .text_size(px(11.))
-                    .text_color(t.faint)
+                    .text_color(t.muted)
                     .child(clock_s(a.at.as_str())),
             )
             .child(

@@ -250,23 +250,49 @@ impl Lexer {
     }
 }
 
-/// `line` cut into runs of at most `cols` characters, as byte ranges. The first run is the line; the rest continue
-/// it. An empty line is one empty run.
-pub fn wrap(line: &str, cols: usize) -> Vec<Range<usize>> {
+/// A line soft-wrapped at `cols` characters, as byte ranges. The first run is the line; the rest continue it at
+/// `indent` extra characters (the line's own indent plus two). A cut lands after whitespace or an opening
+/// bracket when the run's second half has one (an opening bracket keeps what follows it), else before a closing
+/// bracket or an operator, never inside a word; only a run with no boundary at all in its second half is cut
+/// mid-token. An empty line is one empty run.
+pub struct Wrapped {
+    pub runs: Vec<Range<usize>>,
+    pub indent: usize,
+}
+
+pub fn wrap(line: &str, cols: usize) -> Wrapped {
     let cols = cols.max(8);
+    let chars: Vec<(usize, char)> = line.char_indices().collect();
+    let indent = (chars.iter().take_while(|(_, c)| *c == ' ').count() + 2).min(cols / 2);
+    // Lower is better: 0 after a space, a comma or an opening bracket (a bracket followed by a space keeps what
+    // follows it), 2 before a closing bracket or an operator, 3 inside a word.
+    let rank = |i: usize| {
+        let (prev, cur) = (chars[i - 1].1, chars[i].1);
+        let opened = i >= 2 && "({[".contains(chars[i - 2].1);
+        if (prev.is_whitespace() && !opened) || ",;".contains(prev) || ("({[".contains(prev) && !cur.is_whitespace()) {
+            0
+        } else if ")}]".contains(cur) || "+-*/%=<>|&?.".contains(cur) {
+            2
+        } else {
+            3
+        }
+    };
     let mut runs = Vec::new();
     let mut start = 0;
-    let mut n = 0;
-    for (i, _) in line.char_indices() {
-        if n == cols {
-            runs.push(start..i);
-            start = i;
-            n = 0;
+    loop {
+        let budget = if runs.is_empty() { cols } else { cols - indent };
+        if chars.len() - start <= budget {
+            runs.push(chars.get(start).map_or(line.len(), |(b, _)| *b)..line.len());
+            return Wrapped { runs, indent };
         }
-        n += 1;
+        let limit = start + budget;
+        let cut = (start + budget / 2..=limit).rev().min_by_key(|&i| rank(i)).filter(|&i| rank(i) < 3).unwrap_or(limit);
+        runs.push(chars[start].0..chars[cut].0);
+        start = cut;
+        while start < chars.len() && chars[start].1 == ' ' {
+            start += 1;
+        }
     }
-    runs.push(start..line.len());
-    runs
 }
 
 /// The tokens of a whole line clipped to one of its runs, re-based on the run's start.
@@ -367,10 +393,18 @@ mod tests {
     }
 
     #[test]
-    fn wrap_cuts_by_characters_and_clip_rebases_tokens() {
-        let line = "abcdefghij klmnopqrstuvwxyz";
-        assert_eq!(wrap(line, 10), [0..10, 10..20, 20..27]);
-        assert_eq!(wrap("", 10), vec![0..0]);
+    fn wrap_breaks_at_boundaries_and_indents_the_continuation() {
+        let line = "    const refund = await payments.refund(order.payment.providerId, amountCents, { reason });";
+        let w = wrap(line, 48);
+        let runs: Vec<&str> = w.runs.iter().map(|r| &line[r.clone()]).collect();
+        assert_eq!(
+            runs,
+            ["    const refund = await payments.refund(", "order.payment.providerId, amountCents, ", "{ reason });"]
+        );
+        assert_eq!(w.indent, 6);
+        assert_eq!(wrap("", 10).runs, vec![0..0]);
+        // A run with no boundary in its second half is cut at the budget.
+        assert_eq!(wrap("abcdefghijklmnopqrstuvwxyz", 10).runs, [0..10, 10..18, 18..26]);
         let toks = vec![(5..15, Tok::Str)];
         assert_eq!(clip(&toks, &(10..20)), [(0..5, Tok::Str)]);
         assert_eq!(clip(&toks, &(20..27)), []);

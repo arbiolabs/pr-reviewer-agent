@@ -13,7 +13,7 @@ pub enum Card<'a> {
     /// Reviews can't run, or can't be acted on, until the reader fixes the daemon's setup.
     Setup {
         missing: Vec<&'a SetupCheck>,
-        commands_off: Option<&'static str>,
+        count: SetupCount,
     },
     /// A review parked for approval: the reviewer is waiting on the reader.
     Approve {
@@ -104,10 +104,35 @@ pub fn open_finding(f: &Finding) -> bool {
     !f.stale && matches!(f.status, FindingStatus::Detected | FindingStatus::StillPresent | FindingStatus::Uncertain)
 }
 
-/// The checks and the mode that keep reviews from running or from being started here: the one count the sidebar
-/// badge, the setup card and the setup page all show.
-pub fn setup_issues(m: &Model) -> usize {
-    m.server.as_ref().map_or(0, |s| s.missing().count() + usize::from(s.commands_off().is_some()))
+/// What setup still wants, in the one vocabulary the sidebar badge, the setup card and the setup page share:
+/// `blocking` checks keep reviews from running (a missing check, or commands that are off on a daemon with nothing
+/// missing), `limited` checks let them run with less.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct SetupCount {
+    pub blocking: usize,
+    pub limited: usize,
+}
+
+impl SetupCount {
+    /// "1 blocking · 2 limited", or an empty string when nothing wants attention.
+    pub fn words(self) -> String {
+        [(self.blocking, "blocking"), (self.limited, "limited")]
+            .into_iter()
+            .filter(|(n, _)| *n > 0)
+            .map(|(n, w)| format!("{n} {w}"))
+            .collect::<Vec<_>>()
+            .join(" · ")
+    }
+}
+
+pub fn setup_count(m: &Model) -> SetupCount {
+    let Some(s) = &m.server else { return SetupCount::default() };
+    let missing = s.missing().count();
+    let limited = s
+        .checks
+        .as_ref()
+        .map_or(0, |cs| cs.iter().filter(|c| c.status == pr_review_tui::protocol::CheckStatus::Warn).count());
+    SetupCount { blocking: if missing == 0 && s.commands_off().is_some() { 1 } else { missing }, limited }
 }
 
 pub fn cards(m: &Model) -> Vec<Card<'_>> {
@@ -115,9 +140,8 @@ pub fn cards(m: &Model) -> Vec<Card<'_>> {
     let mut out = Vec::new();
     if let Some(s) = &m.server {
         let missing: Vec<&SetupCheck> = s.missing().collect();
-        let commands_off = s.commands_off();
-        if !missing.is_empty() || commands_off.is_some() {
-            out.push(Card::Setup { missing, commands_off });
+        if !missing.is_empty() || s.commands_off().is_some() {
+            out.push(Card::Setup { missing, count: setup_count(m) });
         }
     }
     for pr in m.inbox() {

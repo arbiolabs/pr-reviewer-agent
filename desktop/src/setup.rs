@@ -30,6 +30,61 @@ pub fn setup(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
     div().flex().flex_1().min_h_0().child(page("setup", setup_body(s, t, cx), None, t, false))
 }
 
+/// Why this daemon can't act, as a sentence for the reader rather than the daemon's own words.
+pub fn read_only_sentence(m: &pr_review_tui::model::Model) -> String {
+    let missing = m.server.as_ref().is_some_and(|s| s.missing().next().is_some());
+    if missing {
+        "This daemon is read-only: it can look, but not start, retry, cancel or post. Fix the blocking checks, then \
+         start it with --allow-commands."
+            .into()
+    } else {
+        "This daemon is read-only: it can look, but not start, retry, cancel or post. Start it with --allow-commands."
+            .into()
+    }
+}
+
+/// A fix from a setup check, with its `commands` as mono chips the reader can copy, and the prose between them.
+fn fix_line(t: &Colors, fix: &str) -> Div {
+    let mut row = div().flex().flex_wrap().items_center().gap_x(space::S2).gap_y(space::S1).mt(space::S1);
+    for (i, part) in fix.split('`').enumerate() {
+        if part.is_empty() {
+            continue;
+        }
+        if i % 2 == 0 {
+            row = row.child(
+                div().max_w(relative(1.)).text_size(text::SMALL).text_color(t.muted).child(part.trim().to_string()),
+            );
+        } else {
+            let copy = part.to_string();
+            row = row.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(2.))
+                    .pl(space::S2)
+                    .rounded(radius::SM)
+                    .bg(t.code_bg)
+                    .border_1()
+                    .border_color(t.border)
+                    .child(div().font_family(text::MONO).text_size(px(11.)).text_color(t.text).child(part.to_string()))
+                    .child(
+                        icon_button(
+                            t,
+                            SharedString::from(format!("copy-{i}-{}", part.len())),
+                            IconName::Copy,
+                            "Copy the command",
+                            Some(Box::new(move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
+                                cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()))
+                            }) as OnClick),
+                        )
+                        .size(px(24.)),
+                    ),
+            );
+        }
+    }
+    row
+}
+
 /// The command that starts the daemon this window dials.
 fn daemon_command(m: &pr_review_tui::model::Model) -> String {
     match m.diag.endpoint.strip_prefix("unix:") {
@@ -41,27 +96,25 @@ fn daemon_command(m: &pr_review_tui::model::Model) -> String {
 /// No daemon answers: what to run, in a copyable block, and a retry.
 pub fn offline(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
     let m = &s.model;
-    let (title, why) = match &m.link {
-        Link::Disconnected { reason, retry_in_ms } => (
-            "Reviewer offline",
-            format!(
-                "{reason}.{}",
-                retry_in_ms.map_or(String::new(), |ms| format!(" The app retries in {}s.", ms.div_ceil(1000)))
-            ),
-        ),
-        Link::Stalled { reason } => ("Not connected", format!("{reason}.")),
-        Link::Incompatible { message, .. } => ("This daemon speaks another protocol", message.to_string()),
-        Link::Unusable { message } => ("This endpoint can't work", message.to_string()),
-        _ => ("Not connected", "The reviewer has not answered yet.".to_string()),
+    let (title, why, retrying) = match &m.link {
+        Link::Disconnected { reason, retry_in_ms } => {
+            ("Reviewer offline", crate::kit::sentence(reason.as_str()), retry_in_ms.is_some())
+        }
+        Link::Stalled { reason } => ("Not connected", crate::kit::sentence(reason.as_str()), false),
+        Link::Incompatible { message, .. } => ("This daemon speaks another protocol", message.to_string(), false),
+        Link::Unusable { message } => ("This endpoint can't work", message.to_string(), false),
+        _ => ("Not connected", "The reviewer has not answered yet.".to_string(), false),
     };
     let cmd = daemon_command(m);
     let copy = cmd.clone();
     div()
         .flex()
         .flex_col()
+        .flex_1()
+        .justify_center()
         .gap(space::S6)
         .max_w(px(560.))
-        .pt(space::S8)
+        .pb(px(96.))
         .child(
             div()
                 .size(px(48.))
@@ -73,43 +126,50 @@ pub fn offline(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                 .child(icon(IconName::Unplug, px(22.), t.danger)),
         )
         .child(div().flex().flex_col().gap(space::S2).child(display(t, title)).child(summary(t, why)))
+        .when(retrying, |d| {
+            d.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(space::S2)
+                    .text_size(text::SMALL)
+                    .text_color(t.muted)
+                    .child(spinner(t, s.still, "retry-spin"))
+                    .child("Retrying on its own. Start the daemon and this window connects."),
+            )
+        })
         .child(
-            div()
-                .flex()
-                .flex_col()
-                .gap(space::S2)
-                .child(overline(t, "Start the daemon, then this window connects on its own"))
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(space::S2)
-                        .pl(space::S3)
-                        .pr(space::S1)
-                        .py(space::S1)
-                        .rounded(radius::SM)
-                        .bg(t.code_bg)
-                        .border_1()
-                        .border_color(t.border)
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .font_family(text::MONO)
-                                .text_size(text::CODE)
-                                .text_color(t.text)
-                                .child(cmd),
-                        )
-                        .child(icon_button(
-                            t,
-                            "copy-cmd",
-                            IconName::Copy,
-                            "Copy the command",
-                            Some(Box::new(move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
-                                cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()))
-                            }) as OnClick),
-                        )),
-                ),
+            div().flex().flex_col().gap(space::S2).child(overline(t, "The daemon this window dials")).child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(space::S2)
+                    .pl(space::S3)
+                    .pr(space::S1)
+                    .py(space::S1)
+                    .rounded(radius::SM)
+                    .bg(t.code_bg)
+                    .border_1()
+                    .border_color(t.border)
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .font_family(text::MONO)
+                            .text_size(text::CODE)
+                            .text_color(t.text)
+                            .child(cmd),
+                    )
+                    .child(icon_button(
+                        t,
+                        "copy-cmd",
+                        IconName::Copy,
+                        "Copy the command",
+                        Some(Box::new(move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
+                            cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()))
+                        }) as OnClick),
+                    )),
+            ),
         )
         .child(
             div()
@@ -134,27 +194,58 @@ pub fn offline(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         )
 }
 
-/// Dialing, or waiting for the first snapshot: the page's shapes, greyed.
-pub fn connecting(t: &Colors) -> Div {
+/// A loader that turns while something is on its way; still under reduced motion or in a snapshot.
+pub fn spinner(t: &Colors, still: bool, id: impl Into<ElementId>) -> AnyElement {
+    let glyph = icon(IconName::LoaderCircle, px(14.), t.muted);
+    if still {
+        return glyph.into_any_element();
+    }
+    glyph
+        .with_animation(id, Animation::new(std::time::Duration::from_millis(900)).repeat(), |g, v| {
+            g.with_transformation(Transformation::rotate(percentage(v)))
+        })
+        .into_any_element()
+}
+
+/// Dialing, or waiting for the first snapshot: the PR page's shapes, greyed, where the page's parts will land.
+pub fn connecting(t: &Colors, still: bool) -> Div {
     let bone = |w: Pixels, h: Pixels| div().w(w).h(h).rounded(px(4.)).bg(t.border.alpha(0.7));
+    let card = |inner: Div| {
+        inner.flex().flex_col().gap(space::S3).p(space::S4).rounded(radius::LG).border_1().border_color(t.border)
+    };
     div()
         .flex()
         .flex_col()
-        .gap(space::S5)
+        .gap(space::S6)
         .child(
             div()
                 .flex()
-                .items_center()
+                .flex_col()
                 .gap(space::S2)
-                .child(icon(IconName::LoaderCircle, px(14.), t.faint))
-                .child(overline(t, "Connecting to the reviewer")),
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(space::S2)
+                        .child(spinner(t, still, "connect-spin"))
+                        .child(overline(t, "Connecting to the reviewer")),
+                )
+                .child(bone(px(420.), px(26.)))
+                .child(bone(px(320.), px(14.))),
         )
-        .child(bone(px(420.), px(26.)))
-        .child(bone(px(320.), px(14.)))
-        .child(div().h(space::S2))
-        .child(bone(px(560.), px(72.)))
-        .child(bone(px(560.), px(56.)))
-        .child(bone(px(560.), px(56.)))
+        .child(
+            div()
+                .flex()
+                .gap(space::S5)
+                .pb(space::S2)
+                .border_b_1()
+                .border_color(t.border)
+                .child(bone(px(64.), px(12.)))
+                .child(bone(px(56.), px(12.))),
+        )
+        .child(card(div().child(bone(px(560.), px(5.))).child(bone(px(300.), px(12.)))))
+        .child(card(div().child(bone(px(320.), px(14.))).child(bone(px(240.), px(11.)))))
+        .child(card(div().child(bone(px(280.), px(14.))).child(bone(px(220.), px(11.)))))
 }
 
 /// With nothing selected: the board, what waits and what runs, and where the keyboard starts.
@@ -259,11 +350,9 @@ pub fn setup_body(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                     .flex_col()
                     .gap(px(2.))
                     .child(div().font_weight(FontWeight::SEMIBOLD).child(mode.0))
-                    .children(
-                        server
-                            .and_then(|s| s.read_only_reason.as_ref())
-                            .map(|r| div().text_size(text::SMALL).text_color(t.muted).child(r.to_string())),
-                    ),
+                    .children(server.and_then(|s| s.read_only_reason.as_ref()).map(|r| {
+                        div().text_size(text::SMALL).text_color(t.muted).child(crate::kit::sentence(r.as_str()))
+                    })),
             ),
         );
     if let Some(sv) = server {
@@ -313,20 +402,7 @@ pub fn setup_body(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                                     .child(chip(t, word, hue)),
                             )
                             .child(div().text_size(text::SMALL).text_color(t.muted).child(c.detail.to_string()))
-                            .children(c.fix.as_ref().map(|f| {
-                                div()
-                                    .mt(space::S1)
-                                    .px(space::S2)
-                                    .py(space::S1)
-                                    .rounded(radius::SM)
-                                    .bg(t.code_bg)
-                                    .border_1()
-                                    .border_color(t.border)
-                                    .font_family(text::MONO)
-                                    .text_size(px(11.))
-                                    .text_color(t.text)
-                                    .child(f.to_string())
-                            })),
+                            .children(c.fix.as_ref().map(|f| fix_line(t, f.as_str()))),
                     ),
                 );
             }
@@ -412,23 +488,34 @@ pub fn setup_body(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
             }
         }
     }
-    let issues = queue::setup_issues(m);
+    let count = queue::setup_count(m);
     let missing = server.map_or(0, |s| s.missing().count());
     let lead = if missing > 0 {
         callout(
             t,
             t.danger,
             IconName::CircleX,
-            format!("{issues} {} before reviews can run", if issues == 1 { "fix" } else { "fixes" }),
+            format!("Reviews can't run: {}", count.words()),
             Some("Run the commands below in a terminal, then restart the daemon.".into()),
         )
-    } else if let Some(why) = server.and_then(|s| s.commands_off()) {
+    } else if server.and_then(|s| s.commands_off()).is_some() {
         callout(
             t,
             t.warn,
             IconName::TriangleAlert,
-            "Read-only daemon: this app can look, but not start, retry, cancel or post",
-            Some(format!("{why}. Every action button stays visible and says this when you hover it.")),
+            "This daemon is read-only",
+            Some(format!(
+                "{} Every action button stays visible and says this when you hover it.",
+                read_only_sentence(m)
+            )),
+        )
+    } else if count.limited > 0 {
+        callout(
+            t,
+            t.warn,
+            IconName::TriangleAlert,
+            format!("Reviews run with less: {}", count.words()),
+            Some("The limited checks below say what each one costs.".into()),
         )
     } else {
         callout(t, t.ok, IconName::CircleCheck, "Everything the reviewer needs is in place", None)

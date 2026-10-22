@@ -66,61 +66,6 @@ pub fn queue_column(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
     let cards = queue::cards(m);
     let selected = queue::card_of(&cards, m.ui.selected_pr.as_ref());
     let mut col = div();
-    if cards.is_empty() {
-        // Only a live board can say the reader is clear: an offline window never claims it.
-        let reviewed = queue::done(m).len();
-        let running = queue::running(m).len();
-        let body = match (m.domain.prs.is_empty(), running) {
-            (true, _) => {
-                "Tracked PRs show up here as soon as the reviewer picks one up. Start one with pr-review review <url>."
-                    .to_string()
-            }
-            (false, 0) => format!(
-                "{} reviewed. New decisions land here: a post to approve, a finding to judge, a failure to retry.",
-                queue::count(reviewed, "PR")
-            ),
-            (false, r) => format!(
-                "{} reviewed, {} running. Findings land here as the verifier keeps them.",
-                queue::count(reviewed, "PR"),
-                queue::count(r, "review")
-            ),
-        };
-        col = col.child(
-            div()
-                .flex()
-                .flex_col()
-                .items_center()
-                .gap(space::S3)
-                .pt(px(120.))
-                .px(space::S6)
-                .child(
-                    div()
-                        .size(px(48.))
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .rounded(radius::PILL)
-                        .bg(t.ok.alpha(0.12))
-                        .child(icon(IconName::Check, px(22.), t.ok)),
-                )
-                .child(
-                    div()
-                        .font_family(text::SERIF)
-                        .text_size(text::DISPLAY)
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .child("You're clear"),
-                )
-                .child(
-                    div()
-                        .text_center()
-                        .text_size(text::BODY)
-                        .line_height(text::LINE_BODY)
-                        .text_color(t.muted)
-                        .child(body),
-                ),
-        );
-        return column(t, "column", col);
-    }
     let mut tier: Option<Tier> = None;
     for (i, c) in cards.iter().enumerate() {
         if tier != Some(c.tier()) {
@@ -160,25 +105,20 @@ pub fn too_large(reason: &str) -> bool {
 
 fn face(c: &Card, selected: bool) -> Face {
     match c {
-        Card::Setup { missing, commands_off } => Face {
+        Card::Setup { missing, count, .. } => Face {
             glyph: Some(IconName::TriangleAlert),
             mark: None,
             kicker: "Setup".into(),
             headline: match missing.first() {
                 Some(c) => format!("Reviews can't run: {}", c.detail),
-                None => "Review commands are off".into(),
+                None => "This daemon is read-only".into(),
             },
             quote: None,
-            sub: missing
-                .first()
-                .and_then(|c| c.fix.as_ref().map(|f| f.to_string()))
-                .or(commands_off.map(String::from))
-                .unwrap_or_default(),
-            meta: match (missing.len(), commands_off) {
-                (0, _) => "Read-only daemon".into(),
-                (n, Some(_)) => format!("{} missing · commands off", n),
-                (n, None) => format!("{} missing", n),
+            sub: match missing.first().and_then(|c| c.fix.as_ref()) {
+                Some(f) => f.as_str().replace('`', ""),
+                None => "It can look, but not start, retry, cancel or post. Start it with --allow-commands.".into(),
             },
+            meta: count.words(),
             action: "Show setup",
         },
         Card::Approve { pr, findings, .. } => Face {
@@ -196,7 +136,7 @@ fn face(c: &Card, selected: bool) -> Face {
                     queue::severity_summary(findings)
                 )
             },
-            meta: format!("Stored for {}", pr.head_sha.short()),
+            meta: format!("Ready at {} · nothing posted yet", pr.head_sha.short()),
             action: "Review post",
         },
         Card::Posting { pr, status, .. } => Face {
@@ -285,13 +225,6 @@ fn card(_: &Shell, t: &Colors, c: &Card, i: usize, selected: bool, cx: &Context<
     let f = face(c, selected);
     let hue = hue_of(t, c);
     let place = c.pr().map(|p| format!("{} #{}", p.repository, p.number)).unwrap_or_default();
-    let ring = BoxShadow {
-        color: t.accent.alpha(0.30),
-        offset: point(px(0.), px(0.)),
-        blur_radius: px(0.),
-        spread_radius: px(3.),
-        inset: false,
-    };
     let lift = BoxShadow {
         color: t.shadow.alpha(0.18),
         offset: point(px(0.), px(1.)),
@@ -315,8 +248,8 @@ fn card(_: &Shell, t: &Colors, c: &Card, i: usize, selected: bool, cx: &Context<
         .cursor_pointer()
         .bg(if selected { t.selected } else { t.surface })
         .border_color(if selected { t.accent.alpha(0.75) } else { t.border })
-        .shadow(if selected { vec![ring, lift] } else { vec![lift] })
-        .hover(|d| d.bg(t.hover).border_color(if selected { t.accent } else { t.border_strong }))
+        .shadow(vec![lift])
+        .hover(|d| d.bg(if selected { t.selected } else { t.hover }))
         .active(|d| d.bg(t.press))
         .on_click(cx.listener(move |s, _: &ClickEvent, _, cx| {
             let cards = queue::cards(&s.model);
@@ -325,19 +258,6 @@ fn card(_: &Shell, t: &Colors, c: &Card, i: usize, selected: bool, cx: &Context<
             if again { s.primary(i, cx) } else { s.select_card(i, cx) }
         }))
         .child(div().absolute().left(px(7.)).top(space::S3).bottom(space::S3).w(px(3.)).rounded(px(2.)).bg(hue))
-        // The selected card is the source of the pane beside it: a pointer on its right edge says so.
-        .when(selected, |d| {
-            d.child(
-                div()
-                    .absolute()
-                    .right(px(-14.))
-                    .top_0()
-                    .bottom_0()
-                    .flex()
-                    .items_center()
-                    .child(div().text_size(px(13.)).text_color(t.accent).child("▶")),
-            )
-        })
         .child(
             div()
                 .flex()
@@ -387,35 +307,79 @@ fn card(_: &Shell, t: &Colors, c: &Card, i: usize, selected: bool, cx: &Context<
                     .child(crate::detail::md_line(t, &f.sub)),
             )
         })
+        // The meta line and the action sit on their own rows, so neither ever cuts the other short.
+        .when(!f.meta.is_empty(), |d| {
+            d.child(div().text_size(text::SMALL).line_height(text::LINE_TIGHT).text_color(t.muted).child(f.meta))
+        })
+        .child(div().flex().justify_end().pt(space::S1).child(button(
+            t,
+            ("card-go", i),
+            f.action,
+            key,
+            if selected { Tone::Primary } else { Tone::Secondary },
+            on(cx, move |s, cx| s.primary(i, cx)),
+        )))
+}
+
+/// The reader is clear: said once, at the head of the done list, only by a window with a live snapshot.
+fn clear(t: &Colors, m: &pr_review_tui::model::Model) -> Div {
+    let reviewed = queue::done(m).len();
+    let running = queue::running(m).len();
+    let body = match (m.domain.prs.is_empty(), running) {
+        (true, _) => {
+            "Tracked PRs show up here as soon as the reviewer picks one up. Start one with pr-review review <url>."
+                .to_string()
+        }
+        (false, 0) => format!(
+            "{} reviewed. New decisions land here: a post to approve, a finding to judge, a failure to retry.",
+            queue::count(reviewed, "PR")
+        ),
+        (false, r) => format!(
+            "{} reviewed, {} running. Findings land here as the verifier keeps them.",
+            queue::count(reviewed, "PR"),
+            queue::count(r, "review")
+        ),
+    };
+    div()
+        .flex()
+        .flex_col()
+        .gap(space::S3)
+        .pt(space::S4)
+        .pb(space::S2)
         .child(
             div()
+                .size(px(40.))
                 .flex()
                 .items_center()
-                .gap(space::S2)
-                .pt(space::S1)
-                .child(div().flex_1().min_w_0().truncate().text_size(text::SMALL).text_color(t.faint).child(f.meta))
-                .child(button(
-                    t,
-                    ("card-go", i),
-                    f.action,
-                    key,
-                    if selected { Tone::Primary } else { Tone::Secondary },
-                    on(cx, move |s, cx| s.primary(i, cx)),
-                )),
+                .justify_center()
+                .rounded(radius::PILL)
+                .bg(t.ok.alpha(0.12))
+                .child(icon(IconName::Check, px(20.), t.ok)),
         )
+        .child(
+            div()
+                .font_family(text::SERIF)
+                .text_size(text::DISPLAY)
+                .font_weight(FontWeight::SEMIBOLD)
+                .child("You're clear"),
+        )
+        .child(div().text_size(text::BODY).line_height(text::LINE_BODY).text_color(t.muted).child(body))
 }
 
 pub fn done_column(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
     let m = &s.model;
     let done = queue::done(m);
     let mut col = div();
+    if queue::cards(m).is_empty() {
+        col = col.child(clear(t, m));
+    }
     if done.is_empty() {
         return column(
             t,
             "column",
             col.child(
                 div()
-                    .pt(px(120.))
+                    .pt(px(48.))
                     .text_center()
                     .text_size(text::BODY)
                     .text_color(t.muted)
@@ -438,7 +402,7 @@ pub fn done_column(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                 .border_color(if selected { t.accent.alpha(0.75) } else { t.border })
                 .bg(if selected { t.selected } else { t.surface })
                 .cursor_pointer()
-                .hover(|d| d.bg(t.hover))
+                .hover(|d| d.bg(if selected { t.selected } else { t.hover }))
                 .active(|d| d.bg(t.press))
                 .on_click(cx.listener(move |s, _: &ClickEvent, _, cx| s.select_pr(id.clone(), cx)))
                 .child(div().pt(px(2.)).child(icon(IconName::CircleCheck, px(15.), t.ok)))

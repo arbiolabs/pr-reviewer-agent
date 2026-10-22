@@ -7,7 +7,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use pr_review_tui::protocol::{Phase, Severity};
 
-use crate::tokens::{Colors, radius, severity_mark, space, text};
+use crate::tokens::{Colors, DISABLED_OUTLINE, radius, severity_mark, space, text};
 
 pub type OnClick = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 
@@ -15,7 +15,10 @@ pub type OnClick = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 pub enum Tone {
     Primary,
     Secondary,
+    /// Outlined in the danger hue: a cancel on a page.
     Danger,
+    /// Filled in the danger hue: the one irreversible act in a sheet.
+    Destructive,
     Ghost,
 }
 
@@ -23,21 +26,28 @@ pub fn icon(name: IconName, size: Pixels, color: Hsla) -> Svg {
     svg().path(name.path()).size(size).flex_none().text_color(color)
 }
 
-/// The 2-point accent ring every focused control wears.
-pub fn ring(t: &Colors) -> BoxShadow {
-    BoxShadow {
-        color: t.accent,
+/// The 2-point accent ring every focused control wears, 2 points off its edge so it never reads as a border.
+pub fn ring(t: &Colors) -> Vec<BoxShadow> {
+    let shadow = |color: Hsla, spread: Pixels| BoxShadow {
+        color,
         offset: point(px(0.), px(0.)),
         blur_radius: px(0.),
-        spread_radius: px(2.),
+        spread_radius: spread,
         inset: false,
-    }
+    };
+    vec![shadow(t.bg, px(2.)), shadow(t.accent, px(4.))]
 }
 
 /// A tab stop that shows the ring when it has the keyboard.
 pub fn focusable<E: InteractiveElement>(el: E, t: &Colors) -> E {
     let ring = ring(t);
-    el.tab_index(0).focus(move |s| s.shadow(vec![ring]))
+    el.tab_index(0).focus(move |s| s.shadow(ring.clone()))
+}
+
+/// Digits that line up: one width per figure, so a column of numbers reads as a column.
+pub fn tabular<E: Styled>(mut el: E) -> E {
+    el.text_style().font_features = Some(FontFeatures(std::sync::Arc::new(vec![("tnum".into(), 1)])));
+    el
 }
 
 /// A tooltip: the name of an icon button, or why a control can't act now.
@@ -46,12 +56,13 @@ pub fn tip<E: StatefulInteractiveElement>(el: E, text: impl Into<SharedString>) 
     el.tooltip(move |w, cx| Tooltip::new(text.clone()).build(w, cx))
 }
 
-/// A key cap: the shortcut beside the action it triggers.
-pub fn keycap(t: &Colors, key: &str, on_fill: bool) -> Div {
-    let (fg, bg, border) = if on_fill {
-        (t.on_accent, t.on_accent.alpha(0.16), t.on_accent.alpha(0.0))
-    } else {
-        (t.muted, t.bg, t.border)
+/// A key cap: the shortcut beside the action it triggers. `on_fill` is the fill's text color on a filled button;
+/// `dim` is a cap on a control that can't act now.
+pub fn keycap(t: &Colors, key: &str, on_fill: Option<Hsla>, dim: bool) -> Div {
+    let (fg, bg, border) = match on_fill {
+        Some(fg) => (fg, fg.alpha(0.16), fg.alpha(0.0)),
+        None if dim => (t.disabled, t.surface.alpha(0.), t.disabled.alpha(DISABLED_OUTLINE)),
+        None => (t.muted, t.bg, t.border),
     };
     div()
         .flex()
@@ -80,12 +91,19 @@ pub fn button(
     tone: Tone,
     on: Option<OnClick>,
 ) -> Stateful<Div> {
-    let (bg, fg, hover, press, border) = match tone {
-        Tone::Primary => (t.accent, t.on_accent, t.accent_hover, t.accent_press, t.accent),
-        Tone::Danger => (t.surface, t.danger, t.danger.alpha(0.10), t.danger.alpha(0.18), t.danger.alpha(0.45)),
-        Tone::Secondary => (t.surface, t.text, t.hover, t.press, t.border_strong),
-        Tone::Ghost => (t.surface.alpha(0.), t.muted, t.hover, t.press, t.surface.alpha(0.)),
+    let (bg, fg, hover, press, border) = match (tone, on.is_some()) {
+        // A control that can't act now is outlined grey, whatever its tone: 3:1 for the outline, AA for its words.
+        (_, false) => {
+            let none = t.surface.alpha(0.);
+            (none, t.disabled, none, none, t.disabled.alpha(DISABLED_OUTLINE))
+        }
+        (Tone::Primary, _) => (t.accent, t.on_accent, t.accent_hover, t.accent_press, t.accent),
+        (Tone::Destructive, _) => (t.danger, t.on_danger, t.danger.alpha(0.88), t.danger.alpha(0.76), t.danger),
+        (Tone::Danger, _) => (t.surface, t.danger, t.danger.alpha(0.10), t.danger.alpha(0.18), t.danger.alpha(0.45)),
+        (Tone::Secondary, _) => (t.surface, t.text, t.hover, t.press, t.border_strong),
+        (Tone::Ghost, _) => (t.surface.alpha(0.), t.muted, t.hover, t.press, t.surface.alpha(0.)),
     };
+    let filled = matches!(tone, Tone::Primary | Tone::Destructive) && on.is_some();
     let b = div()
         .id(id)
         .flex()
@@ -102,12 +120,12 @@ pub fn button(
         .font_weight(FontWeight::MEDIUM)
         .text_color(fg)
         .child(label.to_string())
-        .children(key.map(|k| keycap(t, k, tone == Tone::Primary)));
+        .children(key.map(|k| keycap(t, k, if filled { Some(fg) } else { None }, on.is_none())));
     match on {
         Some(on) => {
             focusable(b, t).cursor_pointer().hover(move |s| s.bg(hover)).active(move |s| s.bg(press)).on_click(on)
         }
-        None => b.opacity(0.45),
+        None => b,
     }
 }
 
@@ -123,7 +141,7 @@ pub fn icon_button(
         div().id(id).flex().flex_none().items_center().justify_center().size(px(32.)).rounded(radius::SM).child(icon(
             glyph,
             px(16.),
-            t.muted,
+            if on.is_some() { t.muted } else { t.disabled },
         ));
     let b = tip(b, name.to_string());
     match on {
@@ -131,7 +149,7 @@ pub fn icon_button(
             let (hover, press) = (t.hover, t.press);
             focusable(b, t).cursor_pointer().hover(move |s| s.bg(hover)).active(move |s| s.bg(press)).on_click(on)
         }
-        None => b.opacity(0.45),
+        None => b,
     }
 }
 
@@ -144,16 +162,18 @@ pub fn chip(t: &Colors, label: impl Into<SharedString>, fg: Hsla) -> Div {
         .h(px(22.))
         .px(space::S2)
         .rounded(radius::SM)
-        .bg(fg.alpha(0.10))
+        .bg(fg.alpha(t.tint))
+        .border_1()
+        .border_color(fg.alpha(t.tint * 2.))
         .text_size(text::SMALL)
         .font_weight(FontWeight::MEDIUM)
-        .text_color(if fg == t.muted { t.muted } else { fg })
+        .text_color(fg)
         .child(label.into())
 }
 
 /// A count in a circle, in its meaning's hue.
-pub fn count_badge(n: usize, hue: Hsla) -> Div {
-    div()
+pub fn count_badge(t: &Colors, n: usize, hue: Hsla) -> Div {
+    tabular(div())
         .flex()
         .flex_none()
         .items_center()
@@ -162,7 +182,9 @@ pub fn count_badge(n: usize, hue: Hsla) -> Div {
         .min_w(px(20.))
         .px(px(6.))
         .rounded(radius::PILL)
-        .bg(hue.alpha(0.16))
+        .bg(hue.alpha(t.tint))
+        .border_1()
+        .border_color(hue.alpha(t.tint * 2.))
         .text_size(text::CAPTION)
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(hue)
@@ -181,7 +203,9 @@ pub fn severity_badge(t: &Colors, s: Severity) -> Div {
         .h(px(22.))
         .px(space::S2)
         .rounded(radius::SM)
-        .bg(t.severity_wash(s))
+        .bg(hue.alpha(t.tint))
+        .border_1()
+        .border_color(hue.alpha(t.tint * 2.))
         .text_size(text::SMALL)
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(hue)
@@ -200,7 +224,9 @@ pub fn severity_count(t: &Colors, s: Severity, n: usize) -> Div {
         .h(px(20.))
         .px(px(6.))
         .rounded(radius::PILL)
-        .bg(hue.alpha(0.14))
+        .bg(hue.alpha(t.tint))
+        .border_1()
+        .border_color(hue.alpha(t.tint * 2.))
         .text_size(text::CAPTION)
         .font_weight(FontWeight::SEMIBOLD)
         .text_color(hue)
@@ -317,7 +343,7 @@ pub fn progress(t: &Colors, at: usize, hue: Hsla, failed: bool, gauge: Gauge) ->
             .when(gauge == Gauge::Full, |d| d.flex_1())
             .when(gauge != Gauge::Full, |d| d.w(w));
         if failed {
-            tick.bg(if i <= at.min(5) { t.danger.alpha(0.45) } else { t.border_strong.alpha(0.5) })
+            tick.bg(if i == at.min(5) { t.danger } else { t.border_strong.alpha(0.5) })
         } else if i < at {
             tick.bg(hue)
         } else if i == at {
@@ -332,7 +358,7 @@ pub fn progress(t: &Colors, at: usize, hue: Hsla, failed: bool, gauge: Gauge) ->
     div().flex().flex_col().gap(space::S2).w_full().child(ticks).child(div().flex().gap(gap).children(
         STEPS.iter().enumerate().map(|(i, (label, _))| {
             let (color, weight) = if failed {
-                (t.faint, FontWeight::NORMAL)
+                if i == at.min(5) { (t.danger, FontWeight::SEMIBOLD) } else { (t.faint, FontWeight::NORMAL) }
             } else if i == at {
                 (t.text, FontWeight::SEMIBOLD)
             } else if i < at {
@@ -343,6 +369,15 @@ pub fn progress(t: &Colors, at: usize, hue: Hsla, failed: bool, gauge: Gauge) ->
             div().flex_1().text_size(text::SMALL).font_weight(weight).text_color(color).child(*label)
         }),
     ))
+}
+
+/// A daemon's reason as a sentence: a capital to start, a full stop to end.
+pub fn sentence(s: &str) -> String {
+    let s = s.trim().trim_end_matches('.');
+    let mut out: String = s.chars().take(1).flat_map(char::to_uppercase).collect();
+    out.push_str(s.get(s.chars().next().map_or(0, char::len_utf8)..).unwrap_or(""));
+    out.push('.');
+    out
 }
 
 /// `14:30` from an ISO timestamp, the wall-clock time the daemon reported.
@@ -369,6 +404,15 @@ pub fn lead(s: &str, n: usize) -> String {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn sentence_capitalizes_and_ends_with_a_full_stop() {
+        assert_eq!(
+            super::sentence("socket directory does not exist: /tmp/x"),
+            "Socket directory does not exist: /tmp/x."
+        );
+        assert_eq!(super::sentence("Already a sentence."), "Already a sentence.");
+    }
+
     #[test]
     fn lead_keeps_whole_sentences() {
         assert_eq!(super::lead("One. Two. Three.", 2), "One. Two.");

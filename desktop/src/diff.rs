@@ -11,7 +11,7 @@ use pr_review_tui::update::{Msg, diff_findings, row_findings};
 use pr_review_tui::view::Hit;
 
 use crate::code::Lexer;
-use crate::detail::{code_row, runs};
+use crate::detail::{action_bar, code_row, runs};
 use crate::kit::{Tone, button, callout, focusable, icon, overline, severity_count};
 use crate::tokens::{Colors, layout, radius, severity_mark, space, text};
 use crate::ui::{Shell, on};
@@ -79,27 +79,29 @@ pub fn view(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                 FileStatus::Binary => "B",
                 _ => "M",
             };
+            let line = || div().h(px(18.)).flex().items_center().flex_none();
             let row = div()
                 .id(("file", i))
                 .flex()
-                .items_center()
+                .items_start()
                 .gap(space::S2)
                 .h(px(44.))
                 .px(space::S2)
+                .py(px(5.))
                 .rounded(radius::SM)
                 .cursor_pointer()
                 .when(selected, |d| d.bg(t.selected))
-                .hover(|d| d.bg(t.hover))
+                .hover(|d| d.bg(if selected { t.selected } else { t.hover }))
                 .active(|d| d.bg(t.press))
                 .on_click(
                     cx.listener(move |s, _: &ClickEvent, _, cx| s.send(Msg::Pick(Hit::DiffFile(path.clone())), cx)),
                 )
                 .child(
-                    div()
+                    line()
                         .w(px(14.))
                         .text_size(text::CAPTION)
                         .font_weight(FontWeight::BOLD)
-                        .text_color(t.faint)
+                        .text_color(t.muted)
                         .child(letter),
                 )
                 .child(
@@ -112,15 +114,16 @@ pub fn view(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                             div()
                                 .truncate()
                                 .text_size(text::SMALL)
+                                .line_height(px(18.))
                                 .font_weight(FontWeight::MEDIUM)
                                 .text_color(t.text)
                                 .child(name.to_string()),
                         )
-                        .child(div().truncate().text_size(text::CAPTION).text_color(t.faint).child(dir.to_string())),
+                        .child(div().truncate().text_size(text::CAPTION).text_color(t.muted).child(dir.to_string())),
                 )
-                .children(worst.map(|w| severity_count(t, w, here.len())))
-                .child(div().text_size(text::CAPTION).text_color(t.add_fg).child(format!("+{}", f.additions)))
-                .child(div().text_size(text::CAPTION).text_color(t.del_fg).child(format!("−{}", f.deletions)));
+                .children(worst.map(|w| line().child(severity_count(t, w, here.len()))))
+                .child(line().text_size(text::CAPTION).text_color(t.add_fg).child(format!("+{}", f.additions)))
+                .child(line().text_size(text::CAPTION).text_color(t.del_fg).child(format!("−{}", f.deletions)));
             focusable(row, t)
         }));
     let Some(file) = d.file() else { return shell.child(files) };
@@ -135,23 +138,33 @@ pub fn view(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         }
     }
     let in_file: Vec<_> = anchored.iter().filter(|f| f.file == file.path).collect();
+    let hunk_header = |h: &str, first: bool| {
+        div()
+            .flex()
+            .items_center()
+            .h(px(26.))
+            .mt(if first { px(0.) } else { space::S2 })
+            .px(space::S4)
+            .bg(t.accent.alpha(0.06))
+            .text_size(px(11.))
+            .text_color(t.muted)
+            .child(h.to_string())
+    };
     let mut code =
         div().flex().flex_col().w_full().font_family(text::MONO).text_size(text::CODE).py(space::S2).pb(space::S8);
+    // The window opens inside a hunk: its header still leads, so the reader knows where these rows sit.
+    if !matches!(rows.get(from), Some(DiffRow::Header(_)))
+        && let Some(DiffRow::Header(h)) = rows[..from].iter().rev().find(|r| matches!(r, DiffRow::Header(_)))
+    {
+        code = code.child(hunk_header(h.header.as_str(), true));
+    }
     for (i, row) in rows.iter().enumerate().skip(from).take(SPAN) {
         let cursor = i == d.cursor;
         let here = row_findings(&anchored, file, row);
         let line: Div = match row {
             DiffRow::Header(h) => {
                 lx = Lexer::for_path(file.path.as_str());
-                div()
-                    .flex()
-                    .items_center()
-                    .h(px(26.))
-                    .mt(if i > from { space::S2 } else { px(0.) })
-                    .px(space::S4)
-                    .bg(t.accent.alpha(0.06))
-                    .text_color(t.muted)
-                    .child(h.header.to_string())
+                hunk_header(h.header.as_str(), i == from)
             }
             DiffRow::Line(l) => {
                 let (wash, sign, sign_fg) = match l.kind {
@@ -161,6 +174,7 @@ pub fn view(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                 };
                 let worst = here.first().map(|f| f.severity);
                 let wash = worst.map(|s| t.severity_wash(s)).or(wash);
+                let mark = worst.map(|s| t.severity(s)).or(cursor.then_some(t.accent));
                 let mut block = div().flex().flex_col();
                 for (k, (run, cont)) in runs(t, &mut lx, l.text.as_str(), layout::COLS_DIFF).into_iter().enumerate() {
                     block = block.child(
@@ -174,14 +188,7 @@ pub fn view(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                             } else {
                                 " "
                             }))
-                            .child(div().flex_1().min_w_0().child(code_row(
-                                t,
-                                l.new,
-                                run,
-                                cont,
-                                wash,
-                                worst.map(|s| t.severity(s)),
-                            ))),
+                            .child(div().flex_1().min_w_0().child(code_row(t, l.new, run, cont, wash, mark))),
                     );
                 }
                 block
@@ -195,10 +202,7 @@ pub fn view(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                 .cursor_pointer()
                 .hover(|d| d.bg(t.hover))
                 .on_click(cx.listener(move |s, _: &ClickEvent, _, cx| s.send(Msg::Pick(Hit::DiffRow(id)), cx)))
-                .child(line)
-                .when(cursor, |d| {
-                    d.child(div().absolute().inset_0().border_1().border_color(t.accent).rounded(px(2.)))
-                }),
+                .child(line),
         );
         for f in here {
             let hue = t.severity(f.severity);
@@ -215,13 +219,20 @@ pub fn view(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                     .p(space::S3)
                     .rounded(radius::LG)
                     .border_1()
-                    .border_color(hue.alpha(0.45))
+                    .border_color(hue.alpha(0.7))
                     .bg(t.surface)
+                    .shadow(vec![BoxShadow {
+                        color: t.shadow.alpha(0.18),
+                        offset: point(px(0.), px(1.)),
+                        blur_radius: px(2.),
+                        spread_radius: px(0.),
+                        inset: false,
+                    }])
                     .font_family(text::UI)
                     .min_w_0()
                     .overflow_hidden()
                     .cursor_pointer()
-                    .hover(|d| d.border_color(hue).bg(t.hover))
+                    .hover(|d| d.bg(t.hover))
                     .active(|d| d.bg(t.press))
                     .on_click(cx.listener(move |s, _: &ClickEvent, _, cx| {
                         if s.model.ui.selected_finding.as_ref() != Some(&fid) {
@@ -288,19 +299,11 @@ pub fn view(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         .child(div().text_size(text::SMALL).text_color(t.add_fg).child(format!("+{}", file.additions)))
         .child(div().text_size(text::SMALL).text_color(t.del_fg).child(format!("−{}", file.deletions)))
         .child(div().flex_1())
-        .child(div().text_size(text::SMALL).text_color(t.faint).child(match (stop, in_file.len()) {
+        .child(div().text_size(text::SMALL).text_color(t.muted).child(match (stop, in_file.len()) {
             (_, 0) => "No findings in this file".to_string(),
-            (Some(i), n) => format!("Finding {} of {n} here · n / N walk", i + 1),
-            (None, n) => format!("{n} findings here · n / N walk"),
-        }))
-        .child(button(
-            t,
-            "d-next",
-            "Next finding",
-            Some("N"),
-            Tone::Secondary,
-            on(cx, |s, cx| s.act(Action::NextFinding, cx)),
-        ));
+            (Some(i), n) => format!("Finding {} of {n} here", i + 1),
+            (None, n) => format!("{n} findings here"),
+        }));
     let pane = div().flex().flex_col().flex_1().min_w_0().child(header).child(
         div()
             .id("diff-rows")
@@ -309,6 +312,9 @@ pub fn view(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
             .overflow_hidden()
             .on_scroll_wheel(cx.listener(|s, e: &ScrollWheelEvent, w, cx| {
                 let dy = e.delta.pixel_delta(w.line_height()).y;
+                if dy == px(0.) {
+                    return;
+                }
                 let a = if dy < px(0.) { Action::Down } else { Action::Up };
                 for _ in 0..3 {
                     s.act(a, cx);
@@ -324,5 +330,21 @@ pub fn view(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                     .child("This file is truncated: the daemon sent part of it.")
             })),
     );
-    shell.child(files).child(pane)
+    let bar = div()
+        .flex()
+        .items_center()
+        .gap(space::S2)
+        .flex_1()
+        .child(button(t, "d-back", "Back", Some("esc"), Tone::Secondary, on(cx, |s, cx| s.act(Action::Back, cx))))
+        .child(button(
+            t,
+            "d-next",
+            "Next finding",
+            Some("N"),
+            Tone::Secondary,
+            (!in_file.is_empty()).then(|| crate::ui::click(cx, |s, cx| s.act(Action::NextFinding, cx))),
+        ))
+        .child(div().flex_1())
+        .child(button(t, "d-gh", "Open on GitHub", Some("⌘⇧O"), Tone::Ghost, on(cx, |s, cx| s.open_github(cx))));
+    div().flex().flex_col().flex_1().min_h_0().min_w_0().child(shell.child(files).child(pane)).child(action_bar(t, bar))
 }

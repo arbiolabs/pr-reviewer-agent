@@ -12,7 +12,7 @@ use crate::detail::*;
 use crate::kit::{OnClick, Tone, button, callout, icon, summary};
 use crate::queue;
 use crate::tokens::{Colors, layout, radius, space, text};
-use crate::ui::{Shell, on};
+use crate::ui::{Overlay, Shell, on};
 
 const MARKER: &str = "<!-- durable-review:";
 
@@ -107,7 +107,7 @@ pub fn publication(
         .children(url.as_ref().filter(|_| done).map(|u| {
             div().font_family(text::MONO).text_size(text::CAPTION).text_color(t.faint).truncate().child(u.clone())
         }));
-    let target = pr.map_or("this PR".to_string(), |p| format!("{}#{}", p.repository, p.number));
+    let target = pr.map_or("this PR".to_string(), |p| format!("{} #{}", p.repository, p.number));
     let mut body = div().flex().flex_col().gap(space::S6);
     let p = match preview {
         Preview::Ready(p) => p,
@@ -144,12 +144,7 @@ pub fn publication(
     };
     let n = p.comments.len();
     let sentence = if done {
-        format!(
-            "Posted to {target} as {} at {}: one review with {}.",
-            who(m),
-            p.head_sha.short(),
-            queue::count(n, "inline comment")
-        )
+        format!("As {} at {}: one review with {}.", who(m), p.head_sha.short(), queue::count(n, "inline comment"))
     } else {
         format!(
             "One review with {}, posted as {}, at {}. It posts as {}, and only when you choose Post.",
@@ -225,27 +220,28 @@ pub fn publication(
         let mut content = div().flex().flex_col().gap(space::S3);
         if let Some(lines) = context {
             let mut lx = Lexer::for_path(cm.path.as_str());
-            let mut rows = div()
-                .rounded(radius::SM)
-                .border_1()
-                .border_color(t.border)
-                .bg(t.code_bg)
-                .py(space::S1)
-                .font_family(text::MONO)
-                .text_size(text::CODE);
+            let mut rows = div().py(space::S1).font_family(text::MONO).text_size(text::CODE);
+            let long = lines.iter().any(|(_, l, _)| l.chars().count() > layout::COLS_WIDE);
             for (n, l, hit) in lines {
-                for (run, cont) in runs(t, &mut lx, &l, layout::COLS_WIDE) {
-                    rows = rows.child(code_row(
-                        t,
-                        Some(n),
-                        run,
-                        cont,
-                        hit.then(|| t.accent.alpha(0.12)),
-                        hit.then_some(t.accent),
-                    ));
-                }
+                let run = one_run(t, &mut lx, &l);
+                rows = rows.child(code_row(
+                    t,
+                    Some(n),
+                    run,
+                    false,
+                    hit.then(|| t.accent.alpha(0.12)),
+                    hit.then_some(t.accent),
+                ));
             }
-            content = content.child(rows);
+            content = content.child(
+                div()
+                    .rounded(radius::SM)
+                    .border_1()
+                    .border_color(t.border)
+                    .bg(t.code_bg)
+                    .overflow_hidden()
+                    .child(code_scroll(t, SharedString::from(format!("pc-{}-{}", cm.path, cm.line)), rows, long)),
+            );
         }
         content = content.child(markdown(t, cm.body.as_str(), raw));
         comments = comments.child(frame(
@@ -269,22 +265,18 @@ pub fn publication(
     }
     body = body.child(section(t, &format!("Inline comments · {n}"), comments));
 
-    let ready = can_confirm(m);
+    // While the sheet asks, the page's own Post steps back, so one primary is on screen.
+    let ready = can_confirm(m) && !matches!(s.overlay, Some(Overlay::ConfirmPost));
     let mut footer = div().flex().items_center().gap(space::S2).flex_1();
     footer = if done {
-        footer
-            .child(icon(IconName::CircleCheck, px(15.), t.ok))
-            .child(div().flex_1().text_size(text::BODY).text_color(t.text).child("Posted to GitHub."))
-            .child(button(
-                t,
-                "p-view",
-                "View on GitHub",
-                Some("⌘O"),
-                Tone::Primary,
-                url.map(|_| -> OnClick {
-                    Box::new(cx.listener(|s, _: &ClickEvent, _, cx| s.act(Action::OpenUrl, cx)))
-                }),
-            ))
+        footer.child(div().flex_1()).child(button(
+            t,
+            "p-view",
+            "View on GitHub",
+            Some("⌘⇧O"),
+            Tone::Primary,
+            url.map(|_| -> OnClick { Box::new(cx.listener(|s, _: &ClickEvent, _, cx| s.act(Action::OpenUrl, cx))) }),
+        ))
     } else {
         footer
             .child(icon(IconName::TriangleAlert, px(14.), t.faint))
@@ -318,9 +310,8 @@ fn state_callout(
     posted: Option<PublicationStatus>,
 ) -> Option<Div> {
     Some(match (posted, publish) {
-        (Some(PublicationStatus::Published), _) => {
-            callout(t, t.ok, IconName::CircleCheck, "GitHub has this review", None)
-        }
+        // The kicker, the title and the sentence already say it posted.
+        (Some(PublicationStatus::Published), _) => return None,
         (Some(PublicationStatus::Publishing), _) => {
             callout(t, t.running, IconName::LoaderCircle, "Posting to GitHub…", None)
         }

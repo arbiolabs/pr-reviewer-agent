@@ -230,6 +230,13 @@ fn run_app(
         cx.set_menus(ui::menus());
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds::centered(None, size(px(w), px(h)), cx))),
+            // The sidebar and the title bar let a blur of the desktop through; a snapshot stays opaque, since its
+            // pixels must not depend on what is behind the window.
+            window_background: if view.snapshot {
+                WindowBackgroundAppearance::Opaque
+            } else {
+                WindowBackgroundAppearance::Blurred
+            },
             titlebar: Some(TitlebarOptions {
                 title: Some("pr-review".into()),
                 appears_transparent: true,

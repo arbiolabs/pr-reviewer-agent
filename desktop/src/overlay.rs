@@ -8,6 +8,7 @@ use pr_review_tui::keymap::{Action, Mutation};
 use pr_review_tui::model::{ConfirmState, InputPurpose, Modal, Model, Preview, Screen, fuzzy};
 use pr_review_tui::protocol::{Command, PrId};
 use pr_review_tui::update::{can_confirm, can_mutate, write_block};
+use std::ops::Range;
 
 use crate::detail::who;
 use crate::kit::{Tone, button, icon, keycap, overline};
@@ -99,7 +100,7 @@ fn entries(s: &Shell) -> Vec<Entry> {
     out.push(Entry {
         group: "Review",
         title: format!("Open{n} on GitHub"),
-        key: Some("⌘O"),
+        key: Some("⌘⇧O"),
         blocked: m.selected_pr().is_none().then(|| "no PR is selected".to_string()),
         run: Run::GitHub,
     });
@@ -170,6 +171,32 @@ pub fn score(query: &str, title: &str) -> Option<u8> {
         return Some(2);
     }
     fuzzy(query, title).then_some(3)
+}
+
+/// The characters of `title` that `query` lit up, as byte ranges: each query character, in order, where it
+/// continues the run before it, else at the next word start, else at its next place at all. Empty when the query
+/// is empty or did not match the title itself.
+pub fn matched(query: &str, title: &str) -> Vec<Range<usize>> {
+    let mut out: Vec<Range<usize>> = Vec::new();
+    let mut from = 0;
+    for q in query.chars().filter(|c| !c.is_whitespace()).flat_map(char::to_lowercase) {
+        let is = |c: char| c.to_lowercase().eq(std::iter::once(q));
+        let rest: Vec<(usize, char)> = title[from..].char_indices().collect();
+        let word_start = |k: usize| k == 0 && from == 0 || !title[..from + rest[k].0].ends_with(char::is_alphanumeric);
+        let found = rest
+            .first()
+            .filter(|(_, c)| is(*c))
+            .or_else(|| rest.iter().enumerate().find(|(k, (_, c))| is(*c) && word_start(*k)).map(|(_, x)| x))
+            .or_else(|| rest.iter().find(|(_, c)| is(*c)));
+        let Some(&(i, c)) = found else { return Vec::new() };
+        let (a, b) = (from + i, from + i + c.len_utf8());
+        match out.last_mut() {
+            Some(last) if last.end == a => last.end = b,
+            _ => out.push(a..b),
+        }
+        from = b;
+    }
+    out
 }
 
 /// The entries `query` matches, best first. Groups stay together: a group sorts by its best entry, and its entries
@@ -362,6 +389,16 @@ fn palette(s: &Shell, t: &Colors, query: &str, selected: usize, cx: &Context<She
         let on_it = i == selected;
         let blocked = e.blocked.is_some();
         let r = e.run.clone();
+        // A row that can't run is dimmed to about half, as one opaque color that still meets AA.
+        let fg = match (blocked, on_it) {
+            (true, _) => t.disabled,
+            (false, true) => t.on_accent,
+            (false, false) => t.text,
+        };
+        let hits: Vec<_> = matched(query, &e.title)
+            .into_iter()
+            .map(|r| (r, HighlightStyle { font_weight: Some(FontWeight::BOLD), ..Default::default() }))
+            .collect();
         list = list.child(
             div()
                 .id(("pal", i))
@@ -372,34 +409,24 @@ fn palette(s: &Shell, t: &Colors, query: &str, selected: usize, cx: &Context<She
                 .px(space::S3)
                 .rounded(radius::SM)
                 .cursor_pointer()
-                .when(on_it, |d| {
-                    d.bg(if blocked { t.selected } else { t.accent }).text_color(if blocked {
-                        t.text
-                    } else {
-                        t.on_accent
-                    })
-                })
+                .text_color(fg)
+                .when(on_it, |d| d.bg(if blocked { t.selected } else { t.accent }))
                 .when(!on_it, |d| d.hover(|d| d.bg(t.hover)))
-                .when(blocked, |d| d.opacity(0.6))
                 .when(!blocked, |d| d.on_click(cx.listener(move |s, _: &ClickEvent, _, cx| run(s, r.clone(), cx))))
-                .child(div().flex_1().min_w_0().truncate().text_size(text::BODY).child(e.title))
-                .children(e.blocked.map(|why| {
+                .child(
                     div()
-                        .flex_none()
-                        .text_size(text::CAPTION)
-                        .text_color(if on_it { t.muted } else { t.faint })
-                        .child(why)
-                }))
+                        .flex_1()
+                        .min_w_0()
+                        .truncate()
+                        .text_size(text::BODY)
+                        .child(StyledText::new(e.title).with_highlights(hits)),
+                )
+                .children(e.blocked.map(|why| div().flex_none().text_size(text::CAPTION).child(why)))
                 .child(match e.key {
-                    Some(k) => keycap(t, k, on_it && !blocked),
-                    None => div()
-                        .w(px(18.))
-                        .text_center()
-                        .text_size(text::CAPTION)
-                        .text_color(if on_it && !blocked { t.on_accent.alpha(0.6) } else { t.faint })
-                        .child("—"),
+                    Some(k) => keycap(t, k, (on_it && !blocked).then_some(t.on_accent), blocked),
+                    None => div().w(px(18.)),
                 })
-                .when(on_it && !blocked, |d| d.child(keycap(t, "⏎", true))),
+                .when(on_it && !blocked, |d| d.child(keycap(t, "⏎", Some(t.on_accent), false))),
         );
     }
     scrim(t, "palette-scrim", cx, true)
@@ -435,7 +462,7 @@ fn palette(s: &Shell, t: &Colors, query: &str, selected: usize, cx: &Context<She
                                 })
                                 .child(div().w(px(2.)).h(px(18.)).ml(px(1.)).bg(t.accent)),
                         )
-                        .child(keycap(t, "esc", false)),
+                        .child(keycap(t, "esc", None, false)),
                 )
                 .child(list)
                 .child(
@@ -451,7 +478,7 @@ fn palette(s: &Shell, t: &Colors, query: &str, selected: usize, cx: &Context<She
                         .text_size(text::CAPTION)
                         .text_color(t.faint)
                         .children([("↑↓", "choose"), ("⏎", "run"), ("esc", "close")].map(|(k, what)| {
-                            div().flex().items_center().gap(px(6.)).child(keycap(t, k, false)).child(what)
+                            div().flex().items_center().gap(px(6.)).child(keycap(t, k, None, false)).child(what)
                         }))
                         .child(div().flex_1())
                         .child("dimmed actions say why they can't run"),
@@ -472,7 +499,7 @@ fn confirm(
     let (verb, tone, glyph, hue) = match command {
         Command::Start(_) => ("Start review", Tone::Primary, IconName::Play, t.accent),
         Command::Retry(_) => ("Retry", Tone::Primary, IconName::RotateCw, t.accent),
-        Command::Cancel(_) => ("Cancel review", Tone::Danger, IconName::CircleX, t.danger),
+        Command::Cancel(_) => ("Cancel review", Tone::Destructive, IconName::CircleX, t.danger),
         Command::SelectAccount(_) => ("Use account", Tone::Primary, IconName::User, t.accent),
         _ => ("Confirm", Tone::Primary, IconName::Check, t.accent),
     };
@@ -550,7 +577,7 @@ fn confirm(
                                 t,
                                 "c-yes",
                                 verb,
-                                Some("⏎"),
+                                Some(if keep { "⌘⏎" } else { "⏎" }),
                                 tone,
                                 ready.then(|| -> crate::kit::OnClick {
                                     Box::new(cx.listener(|s, _: &ClickEvent, _, cx| s.act(Action::Confirm, cx)))
@@ -562,14 +589,15 @@ fn confirm(
         .into_any_element()
 }
 
-/// The one irreversible act asks once more, naming exactly what goes out. Cancel is the default; only ⌘⏎ posts.
+/// The one irreversible act asks once more, naming exactly what goes out. Cancel is the default, on esc and on ⏎;
+/// only ⌘⏎ posts.
 fn confirm_post(s: &Shell, t: &Colors, cx: &Context<Shell>) -> AnyElement {
     let m = &s.model;
     let Some(Modal::Publication { run_id, preview: Preview::Ready(p), .. }) = m.top_modal() else {
         return div().into_any_element();
     };
     let pr = m.domain.runs.get(run_id).and_then(|r| m.domain.prs.get(&r.pr_id));
-    let target = pr.map_or("this PR".to_string(), |p| format!("{}#{}", p.repository, p.number));
+    let target = pr.map_or("this PR".to_string(), |p| format!("{} #{}", p.repository, p.number));
     let fact = |label: &str, value: String| {
         div()
             .flex()
@@ -636,7 +664,7 @@ fn confirm_post(s: &Shell, t: &Colors, cx: &Context<Shell>) -> AnyElement {
                             t,
                             "post-no",
                             "Cancel",
-                            Some("⏎"),
+                            Some("esc"),
                             Tone::Secondary,
                             on(cx, |s, cx| {
                                 s.overlay = None;
@@ -648,7 +676,7 @@ fn confirm_post(s: &Shell, t: &Colors, cx: &Context<Shell>) -> AnyElement {
                             "post-yes",
                             "Post to GitHub",
                             Some("⌘⏎"),
-                            Tone::Primary,
+                            Tone::Destructive,
                             on(cx, |s, cx| s.confirm_post(cx)),
                         )),
                 ),
@@ -679,7 +707,7 @@ fn input(t: &Colors, purpose: InputPurpose, buffer: &str, cx: &Context<Shell>) -
                     .child(div().text_size(text::SMALL).text_color(t.muted).child(label))
                     .child(div().flex_1().font_family(text::MONO).text_size(text::LEAD).child(buffer.to_string()))
                     .child(div().w(px(2.)).h(px(18.)).bg(t.accent))
-                    .child(keycap(t, "⏎", false)),
+                    .child(keycap(t, "⏎", None, false)),
             ),
         )
         .into_any_element()
@@ -702,7 +730,7 @@ const KEYS: &[(&str, &[(&str, &str)])] = &[
         "Decide",
         &[
             ("P", "open the proof of what would post"),
-            ("⌘⏎", "post the proof, after one confirmation"),
+            ("⌘⏎", "post the proof, or cancel a review, after its sheet"),
             ("S", "start a review (no sheet)"),
             ("⇧R", "retry a failed review (no sheet)"),
             ("C", "cancel a review (asks first)"),
@@ -714,7 +742,7 @@ const KEYS: &[(&str, &[(&str, &str)])] = &[
             ("⌘K  /", "command palette"),
             ("⌘1  ⌘2", "needs you, done"),
             ("⌘,", "setup and accounts"),
-            ("⌘O", "open on GitHub"),
+            ("⌘⇧O", "open on GitHub"),
             ("⌘R", "refresh"),
             ("⌘W", "close the window"),
             ("?", "this sheet"),
@@ -729,7 +757,7 @@ fn keys(t: &Colors, cx: &Context<Shell>, reducer: bool) -> AnyElement {
                 .flex()
                 .items_center()
                 .gap(space::S3)
-                .child(div().w(px(64.)).flex().child(keycap(t, k, false)))
+                .child(div().w(px(64.)).flex().child(keycap(t, k, None, false)))
                 .child(div().text_size(text::SMALL).text_color(t.muted).child(what.to_string()))
         }))
     }));
@@ -751,6 +779,14 @@ fn keys(t: &Colors, cx: &Context<Shell>, reducer: bool) -> AnyElement {
 #[cfg(test)]
 mod tests {
     use super::score;
+
+    #[test]
+    fn matched_lights_the_query_in_order() {
+        assert_eq!(super::matched("re", "Review and post #1291"), vec![0..2]);
+        assert_eq!(super::matched("rtf", "Retry the failed review"), [0..1, 6..7, 10..11]);
+        assert_eq!(super::matched("zz", "Retry"), Vec::<std::ops::Range<usize>>::new());
+        assert_eq!(super::matched("", "Retry"), Vec::<std::ops::Range<usize>>::new());
+    }
 
     #[test]
     fn prefixes_and_initials_rank_before_subsequences() {
