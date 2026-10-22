@@ -121,7 +121,7 @@ pub fn light() -> Colors {
         sidebar: c(0xECEAE4),
         surface: c(0xFFFFFF),
         raised: c(0xFBFAF7),
-        selected: c(0xEEF0FF),
+        selected: c(0xE9E7E0),
         border: c(0xE1DED6),
         border_strong: c(0xCCC7BC),
         text: c(0x1A1E24),

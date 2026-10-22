@@ -93,7 +93,7 @@ pub fn live(s: &Shell, t: &Colors, pr: &Pr, run: &Run, cx: &Context<Shell>) -> D
         }),
     );
     let legend = div().flex().items_center().gap(space::S4).text_size(text::CAPTION).text_color(t.muted).children(
-        [("Phase", 14., t.running), ("Finding", 11., t.high), ("Run", 14., t.muted), ("Tool call", 7., t.faint)].map(
+        [("Phase", 14., t.running), ("Finding", 11., t.high), ("Run", 14., t.accent), ("Tool call", 7., t.muted)].map(
             |(word, h, c)| {
                 div().flex().items_end().gap(px(5.)).child(div().w(px(3.)).h(px(h)).rounded(px(1.)).bg(c)).child(word)
             },
@@ -265,8 +265,8 @@ fn tick_kind(t: &Colors, a: &Activity) -> (f32, Hsla) {
     match &a.kind {
         ActivityKind::Phase { .. } => (26., t.running),
         ActivityKind::Finding { severity, .. } => (20., t.severity(*severity)),
-        ActivityKind::Run { .. } => (26., t.muted),
-        ActivityKind::Tool { .. } => (12., t.faint),
+        ActivityKind::Run { .. } => (26., t.accent),
+        ActivityKind::Tool { .. } => (12., t.muted),
     }
 }
 

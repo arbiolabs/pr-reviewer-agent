@@ -269,13 +269,21 @@ fn card(s: &Shell, t: &Colors, c: &Card, i: usize, selected: bool, cx: &Context<
         command.filter(|_| queue::read_only(&s.model)).map(|mu| crate::detail::why_not(&s.model, mu, f.action));
     let hue = hue_of(t, c);
     let place = c.pr().map(|p| format!("{} #{}", p.repository, p.number)).unwrap_or_default();
-    let lift = BoxShadow {
-        color: t.shadow.alpha(0.18),
-        offset: point(px(0.), px(1.)),
-        blur_radius: px(2.),
+    // Weight follows the tier, so the order reads without color: a decision now stands off the column on a stronger
+    // edge and a deeper shadow, the middle tiers sit on it, and "when you have a minute" lies flat in the column's ink.
+    let lift = |alpha: f32, y: f32, blur: f32| BoxShadow {
+        color: t.shadow.alpha(alpha),
+        offset: point(px(0.), px(y)),
+        blur_radius: px(blur),
         spread_radius: px(0.),
         inset: false,
     };
+    let (base, edge, shadow) = match c.tier() {
+        Tier::Setup | Tier::Decide => (t.surface, t.border_strong, vec![lift(0.28, 4., 12.), lift(0.2, 1., 2.)]),
+        Tier::Blocking | Tier::Unblock => (t.surface, t.border, vec![lift(0.18, 1., 2.)]),
+        Tier::Later => (t.bg, t.border, vec![]),
+    };
+    let base = if selected { t.selected } else { base };
     let key = if selected { Some("⏎") } else { None };
     div()
         .id(("card", i))
@@ -290,10 +298,10 @@ fn card(s: &Shell, t: &Colors, c: &Card, i: usize, selected: bool, cx: &Context<
         .rounded(radius::LG)
         .border_1()
         .cursor_pointer()
-        .bg(if selected { t.selected } else { t.surface })
-        .border_color(if selected { t.accent.alpha(0.75) } else { t.border })
-        .shadow(vec![lift])
-        .hover(move |d| d.bg(crate::kit::lift(t, if selected { t.selected } else { t.surface })))
+        .bg(base)
+        .border_color(if selected { t.accent.alpha(0.75) } else { edge })
+        .shadow(shadow)
+        .hover(move |d| d.bg(crate::kit::lift(t, base)))
         .active(|d| d.bg(t.press))
         .on_click(cx.listener(move |s, _: &ClickEvent, _, cx| {
             let cards = queue::cards(&s.model);
@@ -473,7 +481,8 @@ pub fn done_column(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                             div()
                                 .text_size(text::BODY)
                                 .font_weight(FontWeight::SEMIBOLD)
-                                .truncate()
+                                .text_ellipsis()
+                                .line_clamp(2)
                                 .child(format!("#{} {}", p.number, p.title)),
                         )
                         .child(div().text_size(text::SMALL).text_color(t.muted).child(format!(

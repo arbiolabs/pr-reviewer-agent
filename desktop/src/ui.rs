@@ -764,6 +764,46 @@ fn titlebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                 .child(div().flex_none().text_size(text::LEAD).font_weight(FontWeight::SEMIBOLD).child(title))
                 .child(div().min_w_0().truncate().text_size(text::SMALL).text_color(t.muted).child(sub)),
         )
+        // The live strip belongs to the home; on a deep page the title bar keeps the one fact: reviews are at work.
+        .children({
+            let running = queue::running(m);
+            (deep(m) && !running.is_empty()).then(|| {
+                let first = running[0].0.id.clone();
+                let names =
+                    running.iter().map(|(p, r)| format!("#{} {}", p.number, phase_word(r.phase))).collect::<Vec<_>>();
+                let face = div()
+                    .id("live-face")
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .gap(space::S2)
+                    .h(px(24.))
+                    .px(space::S2)
+                    .rounded(radius::PILL)
+                    .border_1()
+                    .border_color(t.running.alpha(0.5))
+                    .bg(t.running.alpha(t.tint))
+                    .hover(move |d| d.bg(t.running.alpha(t.tint * 2.)))
+                    .child(live_dot(t, s.still, "title-live"))
+                    .child(
+                        div()
+                            .text_size(text::SMALL)
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(t.running)
+                            .child(format!("{} running", running.len())),
+                    );
+                tip(
+                    focusable(
+                        "live",
+                        face,
+                        t,
+                        radius::PILL,
+                        Box::new(cx.listener(move |s, _: &ClickEvent, _, cx| s.select_pr(first.clone(), cx))),
+                    ),
+                    format!("Watch live: {}", names.join(", ")),
+                )
+            })
+        })
         .when(read_only, |d| {
             d.child(tip(
                 div()
@@ -782,8 +822,10 @@ fn titlebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(t.warn)
                     .child(icon(IconName::Lock, px(12.), t.warn))
-                    .child("Read-only"),
-                crate::setup::read_only_sentence(m),
+                    .child("Read-only")
+                    .cursor_pointer()
+                    .on_click(cx.listener(|s, _: &ClickEvent, _, cx| s.act(Action::Goto(Screen::Settings), cx))),
+                format!("{} Click for setup.", crate::setup::read_only_sentence(m)),
             ))
         })
         .child(tip(
@@ -1020,15 +1062,19 @@ fn pr_row(s: &Shell, t: &Colors, pr: &Pr, state: RowState, on: bool, cx: &Contex
                             .children(badge),
                     ),
             );
-    focusable(
-        SharedString::from(format!("nav-pr-{}", pr.number)),
-        row,
-        t,
-        radius::SM,
-        Box::new(cx.listener(move |s, _: &ClickEvent, _, cx| {
-            s.done_tab = queue::done(&s.model).iter().any(|(p, _)| p.id == id);
-            s.select_pr(id.clone(), cx)
-        })),
+    let full = pr.title.to_string();
+    tip(
+        focusable(
+            SharedString::from(format!("nav-pr-{}", pr.number)),
+            row,
+            t,
+            radius::SM,
+            Box::new(cx.listener(move |s, _: &ClickEvent, _, cx| {
+                s.done_tab = queue::done(&s.model).iter().any(|(p, _)| p.id == id);
+                s.select_pr(id.clone(), cx)
+            })),
+        ),
+        full,
     )
 }
 
@@ -1130,6 +1176,9 @@ pub fn live_dot(t: &Colors, still: bool, id: impl Into<ElementId>) -> AnyElement
 }
 
 /// The live strip: every review at work, its phase and progress, one click from its activity.
+/// The pills the strip shows before it folds the rest under "+N running".
+const STRIP_PILLS: usize = 2;
+
 fn strip(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
     let m = &s.model;
     let running = queue::running(m);
@@ -1154,7 +1203,25 @@ fn strip(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
     }
     row.min_w_0()
         .child(div().pr(space::S1).child(overline(t, "Live")))
-        .children(running.into_iter().map(|(p, r)| pill(s, t, p, r, cx)))
+        // Two pills at most, each capped, so a title never eats the row; the rest wait behind "+N running".
+        .children(running.iter().take(STRIP_PILLS).map(|(p, r)| pill(s, t, p, r, cx)))
+        .when(running.len() > STRIP_PILLS, |d| {
+            let more = running.len() - STRIP_PILLS;
+            d.child(tip(
+                button(
+                    t,
+                    "strip-more",
+                    &format!("+{more} running"),
+                    None,
+                    Tone::Secondary,
+                    on(cx, |s, cx| {
+                        s.overlay = Some(Overlay::Palette { query: "watch".into(), selected: 0 });
+                        cx.notify();
+                    }),
+                ),
+                "Every review at work, in the palette",
+            ))
+        })
 }
 
 /// The strip's place while the first snapshot loads, so nothing jumps when it lands.
@@ -1210,7 +1277,8 @@ fn pill(s: &Shell, t: &Colors, p: &Pr, r: &Run, cx: &Context<Shell>) -> Stateful
             radius::PILL,
             Box::new(cx.listener(move |s, _: &ClickEvent, _, cx| s.select_pr(id.clone(), cx))),
         )
-        .min_w_0(),
+        .min_w_0()
+        .max_w(px(520.)),
         format!("Watch #{} live", p.number),
     )
 }

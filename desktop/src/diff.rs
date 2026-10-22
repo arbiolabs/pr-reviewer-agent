@@ -259,7 +259,8 @@ pub fn view(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                         crate::queue::count(d.files.len(), "file")
                     },
                 )))
-                .child(filter),
+                // A filter that would hide nothing is not offered.
+                .when(with_findings < d.files.len() || s.diff_flagged_only, |d| d.child(filter)),
         )
         .child(made_list)
         .child(list);
