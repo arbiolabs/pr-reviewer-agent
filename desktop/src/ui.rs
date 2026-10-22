@@ -41,7 +41,9 @@ gpui_kit::actions!(
         DoneList,
         AppearanceSystem,
         AppearanceDark,
-        AppearanceLight
+        AppearanceLight,
+        FocusNext,
+        FocusPrev
     ]
 );
 
@@ -59,6 +61,9 @@ pub fn bindings() -> Vec<KeyBinding> {
         KeyBinding::new("cmd-[", GoBack, None),
         KeyBinding::new("cmd-1", NeedsYou, None),
         KeyBinding::new("cmd-2", DoneList, None),
+        // Ours, not the kit root's: the window records that the keyboard owns focus, so the ring shows.
+        KeyBinding::new("tab", FocusNext, Some("pr-review")),
+        KeyBinding::new("shift-tab", FocusPrev, Some("pr-review")),
     ]
 }
 
@@ -420,16 +425,6 @@ impl Shell {
         if overlay::palette_key(self, key, typed.as_deref(), cx) {
             return;
         }
-        // ⇥ first: an open sheet keeps it among its own controls (see `kit::sheet_open`).
-        if key == "tab" {
-            crate::kit::KEYBOARD.store(true, std::sync::atomic::Ordering::Relaxed);
-            if mods.shift {
-                window.focus_prev(cx)
-            } else {
-                window.focus_next(cx)
-            }
-            return cx.notify();
-        }
         match self.overlay {
             Some(Overlay::Keys) => {
                 if key == "escape" || typed.as_deref() == Some("?") {
@@ -621,6 +616,16 @@ impl Render for Shell {
                 if s.overlay.is_none() && s.away() {
                     s.act(Action::Back, cx)
                 }
+            }))
+            .on_action(cx.listener(|_, _: &FocusNext, window, cx| {
+                crate::kit::KEYBOARD.store(true, std::sync::atomic::Ordering::Relaxed);
+                window.focus_next(cx);
+                cx.notify();
+            }))
+            .on_action(cx.listener(|_, _: &FocusPrev, window, cx| {
+                crate::kit::KEYBOARD.store(true, std::sync::atomic::Ordering::Relaxed);
+                window.focus_prev(cx);
+                cx.notify();
             }))
             .on_action(cx.listener(|s, _: &NeedsYou, _, cx| s.set_tab(false, cx)))
             .on_action(cx.listener(|s, _: &DoneList, _, cx| s.set_tab(true, cx)))
