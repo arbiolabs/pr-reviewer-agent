@@ -226,7 +226,7 @@ pub fn live(s: &Shell, t: &Colors, pr: &Pr, run: &Run, cx: &Context<Shell>) -> D
                 .border_1()
                 .border_color(t.border)
                 .bg(t.surface)
-                .child(progress(t, step_of(run.phase), t.running, false, Gauge::Full))
+                .child(progress(t, queue::marks(m, run), t.running, Gauge::Full))
                 .child(div().text_size(text::SMALL).text_color(t.muted).child(format!(
                     "{} · {} · run {}",
                     phase_word(run.phase),

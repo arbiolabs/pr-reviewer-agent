@@ -7,7 +7,7 @@ use gpui_kit::*;
 use pr_review_tui::protocol::PublicationStatus;
 
 use crate::kit::{Tone, button, icon, overline};
-use crate::queue::{self, Card, Tier};
+use crate::queue::{self, Card, Ending, Tier};
 use crate::tokens::{Colors, layout, radius, severity_mark, space, text};
 use crate::ui::*;
 
@@ -99,11 +99,6 @@ struct Face {
     action: &'static str,
 }
 
-/// A review the daemon refused for size: the reader's next step is to shrink the PR, then retry.
-pub fn too_large(reason: &str) -> bool {
-    reason.to_lowercase().contains("too large")
-}
-
 fn face(c: &Card, selected: bool) -> Face {
     match c {
         Card::Setup { missing, count, .. } => Face {
@@ -183,20 +178,38 @@ fn face(c: &Card, selected: bool) -> Face {
         }
         Card::Failed { pr, run } => {
             let reason = run.failure_reason.as_ref().map_or("No reason given".to_string(), |r| r.to_string());
-            let large = too_large(&reason);
+            let (glyph, kicker, sub, meta, action) = match queue::ending(run) {
+                Some(Ending::Cancelled) => (
+                    IconName::CircleSlash,
+                    "Cancelled",
+                    "Stopped before it finished. Nothing was posted.".to_string(),
+                    String::new(),
+                    "Start again",
+                ),
+                Some(Ending::TooLarge) => (
+                    IconName::CircleX,
+                    "Too large to review",
+                    reason,
+                    "Next: exclude generated files or split the PR, then retry".into(),
+                    "Retry",
+                ),
+                _ => (
+                    IconName::CircleX,
+                    "Review failed",
+                    reason,
+                    run.attempt.map_or(String::new(), |a| format!("Attempt {a}")),
+                    "Retry",
+                ),
+            };
             Face {
-                glyph: Some(IconName::CircleX),
+                glyph: Some(glyph),
                 mark: None,
-                kicker: if large { "Too large to review".into() } else { "Review failed".into() },
+                kicker: kicker.into(),
                 headline: pr.title.to_string(),
                 quote: None,
-                sub: reason,
-                meta: if large {
-                    "Next: exclude generated files or split the PR, then retry".into()
-                } else {
-                    run.attempt.map_or(String::new(), |a| format!("Attempt {a}"))
-                },
-                action: "Retry",
+                sub,
+                meta,
+                action,
             }
         }
         Card::Start { pr } => Face {
@@ -216,6 +229,7 @@ fn hue_of(t: &Colors, c: &Card) -> Hsla {
     match c {
         Card::Setup { .. } => t.warn,
         Card::Approve { .. } => t.accent,
+        Card::Failed { run, .. } if queue::ending(run) == Some(Ending::Cancelled) => t.muted,
         Card::Posting { .. } | Card::Failed { .. } => t.danger,
         Card::Findings { findings, .. } => t.severity(findings[0].severity),
         Card::Start { .. } => t.muted,
@@ -232,7 +246,7 @@ fn card(s: &Shell, t: &Colors, c: &Card, i: usize, selected: bool, cx: &Context<
     // On a read-only daemon a card's command stays visible, dimmed, with the reason in its tooltip.
     let command = match c {
         Card::Start { .. } => Some(pr_review_tui::keymap::Mutation::Start),
-        Card::Failed { .. } => Some(pr_review_tui::keymap::Mutation::Retry),
+        Card::Failed { run, .. } => Some(queue::redo(run)),
         _ => None,
     };
     let refused =

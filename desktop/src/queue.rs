@@ -64,6 +64,8 @@ impl<'a> Card<'a> {
                 Some(Severity::High) => 4,
                 _ => 7,
             },
+            // A cancel was the reader's own choice: it waits with the reviews nobody started.
+            Card::Failed { run, .. } if ending(run) == Some(Ending::Cancelled) => 8,
             Card::Failed { .. } => 5,
             Card::Start { .. } => 8,
         }
@@ -183,6 +185,96 @@ pub fn running(m: &Model) -> Vec<(&Pr, &Run)> {
     v
 }
 
+/// How a run that stopped short ended: the reader cancelled it, the daemon refused it for size, or it broke.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Ending {
+    Cancelled,
+    TooLarge,
+    Failed,
+}
+
+/// `None` for a run that did not fail. The engine records a cancel as a failed run whose reason starts with
+/// "cancelled", so the reason is the only place it says so.
+pub fn ending(r: &Run) -> Option<Ending> {
+    if r.status != RunStatus::Failed {
+        return None;
+    }
+    let reason = r.failure_reason.as_ref().map_or(String::new(), |x| x.as_str().to_lowercase());
+    Some(if reason.starts_with("cancel") {
+        Ending::Cancelled
+    } else if reason.contains("too large") {
+        Ending::TooLarge
+    } else {
+        Ending::Failed
+    })
+}
+
+/// What gets a stopped run going again: a cancel was the reader's choice, so it starts fresh; anything else
+/// retries from the last checkpoint.
+pub fn redo(r: &Run) -> pr_review_tui::keymap::Mutation {
+    use pr_review_tui::keymap::Mutation;
+    if ending(r) == Some(Ending::Cancelled) { Mutation::Start } else { Mutation::Retry }
+}
+
+/// What the gauge says about one step: only what the run did.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Mark {
+    Done,
+    /// The step the run is on, or waits at.
+    Now,
+    Waiting,
+    /// Where a failed or cancelled run stopped.
+    Stopped,
+    /// A step the run finished without: a completed review nobody posted.
+    Skipped,
+}
+
+/// The six steps of `r`, from its status, its phase and its publication. A completed review that posted nothing
+/// never shows Post as done.
+pub fn marks(m: &Model, r: &Run) -> [Mark; 6] {
+    if r.status == RunStatus::Running {
+        return running_marks(r.phase);
+    }
+    if r.status == RunStatus::Failed || r.status == RunStatus::Superseded {
+        return upto(stopped_at(m, r), Mark::Stopped);
+    }
+    match m.domain.publications.get(&r.id).map(|p| p.status) {
+        Some(PublicationStatus::Published) => [Mark::Done; 6],
+        Some(PublicationStatus::Failed) => upto(5, Mark::Stopped),
+        Some(PublicationStatus::Publishing | PublicationStatus::Uncertain) => upto(5, Mark::Now),
+        _ => upto(5, Mark::Skipped),
+    }
+}
+
+/// The steps before `at` done, `at` itself `mark`, the rest waiting.
+fn upto(at: usize, mark: Mark) -> [Mark; 6] {
+    std::array::from_fn(|i| match i.cmp(&at) {
+        std::cmp::Ordering::Less => Mark::Done,
+        std::cmp::Ordering::Equal => mark,
+        std::cmp::Ordering::Greater => Mark::Waiting,
+    })
+}
+
+/// A run at work in `phase`.
+pub fn running_marks(phase: Phase) -> [Mark; 6] {
+    upto(crate::kit::step_of(phase).min(5), Mark::Now)
+}
+
+/// The step a run stopped in, from the last phase change the window saw for it; Collect when it saw none.
+pub fn stopped_at(m: &Model, r: &Run) -> usize {
+    use crate::kit::step_of;
+    m.domain
+        .activity
+        .iter()
+        .rev()
+        .filter(|a| a.pr_id.as_ref() == Some(&r.pr_id))
+        .find_map(|a| match &a.kind {
+            pr_review_tui::model::ActivityKind::Phase { to, .. } if step_of(*to) < 6 => Some(step_of(*to)),
+            _ => None,
+        })
+        .unwrap_or(0)
+}
+
 /// PRs with nothing left for the reader: posted, clean, merged or closed.
 pub fn done(m: &Model) -> Vec<(&Pr, Option<&Run>)> {
     let queued: Vec<&PrId> = cards(m).iter().filter_map(|c| c.pr().map(|p| &p.id)).collect();
@@ -252,6 +344,7 @@ pub enum RowState {
     Running(Phase),
     Parked,
     Failed,
+    Cancelled,
     /// The worst open severity and how many open findings.
     Findings(Severity, usize),
     Posted,
@@ -270,6 +363,7 @@ impl RowState {
             },
             RowState::Parked => "To approve",
             RowState::Failed => "Failed",
+            RowState::Cancelled => "Cancelled",
             RowState::Findings(..) => "To judge",
             RowState::Posted => "Posted",
             RowState::Clean => "Clean",
@@ -299,6 +393,7 @@ pub fn rows(m: &Model) -> Vec<(String, Vec<Row<'_>>)> {
             Some(r) if r.parked() => RowState::Parked,
             _ if pr.lifecycle == Lifecycle::Merged => RowState::Merged,
             _ if pr.lifecycle == Lifecycle::Closed => RowState::Closed,
+            Some(r) if ending(r) == Some(Ending::Cancelled) => RowState::Cancelled,
             Some(r) if r.status == RunStatus::Failed => RowState::Failed,
             _ if !open.is_empty() => RowState::Findings(open[0].severity, open.len()),
             _ if posted => RowState::Posted,
@@ -384,7 +479,9 @@ pub fn summary(m: &Model) -> String {
         let article = if matches!(findings[0].severity, Severity::Unknown) { "an" } else { "a" };
         parts.push(format!("#{} has {article} {} finding.", pr.number, word.to_lowercase()));
     }
-    if let Some(Card::Failed { pr, .. }) = cards.iter().find(|c| matches!(c, Card::Failed { .. })) {
+    if let Some(Card::Failed { pr, .. }) =
+        cards.iter().find(|c| matches!(c, Card::Failed { run, .. } if ending(run) != Some(Ending::Cancelled)))
+    {
         parts.push(format!("The review of #{} failed.", pr.number));
     }
     if let Some(Card::Setup { .. }) = cards.first() {
@@ -472,6 +569,37 @@ mod tests {
         let m = at(30_000, "wait:20000,pr:1291,publish,wait:100,confirm");
         assert!(!shape(&m).iter().any(|(_, n)| *n == 1291), "{:?}", shape(&m));
         assert!(done(&m).iter().any(|(p, _)| p.number == 1291));
+    }
+
+    fn run_of(m: &Model, number: u64) -> pr_review_tui::protocol::Run {
+        let pr = m.domain.prs.values().find(|p| p.number == number).unwrap();
+        m.domain.latest_run(&pr.id).unwrap().clone()
+    }
+
+    #[test]
+    fn the_gauge_never_claims_a_post_the_run_did_not_make() {
+        use super::Mark::{Done, Now, Skipped, Waiting};
+        let m = at(20_000, "");
+        assert_eq!(super::marks(&m, &run_of(&m, 1287)), [Done, Done, Done, Done, Done, Skipped]);
+        assert_eq!(super::marks(&m, &run_of(&m, 1291)), [Done, Done, Done, Done, Done, Now]);
+        assert_eq!(super::marks(&m, &run_of(&m, 338)), [Done, Done, Done, Now, Waiting, Waiting]);
+        let posted = at(30_000, "wait:20000,pr:1291,publish,wait:100,confirm");
+        assert_eq!(super::marks(&posted, &run_of(&posted, 1291)), [Done; 6]);
+    }
+
+    #[test]
+    fn a_cancelled_review_reads_as_cancelled_and_starts_again() {
+        use super::Mark::{Done, Stopped, Waiting};
+        let m = at(25_000, "wait:20000,pr:338,cancel,wait:100,confirm,wait:2000");
+        let r = run_of(&m, 338);
+        assert_eq!(super::ending(&r), Some(super::Ending::Cancelled));
+        assert_eq!(super::redo(&r), pr_review_tui::keymap::Mutation::Start);
+        assert_eq!(super::marks(&m, &r), [Done, Done, Done, Stopped, Waiting, Waiting]);
+        let row = rows(&m).into_iter().flat_map(|(_, r)| r).find(|r| r.pr.number == 338).unwrap().state;
+        assert_eq!((row, row.word()), (RowState::Cancelled, "Cancelled"));
+        assert!(!summary(&m).contains("#338"), "a cancel is not a failure: {}", summary(&m));
+        let failed = at(20_000, "");
+        assert_eq!(super::ending(&run_of(&failed, 345)), Some(super::Ending::TooLarge));
     }
 
     #[test]

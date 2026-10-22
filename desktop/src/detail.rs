@@ -17,9 +17,9 @@ use pr_review_tui::view::Hit;
 use crate::code::{Inline, Lexer, Tok, clip, inline_markdown, wrap};
 use crate::kit::{
     Gauge, OnClick, Tone, button, callout, chip, clock, display, heading, icon, icon_button, lift, overline, progress,
-    rail, severity_badge, step_of, summary, tabular, tip,
+    rail, severity_badge, summary, tabular, tip,
 };
-use crate::queue::{self, Stage, phase_word};
+use crate::queue::{self, Ending, Stage, phase_word};
 use crate::tokens::{Colors, layout, radius, severity_mark, space, text};
 use crate::ui::{Shell, on};
 
@@ -405,11 +405,10 @@ pub fn pr_sentence(m: &Model, pr: &Pr, run: Option<&Run>) -> String {
     }
     if r.status == RunStatus::Failed {
         // The reason itself sits in the run block below, once.
-        let large = r.failure_reason.as_ref().is_some_and(|x| crate::cards::too_large(x.as_str()));
-        return if large {
-            "Too large to review. Shrink the PR, then retry.".into()
-        } else {
-            "The review did not finish. Retry for a verdict.".into()
+        return match queue::ending(r) {
+            Some(Ending::TooLarge) => "Too large to review. Shrink the PR, then retry.".into(),
+            Some(Ending::Cancelled) => "Cancelled before it finished. Start again for a verdict.".into(),
+            _ => "The review did not finish. Retry for a verdict.".into(),
         };
     }
     let posted = m.domain.publications.get(&r.id).map(|p| p.status);
@@ -553,41 +552,47 @@ fn run_block(s: &Shell, t: &Colors, run: Option<&Run>, current: &[&Finding]) -> 
             }),
         ),
         Some(r) if r.parked() => frame(
-            div()
-                .flex()
-                .flex_col()
-                .gap(space::S3)
-                .child(progress(t, step_of(r.phase), t.accent, false, Gauge::Full))
-                .child(div().text_size(text::SMALL).text_color(t.muted).child(format!(
+            div().flex().flex_col().gap(space::S3).child(progress(t, queue::marks(m, r), t.accent, Gauge::Full)).child(
+                div().text_size(text::SMALL).text_color(t.muted).child(format!(
                     "Parked for your approval · {} · run {}. Nothing posts to GitHub until you approve the proof.",
                     r.model,
                     r.id.short()
-                ))),
+                )),
+            ),
         ),
         Some(r) if r.status == RunStatus::Failed => {
             let reason = r.failure_reason.as_ref().map_or("No reason given.".to_string(), |x| x.to_string());
-            let large = crate::cards::too_large(&reason);
+            let at = crate::kit::STEPS[queue::stopped_at(m, r)].0;
+            let (hue, glyph, title, body) = match queue::ending(r).unwrap_or(Ending::Failed) {
+                // The engine's reason names the client that cancelled ("from the TUI"), which may not be this one.
+                Ending::Cancelled => (
+                    t.muted,
+                    IconName::CircleSlash,
+                    "Cancelled".to_string(),
+                    format!(
+                        "Cancelled during {at}. Nothing was posted.\n\nNext step: start again (S) for a fresh review."
+                    ),
+                ),
+                Ending::TooLarge => (
+                    t.danger,
+                    IconName::CircleX,
+                    "Too large to review".to_string(),
+                    format!("{reason}\n\nNext step: exclude generated files or split the PR, then retry (⇧R)."),
+                ),
+                Ending::Failed => (
+                    t.danger,
+                    IconName::CircleX,
+                    format!("Review failed{}", r.attempt.map_or(String::new(), |a| format!(" on attempt {a}"))),
+                    format!("{reason}\n\nNext step: retry (⇧R). The reviewer resumes from its last checkpoint."),
+                ),
+            };
             frame(
                 div()
                     .flex()
                     .flex_col()
                     .gap(space::S3)
-                    .child(progress(t, failed_at(m, r), t.danger, true, Gauge::Full))
-                    .child(callout(
-                        t,
-                        t.danger,
-                        IconName::CircleX,
-                        if large {
-                            "Too large to review".to_string()
-                        } else {
-                            format!("Review failed{}", r.attempt.map_or(String::new(), |a| format!(" on attempt {a}")))
-                        },
-                        Some(if large {
-                            format!("{reason}\n\nNext step: exclude generated files or split the PR, then retry (⇧R).")
-                        } else {
-                            format!("{reason}\n\nNext step: retry (⇧R). The reviewer resumes from its last checkpoint.")
-                        }),
-                    )),
+                    .child(progress(t, queue::marks(m, r), hue, Gauge::Full))
+                    .child(callout(t, hue, glyph, title, Some(body))),
             )
         }
         Some(r) => {
@@ -596,11 +601,12 @@ fn run_block(s: &Shell, t: &Colors, run: Option<&Run>, current: &[&Finding]) -> 
                 Some(PublicationStatus::Published) => (t.ok, "Review posted to GitHub"),
                 Some(PublicationStatus::Failed) => (t.danger, "Posting failed"),
                 Some(PublicationStatus::Uncertain) => (t.warn, "Posting unconfirmed"),
+                Some(PublicationStatus::Publishing) => (t.running, "Posting to GitHub"),
                 _ if current.is_empty() => (t.ok, "Reviewed: nothing found"),
                 _ => (t.accent, "Reviewed, nothing posted"),
             };
             frame(
-                div().flex().flex_col().gap(space::S3).child(progress(t, 6, hue, false, Gauge::Full)).child(
+                div().flex().flex_col().gap(space::S3).child(progress(t, queue::marks(m, r), hue, Gauge::Full)).child(
                     div()
                         .flex()
                         .items_center()
@@ -620,20 +626,6 @@ fn run_block(s: &Shell, t: &Colors, run: Option<&Run>, current: &[&Finding]) -> 
             )
         }
     }
-}
-
-/// The phase a failed run stopped in, from the last phase change the window saw for it; Collect when it saw none.
-fn failed_at(m: &Model, r: &Run) -> usize {
-    m.domain
-        .activity
-        .iter()
-        .rev()
-        .filter(|a| a.pr_id.as_ref() == Some(&r.pr_id))
-        .find_map(|a| match &a.kind {
-            pr_review_tui::model::ActivityKind::Phase { to, .. } if step_of(*to) < 6 => Some(step_of(*to)),
-            _ => None,
-        })
-        .unwrap_or(0)
 }
 
 /// A reviewed PR with nothing to judge: a designed state, not a blank. A failed run says why in its run block, so
@@ -720,6 +712,9 @@ fn pr_actions(s: &Shell, pr: &Pr, run: Option<&Run>, cx: &Context<Shell>) -> Bar
             Tone::Primary,
             on(cx, |s, cx| s.send(Msg::Pick(Hit::Ready), cx)),
         )),
+        Some(r) if queue::ending(r) == Some(Ending::Cancelled) => {
+            bar.lead.push(mutation_item(s, "a-start", "Start again", "S", Tone::Primary, Mutation::Start, cx))
+        }
         Some(r) if r.status == RunStatus::Failed => {
             bar.lead.push(mutation_item(s, "a-retry", "Retry review", "⇧R", Tone::Primary, Mutation::Retry, cx))
         }

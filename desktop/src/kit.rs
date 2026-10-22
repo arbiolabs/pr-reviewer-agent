@@ -7,6 +7,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use pr_review_tui::protocol::{Phase, Severity};
 
+use crate::queue::Mark;
 use crate::tokens::{Colors, DISABLED_OUTLINE, radius, severity_mark, space, text};
 
 pub type OnClick = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
@@ -408,45 +409,43 @@ pub enum Gauge {
     Full,
 }
 
-/// The one progress gauge: done ticks are solid, the current tick is a ring in the hue, pending ticks are hairlines.
-/// A failed run shows where it stopped in the danger hue.
-pub fn progress(t: &Colors, at: usize, hue: Hsla, failed: bool, gauge: Gauge) -> Div {
+/// The one progress gauge, drawn from `marks`: done ticks are solid in `hue`, the current tick is a ring in it,
+/// waiting ticks are hairlines, a stop is solid in `hue` with the steps before it in the muted ink, and a skipped
+/// step is a dashed outline whose label says "Not posted".
+pub fn progress(t: &Colors, marks: [Mark; 6], hue: Hsla, gauge: Gauge) -> Div {
     let (w, h, gap) = match gauge {
         Gauge::Pip => (px(6.), px(3.), px(1.)),
         Gauge::Strip => (px(10.), px(4.), px(2.)),
         Gauge::Full => (px(0.), px(5.), px(4.)),
     };
-    let ticks = div().flex().items_center().gap(gap).children((0..STEPS.len()).map(|i| {
+    let stopped = marks.contains(&Mark::Stopped);
+    let ticks = div().flex().items_center().gap(gap).children(marks.iter().map(|mark| {
         let tick = div()
             .h(h)
             .rounded(px(2.))
             .when(gauge == Gauge::Full, |d| d.flex_1())
             .when(gauge != Gauge::Full, |d| d.w(w));
-        if failed {
-            tick.bg(if i == at.min(5) { t.danger } else { t.border_strong.alpha(0.5) })
-        } else if i < at {
-            tick.bg(hue)
-        } else if i == at {
-            tick.bg(hue.alpha(0.28)).border_1().border_color(hue)
-        } else {
-            tick.bg(t.border_strong.alpha(0.6))
+        match mark {
+            Mark::Done if stopped => tick.bg(t.muted.alpha(0.6)),
+            Mark::Done | Mark::Stopped => tick.bg(hue),
+            Mark::Now => tick.bg(hue.alpha(0.28)).border_1().border_color(hue),
+            Mark::Waiting => tick.bg(t.border_strong.alpha(0.6)),
+            Mark::Skipped => tick.border_1().border_dashed().border_color(t.faint),
         }
     }));
     if gauge != Gauge::Full {
         return ticks.flex_none();
     }
     div().flex().flex_col().gap(space::S2).w_full().child(ticks).child(div().flex().gap(gap).children(
-        STEPS.iter().enumerate().map(|(i, (label, _))| {
-            let (color, weight) = if failed {
-                if i == at.min(5) { (t.danger, FontWeight::SEMIBOLD) } else { (t.faint, FontWeight::NORMAL) }
-            } else if i == at {
-                (t.text, FontWeight::SEMIBOLD)
-            } else if i < at {
-                (t.muted, FontWeight::NORMAL)
-            } else {
-                (t.faint, FontWeight::NORMAL)
+        STEPS.iter().zip(marks).map(|((label, _), mark)| {
+            let (color, weight, label) = match mark {
+                Mark::Stopped => (hue, FontWeight::SEMIBOLD, *label),
+                Mark::Now => (t.text, FontWeight::SEMIBOLD, *label),
+                Mark::Done => (t.muted, FontWeight::NORMAL, *label),
+                Mark::Waiting => (t.faint, FontWeight::NORMAL, *label),
+                Mark::Skipped => (t.faint, FontWeight::NORMAL, "Not posted"),
             };
-            div().flex_1().text_size(text::SMALL).font_weight(weight).text_color(color).child(*label)
+            div().flex_1().text_size(text::SMALL).font_weight(weight).text_color(color).child(label)
         }),
     ))
 }

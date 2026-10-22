@@ -259,7 +259,10 @@ impl Shell {
                 }
                 id.map(|id| Msg::Pick(Hit::Finding(id)))
             }
-            Some(Card::Failed { .. }) => return self.direct(Mutation::Retry, cx),
+            Some(Card::Failed { run, .. }) => {
+                let mu = queue::redo(run);
+                return self.direct(mu, cx);
+            }
             Some(Card::Start { .. }) => return self.direct(Mutation::Start, cx),
             Some(Card::Posting { .. }) => Some(Msg::Action(Action::Mutation(Mutation::Publish))),
             _ => None,
@@ -823,6 +826,7 @@ fn pr_row(s: &Shell, t: &Colors, pr: &Pr, state: RowState, on: bool, cx: &Contex
         RowState::Running(_) => (live_dot(t, s.still, ("nav-dot", pr.number as usize)), t.running),
         RowState::Parked => (icon(IconName::Send, px(13.), t.accent).into_any_element(), t.accent),
         RowState::Failed => (icon(IconName::CircleX, px(13.), t.danger).into_any_element(), t.danger),
+        RowState::Cancelled => (icon(IconName::CircleSlash, px(13.), t.muted).into_any_element(), t.muted),
         RowState::Findings(sev, _) => (
             div().text_size(px(10.)).text_color(t.severity(sev)).child(tokens::severity_mark(sev).0).into_any_element(),
             t.severity(sev),
@@ -835,7 +839,7 @@ fn pr_row(s: &Shell, t: &Colors, pr: &Pr, state: RowState, on: bool, cx: &Contex
     };
     let badge: Option<AnyElement> = match state {
         RowState::Findings(sev, n) => Some(severity_count(t, sev, n).into_any_element()),
-        RowState::Running(p) => Some(progress(t, step_of(p), t.running, false, Gauge::Pip).into_any_element()),
+        RowState::Running(p) => Some(progress(t, queue::running_marks(p), t.running, Gauge::Pip).into_any_element()),
         _ => None,
     };
     let row = div()
@@ -1058,7 +1062,7 @@ fn pill(s: &Shell, t: &Colors, p: &Pr, r: &Run, cx: &Context<Shell>) -> Stateful
         .child(live_dot(t, s.still, ("pill-dot", p.number as usize)))
         .child(div().text_size(text::SMALL).font_weight(FontWeight::SEMIBOLD).child(format!("#{}", p.number)))
         .child(div().min_w_0().truncate().text_size(text::SMALL).text_color(t.muted).child(p.title.to_string()))
-        .child(progress(t, step_of(r.phase), t.running, false, Gauge::Strip))
+        .child(progress(t, queue::marks(m, r), t.running, Gauge::Strip))
         .child(div().text_size(text::SMALL).text_color(t.running).child(phase_word(r.phase)))
         .child(crate::kit::tabular(div()).flex_none().text_size(text::CAPTION).text_color(t.faint).child(format!(
             "step {} of {}",
