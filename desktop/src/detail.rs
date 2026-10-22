@@ -587,7 +587,12 @@ fn run_block(s: &Shell, t: &Colors, run: Option<&Run>, current: &[&Finding]) -> 
                     t.danger,
                     IconName::CircleX,
                     "Too large to review".to_string(),
-                    format!("{reason}\n\nNext step: exclude generated files or split the PR, then retry (⇧R)."),
+                    // When the daemon's reason already says how to shrink the PR, the step says only what follows.
+                    if reason.to_lowercase().contains("split the pr") {
+                        format!("{reason}\n\nThen retry (⇧R).")
+                    } else {
+                        format!("{reason}\n\nNext step: exclude generated files or split the PR, then retry (⇧R).")
+                    },
                 ),
                 Ending::Failed => (
                     t.danger,
@@ -1136,6 +1141,7 @@ fn reopened_link(t: &Colors, m: &Model, f: &Finding, cx: &Context<Shell>) -> Opt
             .flex()
             .flex_col()
             .items_start()
+            .w_full()
             .gap(space::S2)
             .p(space::S3)
             .rounded(radius::LG)
@@ -1145,9 +1151,18 @@ fn reopened_link(t: &Colors, m: &Model, f: &Finding, cx: &Context<Shell>) -> Opt
             .child(
                 div()
                     .flex()
+                    .w_full()
                     .gap(space::S2)
                     .child(div().pt(px(3.)).child(icon(IconName::RotateCcw, px(14.), t.high)))
-                    .child(div().text_size(text::BODY).line_height(text::LINE_BODY).text_color(t.text).child(text)),
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .text_size(text::BODY)
+                            .line_height(text::LINE_BODY)
+                            .text_color(t.text)
+                            .child(text),
+                    ),
             )
             .children(open),
     )
