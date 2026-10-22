@@ -79,7 +79,7 @@ pub fn timeline(s: &Shell, t: &Colors, pr: &Pr, cx: &Context<Shell>) -> Div {
             .flex()
             .items_start()
             .gap(space::S3)
-            .px(space::S2)
+            .px(space::S3)
             .py(px(6.))
             .rounded(radius::SM)
             .when(on_it, |d| d.bg(t.selected).child(crate::kit::rail(t)))

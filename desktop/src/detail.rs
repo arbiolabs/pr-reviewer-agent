@@ -368,7 +368,11 @@ pub fn pr_sentence(m: &Model, pr: &Pr, run: Option<&Run>) -> String {
     let current: Vec<&Finding> = findings.iter().copied().filter(|f| !f.stale).collect();
     let open: Vec<&Finding> = current.iter().copied().filter(|f| queue::open_finding(f)).collect();
     let Some(r) = run else {
-        return "Not reviewed yet. Start a review and it runs live here.".into();
+        return if queue::read_only(m) {
+            "Not reviewed yet.".into()
+        } else {
+            "Not reviewed yet. Start a review and it runs live here.".into()
+        };
     };
     let when = r.completed_at.as_ref().map_or(clock(r.started_at.as_str()), |c| clock(c.as_str()));
     if r.parked() {

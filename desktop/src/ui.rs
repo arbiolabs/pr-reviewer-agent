@@ -635,7 +635,9 @@ fn titlebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         .border_color(t.border)
         .window_control_area(WindowControlArea::Drag)
         .when(away, |d| {
-            d.child(button(t, "back", "Back", Some("⌘["), Tone::Ghost, on(cx, |s, cx| s.act(Action::Back, cx))))
+            // While a sheet asks, the title bar's Back waits for it, as ⌘[ does.
+            let back = s.overlay.is_none().then(|| click(cx, |s, cx| s.act(Action::Back, cx)));
+            d.child(button(t, "back", "Back", Some("⌘["), Tone::Ghost, back))
         })
         .child(
             div()
