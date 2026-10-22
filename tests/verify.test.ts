@@ -245,7 +245,7 @@ it("refuses a resolution while any of the finding's own-file code survives at he
   // The file is gone and its code reappears verbatim in another file: a claim on any changed file does not resolve it.
   const moved = { "src/b.ts": BASE_A, "src/c.ts": ["x"] };
   expect(await resolve(moved, [item(A, BASE_A, 3, 6)], [[1, 1]])).toEqual(["its code survives at src/b.ts:3", "OUTDATED"]);
-  expect(await resolve(moved, [item(A, BASE_A, 3, 6)], [[1, 1]], [], { grep: async () => undefined })).toEqual(["its code survives in more files than the search lists", "OUTDATED"]);
+  expect(await resolve(moved, [item(A, BASE_A, 3, 6)], [[1, 1]], [], { grep: async () => undefined })).toEqual(["its code may survive, in more files than the search lists", "OUTDATED"]);
   // A guard inserted where the delete was: nothing of the block is found whole, and a claim that cites the guard, alone or with the block around it, is new code.
   const guarded = { [A]: [...BASE_A.slice(0, 4), "  if (!req.user.admin) return res.status(403).end();", ...BASE_A.slice(4)], [HELPER]: BASE_HELPER };
   expect(await resolve(guarded, [item(A, BASE_A, 3, 6)], [[5, 5]])).toEqual([null, "RESOLVED"]);

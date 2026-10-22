@@ -2,11 +2,13 @@ import { execFileSync } from "node:child_process";
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { setFlagsFromString } from "node:v8";
+import { runInNewContext } from "node:vm";
 import { beforeAll, expect, it } from "vitest";
 import type { CandidateFinding } from "../src/domain/types.ts";
-import { evidenceTexts, findLongestRun, findOwnEvidence, headReader, linkPriors, locate, normalize, type ObservedLocation, observe, type PriorFinding, type Report, sameText, splitLines, survivingCode, tokenize, within } from "../src/reasoning/track.ts";
+import { type EvidenceText, evidenceTexts, findLongestRun, findOwnEvidence, headReader, linkPriors, locate, MAX_FILE_CHARS, normalize, type ObservedLocation, observe, type PriorFinding, reopen, type Report, sameText, splitLines, survivingCode, tokenize, UNREADABLE, within } from "../src/reasoning/track.ts";
 import { fingerprint } from "../src/reasoning/verify.ts";
-import { PinnedRepo, syncRepo } from "../src/source/git.ts";
+import { BlobTooLargeError, PinnedRepo, syncRepo } from "../src/source/git.ts";
 
 const FILE = "src/routes/orders.ts";
 const ROUTES = `import { requireUser, requireAdmin } from "../auth.ts";
@@ -86,6 +88,10 @@ beforeAll(async () => {
   scenario("binary", () => {
     write(".gitattributes", `${FILE} -diff\n`);
     write("src/nul/orders.ts", `${ROUTES}\0`);
+  });
+  scenario("huge", () => {
+    rmSync(join(repoDir, FILE));
+    write("src/huge.ts", `${ROUTES}${PAD(5_000)}\n`);
   });
   cache = mkdtempSync(join(tmpdir(), "track-cache-"));
   for (const sha of Object.values(heads)) git("update-ref", `refs/heads/keep-${sha.slice(0, 7)}`, sha);
@@ -337,6 +343,134 @@ it("finds the longest run in time that grows with the file, not with its square,
   started = performance.now();
   expect(await locate({ file: "f.ts", newLine: 1, headSha: "o", evidence: [{ path: "f.ts", start: 1, end: 31, text: needle }] }, "H", head, { treeWide: false })).toEqual({ kind: "changed", file: "f.ts" });
   expect(performance.now() - started).toBeLessThan(5_000);
+  // Four times the file: a scan that compared from every token took 5.4 s here, and 50 watched findings would each pay it on every push.
+  const four = { read: async () => Array.from({ length: 4 }, () => hay.join("\n")).join("\n"), renamedTo: () => undefined, grep: async () => [] };
+  started = performance.now();
+  expect(await locate({ file: "f.ts", newLine: 1, headSha: "o", evidence: [{ path: "f.ts", start: 1, end: 31, text: needle }] }, "H", four, { treeWide: false })).toEqual({ kind: "changed", file: "f.ts" });
+  expect(performance.now() - started).toBeLessThan(3_000);
+});
+
+/** A head with these files and no renames, whose tree-wide search lists every file holding the word. */
+const headOf = (files: Record<string, string[]>) => ({
+  read: async (p: string) => files[p]?.join("\n"),
+  renamedTo: () => undefined,
+  grep: async (word: string) => Object.keys(files).filter((p) => files[p]!.join("\n").includes(word)),
+});
+const items = (path: string, lines: string[], ranges: [number, number][]): EvidenceText[] => ranges.map(([start, end]) => ({ path, start, end, text: normalize(lines.slice(start - 1, end)) }));
+/** Where the watch reopens a finding resolved on `H1` at this head, as `file:line` plus the ranges it reopens with, or undefined. */
+async function reopensAt(file: string, evidence: EvidenceText[], files: Record<string, string[]>, newLine = evidence[0]!.start) {
+  const resolved = { findingId: "f-old", candidate: { ...candidate, file, newLine }, location: { file, newLine, headSha: "H1", evidence }, observedAt: "H1" };
+  const again = await reopen(resolved, "pr", "rev-3", "H2", headOf(files));
+  return again && `${again.location.file}:${again.location.newLine} ${again.location.evidence.map((e) => `${e.start}-${e.end}`).join(" ")}`;
+}
+/** Whether a claim on the finding would be refused because its code survives at this head, by the loose check. */
+const survives = async (file: string, evidence: EvidenceText[], files: Record<string, string[]>) => {
+  const location = { file, newLine: evidence[0]!.start, headSha: "H0", evidence };
+  const located = await locate(location, "H1", headOf(files));
+  return located.kind === "same" || (await survivingCode({ location, located }, headOf(files))) !== undefined;
+};
+
+it("reopens a resolved finding only on its distinctive code read as code, so a short line, a brace or old code in a comment never posts again", async () => {
+  const A = "src/a.ts";
+  // A revert brings the code back in place: the desired reopen.
+  const query = ["function f(x) {", "  return db.query('SELECT * FROM t WHERE id=' + x);", "}"];
+  const fixedQuery = ["function f(x) {", "  return db.query('SELECT * FROM t WHERE id=?', [x]);", "}"];
+  expect(await reopensAt(A, items(A, query, [[2, 2]]), { [A]: query })).toBe(`${A}:2 2-2`);
+  expect(await reopensAt(A, items(A, query, [[2, 2]]), { [A]: ["import y from 'y';", "", ...query] })).toBe(`${A}:4 4-4`);
+  // A true fix, then an unrelated edit, then the old line quoted in a `//`, a `/* */` block or a SQL `--` comment: none is the code back.
+  expect(await reopensAt(A, items(A, query, [[2, 2]]), { [A]: ["import x from 'y';", ...fixedQuery, "function g() { return 1; }"] })).toBe(undefined);
+  expect(await reopensAt(A, items(A, query, [[2, 2]]), { [A]: ["function f(x) {", "  // return db.query('SELECT * FROM t WHERE id=' + x);", ...fixedQuery.slice(1)] })).toBe(undefined);
+  expect(await reopensAt(A, items(A, query, [[2, 2]]), { [A]: ["/*", " * Before:", "   return db.query('SELECT * FROM t WHERE id=' + x);", " */", ...fixedQuery] })).toBe(undefined);
+  const sql = ["SELECT 1;", "DELETE FROM users WHERE id = 1 OR 1 = 1;", "SELECT 2;"];
+  const sqlFixed = ["SELECT 1;", "-- was: DELETE FROM users WHERE id = 1 OR 1 = 1;", "DELETE FROM users WHERE id = 1;", "SELECT 2;"];
+  expect(await reopensAt("db/m.sql", items("db/m.sql", sql, [[2, 2]]), { "db/m.sql": sqlFixed })).toBe(undefined);
+  // The loose check behind a resolution claim still sees that quoted code, so the claim is refused and the finding stays open.
+  expect(await survives("db/m.sql", items("db/m.sql", sql, [[2, 2]]), { "db/m.sql": sqlFixed })).toBe(true);
+  // A short item found anywhere but in place, alone or next to a distinctive item that is gone, is any such line in the file.
+  const del = ["export function del(req, res) {", "  if (!user) return;", "  db.orders.delete(req.params.id);", "}"];
+  const delFixed = [del[0]!, "  if (!user) throw new Forbidden();", ...del.slice(2)];
+  expect(await reopensAt(A, items(A, del, [[2, 2]]), { [A]: [...delFixed, "", "export function list(req, res) {", "  if (!user) return;", "  res.json([]);", "}"] })).toBe(undefined);
+  const pay = ["function pay(req) {", "  const amount = Number(req.body.amount);", "  charge(req.user, amount);", "  return ok;", "}"];
+  const payFixed = [pay[0]!, "  const amount = parseAmount(req.body.amount);", pay[2]!, "  return done(amount);", "}"];
+  expect(await reopensAt(A, items(A, pay, [[2, 3], [4, 4]]), { [A]: [...payFixed, "function ping() {", "  return ok;", "}"] })).toBe(undefined);
+  const evil = ["function f(x) {", "  eval(x);", "}"];
+  expect(await reopensAt(A, items(A, evil, [[2, 2], [3, 3]]), { [A]: ["function f(x) {", "  safeEval(x);", "  done();", "}"] })).toBe(undefined);
+  // A distinctive item back where it was, with its short item in place next to it, reopens; with the short item moved it does not.
+  expect(await reopensAt(A, items(A, pay, [[2, 3], [4, 4]]), { [A]: pay })).toBe(`${A}:2 2-3 4-4`);
+  expect(await reopensAt(A, items(A, pay, [[2, 3], [4, 4]]), { [A]: [...pay.slice(0, 3), "  log(amount);", ...pay.slice(3)] })).toBe(undefined);
+  // Distinctive means six tokens under every reading: an item whose regex backtick swallows its code under one reading is not, so it never reopens on its own.
+  const tick = ["export function del(req, res) {", "  const tick = /`/g;", "  db.orders.delete(req.params.id, { cascade: true });", "  res.end();", "}"];
+  expect(await reopensAt(A, items(A, tick, [[2, 3]]), { [A]: ["import x;", ...tick] })).toBe(undefined);
+  expect(await reopensAt(A, items(A, tick, [[2, 3]]), { [A]: tick })).toBe(undefined);
+  expect(await reopensAt(A, items(A, tick, [[2, 3], [4, 4]]), { [A]: tick })).toBe(undefined);
+});
+
+it("counts an item's tokens under the reading that finds the most, so a regex backtick or a glob does not hide a moved line from the tree-wide search", async () => {
+  const A = "src/a.ts";
+  const tick = ["export function del(req, res) {", "  const tick = /`/g;", "  db.orders.delete(req.params.id, { cascade: true });", "  res.end();", "}"];
+  expect(tokenize(normalize(tick.slice(1, 3))).length).toBe(5);
+  const moved = { [A]: ["import { rm } from './rm';", "export function del(req, res) {", "  rm(req);", "  res.end();", "}"], "src/rm.ts": ["export function rm(req) {", ...tick.slice(1, 3), "}"] };
+  expect(await survives(A, items(A, tick, [[2, 3]]), moved)).toBe(true);
+  expect(await locate({ file: A, newLine: 3, headSha: "H0", evidence: items(A, tick, [[2, 3]]) }, "H1", headOf(moved))).toEqual({
+    kind: "same",
+    location: { file: "src/rm.ts", newLine: 3, headSha: "H1", evidence: [{ path: "src/rm.ts", start: 2, end: 3, text: normalize(tick.slice(1, 3)) }] },
+  });
+});
+
+it("calls a finding's code unknown, never gone, in a file too large to read or to compare as code, and reopens nothing there", async () => {
+  const A = "src/a.ts";
+  const filler = Array.from({ length: 90_000 }, (_, i) => `export const value${i} = compute(${i}, "padding padding");`);
+  const del = ["export function del(req, res) {", "  db.orders.delete(req.params.id);", "  res.end();", "}"];
+  const big = [...filler.slice(0, 10), ...del, ...filler.slice(10)];
+  expect(big.join("\n").length).toBeGreaterThan(MAX_FILE_CHARS);
+  const evidence = items(A, big, [[12, 12]]);
+  const location = { file: A, newLine: 12, headSha: "H0", evidence };
+  // Found in place, as written: the finding is still present.
+  expect((await locate(location, "H1", headOf({ [A]: big }))).kind).toBe("same");
+  // A dropped semicolon: the lines are not found as written, and without tokens code cannot say the line is gone.
+  const reformatted = { [A]: big.with(11, "  db.orders.delete(req.params.id)") };
+  const located = await locate(location, "H1", headOf(reformatted));
+  expect(located).toEqual({ kind: "changed", file: A });
+  expect(await survivingCode({ location, located }, headOf(reformatted))).toEqual({ kind: "unknown", reason: `${A} is too large to compare as code` });
+  expect(await reopensAt(A, evidence, reformatted)).toBe(undefined);
+  // A file too large to read at all: present, unknown, and never a place to reopen at.
+  const small = headOf({ [A]: del, "src/b.ts": ["db.orders.delete(req.params.id);"] });
+  const unreadable = { ...small, read: async (p: string) => (p === A ? UNREADABLE : small.read(p)) };
+  expect(await locate(location, "H1", unreadable)).toEqual({ kind: "changed", file: A });
+  expect(await survivingCode({ location, located: { kind: "changed", file: A } }, unreadable)).toEqual({ kind: "unknown", reason: `${A} is too large to read` });
+  expect(await reopensAt(A, evidence, { [A]: del }, 12)).toBe(`${A}:2 2-2`);
+  expect(await reopen({ findingId: "f", candidate, location, observedAt: "H1" }, "pr", "rev", "H2", unreadable)).toBe(undefined);
+  // The file is gone and the tree-wide search lists a file too large to read: it may hold the code.
+  const gone = { file: "src/gone.ts", newLine: 2, headSha: "H0", evidence: items("src/gone.ts", del, [[2, 2]]) };
+  expect(await locate(gone, "H1", unreadable)).toEqual({ kind: "file_gone" });
+  expect(await survivingCode({ location: gone, located: { kind: "file_gone" } }, unreadable)).toEqual({ kind: "unknown", reason: `${A} is too large to read` });
+});
+
+it("reads a blob over the byte cap from git as unreadable instead of failing the review, so the search over a huge file refuses a claim", async () => {
+  const repo = new PinnedRepo(await syncRepo(cache, "acme/track", repoDir, 1), baseSha, heads.huge!);
+  await expect(repo.show(heads.huge!, "src/huge.ts", { maxBytes: 64 * 1024 })).rejects.toThrow(BlobTooLargeError);
+  expect((await repo.show(heads.huge!, "src/huge.ts"))?.length).toBeGreaterThan(64 * 1024);
+  const head = headReader(repo, await repo.changedFiles(), { maxBytes: 64 * 1024 });
+  expect(await head.read("src/huge.ts")).toBe(UNREADABLE);
+  expect(await locate(location(), heads.huge!, { ...head, renamedTo: () => undefined })).toEqual({ kind: "file_gone" });
+  const f = { location: location(), located: { kind: "file_gone" as const } };
+  expect(await survivingCode(f, head)).toEqual({ kind: "unknown", reason: "src/huge.ts is too large to read" });
+  expect(await reopen({ findingId: "f", candidate, location: location(), observedAt: "H1" }, "pr", "rev", heads.huge!, head)).toBe(undefined);
+});
+
+it("retains the tokens of a bounded run of files, not of every file a tree-wide search read", async () => {
+  setFlagsFromString("--expose-gc");
+  const gc = runInNewContext("gc") as () => void;
+  const body = Array.from({ length: 250 }, (_, i) => `  const v${i} = req.params.identifier + compute(a, b);`);
+  const files = Object.fromEntries(Array.from({ length: 1_500 }, (_, k) => [`src/f${k}.ts`, body]));
+  const head = headOf(files);
+  gc();
+  const before = process.memoryUsage().heapUsed;
+  const gone = { file: "src/gone.ts", newLine: 1, headSha: "o", evidence: [{ path: "src/gone.ts", start: 1, end: 1, text: "db.orders.delete(req.params.identifier, extra);" }] };
+  expect(await locate(gone, "H", head)).toEqual({ kind: "file_gone" });
+  gc();
+  // About 1.4 GB when every file's tokens under four readings were kept; the normalized lines of 1,500 files are some 40 MB.
+  expect((process.memoryUsage().heapUsed - before) / 1e6).toBeLessThan(200);
 });
 
 it("links a candidate that names its prior finding only where code sees the report: near the finding's anchor and on its lines at this head", () => {

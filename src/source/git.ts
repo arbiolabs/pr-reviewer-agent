@@ -39,12 +39,18 @@ export function isMissingObject(error: unknown): boolean {
   return /bad object|unable to read|could not read|missing blob|promisor/i.test(String((error as { stderr?: unknown }).stderr ?? ""));
 }
 
-async function git(dir: string, args: string[], maxBuffer = 64 * 1024 * 1024, env = GIT_ENV): Promise<string> {
+/** The most output one git command may produce; past it the command is killed and `ERR_CHILD_PROCESS_STDIO_MAXBUFFER` thrown. */
+const MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
+
+async function git(dir: string, args: string[], maxBuffer = MAX_OUTPUT_BYTES, env = GIT_ENV): Promise<string> {
   const { stdout } = await run("git", ["-C", dir, "-c", "core.quotePath=false", ...args], { env, maxBuffer, encoding: "utf8" });
   return stdout;
 }
 
 export class UnsafePathError extends Error {}
+
+/** A blob larger than the `maxBytes` its reader allowed: git was stopped at that many bytes, so none of it was read. */
+export class BlobTooLargeError extends Error {}
 
 /** Paths come from the model or from repository content; keep them relative and inside the tree. */
 export function assertSafePath(path: string): string {
@@ -121,15 +127,17 @@ export class PinnedRepo {
 
   /**
    * `undefined` when the path or object does not exist at `sha`; any other git failure throws so the caller retries.
-   * `offline` never fetches a blob the clone lacks: git fails with "bad object" instead.
+   * `offline` never fetches a blob the clone lacks: git fails with "bad object" instead. A blob over `maxBytes`
+   * (MAX_OUTPUT_BYTES by default) throws BlobTooLargeError once that many bytes have arrived, so a huge file costs at most the cap.
    */
-  async show(sha: string, path: string, options: { offline?: boolean } = {}): Promise<string | undefined> {
+  async show(sha: string, path: string, options: { offline?: boolean; maxBytes?: number } = {}): Promise<string | undefined> {
     const safe = assertSafePath(path);
     try {
-      return await git(this.dir, ["show", `${sha}:${safe}`], undefined, options.offline ? OFFLINE_ENV : GIT_ENV);
+      return await git(this.dir, ["show", `${sha}:${safe}`], options.maxBytes, options.offline ? OFFLINE_ENV : GIT_ENV);
     } catch (error) {
       const { code, stderr } = error as { code?: unknown; stderr?: unknown };
       if (code === 128 && /does not exist|exists on disk, but not in|invalid object name/.test(String(stderr))) return undefined;
+      if (code === "ERR_CHILD_PROCESS_STDIO_MAXBUFFER") throw new BlobTooLargeError(`${sha}:${safe} is over ${options.maxBytes ?? MAX_OUTPUT_BYTES} bytes`);
       throw error;
     }
   }

@@ -4,7 +4,7 @@
 import { transition } from "../domain/machine.ts";
 import { FINDING_MACHINE, type FindingEvent, type FindingState } from "../domain/machines.ts";
 import { type CandidateFinding, type ChangedFile, type ResolutionVerdict, stableId } from "../domain/types.ts";
-import type { PinnedRepo } from "../source/git.ts";
+import { BlobTooLargeError, type PinnedRepo } from "../source/git.ts";
 
 /** The text a finding points at, enough to find it again without the old commit. */
 export type EvidenceText = { path: string; start: number; end: number; text: string };
@@ -42,19 +42,30 @@ export type PriorFinding = {
 /** One observation per finding per revision: the states it walked and the candidate and location it ended with. */
 export type Observation = { findingId: string; path: FindingState[]; basis: Basis | null; candidate: CandidateFinding; location: ObservedLocation; reopens?: Reopened };
 
-/** Reads one head: file contents, the head path of a rename, and the paths whose text contains a literal word (undefined when too many to list). */
+/** A file at head that exists but was not read, because it is over the reader's byte cap: it may hold anything, so it is never "gone" and never "without the code". */
+export const UNREADABLE: unique symbol = Symbol("unreadable");
+/**
+ * A blob over this many bytes is UNREADABLE: a file that large is past MAX_FILE_CHARS under any encoding, so its tokens
+ * would never be compared, and reading it in full would hold it in memory for the whole review.
+ */
+export const MAX_FILE_BYTES = 16 * 1024 * 1024;
+
+/** Reads one head: file contents (UNREADABLE past the byte cap), the head path of a rename, and the paths whose text contains a literal word (undefined when too many to list). */
 export type HeadReader = {
-  read(path: string): Promise<string | undefined>;
+  read(path: string): Promise<string | undefined | typeof UNREADABLE>;
   renamedTo(path: string): string | undefined;
   grep(word: string): Promise<string[] | undefined>;
 };
 
 /** The repository's head, with the renames the revision's diff reports (base to head, so a rename of a file the PR added is found by the tree-wide search instead). */
-export function headReader(repo: PinnedRepo, changedFiles: ChangedFile[]): HeadReader {
+export function headReader(repo: PinnedRepo, changedFiles: ChangedFile[], { maxBytes = MAX_FILE_BYTES } = {}): HeadReader {
   const renames = new Map(changedFiles.flatMap((f) => (f.from === undefined ? [] : [[f.from, f.path] as const])));
-  const texts = new Map<string, Promise<string | undefined>>();
   return {
-    read: (path) => texts.get(path) ?? texts.set(path, repo.show(repo.headSha, path)).get(path)!,
+    read: (path) =>
+      repo.show(repo.headSha, path, { maxBytes }).catch((error: unknown) => {
+        if (error instanceof BlobTooLargeError) return UNREADABLE;
+        throw error;
+      }),
     renamedTo: (path) => renames.get(path),
     grep: (word) => repo.grepPaths(word),
   };
@@ -70,7 +81,8 @@ export const MIN_TOKENS = 6;
 /** A finding whose evidence cites only the base SHA is located by this many lines on each side of its anchor. */
 const ANCHOR_CONTEXT = 2;
 
-const normalizeLine = (line: string) => line.trim().replace(/\s+/g, " ");
+// Split and joined rather than replaced: a replace builds a tree of slices that keeps the whole file's text alive behind every line it cached.
+const normalizeLine = (line: string) => line.trim().split(/\s+/).join(" ");
 export const normalize = (lines: string[]) => lines.map(normalizeLine).join("\n");
 export const splitLines = (text: string | undefined) => (text === undefined ? undefined : (text.endsWith("\n") ? text.slice(0, -1) : text).split("\n"));
 
@@ -190,19 +202,24 @@ function parses(text: string, variant: Variant): Token[][] {
 
 const texts = (tokens: Token[]) => tokens.map((t) => t.text);
 
-/** The index in `hay` at or after `from` where `needle` sits whole, or -1. */
-function indexOfRun(needle: string[], hay: string[], from = 0): number {
-  search: for (let i = from; i + needle.length <= hay.length; i++) {
-    for (let k = 0; k < needle.length; k++) if (hay[i + k] !== needle[k]) continue search;
-    return i;
-  }
-  return -1;
+/**
+ * Every index in `hay` where `needle` sits whole, by the rolling hash of each window with a hit confirmed token by
+ * token: linear in both, where a scan that compared from every position took seconds on a file of one repeated token.
+ */
+function runsAt(needle: number[], hay: number[]): number[] {
+  const want = windowHashes(needle, needle.length)[0];
+  const out: number[] = [];
+  if (want === undefined) return out;
+  windowHashes(hay, needle.length).forEach((h, i) => {
+    if (h === want && equalAt(needle, hay, 0, i, needle.length)) out.push(i);
+  });
+  return out;
 }
 
 export const hasCode = (text: string) => tokenize(text).length > 0;
 
 /** True when, under some reading, some parse of `a` sits whole in some parse of `b`: `a` is a piece of `b`'s code, unchanged. */
-export const within = (a: string, b: string) => VARIANTS.some((v) => parses(a, v).some((pa) => parses(b, v).some((pb) => indexOfRun(texts(pa), texts(pb)) !== -1)));
+export const within = (a: string, b: string) => VARIANTS.some((v) => parses(a, v).some((pa) => parses(b, v).some((pb) => runsAt(...numbered(texts(pa), texts(pb))).length > 0)));
 
 /** True when, under some reading, some parse of `a` and the tokens of `b` share a run of MIN_TOKENS or more: `b` still holds a substantial piece of `a`'s code. */
 export const sharesCode = (a: string, b: string) =>
@@ -214,30 +231,38 @@ export const sharesCode = (a: string, b: string) =>
 /** A 1-based line range. */
 type Range = { start: number; end: number };
 
-/** A text's tokens under one reading, with their texts ready for comparison. */
-type Tokenized = { tokens: Token[]; texts: string[] };
-/** A text under every reading, in VARIANTS order. */
-const readings = (text: string): Tokenized[] =>
-  VARIANTS.map((v) => {
-    const tokens = tokenize(text, v);
-    return { tokens, texts: texts(tokens) };
-  });
+/**
+ * A file's tokens under one reading, as small integers: `ids[k]` numbers token k by its text under `idOf`, and
+ * `lines[k]` is the 1-based line it starts on. Two numbers per token, where a token object and its text per reading
+ * made a file cost some 80 bytes per character.
+ */
+type Reading = { ids: number[]; lines: number[]; idOf: Map<string, number> };
+function readingOf(text: string, variant: Variant): Reading {
+  const idOf = new Map<string, number>();
+  const ids: number[] = [];
+  const lines: number[] = [];
+  for (const t of tokenize(text, variant)) {
+    ids.push(idOf.get(t.text) ?? (idOf.set(t.text, idOf.size), idOf.size - 1));
+    lines.push(t.line);
+  }
+  return { ids, lines, idOf };
+}
 
 /**
- * Every line range of `file` where a parse of `text` sits whole under the same reading, in file order. The range
- * starts where the text's first line would and ends where its last line would, so a comment inserted inside widens it
- * by a line.
+ * Every line range of `file` where a parse of `text` sits whole under one of `variants`, read the same way on both
+ * sides, in file order. The range starts where the text's first line would and ends where its last line would, so a
+ * comment inserted inside widens it by a line.
  */
-function occurrences(text: string, file: Tokenized[]): Range[] {
+function occurrences(text: string, file: Reading[], variants: Variant[]): Range[] {
   const lines = text.split("\n").length;
   const found: Range[] = [];
   for (const [k, variant] of VARIANTS.entries()) {
-    const { tokens, texts: hay } = file[k]!;
+    if (!variants.includes(variant)) continue;
+    const { ids, lines: at, idOf } = file[k]!;
     for (const parse of parses(text, variant)) {
-      const needle = texts(parse);
-      for (let i = indexOfRun(needle, hay); i !== -1; i = indexOfRun(needle, hay, i + 1)) {
-        found.push({ start: tokens[i]!.line - parse[0]!.line + 1, end: tokens[i + needle.length - 1]!.line + lines - parse.at(-1)!.line });
-      }
+      const needle = parse.map((t) => idOf.get(t.text) ?? -1);
+      if (needle.includes(-1)) continue;
+      for (const i of runsAt(needle, ids)) found.push({ start: at[i]! - parse[0]!.line + 1, end: at[i + needle.length - 1]! + lines - parse.at(-1)!.line });
     }
   }
   return found.sort((a, b) => a.start - b.start);
@@ -245,8 +270,19 @@ function occurrences(text: string, file: Tokenized[]): Range[] {
 
 const nearest = (ranges: Range[], near: number) => ranges.reduce<Range | undefined>((best, r) => (best === undefined || Math.abs(r.start - near) < Math.abs(best.start - near) ? r : best), undefined);
 
-/** Text with enough tokens to be looked for across the tree, or to say that two texts are the same code. */
-const substantial = (text: string) => tokenize(text).length >= MIN_TOKENS;
+const tokenCounts = (text: string) => VARIANTS.map((v) => tokenize(text, v).length);
+/**
+ * Text with enough tokens under some reading to be looked for across the tree, relocated within its file, or to say
+ * that two texts are the same code. The reading that finds the most code decides, since a regex backtick or a shell
+ * glob swallows the rest of the text under another, and a search under the reading that found it can only find more.
+ */
+const substantial = (text: string) => Math.max(...tokenCounts(text)) >= MIN_TOKENS;
+/**
+ * Text with enough tokens under every reading to say on its own that a resolved finding's code is back: the floor
+ * for posting a comment is the fewest tokens any reading gives, so a text that one reading swallows into a string is
+ * found in place only, never anywhere in its file.
+ */
+const distinctive = (text: string) => Math.min(...tokenCounts(text)) >= MIN_TOKENS;
 
 /**
  * Every 1-based line of `lines`, already normalized, where the text's lines sit as written: how a text with no code
@@ -288,34 +324,61 @@ export async function evidenceTexts(candidate: CandidateFinding, headSha: string
 
 /**
  * A file longer than this is compared by its lines as written only, never by tokens: a finding in it is found in place
- * or at the one place its lines sit, it survives when its lines are found, and a claim on it is otherwise refused as
- * code that may survive. Tokenizing such a file under every reading and searching each would cost seconds and hundreds
- * of megabytes per finding, so the bound fails toward an open finding, never toward a resolution.
+ * or at the one place its lines sit, it survives when its lines are found, and otherwise its code is unknown, which
+ * refuses a claim and reopens nothing. Tokenizing such a file under every reading and searching each would cost
+ * seconds and hundreds of megabytes per finding, so the bound fails toward an open finding, never toward a resolution.
  */
 export const MAX_FILE_CHARS = 4_000_000;
+/**
+ * The readings of the most recently compared files stay cached up to this many characters of file in all: a file
+ * several findings cite is tokenized once, and a tree-wide search over thousands of files keeps the tokens of a few.
+ */
+const READINGS_CACHE_CHARS = 2_000_000;
 
-/** A file at head: its normalized lines, and its tokens under every reading, or none past MAX_FILE_CHARS. */
-type FileAt = { lines: string[]; readings: Tokenized[] | undefined };
-type FilesOf = (path: string) => Promise<FileAt | undefined>;
-const FILES = new WeakMap<HeadReader, Map<string, Promise<FileAt | undefined>>>();
-/** Each file at head, read and tokenized once per head, however many findings are checked against it. */
+/** A file at head: its normalized lines, and its tokens under every reading (`readings`, none past MAX_FILE_CHARS). */
+type FileAt = { lines: string[]; readings: () => Reading[] | undefined };
+/** The file at `path`, UNREADABLE when it exists past the byte cap, or undefined when there is none. */
+type FilesOf = (path: string) => Promise<FileAt | typeof UNREADABLE | undefined>;
+type Cache = { files: Map<string, Promise<FileAt | typeof UNREADABLE | undefined>>; readings: Map<string, { chars: number; readings: Reading[] }>; chars: number };
+const CACHES = new WeakMap<HeadReader, Cache>();
+/** Each file at head, read once per head and tokenized when compared, however many findings are checked against it. */
 const fileCache = (head: HeadReader): FilesOf => {
-  const files = FILES.get(head) ?? new Map<string, Promise<FileAt | undefined>>();
-  FILES.set(head, files);
-  const load = async (path: string) => {
-    const raw = splitLines(await head.read(path));
-    if (!raw) return undefined;
-    const lines = raw.map(normalizeLine);
+  const cache = CACHES.get(head) ?? { files: new Map(), readings: new Map(), chars: 0 };
+  CACHES.set(head, cache);
+  // Most recently used last; one file over the whole budget stays alone until the next one comes in.
+  const readingsOf = (path: string, lines: string[], chars: number): Reading[] => {
+    const hit = cache.readings.get(path);
+    if (hit) {
+      cache.readings.delete(path);
+      cache.readings.set(path, hit);
+      return hit.readings;
+    }
     const text = lines.join("\n");
-    return { lines, readings: text.length > MAX_FILE_CHARS ? undefined : readings(text) };
+    const entry = { chars, readings: VARIANTS.map((v) => readingOf(text, v)) };
+    cache.readings.set(path, entry);
+    cache.chars += chars;
+    for (const [old, { chars: size }] of cache.readings) {
+      if (cache.chars <= READINGS_CACHE_CHARS || old === path) break;
+      cache.readings.delete(old);
+      cache.chars -= size;
+    }
+    return entry.readings;
   };
-  return (path) => files.get(path) ?? files.set(path, load(path)).get(path)!;
+  const load = async (path: string) => {
+    const text = await head.read(path);
+    if (text === undefined || text === UNREADABLE) return text;
+    const lines = splitLines(text)!.map(normalizeLine);
+    const chars = lines.reduce((n, line) => n + line.length + 1, 0);
+    return { lines, readings: () => (chars > MAX_FILE_CHARS ? undefined : readingsOf(path, lines, chars)) };
+  };
+  return (path) => cache.files.get(path) ?? cache.files.set(path, load(path)).get(path)!;
 };
 
-/** Every range of `file` that holds `item`, one per start line: its tokens under any reading, or its lines as written. */
-function places(item: EvidenceText, file: FileAt): Range[] {
+/** Every range of `file` that holds `item`, one per start line: its tokens under one of `variants`, or its lines as written. */
+function places(item: EvidenceText, file: FileAt, variants = VARIANTS): Range[] {
   const byStart = new Map<number, Range>();
-  for (const r of file.readings ? occurrences(item.text, file.readings) : []) byStart.set(r.start, r);
+  const readings = file.readings();
+  for (const r of readings ? occurrences(item.text, readings, variants) : []) byStart.set(r.start, r);
   for (const start of linesAt(item.text, file.lines)) if (!byStart.has(start)) byStart.set(start, { start, end: start + item.end - item.start });
   return [...byStart.values()].sort((a, b) => a.start - b.start);
 }
@@ -325,23 +388,31 @@ const searchWord = (parse: Token[]) => texts(parse).filter((t) => WORD.test(t[0]
 
 /**
  * Every file at head where a substantial `item` sits, with the place nearest its old line, by one tree-wide search per
- * distinct longest word of its parses and a token comparison of each file found, or undefined when a path list was cut
- * at its cap and so names no place.
+ * distinct longest word of its parses and a token comparison of each file found; or why no place can be named: a path
+ * list cut at its cap, or a listed file too large to read, either of which may hold the code.
  */
-async function treeHits(item: EvidenceText, head: HeadReader, filesOf: FilesOf): Promise<(Range & { path: string })[] | undefined> {
+async function treeHits(item: EvidenceText, head: HeadReader, filesOf: FilesOf): Promise<{ hits: (Range & { path: string })[] } | { unknown: string }> {
   const paths = new Set<string>();
   for (const word of new Set(VARIANTS.flatMap((v) => parses(item.text, v).map(searchWord)))) {
     const found = word === "" ? [] : await head.grep(word);
-    if (found === undefined) return undefined;
+    if (found === undefined) return { unknown: "in more files than the search lists" };
     for (const path of found) paths.add(path);
   }
   const hits: (Range & { path: string })[] = [];
   for (const path of paths) {
     const file = await filesOf(path);
+    if (file === UNREADABLE) return { unknown: `${path} is too large to read` };
     const hit = file && nearest(places(item, file), item.start);
     if (hit) hits.push({ path, ...hit });
   }
-  return hits;
+  return { hits };
+}
+
+/** `path` when a file is there at head, else the head path of its rename when that is, else undefined. */
+async function presentFile(path: string, head: HeadReader, filesOf: FilesOf): Promise<string | undefined> {
+  if (await filesOf(path)) return path;
+  const renamed = head.renamedTo(path);
+  return renamed !== undefined && (await filesOf(renamed)) ? renamed : undefined;
 }
 
 /**
@@ -353,29 +424,27 @@ async function treeHits(item: EvidenceText, head: HeadReader, filesOf: FilesOf):
  */
 export async function locate(location: ObservedLocation, headSha: string, head: HeadReader, options: { treeWide: boolean } = { treeWide: true }): Promise<Located> {
   const filesOf = fileCache(head);
-  const present = async (path: string) => {
-    if (await filesOf(path)) return path;
-    const renamed = head.renamedTo(path);
-    return renamed !== undefined && (await filesOf(renamed)) ? renamed : undefined;
-  };
   const findItem = async (item: EvidenceText): Promise<(Range & { path: string }) | undefined> => {
-    const own = await present(item.path);
-    const code = tokenize(item.text).length;
-    if (own !== undefined) {
-      const file = (await filesOf(own))!;
+    const own = await presentFile(item.path, head, filesOf);
+    const file = own === undefined ? undefined : await filesOf(own);
+    const counts = tokenCounts(item.text);
+    const code = Math.max(...counts);
+    if (file !== undefined && file !== UNREADABLE) {
       const found = places(item, file);
       // Below the floor: found in place, since moving it would pin the finding to any `return x;` in the file. With no code
-      // tokens at all, as in `}` or a `#field` line, also at the one place its lines sit, when there is exactly one.
-      const inPlace = found.find((r) => r.start === item.start) ?? (code === 0 && found.length === 1 ? found[0] : undefined);
+      // tokens under some reading, as in `}`, a `#field` or a `--flag \` line, also at the one place its lines sit, when there is exactly one.
+      const inPlace = found.find((r) => r.start === item.start) ?? (Math.min(...counts) === 0 && found.length === 1 ? found[0] : undefined);
       const hit = code >= MIN_TOKENS ? nearest(found, item.start) : inPlace;
-      if (hit) return { path: own, ...hit };
+      if (hit) return { path: own!, ...hit };
     }
     if (code < MIN_TOKENS || !options.treeWide) return undefined;
-    const hits = (await treeHits(item, head, filesOf))?.filter((hit) => hit.path !== own);
-    return hits?.length === 1 ? hits[0] : undefined;
+    const tree = await treeHits(item, head, filesOf);
+    if ("unknown" in tree) return undefined;
+    const hits = tree.hits.filter((hit) => hit.path !== own);
+    return hits.length === 1 ? hits[0] : undefined;
   };
 
-  const file = await present(location.file);
+  const file = await presentFile(location.file, head, filesOf);
   const miss = (): Located => (file === undefined ? { kind: "file_gone" } : { kind: "changed", file });
   const found: EvidenceText[] = [];
   for (const item of location.evidence) {
@@ -398,24 +467,29 @@ export const currentFile = (f: Pick<PriorFinding, "located">) => (f.located.kind
 export type Survival = { kind: "found"; item: EvidenceText; path: string; start: number; end: number } | { kind: "unknown"; reason: string };
 
 /**
- * Where the finding's own-file code still sits at this head, or undefined when none of it does. `located` says only
- * that some item went missing, which a changed helper in another file or a short item shifted a line also does, so a
- * resolution check asks this instead: each own-file item is looked for anywhere in the finding's current file, by its
- * tokens under any reading or by its lines as written, and a substantial item anywhere in the tree unless
- * `treeWide: false`. A tree-wide search cut at its cap counts as found, since an open finding beats a false resolution.
+ * Where the finding's own-file code still sits at this head, undefined when none of it does, or `unknown` when code
+ * cannot say. `located` says only that some item went missing, which a changed helper in another file or a short item
+ * shifted a line also does, so a resolution check asks this instead: each own-file item is looked for anywhere in the
+ * finding's current file, by its tokens under any reading or by its lines as written, and a substantial item anywhere
+ * in the tree. A file too large to read, one too large to compare as tokens whose lines are not found as written, and
+ * a tree-wide search cut at its cap or listing such a file are all `unknown`, since an open finding beats a false
+ * resolution. The loose side of the asymmetry: every reading and every match counts here, where `reopen` posts a
+ * comment and so takes only the strict one.
  */
-export async function survivingCode(f: Pick<PriorFinding, "location" | "located">, head: HeadReader, options: { treeWide: boolean } = { treeWide: true }): Promise<Survival | undefined> {
+export async function survivingCode(f: Pick<PriorFinding, "location" | "located">, head: HeadReader): Promise<Survival | undefined> {
   const filesOf = fileCache(head);
   const file = currentFile(f);
   const at = file === undefined ? undefined : await filesOf(file);
+  if (at === UNREADABLE) return { kind: "unknown", reason: `${file} is too large to read` };
   for (const item of f.location.evidence) {
     if (item.path !== f.location.file || item.text === "") continue;
     const hit = at && nearest(places(item, at), item.start);
     if (hit) return { kind: "found", item, path: file!, ...hit };
-    if (tokenize(item.text).length < MIN_TOKENS || !options.treeWide) continue;
-    const hits = await treeHits(item, head, filesOf);
-    if (hits === undefined) return { kind: "unknown", reason: "in more files than the search lists" };
-    const elsewhere = hits.find((h) => h.path !== file);
+    if (at && at.readings() === undefined) return { kind: "unknown", reason: `${file} is too large to compare as code` };
+    if (!substantial(item.text)) continue;
+    const tree = await treeHits(item, head, filesOf);
+    if ("unknown" in tree) return { kind: "unknown", reason: tree.unknown };
+    const elsewhere = tree.hits.find((h) => h.path !== file);
     if (elsewhere) return { kind: "found", item, ...elsewhere };
   }
   return undefined;
@@ -424,29 +498,42 @@ export async function survivingCode(f: Pick<PriorFinding, "location" | "located"
 /**
  * A resolved finding whose own-file code is back at this head, as a new finding seeded from it: the stored candidate
  * and evidence relocated to where the code sits now, under an id derived from this revision, so a retried VERIFY
- * derives the same one. A resolution is a claim code checked once; this is the same check run again on every later
- * head, so a false resolution corrects itself on the next push. Only the finding's own file and its rename are read:
- * code that came back elsewhere is a new defect for the model to report.
+ * derives the same one. A resolution is a claim code checked once; this is a check run again on every later head, so
+ * a false resolution corrects itself on the next push. It posts a comment, so it takes strong evidence only, the
+ * strict side of the asymmetry that `survivingCode` is the loose side of: every own-file item must be found in the
+ * finding's file (or its rename) under the default reading, so old code quoted in a comment reads as a comment; a
+ * distinctive item (MIN_TOKENS under every reading) anywhere in the file, any other item in place only, never as a
+ * `return x;` elsewhere; and at least one item must be distinctive. A file too large to read or to compare as tokens
+ * reopens nothing, as does code that came back in another file, which is a new defect for the model to report.
  */
 export async function reopen(resolved: { findingId: string; candidate: CandidateFinding; location: ObservedLocation; observedAt: string }, prId: string, revisionId: string, headSha: string, head: HeadReader): Promise<PriorFinding | undefined> {
   const { location } = resolved;
-  const located = await locate(location, headSha, head, { treeWide: false });
-  let at = located.kind === "same" ? located.location : undefined;
-  if (!at) {
-    const survival = await survivingCode({ location, located }, head, { treeWide: false });
-    if (survival?.kind !== "found") return undefined;
-    const { item, path, start, end } = survival;
-    // The anchor keeps its offset inside the item that survived, as far as that item still reaches.
-    const offset = location.newLine !== null && item.start <= location.newLine && location.newLine <= item.end ? Math.min(location.newLine - item.start, end - start) : 0;
-    at = { file: path, newLine: start + offset, headSha, evidence: [{ ...item, path, start, end }] };
+  const filesOf = fileCache(head);
+  const file = await presentFile(location.file, head, filesOf);
+  if (file === undefined) return undefined;
+  const at = await filesOf(file);
+  if (at === undefined || at === UNREADABLE) return undefined;
+  const own = location.evidence.filter((e) => e.path === location.file && e.text !== "");
+  const readings = at.readings();
+  if (readings === undefined || !own.some((e) => distinctive(e.text))) return undefined;
+  const found: EvidenceText[] = [];
+  for (const item of own) {
+    const ranges = distinctive(item.text) ? occurrences(item.text, readings, [DEFAULT_VARIANT]) : places(item, at, [DEFAULT_VARIANT]);
+    const hit = distinctive(item.text) ? nearest(ranges, item.start) : ranges.find((r) => r.start === item.start);
+    if (!hit) return undefined;
+    found.push({ ...item, path: file, ...hit });
   }
-  const candidate = { ...resolved.candidate, file: at.file, newLine: at.newLine, codeEvidence: at.evidence.map(({ path, start, end }) => ({ path, start, end, refSha: headSha })) };
+  // The anchor shifts with the item that held it, else with the first.
+  const anchor = Math.max(0, own.findIndex((e) => location.newLine !== null && e.start <= location.newLine && location.newLine <= e.end));
+  const newLine = location.newLine === null ? null : Math.max(1, location.newLine + found[anchor]!.start - own[anchor]!.start);
+  const where: ObservedLocation = { file, newLine, headSha, evidence: found };
+  const candidate = { ...resolved.candidate, file, newLine, codeEvidence: found.map(({ path, start, end }) => ({ path, start, end, refSha: headSha })) };
   return {
     findingId: stableId("finding", prId, revisionId, "reopens", resolved.findingId),
     status: "DETECTED",
     candidate,
-    location: at,
-    located: { kind: "same", location: at },
+    location: where,
+    located: { kind: "same", location: where },
     reopens: { findingId: resolved.findingId, resolvedAt: resolved.observedAt },
   };
 }
