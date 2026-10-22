@@ -196,6 +196,7 @@ Run every command as `node bin/pr-review.mjs <command>`.
 - [Publishing](docs/publishing.md) explains how pr-review avoids posting a review twice, and how to recover an uncertain publication.
 - [Running the service](docs/service.md) covers GitHub App setup, environment variables, endpoints, and deployment.
 - [The terminal client](docs/tui.md) covers the daemon, the client's views, keys, mouse, and background setting, and the account selector.
+- [The desktop client](desktop/README.md) covers the macOS app in `desktop/`, an early GPUI client built on the terminal client's core, and its snapshot harness.
 - [Protocol v1](protocol/README.md) is the reference for the messages between the daemon and the TUI.
 - [`docs/SPEC.md`](docs/SPEC.md) and [`docs/TUI_SPEC.md`](docs/TUI_SPEC.md) are the design specifications.
 
@@ -204,6 +205,7 @@ Run every command as `node bin/pr-review.mjs <command>`.
 ```bash
 pnpm typecheck && pnpm test             # TypeScript engine, daemon, and protocol
 (cd tui && cargo test && cargo clippy --all-targets -- -D warnings && cargo fmt --check)
+(cd desktop && cargo test && cargo clippy --all-targets -- -D warnings && cargo fmt --check)   # macOS only
 pnpm protocol:emit                      # regenerate protocol/schema, fixtures, and playback after changing src/protocol
 ```
 
