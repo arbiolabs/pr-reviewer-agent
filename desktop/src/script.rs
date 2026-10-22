@@ -22,6 +22,19 @@ pub enum Step {
     Finding(usize),
     /// Milliseconds before the next step.
     Wait(u64),
+    /// A step for the desktop's own view state, which the reducer never sees.
+    Desk(Desk),
+}
+
+/// The desktop's own view state: which list the home shows and what floats over it.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Desk {
+    /// `tab:done` or `tab:queue`.
+    Done(bool),
+    /// `palette:QUERY`: the command palette, open with QUERY typed.
+    Palette(String),
+    /// `keys`: the shortcut sheet.
+    Keys,
 }
 
 #[rustfmt::skip]
@@ -62,6 +75,13 @@ pub fn parse(s: &str) -> Result<Vec<Step>, String> {
                 0 => return Err(format!("{t:?}: findings count from 1")),
                 n => steps.push(Step::Finding(n as usize)),
             },
+            Some(("tab", v)) => match v {
+                "done" | "queue" => steps.push(Step::Desk(Desk::Done(v == "done"))),
+                _ => return Err(format!("{t:?}: tabs are queue and done")),
+            },
+            Some(("palette", v)) => steps.push(Step::Desk(Desk::Palette(v.into()))),
+            None if t == "palette" => steps.push(Step::Desk(Desk::Palette(String::new()))),
+            None if t == "keys" => steps.push(Step::Desk(Desk::Keys)),
             Some(("type", v)) => steps.extend(v.chars().map(|c| Step::Act(Action::InputChar(c)))),
             Some(("goto", v)) => match SCREENS.iter().find(|(n, _)| *n == v) {
                 Some((_, s)) => steps.push(Step::Act(Action::Goto(*s))),
@@ -83,7 +103,7 @@ fn names<T>(table: &[(&str, T)]) -> String {
 /// The message a step sends now, `None` for a wait.
 fn message(m: &Model, step: &Step) -> Result<Option<Msg>, String> {
     Ok(Some(match step {
-        Step::Wait(_) => return Ok(None),
+        Step::Wait(_) | Step::Desk(_) => return Ok(None),
         Step::Act(a) => Msg::Action(*a),
         Step::Pr(n) => match m.domain.prs.values().find(|p| p.number == *n) {
             Some(p) => Msg::Pick(Hit::Pr(p.id.clone())),

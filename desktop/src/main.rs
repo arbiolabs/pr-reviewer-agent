@@ -1,13 +1,25 @@
 //! The macOS client: the TUI crate's reducer and network task behind a GPUI window.
 
 mod capture;
+mod cards;
+mod code;
+mod detail;
+mod diff;
+mod kit;
+mod live;
+mod overlay;
+mod publish;
+mod queue;
 mod script;
+mod setup;
+mod tokens;
+mod ui;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::time::{Duration, Instant};
 
-use gpui_kit::component::{ActiveTheme, Theme, ThemeMode};
+use gpui_kit::component::{Theme, ThemeMode};
 use gpui_kit::*;
 use pr_review_tui::app::dispatch;
 use pr_review_tui::config::{self, Source};
@@ -88,41 +100,6 @@ fn size_arg(v: &str) -> Result<(f32, f32), String> {
     }
 }
 
-/// The window's view: the TUI's model, and the channel its effects go out on.
-struct Shell {
-    model: Model,
-    cmds: mpsc::Sender<NetCmd>,
-}
-
-impl Render for Shell {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        let m = &self.model;
-        let theme = cx.theme();
-        let inbox = m.inbox();
-        div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .gap_1()
-            .p_6()
-            .bg(theme.background)
-            .text_color(theme.foreground)
-            .font_family(".SystemUIFont")
-            .child(div().text_color(theme.muted_foreground).child(format!(
-                "{:?} · {:?} · {} panels · {}",
-                m.link,
-                m.ui.screen,
-                m.ui.modals.len(),
-                m.diag.endpoint
-            )))
-            .child(div().pb_2().child(format!("{} PRs", inbox.len())))
-            .children(inbox.into_iter().map(|p| {
-                let selected = m.ui.selected_pr.as_ref() == Some(&p.id);
-                div().child(format!("{} #{} {}", if selected { "▸" } else { " " }, p.number, p.title.as_str()))
-            }))
-    }
-}
-
 fn main() -> ExitCode {
     let opts = match parse_args(std::env::args().skip(1)) {
         Ok(Cli::Run(o)) => o,
@@ -159,7 +136,9 @@ fn start(opts: Opts) -> Result<(), String> {
     if let (Source::Playback(p), Some(_)) = (&settings.source, &opts.snapshot) {
         script::play(playback::load(p)?, &mut model, &opts.steps, opts.after_ms)?;
         let snapshot = opts.snapshot.map(|out| (out, 0));
-        run_app(Shell { model, cmds }, None, snapshot, opts.window, opts.appearance);
+        let view = View { model, cmds, desk: desk(&opts.steps), still: true };
+        run_app(view, None, snapshot, opts.window, opts.appearance);
+        drop(cmd_rx);
         return Ok(());
     }
 
@@ -177,11 +156,37 @@ fn start(opts: Opts) -> Result<(), String> {
         }
     }
     drop(rt.spawn(ticks(msg_tx)));
-    let snapshot = opts.snapshot.map(|out| (out, opts.after_ms));
+    let snapshot = opts.snapshot.clone().map(|out| (out, opts.after_ms));
     // `rt` lives until the process exits, since `run_app` returns only after the app quits.
-    run_app(Shell { model, cmds }, Some(msgs), snapshot, opts.window, opts.appearance);
+    let view = View { model, cmds, desk: Vec::new(), still: opts.snapshot.is_some() || reduce_motion() };
+    run_app(view, Some(msgs), snapshot, opts.window, opts.appearance);
     drop(rt);
     Ok(())
+}
+
+/// What the window opens with: the model, the network's queue, and the desktop's own view steps.
+struct View {
+    model: Model,
+    cmds: mpsc::Sender<NetCmd>,
+    desk: Vec<script::Desk>,
+    still: bool,
+}
+
+fn desk(steps: &[script::Step]) -> Vec<script::Desk> {
+    steps.iter().filter_map(|s| if let script::Step::Desk(d) = s { Some(d.clone()) } else { None }).collect()
+}
+
+/// macOS's Reduce motion setting, or `PR_REVIEW_REDUCE_MOTION=1`.
+fn reduce_motion() -> bool {
+    if std::env::var_os("PR_REVIEW_REDUCE_MOTION").is_some_and(|v| v == "1") {
+        return true;
+    }
+    #[cfg(target_os = "macos")]
+    {
+        objc2_app_kit::NSWorkspace::sharedWorkspace().accessibilityDisplayShouldReduceMotion()
+    }
+    #[cfg(not(target_os = "macos"))]
+    false
 }
 
 /// `Msg::Tick` at the TUI's cadence, through the same queue as the network's messages.
@@ -200,13 +205,13 @@ async fn ticks(tx: mpsc::Sender<Msg>) {
 /// Opens the window and, with `msgs`, feeds the reducer on the main thread; with `snapshot`, captures the window
 /// that many milliseconds after it opens and quits.
 fn run_app(
-    shell: Shell,
+    view: View,
     msgs: Option<mpsc::Receiver<Msg>>,
     snapshot: Option<(PathBuf, u64)>,
     (w, h): (f32, f32),
     appearance: Option<ThemeMode>,
 ) {
-    gpui_kit::application().run(move |cx| {
+    gpui_kit::application().with_assets(gpui_kit::assets::AllAssets).run(move |cx| {
         gpui_kit::init(cx);
         match appearance {
             Some(mode) => Theme::change(mode, None, cx),
@@ -214,10 +219,21 @@ fn run_app(
         }
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds::centered(None, size(px(w), px(h)), cx))),
-            titlebar: Some(TitlebarOptions { title: Some("pr-review".into()), ..Default::default() }),
+            titlebar: Some(TitlebarOptions {
+                title: Some("pr-review".into()),
+                appears_transparent: true,
+                traffic_light_position: Some(point(px(18.), px(18.))),
+            }),
             ..Default::default()
         };
-        let (window, shell) = match gpui_kit::open_window(options, cx, |_, cx| cx.new(|_| shell)) {
+        let View { model, cmds, desk, still } = view;
+        let built = gpui_kit::open_window(options, cx, |window, cx| {
+            let shell = cx.new(|cx| ui::Shell::new(model, cmds, still, &desk, cx));
+            let focus = shell.read(cx).focus.clone();
+            window.focus(&focus, cx);
+            shell
+        });
+        let (window, shell) = match built {
             Ok(opened) => opened,
             Err(e) => fail(format!("could not open a window: {e}")),
         };

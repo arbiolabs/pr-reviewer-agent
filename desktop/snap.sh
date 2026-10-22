@@ -15,24 +15,30 @@ cd "$here/.."
 script=protocol/playback/showcase.ndjson
 
 snap() {
-  name=$1 appearance=$2 ms=$3 actions=$4
+  name=$1 appearance=$2 ms=$3 actions=$4 from=${5:-$script}
   case $only in "  " | *" $name "*) ;; *) return 0 ;; esac
-  set -- --playback "$script" --window 1280x800 --appearance "$appearance" --snapshot-after-ms "$ms" \
+  set -- --playback "$from" --window 1280x800 --appearance "$appearance" --snapshot-after-ms "$ms" \
     --snapshot "$out/$name.png"
   [ -n "$actions" ] && set -- "$@" --actions "$actions"
   "$bin" "$@"
   echo "$out/$name.png"
 }
 
-# name           appearance  ms     actions
-snap start       dark        0      ""
-snap inbox       dark        500    "goto:inbox"
-snap running     dark        6000   ""
-snap findings    dark        20000  "wait:19000,pr:1287"
-snap findings-light light    20000  "wait:19000,pr:1287"
-snap finding     dark        20000  "wait:19000,pr:1287,finding:2,finding:2"
-snap diff        dark        20000  "wait:19000,pr:1287,finding:2,open-diff"
-snap timeline    dark        20000  "wait:19000,pr:1287,open-timeline"
-snap help        dark        20000  "wait:19000,help"
-snap ready       dark        83000  ""
-snap settings    dark        20000  "wait:19000,goto:settings"
+# The design review's states, dark and light. 08 plays a daemon with no PRs and a missing model.
+for look in dark light; do
+  snap 01-overview-$look   $look 20000 ""
+  snap 02-pr-$look         $look 20000 "wait:19000,pr:1287,finding:2"
+  snap 03-finding-$look    $look 20000 "wait:19000,pr:1287,finding:1,finding:1"
+  snap 04-diff-$look       $look 20000 "wait:19000,pr:1287,finding:1,open-diff"
+  snap 05-running-$look    $look 10000 "wait:9000,pr:1291"
+  snap 06-approval-$look   $look 20000 "wait:19000,pr:1291,publish"
+  snap 07-palette-$look    $look 20000 "wait:19000,palette:re"
+  snap 08-setup-$look      $look 1000  "" protocol/playback/setup.ndjson
+  snap 08-setup-checks-$look $look 1000 "goto:settings" protocol/playback/setup.ndjson
+  case $only in "  " | *" 08-disconnected-$look "*)
+    "$bin" --socket /private/tmp/prdc/s.sock --window 1280x800 --appearance $look --snapshot-after-ms 1500 \
+      --snapshot "$out/08-disconnected-$look.png" && echo "$out/08-disconnected-$look.png" ;;
+  esac
+  snap 09-done-$look       $look 30000 "wait:20000,pr:1291,publish,wait:200,confirm,wait:6000,tab:done"
+  snap 10-confirm-$look    $look 20000 "wait:19000,pr:345,retry"
+done
