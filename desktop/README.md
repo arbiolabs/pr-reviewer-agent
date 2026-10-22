@@ -50,7 +50,7 @@ pr-review-desktop --playback protocol/playback/showcase.ndjson --snapshot out.pn
 | `--window WxH` | The window size in points. The default is 1280x800. |
 | `--appearance dark\|light` | The gpui-kit theme mode. The default follows the system. |
 
-The PNG is the window's content area at the display's scale, so `--window 1280x800` gives a 2560x1600 image on a Retina display. The title bar is cropped off, because macOS draws it differently when the window is not focused.
+The window must fit on the screen, because macOS shrinks a larger one and the capture then never matches the requested size. The PNG is the window's content area at the display's scale, so `--window 1280x800` gives a 2560x1600 image on a Retina display. The title bar is cropped off, because macOS draws it differently when the window is not focused.
 
 ### Determinism
 

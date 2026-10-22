@@ -69,7 +69,9 @@ jobs:
       - run: cargo clippy --all-targets -- -D warnings
       - run: cargo test
       - run: cargo build --release
+      # The runner's display is 1024x768, too small for snap.sh's 1280x800 window.
       - name: Smoke-test the snapshot harness
         run: |
-          ./snap.sh "$RUNNER_TEMP/snaps" findings
-          file "$RUNNER_TEMP/snaps/findings.png" | grep -Eq '(1280 x 800|2560 x 1600)'
+          ./target/release/pr-review-desktop --playback ../protocol/playback/showcase.ndjson --window 800x500 \
+            --appearance dark --snapshot-after-ms 20000 --actions wait:19000,pr:1287 --snapshot "$RUNNER_TEMP/snap.png"
+          file "$RUNNER_TEMP/snap.png" | grep -Eq '(800 x 500|1600 x 1000)'
