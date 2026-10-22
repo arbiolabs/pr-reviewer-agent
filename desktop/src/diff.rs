@@ -6,13 +6,13 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use pr_review_tui::keymap::Action;
 use pr_review_tui::model::{DiffRow, file_rows};
-use pr_review_tui::protocol::{FileStatus, LineKind};
+use pr_review_tui::protocol::{DiffFile, FileStatus, LineKind};
 use pr_review_tui::update::{Msg, diff_findings, row_findings};
 use pr_review_tui::view::Hit;
 
 use crate::code::Lexer;
 use crate::detail::{Bar, Item, action_bar, bar_view, code_row, runs};
-use crate::kit::{Tone, callout, focusable, icon, lift, overline, rail, severity_count};
+use crate::kit::{Tone, button, callout, focusable, icon, lift, overline, rail, severity_count};
 use crate::tokens::{Colors, layout, radius, severity_mark, space, text};
 use crate::ui::{Shell, on};
 
@@ -20,6 +20,17 @@ use crate::ui::{Shell, on};
 const LEAD: usize = 8;
 /// Rows drawn in all; the pane clips what doesn't fit.
 const SPAN: usize = 64;
+
+/// A file a generator wrote: a lock file, a test snapshot, or anything under a `generated/` or `dist/` folder.
+/// ponytail: a path rule, since the protocol carries no generated flag; read the repository's .gitattributes
+/// (linguist-generated) if the rule misses.
+pub fn generated(path: &str) -> bool {
+    let name = path.rsplit('/').next().unwrap_or(path);
+    matches!(name, "pnpm-lock.yaml" | "package-lock.json" | "yarn.lock" | "Cargo.lock" | "go.sum")
+        || name.ends_with(".snap")
+        || name.ends_with(".min.js")
+        || path.split('/').any(|p| matches!(p, "generated" | "__snapshots__" | "dist"))
+}
 
 pub fn view(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
     let m = &s.model;
@@ -52,6 +63,176 @@ pub fn view(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         )));
     }
     let anchored = diff_findings(m, d);
+    let flagged = |f: &DiffFile| anchored.iter().any(|x| x.file == f.path);
+    let with_findings = d.files.iter().filter(|f| flagged(f)).count();
+    let file_row = |i: usize, f: &DiffFile| {
+        let selected = d.selected_file.as_ref() == Some(&f.path);
+        let here: Vec<_> = anchored.iter().filter(|x| x.file == f.path).collect();
+        let worst = here.iter().map(|x| x.severity).min();
+        let path = f.path.clone();
+        let name = f.path.as_str().rsplit_once('/').map_or(f.path.as_str(), |(_, n)| n);
+        let letter = match f.status {
+            FileStatus::Added => "A",
+            FileStatus::Deleted => "D",
+            FileStatus::Renamed => "R",
+            FileStatus::Binary => "B",
+            _ => "M",
+        };
+        let row = div()
+            .id(("file-face", i))
+            .relative()
+            .flex()
+            .items_center()
+            .gap(space::S2)
+            .h(px(30.))
+            .pl(space::S4)
+            .pr(space::S2)
+            .rounded(radius::SM)
+            .when(selected, |d| d.bg(t.selected).child(rail(t)))
+            .hover(move |d| d.bg(if selected { lift(t, t.selected) } else { t.hover }))
+            .active(|d| d.bg(t.press))
+            .child(
+                div()
+                    .w(px(12.))
+                    .flex_none()
+                    .text_size(text::CAPTION)
+                    .font_weight(FontWeight::BOLD)
+                    .text_color(t.muted)
+                    .child(letter),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(text::SMALL)
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(t.text)
+                    .child(name.to_string()),
+            )
+            .children(worst.map(|w| severity_count(t, w, here.len())))
+            .child(div().flex_none().text_size(text::CAPTION).text_color(t.add_fg).child(format!("+{}", f.additions)))
+            .child(div().flex_none().text_size(text::CAPTION).text_color(t.del_fg).child(format!("−{}", f.deletions)));
+        crate::kit::tip(
+            focusable(
+                ("file", i),
+                row,
+                t,
+                radius::SM,
+                Box::new(
+                    cx.listener(move |s, _: &ClickEvent, _, cx| s.send(Msg::Pick(Hit::DiffFile(path.clone())), cx)),
+                ),
+            ),
+            f.path.to_string(),
+        )
+    };
+    let folder = |dir: &str, n: usize| {
+        div()
+            .flex()
+            .items_center()
+            .gap(space::S2)
+            .px(space::S2)
+            .pt(space::S3)
+            .pb(space::S1)
+            .child(icon(IconName::Folder, px(12.), t.faint))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(text::CAPTION)
+                    .text_color(t.muted)
+                    .child(if dir.is_empty() { "/".to_string() } else { format!("{dir}/") }),
+            )
+            .child(crate::kit::tabular(div()).text_size(text::CAPTION).text_color(t.faint).child(n.to_string()))
+    };
+    let mut list = div().flex().flex_col().gap(px(2.));
+    let mut made_list = div().flex().flex_col().gap(px(2.));
+    // Written files grouped by folder, in the order the diff first names each folder.
+    let shown: Vec<(usize, &DiffFile)> = d
+        .files
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| !generated(f.path.as_str()) && (!s.diff_flagged_only || flagged(f)))
+        .collect();
+    let mut dirs: Vec<&str> = Vec::new();
+    for (_, f) in &shown {
+        let dir = f.path.as_str().rsplit_once('/').map_or("", |(d, _)| d);
+        if !dirs.contains(&dir) {
+            dirs.push(dir);
+        }
+    }
+    for dir in dirs {
+        let here: Vec<&(usize, &DiffFile)> =
+            shown.iter().filter(|(_, f)| f.path.as_str().rsplit_once('/').map_or("", |(d, _)| d) == dir).collect();
+        list = list.child(folder(dir, here.len())).children(here.into_iter().map(|(i, f)| file_row(*i, f)));
+    }
+    // What a generator wrote stays folded under one row at the top: the reader rarely reads a lock or snapshot file.
+    let made: Vec<(usize, &DiffFile)> = d
+        .files
+        .iter()
+        .enumerate()
+        .filter(|(_, f)| generated(f.path.as_str()) && (!s.diff_flagged_only || flagged(f)))
+        .collect();
+    if !made.is_empty() {
+        let open = s.diff_generated_open || made.iter().any(|(_, f)| d.selected_file.as_ref() == Some(&f.path));
+        let lines: u32 = made.iter().map(|(_, f)| f.additions + f.deletions).sum();
+        let head = div()
+            .id("generated-face")
+            .flex()
+            .items_center()
+            .gap(space::S2)
+            .h(px(30.))
+            .mt(space::S3)
+            .px(space::S2)
+            .rounded(radius::SM)
+            .hover(|d| d.bg(t.hover))
+            .child(icon(if open { IconName::ChevronDown } else { IconName::ChevronRight }, px(12.), t.muted))
+            .child(
+                div()
+                    .flex_1()
+                    .text_size(text::SMALL)
+                    .text_color(t.muted)
+                    .child(format!("Generated · {}", crate::queue::count(made.len(), "file"))),
+            )
+            .child(
+                crate::kit::tabular(div())
+                    .text_size(text::CAPTION)
+                    .text_color(t.faint)
+                    .child(format!("{} lines", thousands(lines))),
+            );
+        made_list = made_list.child(crate::kit::tip(
+            focusable(
+                "generated",
+                head,
+                t,
+                radius::SM,
+                Box::new(cx.listener(|s, _: &ClickEvent, _, cx| {
+                    s.diff_generated_open = !s.diff_generated_open;
+                    cx.notify();
+                })),
+            ),
+            "Lock files, test snapshots and generated output: folded, since they are rarely read by hand.",
+        ));
+        if open {
+            made_list = made_list.children(made.into_iter().map(|(i, f)| file_row(i, f)));
+        }
+    }
+    let filter = button(
+        t,
+        "files-filter",
+        &if s.diff_flagged_only {
+            format!("All {} files", d.files.len())
+        } else {
+            format!("{with_findings} with findings")
+        },
+        Some("F"),
+        Tone::Ghost,
+        on(cx, |s, cx| {
+            s.diff_flagged_only = !s.diff_flagged_only;
+            cx.notify();
+        }),
+    );
     let files = div()
         .id("files")
         .flex()
@@ -64,73 +245,24 @@ pub fn view(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         .border_color(t.border)
         .p(space::S3)
         .pb(space::S8)
-        .gap(px(2.))
-        .child(div().px(space::S2).pb(space::S2).child(overline(t, crate::queue::count(d.files.len(), "file"))))
-        .children(d.files.iter().enumerate().map(|(i, f)| {
-            let selected = d.selected_file.as_ref() == Some(&f.path);
-            let here: Vec<_> = anchored.iter().filter(|x| x.file == f.path).collect();
-            let worst = here.iter().map(|x| x.severity).min();
-            let path = f.path.clone();
-            let (dir, name) = f.path.as_str().rsplit_once('/').unwrap_or(("", f.path.as_str()));
-            let letter = match f.status {
-                FileStatus::Added => "A",
-                FileStatus::Deleted => "D",
-                FileStatus::Renamed => "R",
-                FileStatus::Binary => "B",
-                _ => "M",
-            };
-            let line = || div().h(px(18.)).flex().items_center().flex_none();
-            let row = div()
-                .id(("file-face", i))
-                .relative()
+        .child(
+            div()
                 .flex()
-                .items_start()
+                .items_center()
                 .gap(space::S2)
-                .h(px(44.))
-                .px(space::S2)
-                .py(px(5.))
-                .rounded(radius::SM)
-                .when(selected, |d| d.bg(t.selected).child(rail(t)))
-                .hover(move |d| d.bg(if selected { lift(t, t.selected) } else { t.hover }))
-                .active(|d| d.bg(t.press))
-                .child(
-                    line()
-                        .w(px(14.))
-                        .text_size(text::CAPTION)
-                        .font_weight(FontWeight::BOLD)
-                        .text_color(t.muted)
-                        .child(letter),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .flex_1()
-                        .min_w_0()
-                        .child(
-                            div()
-                                .truncate()
-                                .text_size(text::SMALL)
-                                .line_height(px(18.))
-                                .font_weight(FontWeight::MEDIUM)
-                                .text_color(t.text)
-                                .child(name.to_string()),
-                        )
-                        .child(div().truncate().text_size(text::CAPTION).text_color(t.muted).child(dir.to_string())),
-                )
-                .children(worst.map(|w| line().child(severity_count(t, w, here.len()))))
-                .child(line().text_size(text::CAPTION).text_color(t.add_fg).child(format!("+{}", f.additions)))
-                .child(line().text_size(text::CAPTION).text_color(t.del_fg).child(format!("−{}", f.deletions)));
-            focusable(
-                ("file", i),
-                row,
-                t,
-                radius::SM,
-                Box::new(
-                    cx.listener(move |s, _: &ClickEvent, _, cx| s.send(Msg::Pick(Hit::DiffFile(path.clone())), cx)),
-                ),
-            )
-        }));
+                .pl(space::S2)
+                .child(div().flex_1().child(overline(
+                    t,
+                    if s.diff_flagged_only {
+                        format!("{} of {}", crate::queue::count(with_findings, "file"), d.files.len())
+                    } else {
+                        crate::queue::count(d.files.len(), "file")
+                    },
+                )))
+                .child(filter),
+        )
+        .child(made_list)
+        .child(list);
     let Some(file) = d.file() else { return shell.child(files) };
     let rows = file_rows(file);
     let mut lx = Lexer::for_path(file.path.as_str());
@@ -349,4 +481,35 @@ pub fn view(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
     };
     let bar = bar_view(s, t, bar, cx);
     div().flex().flex_col().flex_1().min_h_0().min_w_0().child(shell.child(files).child(pane)).child(action_bar(t, bar))
+}
+
+/// 2442 as "2,442".
+fn thousands(n: u32) -> String {
+    let s = n.to_string();
+    let mut out = String::new();
+    for (i, c) in s.chars().enumerate() {
+        if i > 0 && (s.len() - i).is_multiple_of(3) {
+            out.push(',');
+        }
+        out.push(c);
+    }
+    out
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{generated, thousands};
+
+    #[test]
+    fn generated_files_are_told_apart_by_their_path() {
+        for p in
+            ["pnpm-lock.yaml", "src/tokens/generated/tokens.css", "src/b/__snapshots__/B.test.tsx.snap", "dist/app.js"]
+        {
+            assert!(generated(p), "{p}");
+        }
+        for p in ["src/components/Button/Button.tsx", "docs/generating-tokens.md", "package.json"] {
+            assert!(!generated(p), "{p}");
+        }
+        assert_eq!([thousands(2442), thousands(999), thousands(1_204_000)], ["2,442", "999", "1,204,000"]);
+    }
 }

@@ -147,6 +147,10 @@ pub struct Shell {
     pub more_open: bool,
     /// The timeline's "Verifier discarded" groups that are open, by the sequence of their CANDIDATES_DISPOSED.
     pub open_discards: Vec<u64>,
+    /// The diff lists only the files with findings.
+    pub diff_flagged_only: bool,
+    /// The diff's Generated group is open.
+    pub diff_generated_open: bool,
 }
 
 /// A page the reader went into: a finding, the proof, the diff or setup. The live strip steps aside there.
@@ -186,6 +190,8 @@ impl Shell {
             width: px(1280.),
             more_open: false,
             open_discards: Vec::new(),
+            diff_flagged_only: false,
+            diff_generated_open: false,
         };
         for d in desk {
             match d {
@@ -194,6 +200,7 @@ impl Shell {
                 Desk::Keys => s.overlay = Some(Overlay::Keys),
                 Desk::ConfirmPost => s.post(false, cx),
                 Desk::Scrub(n) => s.scrub = Some(n.saturating_sub(1)),
+                Desk::Flagged => s.diff_flagged_only = true,
                 Desk::Discards => {
                     s.open_discards =
                         s.model.timeline.iter().flat_map(|tl| &tl.events).map(|e| e.sequence.get()).collect()
@@ -495,6 +502,10 @@ impl Shell {
             (None, Screen::Diff, _, "n") => Action::NextFinding,
             (None, Screen::Diff, _, "N") => Action::PrevFinding,
             (None, Screen::Diff, _, ":") => Action::JumpTo,
+            (None, Screen::Diff, _, "f") => {
+                self.diff_flagged_only = !self.diff_flagged_only;
+                return cx.notify();
+            }
             (None, Screen::Timeline, _, "f") => Action::Search,
             // T toggles the PR's two tabs, so leaving the timeline has a key of its own, apart from Back.
             (None, Screen::Timeline, _, "t") => Action::Back,

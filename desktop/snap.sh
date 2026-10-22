@@ -114,4 +114,5 @@ for look in dark light; do
   snap 15b-reopened-$look      $look 3000  "wait:2000,pr:1302,finding:2,finding:2" protocol/playback/tracking.ndjson
   snap 16-discards-$look       $look 3000  "wait:2000,pr:1302,open-timeline,discards" protocol/playback/tracking.ndjson
   snap 17-big-diff-$look       $look 3000  "wait:2000,pr:1310,open-diff" protocol/playback/big-diff.ndjson
+  snap 17b-big-diff-flagged-$look $look 3000 "wait:2000,pr:1310,open-diff,flagged" protocol/playback/big-diff.ndjson
 done

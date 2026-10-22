@@ -37,6 +37,8 @@ pub enum Desk {
     Keys,
     /// `confirm-post`: the sheet that asks before posting the proof in front.
     ConfirmPost,
+    /// `flagged`: the diff lists only the files with findings.
+    Flagged,
     /// `discards`: every "Verifier discarded" group on the timeline, open.
     Discards,
     /// `scrub:N`: the live log held at its Nth event, counted from 1.
@@ -94,6 +96,7 @@ pub fn parse(s: &str) -> Result<Vec<Step>, String> {
             None if t == "keys" => steps.push(Step::Desk(Desk::Keys)),
             None if t == "confirm-post" => steps.push(Step::Desk(Desk::ConfirmPost)),
             None if t == "discards" => steps.push(Step::Desk(Desk::Discards)),
+            None if t == "flagged" => steps.push(Step::Desk(Desk::Flagged)),
             Some(("type", v)) => steps.extend(v.chars().map(|c| Step::Act(Action::InputChar(c)))),
             Some(("goto", v)) => match SCREENS.iter().find(|(n, _)| *n == v) {
                 Some((_, s)) => steps.push(Step::Act(Action::Goto(*s))),
