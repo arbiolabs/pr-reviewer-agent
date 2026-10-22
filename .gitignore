@@ -5,3 +5,5 @@ dist/
 todo.md
 tui/target/
 .claude/worktrees/
+desktop/target/
+desktop/snapshots/
