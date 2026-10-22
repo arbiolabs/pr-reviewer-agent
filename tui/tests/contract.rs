@@ -183,6 +183,14 @@ fn unknown_fields_and_event_types_are_ignored() {
 }
 
 #[test]
+fn a_history_entry_carries_the_basis_of_its_observation_when_the_daemon_gives_one() {
+    let body = fs::read_to_string(protocol_dir().join("fixtures/server.finding.detail.tracked.json")).unwrap();
+    let ServerMessage::FindingDetail { finding, .. } = ServerMessage::parse(&body).unwrap() else { panic!() };
+    let basis: Vec<_> = finding.history.iter().map(|h| h.basis.as_ref().map(|b| b.to_string())).collect();
+    assert_eq!(basis, [None, None, Some("located".to_string()), Some("changed".to_string())]);
+}
+
+#[test]
 fn accounts_parse_from_snapshot_and_event_and_are_optional_in_old_snapshots() {
     let body = fs::read_to_string(protocol_dir().join("fixtures/server.snapshot.accounts.json")).unwrap();
     let ServerMessage::Snapshot(s) = ServerMessage::parse(&body).unwrap() else { panic!() };
