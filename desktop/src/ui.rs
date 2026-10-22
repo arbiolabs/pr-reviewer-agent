@@ -1,28 +1,99 @@
-//! The window: sidebar, toolbar, the live strip, the triage queue and the detail pane. Every intent is a message to
-//! the TUI's reducer (`Msg::Action`, `Msg::Pick`); the desktop keeps only what floats over the window and which list
-//! the home shows.
+//! The window: one title bar with the traffic lights, the sidebar, the live strip, the triage queue and the detail
+//! pane. Every intent is a message to the TUI's reducer (`Msg::Action`, `Msg::Pick`); the desktop keeps only what
+//! floats over the window, which list the home shows, and where the live log is held.
 
 use gpui_kit::assets::IconName;
+use gpui_kit::component::{Theme, ThemeMode};
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use pr_review_tui::app::dispatch;
 use pr_review_tui::keymap::{Action, Mutation};
-use pr_review_tui::model::{Link, Modal, Model, Screen};
+use pr_review_tui::model::{ConfirmState, Link, Modal, Model, Screen};
 use pr_review_tui::net::NetCmd;
-use pr_review_tui::protocol::{Phase, Pr, PrId, Run};
-use pr_review_tui::update::Msg;
+use pr_review_tui::protocol::{Command, Pr, PrId, Run};
+use pr_review_tui::update::{Msg, can_confirm};
 use pr_review_tui::view::Hit;
 use tokio::sync::mpsc;
 
-use crate::kit::{OnClick, Tone, button, icon, keycap, overline};
-use crate::queue::{self, Card};
+use crate::kit::{
+    Gauge, OnClick, Tone, button, count_badge, focusable, icon, keycap, overline, progress, severity_count, step_of,
+    tip,
+};
+use crate::queue::{self, Card, RowState, Stage, phase_word};
 use crate::script::Desk;
 use crate::tokens::{self, Colors, layout, motion, radius, space, text};
 use crate::{detail, diff, overlay};
 
+gpui_kit::actions!(
+    pr_review,
+    [
+        Quit,
+        CloseWindow,
+        Palette,
+        Refresh,
+        OpenGitHub,
+        Setup,
+        Shortcuts,
+        Post,
+        NeedsYou,
+        DoneList,
+        AppearanceSystem,
+        AppearanceDark,
+        AppearanceLight
+    ]
+);
+
+/// The ⌘ shortcuts, bound to the menu actions so the menu bar shows them.
+pub fn bindings() -> Vec<KeyBinding> {
+    vec![
+        KeyBinding::new("cmd-q", Quit, None),
+        KeyBinding::new("cmd-w", CloseWindow, None),
+        KeyBinding::new("cmd-k", Palette, None),
+        KeyBinding::new("cmd-r", Refresh, None),
+        KeyBinding::new("cmd-o", OpenGitHub, None),
+        KeyBinding::new("cmd-,", Setup, None),
+        KeyBinding::new("cmd-shift-/", Shortcuts, None),
+        KeyBinding::new("cmd-enter", Post, None),
+        KeyBinding::new("cmd-1", NeedsYou, None),
+        KeyBinding::new("cmd-2", DoneList, None),
+    ]
+}
+
+pub fn menus() -> Vec<Menu> {
+    vec![
+        Menu::new("pr-review").items([MenuItem::action("Quit pr-review", Quit)]),
+        Menu::new("File").items([MenuItem::action("Close Window", CloseWindow)]),
+        Menu::new("View").items([
+            MenuItem::action("Needs You", NeedsYou),
+            MenuItem::action("Done", DoneList),
+            MenuItem::separator(),
+            MenuItem::action("Command Palette", Palette),
+            MenuItem::action("Setup", Setup),
+            MenuItem::separator(),
+            MenuItem::submenu(Menu::new("Appearance").items([
+                MenuItem::action("Follow System", AppearanceSystem),
+                MenuItem::action("Dark", AppearanceDark),
+                MenuItem::action("Light", AppearanceLight),
+            ])),
+        ]),
+        Menu::new("Review").items([
+            MenuItem::action("Open on GitHub", OpenGitHub),
+            MenuItem::action("Post the Preview", Post),
+            MenuItem::separator(),
+            MenuItem::action("Refresh from the Daemon", Refresh),
+        ]),
+        Menu::new("Help").items([MenuItem::action("Keyboard Shortcuts", Shortcuts)]),
+    ]
+}
+
 pub enum Overlay {
-    Palette { query: String, selected: usize },
+    Palette {
+        query: String,
+        selected: usize,
+    },
     Keys,
+    /// The sheet that names what a post does before ⌘⏎ sends the reducer's `Confirm`.
+    ConfirmPost,
 }
 
 pub struct Shell {
@@ -34,6 +105,10 @@ pub struct Shell {
     pub focus: FocusHandle,
     /// No motion: the system asks for less, or a snapshot needs a still frame.
     pub still: bool,
+    /// A snapshot: the window ignores the keyboard and the mouse, so what it shows is only the model.
+    pub snapshot: bool,
+    /// The live log held at an event, counted from 0, or `None` to follow the run.
+    pub scrub: Option<usize>,
 }
 
 /// The theme's tokens for the window's current appearance.
@@ -42,14 +117,37 @@ pub fn colors(cx: &App) -> Colors {
     if cx.theme().is_dark() { tokens::dark() } else { tokens::light() }
 }
 
+/// The page-sized panel in front: a finding or the publication, under any sheet.
+pub fn front(m: &Model) -> Option<&Modal> {
+    m.ui.modals.iter().rev().find(|x| matches!(x, Modal::Finding { .. } | Modal::Publication { .. }))
+}
+
 impl Shell {
-    pub fn new(model: Model, cmds: mpsc::Sender<NetCmd>, still: bool, desk: &[Desk], cx: &mut Context<Self>) -> Self {
-        let mut s = Shell { model, cmds, done_tab: false, overlay: None, focus: cx.focus_handle(), still };
+    pub fn new(
+        model: Model,
+        cmds: mpsc::Sender<NetCmd>,
+        still: bool,
+        snapshot: bool,
+        desk: &[Desk],
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let mut s = Shell {
+            model,
+            cmds,
+            done_tab: false,
+            overlay: None,
+            focus: cx.focus_handle(),
+            still,
+            snapshot,
+            scrub: None,
+        };
         for d in desk {
             match d {
                 Desk::Done(on) => s.done_tab = *on,
                 Desk::Palette(q) => s.overlay = Some(Overlay::Palette { query: q.clone(), selected: 0 }),
                 Desk::Keys => s.overlay = Some(Overlay::Keys),
+                Desk::ConfirmPost => s.post(cx),
+                Desk::Scrub(n) => s.scrub = Some(n.saturating_sub(1)),
             }
         }
         s
@@ -87,6 +185,7 @@ impl Shell {
     pub fn select_pr(&mut self, pr: PrId, cx: &mut Context<Self>) {
         self.close_modals(cx);
         self.home(cx);
+        self.scrub = None;
         self.send(Msg::Pick(Hit::Pr(pr)), cx);
     }
 
@@ -128,8 +227,8 @@ impl Shell {
                 }
                 id.map(|id| Msg::Pick(Hit::Finding(id)))
             }
-            Some(Card::Failed { .. }) => Some(Msg::Action(Action::Mutation(Mutation::Retry))),
-            Some(Card::Start { .. }) => Some(Msg::Action(Action::Mutation(Mutation::Start))),
+            Some(Card::Failed { .. }) => return self.direct(Mutation::Retry, cx),
+            Some(Card::Start { .. }) => return self.direct(Mutation::Start, cx),
             Some(Card::Posting { .. }) => Some(Msg::Action(Action::Mutation(Mutation::Publish))),
             _ => None,
         };
@@ -138,13 +237,60 @@ impl Shell {
         }
     }
 
+    /// A start or a retry is cheap and reversible, so it goes without a sheet: the reducer opens its confirmation
+    /// and the desktop answers it at once. The panel stays while the daemon answers, as a quiet status, and reads as
+    /// a sheet only when the daemon refuses.
+    pub fn direct(&mut self, mu: Mutation, cx: &mut Context<Self>) {
+        self.act(Action::Mutation(mu), cx);
+        let asking = matches!(
+            self.model.top_modal(),
+            Some(Modal::Confirm { command: Command::Start(_) | Command::Retry(_), state: ConfirmState::Asking, .. })
+        );
+        if asking {
+            self.act(Action::Confirm, cx);
+        }
+    }
+
+    /// Posting is the one irreversible act: it opens the sheet that names what posts. Only `confirm_post` sends.
+    pub fn post(&mut self, cx: &mut Context<Self>) {
+        if matches!(self.model.top_modal(), Some(Modal::Publication { .. })) && can_confirm(&self.model) {
+            self.overlay = Some(Overlay::ConfirmPost);
+            cx.notify();
+        }
+    }
+
+    pub fn confirm_post(&mut self, cx: &mut Context<Self>) {
+        self.overlay = None;
+        self.act(Action::Confirm, cx);
+    }
+
+    /// ⌘⏎: posts the sheet in front, opens it over a preview, or confirms a reducer panel.
+    fn post_key(&mut self, cx: &mut Context<Self>) {
+        match (&self.overlay, self.model.top_modal()) {
+            (Some(Overlay::ConfirmPost), _) => self.confirm_post(cx),
+            (None, Some(Modal::Publication { .. })) => self.post(cx),
+            (None, Some(Modal::Confirm { .. })) => self.act(Action::Confirm, cx),
+            _ => {}
+        }
+    }
+
+    pub fn toggle_palette(&mut self, cx: &mut Context<Self>) {
+        self.overlay = match self.overlay {
+            Some(Overlay::Palette { .. }) => None,
+            _ => Some(Overlay::Palette { query: String::new(), selected: 0 }),
+        };
+        cx.notify();
+    }
+
     /// The PR on GitHub, built from its repository and number; the desktop opens only github.com URLs.
-    pub fn open_github(&mut self) {
+    pub fn open_github(&mut self, cx: &mut Context<Self>) {
+        if matches!(self.model.top_modal(), Some(Modal::Publication { .. })) {
+            return self.act(Action::OpenUrl, cx);
+        }
         let Some(p) = self.model.selected_pr() else { return };
         let repo = p.repository.as_str();
         if repo.split('/').count() == 2 && repo.chars().all(|c| c.is_ascii_alphanumeric() || "-_./".contains(c)) {
-            let url = format!("https://github.com/{repo}/pull/{}", p.number);
-            let _ = std::process::Command::new("open").arg(url).spawn();
+            cx.open_url(&format!("https://github.com/{repo}/pull/{}", p.number));
         }
     }
 
@@ -179,36 +325,50 @@ impl Shell {
     }
 
     fn on_key(&mut self, ev: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        let k = &ev.keystroke;
-        let (key, cmd, ctrl, shift) = (k.key.as_str(), k.modifiers.platform, k.modifiers.control, k.modifiers.shift);
-        let typed = k.key_char.clone().filter(|_| !cmd && !ctrl);
-        if overlay::palette_key(self, key, cmd, typed.as_deref(), window, cx) {
+        if self.snapshot {
             return;
         }
-        if matches!(self.overlay, Some(Overlay::Keys)) {
-            if matches!(key, "escape" | "?") || typed.as_deref() == Some("?") {
-                self.overlay = None;
-                cx.notify();
+        let k = &ev.keystroke;
+        let (key, mods) = (k.key.as_str(), k.modifiers);
+        // ⌘ shortcuts are the menu's actions, bound in `bindings`.
+        if mods.platform || mods.control {
+            return;
+        }
+        let typed = k.key_char.clone();
+        if overlay::palette_key(self, key, typed.as_deref(), cx) {
+            return;
+        }
+        match self.overlay {
+            Some(Overlay::Keys) => {
+                if key == "escape" || typed.as_deref() == Some("?") {
+                    self.overlay = None;
+                    cx.notify();
+                }
+                return;
             }
+            Some(Overlay::ConfirmPost) => {
+                // Cancel is the default: ⏎ and esc both close it. Only ⌘⏎ posts.
+                if matches!(key, "escape" | "enter") {
+                    self.overlay = None;
+                    cx.notify();
+                }
+                return;
+            }
+            _ => {}
+        }
+        if key == "tab" {
+            if mods.shift {
+                window.focus_prev(cx)
+            } else {
+                window.focus_next(cx)
+            }
+            return cx.notify();
+        }
+        // A focused control takes ⏎ and space itself: GPUI clicks it.
+        if matches!(key, "enter" | "space") && window.focused(cx).is_some_and(|f| f != self.focus) {
             return;
         }
         let m = &self.model;
-        if cmd {
-            match key {
-                "k" => self.overlay = Some(Overlay::Palette { query: String::new(), selected: 0 }),
-                "q" | "w" => cx.quit(),
-                "1" => self.set_tab(false, cx),
-                "2" => self.set_tab(true, cx),
-                "," => self.act(Action::Goto(Screen::Settings), cx),
-                "r" => self.act(Action::Refresh, cx),
-                "o" if matches!(m.top_modal(), Some(Modal::Publication { .. })) => self.act(Action::OpenUrl, cx),
-                "o" => self.open_github(),
-                "enter" => self.act(Action::Confirm, cx),
-                _ => return,
-            }
-            cx.notify();
-            return;
-        }
         if let Some(Modal::Input { .. }) = m.top_modal() {
             let a = match key {
                 "escape" => Action::InputCancel,
@@ -235,24 +395,24 @@ impl Shell {
         let a = match (modal.as_ref(), screen, key, ch) {
             (Some(Modal::Confirm { .. }), _, "enter", _) | (Some(Modal::Confirm { .. }), _, _, "y") => Action::Confirm,
             (Some(Modal::Confirm { .. }), _, _, "n") => Action::Back,
-            (Some(Modal::Publication { .. }), _, _, "y") => Action::Confirm,
+            (Some(Modal::Publication { .. }), _, _, "y") => return self.post(cx),
             (Some(Modal::Publication { .. }), _, _, "m") => Action::ToggleRaw,
             (Some(Modal::Publication { .. }), _, _, "d") => Action::OpenDiff,
             (Some(Modal::Finding { .. }), _, _, "n") => Action::NextFinding,
             (Some(Modal::Finding { .. }), _, _, "N") => Action::PrevFinding,
             (Some(Modal::Finding { .. }), _, _, "d") => Action::OpenDiff,
+            (Some(Modal::Finding { .. }), _, _, "t") => Action::OpenTimeline,
             (Some(Modal::Help { .. }), _, _, _) => Action::Back,
             (_, _, "escape", _) => Action::Back,
-            (None, Screen::Diff | Screen::Settings, "down", _) | (None, Screen::Diff | Screen::Settings, _, "j") => {
-                Action::Down
-            }
-            (None, Screen::Diff | Screen::Settings, "up", _) | (None, Screen::Diff | Screen::Settings, _, "k") => {
-                Action::Up
-            }
-            (None, Screen::Diff | Screen::Settings, "enter", _) => Action::Open,
+            (None, Screen::Diff | Screen::Settings | Screen::Timeline, "down", _)
+            | (None, Screen::Diff | Screen::Settings | Screen::Timeline, _, "j") => Action::Down,
+            (None, Screen::Diff | Screen::Settings | Screen::Timeline, "up", _)
+            | (None, Screen::Diff | Screen::Settings | Screen::Timeline, _, "k") => Action::Up,
+            (None, Screen::Diff | Screen::Settings | Screen::Timeline, "enter", _) => Action::Open,
             (None, Screen::Diff, _, "n") => Action::NextFinding,
             (None, Screen::Diff, _, "N") => Action::PrevFinding,
             (None, Screen::Diff, _, ":") => Action::JumpTo,
+            (None, Screen::Timeline, _, "f") => Action::Search,
             (Some(Modal::Finding { .. } | Modal::Publication { .. }) | None, Screen::Inbox | Screen::Review, ..) => {
                 match (key, ch) {
                     ("down", _) | (_, "j") => return self.move_card(1, cx),
@@ -268,8 +428,9 @@ impl Shell {
                     (_, "n") => Action::NextFinding,
                     (_, "N") => Action::PrevFinding,
                     (_, "d") => Action::OpenDiff,
-                    (_, "s") => Action::Mutation(Mutation::Start),
-                    (_, "R") => Action::Mutation(Mutation::Retry),
+                    (_, "t") => Action::OpenTimeline,
+                    (_, "s") => return self.direct(Mutation::Start, cx),
+                    (_, "R") => return self.direct(Mutation::Retry, cx),
                     (_, "c") => Action::Mutation(Mutation::Cancel),
                     (_, "p") => Action::Mutation(Mutation::Publish),
                     _ => return,
@@ -277,7 +438,6 @@ impl Shell {
             }
             _ => return,
         };
-        let _ = shift;
         self.act(a, cx);
     }
 }
@@ -286,6 +446,8 @@ impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let t = colors(cx);
         let m = &self.model;
+        let stage = queue::stage(m);
+        let finding_open = matches!(front(m), Some(Modal::Finding { .. }));
         let body = match m.ui.screen {
             Screen::Diff => diff::view(self, &t, cx).into_any_element(),
             Screen::Settings => crate::setup::setup(self, &t, cx).into_any_element(),
@@ -293,39 +455,68 @@ impl Render for Shell {
                 .flex()
                 .flex_1()
                 .min_h_0()
-                .child(if self.done_tab {
-                    crate::cards::done_column(self, &t, cx)
-                } else {
-                    crate::cards::queue_column(self, &t, cx)
+                .when(stage == Stage::Ready && !finding_open, |d| {
+                    d.child(if self.done_tab {
+                        crate::cards::done_column(self, &t, cx)
+                    } else {
+                        crate::cards::queue_column(self, &t, cx)
+                    })
                 })
+                .when(stage == Stage::Connecting, |d| d.child(crate::cards::skeleton_column(&t)))
                 .child(detail::pane(self, &t, window, cx))
                 .into_any_element(),
         };
+        let snapshot = self.snapshot;
         div()
             .id("shell")
             .key_context("pr-review")
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::on_key))
+            .on_action(cx.listener(|s, _: &Palette, _, cx| s.toggle_palette(cx)))
+            .on_action(cx.listener(|s, _: &Refresh, _, cx| s.act(Action::Refresh, cx)))
+            .on_action(cx.listener(|s, _: &OpenGitHub, _, cx| s.open_github(cx)))
+            .on_action(cx.listener(|s, _: &Setup, _, cx| s.act(Action::Goto(Screen::Settings), cx)))
+            .on_action(cx.listener(|s, _: &Shortcuts, _, cx| {
+                s.overlay = Some(Overlay::Keys);
+                cx.notify();
+            }))
+            .on_action(cx.listener(|s, _: &Post, _, cx| s.post_key(cx)))
+            .on_action(cx.listener(|s, _: &NeedsYou, _, cx| s.set_tab(false, cx)))
+            .on_action(cx.listener(|s, _: &DoneList, _, cx| s.set_tab(true, cx)))
+            .on_action(cx.listener(|_, _: &CloseWindow, window, _| window.remove_window()))
+            .on_action(
+                cx.listener(|_, _: &AppearanceSystem, window, cx| Theme::sync_system_appearance(Some(window), cx)),
+            )
+            .on_action(
+                cx.listener(|_, _: &AppearanceDark, window, cx| Theme::change(ThemeMode::Dark, Some(window), cx)),
+            )
+            .on_action(
+                cx.listener(|_, _: &AppearanceLight, window, cx| Theme::change(ThemeMode::Light, Some(window), cx)),
+            )
             .relative()
             .size_full()
             .flex()
+            .flex_col()
             .bg(t.bg)
             .font_family(text::UI)
             .text_size(text::BODY)
             .text_color(t.text)
-            .child(sidebar(self, &t, cx))
+            .child(titlebar(self, &t, cx))
             .child(
-                div()
-                    .flex()
-                    .flex_col()
-                    .flex_1()
-                    .min_w_0()
-                    .child(toolbar(self, &t, cx))
-                    .children(banner(m, &t))
-                    .child(strip(self, &t, cx))
-                    .child(body),
+                div().flex().flex_1().min_h_0().child(sidebar(self, &t, cx)).child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .flex_1()
+                        .min_w_0()
+                        .children(banner(m, &t))
+                        .when(stage == Stage::Ready, |d| d.child(strip(self, &t, cx)))
+                        .child(body),
+                ),
             )
             .children(overlay::layer(self, &t, cx))
+            // A snapshot shows only the model: the real pointer never hovers or presses anything under this.
+            .when(snapshot, |d| d.child(div().id("still").absolute().inset_0().occlude()))
     }
 }
 
@@ -337,54 +528,180 @@ pub fn on(cx: &Context<Shell>, f: impl Fn(&mut Shell, &mut Context<Shell>) + 'st
     Some(click(cx, f))
 }
 
+/// The title bar: the traffic lights, the page title with its one-sentence state, and the ⌘K field.
+fn titlebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
+    let m = &s.model;
+    let pr = m.selected_pr();
+    let number = pr.map_or(String::new(), |p| format!("#{}", p.number));
+    let pr_title = pr.map_or(String::new(), |p| p.title.to_string());
+    let (title, sub) = match (m.ui.screen, front(m)) {
+        (_, Some(Modal::Finding { id, .. })) => {
+            let all = pr.map(|p| m.domain.pr_findings(&p.id)).unwrap_or_default();
+            let at = all.iter().position(|f| &f.id == id).map_or(0, |i| i + 1);
+            (format!("{number} · finding {at} of {}", all.len()), pr_title)
+        }
+        (_, Some(Modal::Publication { .. })) => (format!("{number} · proof"), pr_title),
+        (Screen::Diff, _) => (format!("{number} diff"), pr_title),
+        (Screen::Timeline, _) => (format!("{number} timeline"), pr_title),
+        (Screen::Settings, _) => ("Setup".into(), "What the reviewer needs to run".into()),
+        _ if s.done_tab => {
+            ("Done".into(), format!("{} with nothing left for you.", queue::count(queue::done(m).len(), "PR")))
+        }
+        _ => ("Needs you".into(), queue::summary(m)),
+    };
+    let away = !matches!(m.ui.screen, Screen::Inbox | Screen::Review) || front(m).is_some();
+    let search = div()
+        .id("search")
+        .flex()
+        .items_center()
+        .gap(space::S2)
+        .w(px(280.))
+        .h(px(32.))
+        .px(space::S3)
+        .rounded(radius::SM)
+        .bg(t.surface)
+        .border_1()
+        .border_color(t.border)
+        .cursor_pointer()
+        .hover(|d| d.border_color(t.border_strong).bg(t.hover))
+        .active(|d| d.bg(t.press))
+        .on_click(cx.listener(|s, _: &ClickEvent, _, cx| s.toggle_palette(cx)))
+        .child(icon(IconName::Search, px(14.), t.faint))
+        .child(div().flex_1().text_size(text::BODY).text_color(t.faint).child("Search or run a command"))
+        .child(keycap(t, "⌘K", false));
+    div()
+        .flex()
+        .flex_none()
+        .items_center()
+        .gap(space::S3)
+        .h(layout::TOOLBAR)
+        .pl(layout::TRAFFIC)
+        .pr(space::S4)
+        .bg(t.raised)
+        .border_b_1()
+        .border_color(t.border)
+        .window_control_area(WindowControlArea::Drag)
+        .when(away, |d| {
+            d.child(button(t, "back", "Back", Some("esc"), Tone::Ghost, on(cx, |s, cx| s.act(Action::Back, cx))))
+        })
+        .child(
+            div()
+                .flex()
+                .items_baseline()
+                .gap(space::S3)
+                .flex_1()
+                .min_w_0()
+                .child(div().flex_none().text_size(text::LEAD).font_weight(FontWeight::BOLD).child(title))
+                .child(div().min_w_0().truncate().text_size(text::BODY).text_color(t.muted).child(sub)),
+        )
+        .child(tip(focusable(search, t), "Search PRs and findings, or run a command"))
+}
+
+#[allow(clippy::too_many_arguments)]
+fn nav_item(
+    t: &Colors,
+    id: &'static str,
+    glyph: IconName,
+    label: &str,
+    count: usize,
+    hue: Hsla,
+    active: bool,
+    f: OnClick,
+) -> Stateful<Div> {
+    let row = div()
+        .id(id)
+        .flex()
+        .items_center()
+        .gap(space::S2)
+        .h(px(32.))
+        .px(space::S2)
+        .rounded(radius::SM)
+        .cursor_pointer()
+        .when(active, |d| d.bg(t.selected))
+        .hover(|d| d.bg(t.hover))
+        .active(|d| d.bg(t.press))
+        .on_click(f)
+        .child(icon(glyph, px(15.), if active { t.accent } else { t.muted }))
+        .child(
+            div()
+                .flex_1()
+                .text_size(text::BODY)
+                .font_weight(if active { FontWeight::SEMIBOLD } else { FontWeight::NORMAL })
+                .text_color(if active { t.text } else { t.muted })
+                .child(label.to_string()),
+        )
+        .when(count > 0, |d| d.child(count_badge(t, count, hue)));
+    focusable(row, t)
+}
+
+/// The sidebar: the smart lists, then every PR grouped by repository with its state, then the connection.
 fn sidebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
     let m = &s.model;
+    let stage = queue::stage(m);
     let cards = queue::cards(m);
-    let running = queue::running(m);
     let done = queue::done(m);
-    let home = matches!(m.ui.screen, Screen::Inbox | Screen::Review);
-    let setup_issues = m.server.as_ref().map_or(0, |s| s.missing().count() + usize::from(s.commands_off().is_some()));
-    let item = |id: &'static str, glyph: IconName, label: &str, count: usize, hue: Hsla, active: bool, f: OnClick| {
-        div()
-            .id(id)
-            .flex()
-            .items_center()
-            .gap(space::S2)
-            .h(px(30.))
-            .px(space::S2)
-            .rounded(radius::SM)
-            .cursor_pointer()
-            .when(active, |d| d.bg(t.selected))
-            .hover(|d| d.bg(t.surface_hover))
-            .active(|d| d.bg(t.surface_press))
-            .on_click(f)
-            .child(icon(glyph, px(15.), if active { t.accent } else { t.muted }))
-            .child(
-                div()
-                    .flex_1()
-                    .text_size(text::BODY)
-                    .font_weight(if active { FontWeight::SEMIBOLD } else { FontWeight::NORMAL })
-                    .text_color(if active { t.text } else { t.muted })
-                    .child(label.to_string()),
-            )
-            .when(count > 0, |d| {
-                d.child(
-                    div()
-                        .px(px(6.))
-                        .h(px(18.))
-                        .flex()
-                        .items_center()
-                        .rounded(radius::PILL)
-                        .bg(hue.alpha(0.16))
-                        .text_size(text::CAPTION)
-                        .font_weight(FontWeight::SEMIBOLD)
-                        .text_color(hue)
-                        .child(count.to_string()),
-                )
-            })
-    };
-    let needs = cards.len();
+    let home = matches!(m.ui.screen, Screen::Inbox | Screen::Review | Screen::Timeline) && front(m).is_none();
     let selected = m.ui.selected_pr.clone();
+    let mut list = div()
+        .id("sidebar")
+        .flex()
+        .flex_col()
+        .flex_1()
+        .min_h_0()
+        .overflow_y_scroll()
+        .gap(px(2.))
+        .px(space::S3)
+        .pt(space::S3)
+        .pb(space::S4)
+        .child(nav_item(
+            t,
+            "nav-queue",
+            IconName::Inbox,
+            "Needs you",
+            cards.len(),
+            t.accent,
+            home && !s.done_tab && m.ui.screen != Screen::Timeline,
+            click(cx, |s, cx| s.set_tab(false, cx)),
+        ))
+        .child(nav_item(
+            t,
+            "nav-done",
+            IconName::CircleCheck,
+            "Done",
+            done.len(),
+            t.ok,
+            home && s.done_tab,
+            click(cx, |s, cx| s.set_tab(true, cx)),
+        ))
+        .child(nav_item(
+            t,
+            "nav-setup",
+            IconName::Settings,
+            "Setup",
+            queue::setup_issues(m),
+            t.warn,
+            m.ui.screen == Screen::Settings,
+            click(cx, |s, cx| s.act(Action::Goto(Screen::Settings), cx)),
+        ));
+    if stage == Stage::Ready {
+        list = list.child(div().px(space::S2).pt(space::S5).pb(space::S1).child(overline(t, "Pull requests")));
+        for (repo, rows) in queue::rows(m) {
+            list = list.child(
+                div()
+                    .px(space::S2)
+                    .pt(space::S2)
+                    .pb(space::S1)
+                    .font_family(text::MONO)
+                    .text_size(text::CAPTION)
+                    .text_color(t.faint)
+                    .child(repo),
+            );
+            for r in rows {
+                let on = selected.as_ref() == Some(&r.pr.id) && m.ui.screen != Screen::Settings;
+                list = list.child(pr_row(s, t, r.pr, r.state, on, cx));
+            }
+        }
+    }
     div()
         .flex()
         .flex_col()
@@ -394,114 +711,94 @@ fn sidebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         .bg(t.sidebar)
         .border_r_1()
         .border_color(t.border)
-        .child(div().h(layout::TOOLBAR).flex_none().on_mouse_down(MouseButton::Left, |_, w, _| w.start_window_move()))
-        .child(
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(2.))
-                .px(space::S3)
-                .child(item(
-                    "nav-queue",
-                    IconName::Inbox,
-                    "Needs you",
-                    needs,
-                    t.accent,
-                    home && !s.done_tab,
-                    click(cx, |s, cx| s.set_tab(false, cx)),
-                ))
-                .child(item(
-                    "nav-done",
-                    IconName::CircleCheck,
-                    "Done",
-                    done.len(),
-                    t.ok,
-                    home && s.done_tab,
-                    click(cx, |s, cx| s.set_tab(true, cx)),
-                ))
-                .child(div().h(space::S4))
-                .child(div().px(space::S2).pb(space::S1).child(overline(t, "Running")))
-                .when(running.is_empty(), |d| {
-                    d.child(
-                        div()
-                            .px(space::S2)
-                            .h(px(26.))
-                            .text_size(text::SMALL)
-                            .text_color(t.faint)
-                            .child("Nothing running"),
-                    )
-                })
-                .children(running.iter().map(|(p, r)| {
-                    let id = p.id.clone();
-                    let active = selected.as_ref() == Some(&p.id);
-                    div()
-                        .id(SharedString::from(format!("nav-run-{}", p.number)))
-                        .flex()
-                        .items_center()
-                        .gap(space::S2)
-                        .h(px(30.))
-                        .px(space::S2)
-                        .rounded(radius::SM)
-                        .cursor_pointer()
-                        .when(active && home, |d| d.bg(t.selected))
-                        .hover(|d| d.bg(t.surface_hover))
-                        .on_click(cx.listener(move |s, _: &ClickEvent, _, cx| s.select_pr(id.clone(), cx)))
-                        .child(live_dot(t, s.still, ("nav-dot", p.number as usize)))
-                        .child(
-                            div()
-                                .text_size(text::SMALL)
-                                .font_weight(FontWeight::SEMIBOLD)
-                                .text_color(t.text)
-                                .child(format!("#{}", p.number)),
-                        )
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .truncate()
-                                .text_size(text::SMALL)
-                                .text_color(t.muted)
-                                .child(phase_word(r.phase)),
-                        )
-                })),
-        )
-        .child(div().flex_1())
-        .child(
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(2.))
-                .px(space::S3)
-                .pb(space::S3)
-                .child(item(
-                    "nav-setup",
-                    IconName::Settings,
-                    "Setup",
-                    setup_issues,
-                    t.warn,
-                    m.ui.screen == Screen::Settings,
-                    click(cx, |s, cx| s.act(Action::Goto(Screen::Settings), cx)),
-                ))
-                .child(connection(m, t)),
-        )
+        .child(list)
+        .child(connection(m, t))
 }
 
-fn connection(m: &Model, t: &Colors) -> Div {
+fn pr_row(s: &Shell, t: &Colors, pr: &Pr, state: RowState, on: bool, cx: &Context<Shell>) -> Stateful<Div> {
+    let id = pr.id.clone();
+    let (glyph, hue): (AnyElement, Hsla) = match state {
+        RowState::Running(_) => (live_dot(t, s.still, ("nav-dot", pr.number as usize)), t.running),
+        RowState::Parked => (icon(IconName::Send, px(13.), t.accent).into_any_element(), t.accent),
+        RowState::Failed => (icon(IconName::CircleX, px(13.), t.danger).into_any_element(), t.danger),
+        RowState::Findings(sev, _) => (
+            div().text_size(px(10.)).text_color(t.severity(sev)).child(tokens::severity_mark(sev).0).into_any_element(),
+            t.severity(sev),
+        ),
+        RowState::Posted => (icon(IconName::CircleCheck, px(13.), t.ok).into_any_element(), t.ok),
+        RowState::Clean => (icon(IconName::Check, px(13.), t.ok).into_any_element(), t.ok),
+        RowState::Merged => (icon(IconName::GitMerge, px(13.), t.accent).into_any_element(), t.muted),
+        RowState::Closed => (icon(IconName::CircleDashed, px(13.), t.faint).into_any_element(), t.faint),
+        RowState::New => (icon(IconName::Circle, px(13.), t.faint).into_any_element(), t.faint),
+    };
+    let badge: Option<AnyElement> = match state {
+        RowState::Findings(sev, n) => Some(severity_count(t, sev, n).into_any_element()),
+        RowState::Running(p) => Some(progress(t, step_of(p), t.running, false, Gauge::Pip).into_any_element()),
+        _ => None,
+    };
+    let row = div()
+        .id(SharedString::from(format!("nav-pr-{}", pr.number)))
+        .flex()
+        .items_center()
+        .gap(space::S2)
+        .h(px(44.))
+        .px(space::S2)
+        .rounded(radius::SM)
+        .cursor_pointer()
+        .when(on, |d| d.bg(t.selected))
+        .hover(|d| d.bg(t.hover))
+        .active(|d| d.bg(t.press))
+        .on_click(cx.listener(move |s, _: &ClickEvent, _, cx| {
+            s.done_tab = queue::done(&s.model).iter().any(|(p, _)| p.id == id);
+            s.select_pr(id.clone(), cx)
+        }))
+        .child(div().w(px(14.)).flex().justify_center().flex_none().child(glyph))
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .flex_1()
+                .min_w_0()
+                .child(
+                    div()
+                        .flex()
+                        .items_baseline()
+                        .gap(space::S2)
+                        .child(
+                            div()
+                                .text_size(text::BODY)
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_color(t.text)
+                                .child(format!("#{}", pr.number)),
+                        )
+                        .child(div().min_w_0().truncate().text_size(text::CAPTION).text_color(hue).child(state.word())),
+                )
+                .child(div().truncate().text_size(text::SMALL).text_color(t.muted).child(pr.title.to_string())),
+        )
+        .children(badge);
+    focusable(row, t)
+}
+
+fn connection(m: &Model, t: &Colors) -> Stateful<Div> {
     let (hue, word) = link_word(m, t);
     let endpoint = match m.diag.endpoint.split_once(':').map_or("", |(k, _)| k) {
         "unix" => "socket",
         other => other,
     }
     .to_string();
-    div()
+    let row = div()
+        .id("connection")
         .flex()
         .items_center()
         .gap(space::S2)
-        .h(px(28.))
-        .px(space::S2)
+        .h(px(40.))
+        .px(space::S4)
+        .border_t_1()
+        .border_color(t.border)
         .child(div().size(px(7.)).rounded(radius::PILL).bg(hue))
         .child(div().text_size(text::SMALL).text_color(t.muted).child(word))
-        .child(div().text_size(text::SMALL).text_color(t.faint).child(endpoint))
+        .child(div().text_size(text::SMALL).text_color(t.faint).child(endpoint));
+    tip(row, m.diag.endpoint.clone())
 }
 
 pub fn link_word(m: &Model, t: &Colors) -> (Hsla, String) {
@@ -510,17 +807,19 @@ pub fn link_word(m: &Model, t: &Colors) -> (Hsla, String) {
         Link::Connecting { attempt } => (t.warn, format!("Connecting · try {attempt}")),
         Link::Negotiating | Link::Syncing => (t.warn, "Syncing".into()),
         Link::Resyncing => (t.warn, "Catching up".into()),
-        Link::Disconnected { .. } => (t.danger, "Disconnected".into()),
+        Link::Disconnected { .. } => (t.danger, "Offline".into()),
         Link::Stalled { .. } => (t.danger, "Stalled".into()),
         Link::Incompatible { .. } => (t.danger, "Incompatible daemon".into()),
         Link::Unusable { .. } => (t.danger, "Can't connect".into()),
     }
 }
 
-/// A connection that isn't live says so above everything, with what the app shows meanwhile.
+/// With a board on screen but the link down, a banner says what the board is: the last state the daemon sent.
 fn banner(m: &Model, t: &Colors) -> Option<Div> {
+    if m.link.accepts_events() || queue::stage(m) != Stage::Ready {
+        return None;
+    }
     let (hue, title, detail) = match &m.link {
-        Link::Live => return None,
         Link::Disconnected { reason, retry_in_ms } => (
             t.danger,
             match retry_in_ms {
@@ -534,9 +833,8 @@ fn banner(m: &Model, t: &Colors) -> Option<Div> {
             (t.danger, "This daemon speaks another protocol".into(), message.to_string())
         }
         Link::Unusable { message } => (t.danger, "This endpoint can't work".into(), message.to_string()),
-        _ => (t.warn, "Connecting to the reviewer".into(), m.diag.endpoint.clone()),
+        _ => (t.warn, "Reconnecting to the reviewer".into(), m.diag.endpoint.clone()),
     };
-    let stale = if m.domain.prs.is_empty() { "" } else { " What you see is the last state the daemon sent." };
     Some(
         div()
             .flex()
@@ -556,123 +854,9 @@ fn banner(m: &Model, t: &Colors) -> Option<Div> {
                     .truncate()
                     .text_size(text::SMALL)
                     .text_color(t.muted)
-                    .child(format!("{detail}.{stale}")),
+                    .child(format!("{detail}. What you see is the last state the daemon sent.")),
             ),
     )
-}
-
-fn toolbar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
-    let m = &s.model;
-    let cards = queue::cards(m);
-    let running = queue::running(m).len();
-    let (title, sub) = match m.ui.screen {
-        Screen::Diff => {
-            let pr = m.selected_pr();
-            (
-                pr.map_or("Diff".into(), |p| format!("#{} diff", p.number)),
-                pr.map_or(String::new(), |p| p.title.to_string()),
-            )
-        }
-        Screen::Settings => ("Setup".into(), "What the reviewer needs to run".into()),
-        _ if s.done_tab => {
-            ("Done".into(), format!("{} with nothing left for you", queue::count(queue::done(m).len(), "PR")))
-        }
-        _ => (
-            "Needs you".into(),
-            match (cards.len(), running) {
-                (0, 0) => "You're clear".into(),
-                (n, 0) => queue::count(n, "decision"),
-                (n, r) => format!("{} · {r} running", queue::count(n, "decision")),
-            },
-        ),
-    };
-    let away = !matches!(m.ui.screen, Screen::Inbox | Screen::Review);
-    div()
-        .flex()
-        .flex_none()
-        .items_center()
-        .gap(space::S3)
-        .h(layout::TOOLBAR)
-        .px(space::S5)
-        .border_b_1()
-        .border_color(t.border)
-        .on_mouse_down(MouseButton::Left, |_, w, _| w.start_window_move())
-        .when(away, |d| {
-            d.child(button(t, "back", "Queue", Some("esc"), Tone::Ghost, on(cx, |s, cx| s.act(Action::Back, cx))))
-        })
-        .child(
-            div()
-                .flex()
-                .items_baseline()
-                .gap(space::S2)
-                .flex_1()
-                .min_w_0()
-                .child(div().flex_none().text_size(text::LEAD).font_weight(FontWeight::BOLD).child(title))
-                .child(div().min_w_0().truncate().text_size(text::SMALL).text_color(t.muted).child(sub)),
-        )
-        .child(
-            div()
-                .id("search")
-                .flex()
-                .items_center()
-                .gap(space::S2)
-                .w(px(248.))
-                .h(px(28.))
-                .px(space::S2)
-                .rounded(radius::SM)
-                .bg(t.surface)
-                .border_1()
-                .border_color(t.border)
-                .cursor_pointer()
-                .hover(|d| d.border_color(t.border_strong))
-                .active(|d| d.bg(t.surface_press))
-                .on_click(cx.listener(|s, _: &ClickEvent, _, cx| {
-                    s.overlay = Some(Overlay::Palette { query: String::new(), selected: 0 });
-                    cx.notify();
-                }))
-                .child(icon(IconName::Search, px(13.), t.faint))
-                .child(div().flex_1().text_size(text::BODY).text_color(t.faint).child("Search or run a command"))
-                .child(keycap(t, "⌘K", false)),
-        )
-}
-
-pub fn phase_word(p: Phase) -> &'static str {
-    match p {
-        Phase::CollectContext => "Collecting context",
-        Phase::Triage => "Triage",
-        Phase::Analyze => "Analyzing",
-        Phase::Verify => "Verifying",
-        Phase::PreparePublication => "Preparing",
-        Phase::AwaitingApproval => "Awaiting approval",
-        Phase::Publish => "Posting",
-        Phase::Reconcile => "Reconciling",
-        Phase::Completed => "Completed",
-        Phase::Failed => "Failed",
-        Phase::Superseded => "Superseded",
-        Phase::Unknown => "Unknown",
-    }
-}
-
-/// The phases a run walks, as the stepper and the pills count them.
-pub const STEPS: [(&str, Phase); 6] = [
-    ("Collect", Phase::CollectContext),
-    ("Triage", Phase::Triage),
-    ("Analyze", Phase::Analyze),
-    ("Verify", Phase::Verify),
-    ("Prepare", Phase::PreparePublication),
-    ("Post", Phase::Publish),
-];
-
-pub fn step_of(p: Phase) -> usize {
-    match p {
-        Phase::CollectContext => 0,
-        Phase::Triage => 1,
-        Phase::Analyze => 2,
-        Phase::Verify => 3,
-        Phase::PreparePublication => 4,
-        Phase::AwaitingApproval | Phase::Publish | Phase::Reconcile => 5,
-        _ => 6,
-    }
 }
 
 /// The breathing dot of a review at work; still under reduced motion.
@@ -713,39 +897,30 @@ fn strip(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
 fn pill(s: &Shell, t: &Colors, p: &Pr, r: &Run, cx: &Context<Shell>) -> Stateful<Div> {
     let m = &s.model;
     let selected = m.ui.selected_pr.as_ref() == Some(&p.id) && matches!(m.ui.screen, Screen::Inbox | Screen::Review);
-    let at = step_of(r.phase);
     let id = p.id.clone();
     let tools = m.domain.activity.iter().filter(|a| a.pr_id.as_ref() == Some(&p.id)).count();
-    div()
+    let pill = div()
         .id(SharedString::from(format!("pill-{}", p.number)))
         .flex()
         .items_center()
         .gap(space::S2)
-        .h(px(28.))
-        .pl(space::S3)
-        .pr(space::S3)
+        .h(px(32.))
+        .px(space::S3)
         .rounded(radius::PILL)
         .bg(if selected { t.running.alpha(0.14) } else { t.surface })
         .border_1()
         .border_color(if selected { t.running.alpha(0.6) } else { t.border })
         .cursor_pointer()
-        .hover(|d| d.border_color(t.running.alpha(0.6)))
-        .active(|d| d.bg(t.surface_press))
+        .hover(|d| d.border_color(t.running.alpha(0.6)).bg(t.hover))
+        .active(|d| d.bg(t.press))
         .on_click(cx.listener(move |s, _: &ClickEvent, _, cx| s.select_pr(id.clone(), cx)))
         .child(live_dot(t, s.still, ("pill-dot", p.number as usize)))
         .child(div().text_size(text::SMALL).font_weight(FontWeight::SEMIBOLD).child(format!("#{}", p.number)))
         .child(div().max_w(px(180.)).truncate().text_size(text::SMALL).text_color(t.muted).child(p.title.to_string()))
-        .child(div().flex().gap(px(2.)).children((0..STEPS.len()).map(|i| {
-            div().w(px(10.)).h(px(4.)).rounded(px(2.)).bg(if i < at {
-                t.running
-            } else if i == at {
-                t.running.alpha(0.55)
-            } else {
-                t.border_strong
-            })
-        })))
+        .child(progress(t, step_of(r.phase), t.running, false, Gauge::Strip))
         .child(div().text_size(text::SMALL).text_color(t.running).child(phase_word(r.phase)))
         .when(tools > 0, |d| {
             d.child(div().text_size(text::CAPTION).text_color(t.faint).child(format!("{tools} steps")))
-        })
+        });
+    tip(focusable(pill, t), format!("Watch #{} live", p.number))
 }

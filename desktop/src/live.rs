@@ -1,180 +1,208 @@
-//! A review at work: its phase, a quiet stream of what it does, and the findings as they land.
+//! A review at work: its phase, a scrubbable track of everything it did, the log at the point the track is held,
+//! and the findings as they land.
 
-use gpui_kit::assets::IconName;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use pr_review_tui::keymap::{Action, Mutation};
-use pr_review_tui::model::ActivityKind;
+use pr_review_tui::model::{Activity, ActivityKind};
 use pr_review_tui::protocol::{Finding, Pr, Run};
 use pr_review_tui::update::can_mutate;
 
 use crate::detail::*;
-use crate::kit::{OnClick, Tone, button, clock, clock_s, icon};
+use crate::kit::{Gauge, OnClick, Tone, button, clock_s, overline, progress, step_of, tip};
+use crate::queue::{self, phase_word};
 use crate::tokens::{Colors, motion, radius, severity_mark, space, text};
-use crate::ui::{STEPS, Shell, live_dot, phase_word, step_of};
+use crate::ui::{Shell, live_dot};
+
+/// How many log rows the page shows at once, newest last.
+const SHOWN: usize = 14;
 
 pub fn live(s: &Shell, t: &Colors, pr: &Pr, run: &Run, cx: &Context<Shell>) -> Div {
     let m = &s.model;
-    let kicker = div()
-        .flex()
-        .items_center()
-        .gap(space::S2)
-        .child(live_dot(t, s.still, "live-dot"))
-        .child(
-            div().text_size(text::CAPTION).font_weight(FontWeight::BOLD).text_color(t.running).child("REVIEWING NOW"),
-        )
-        .child(div().text_size(text::CAPTION).text_color(t.faint).child(format!(
-            "{} · started {}",
-            run.model,
-            clock(run.started_at.as_str())
-        )));
-    let at = step_of(run.phase);
-    let steps = div().flex().items_start().children(STEPS.iter().enumerate().map(|(i, (label, _))| {
-        let (fill, ring, fg) = if i < at {
-            (t.running, t.running, t.muted)
-        } else if i == at {
-            (t.running.alpha(0.18), t.running, t.text)
-        } else {
-            (t.bg, t.border_strong, t.faint)
-        };
+    let events: Vec<&Activity> = m.domain.activity.iter().filter(|a| a.pr_id.as_ref() == Some(&pr.id)).collect();
+    let total = events.len();
+    let held = s.scrub.filter(|_| total > 0).map(|i| i.min(total - 1));
+    let head = held.unwrap_or(total.saturating_sub(1));
+    let kicker = div().flex().items_center().gap(space::S2).child(live_dot(t, s.still, "live-dot")).child(
+        div().text_size(text::CAPTION).font_weight(FontWeight::BOLD).text_color(t.running).child("REVIEWING NOW"),
+    );
+    let landed: Vec<&Finding> = m.domain.findings.values().filter(|f| f.run_id == run.id).collect();
+    let tools = events.iter().filter(|a| matches!(a.kind, ActivityKind::Tool { .. })).count();
+    let stat = |value: String, label: &str| {
         div()
             .flex()
             .flex_col()
+            .child(div().font_family(text::MONO).text_size(text::TITLE).font_weight(FontWeight::MEDIUM).child(value))
+            .child(div().text_size(text::CAPTION).text_color(t.faint).child(label.to_string()))
+    };
+    let stats = div()
+        .flex()
+        .gap(space::S8)
+        .child(stat(tools.to_string(), "tool calls"))
+        .child(stat(
+            if landed.is_empty() { "none yet".into() } else { queue::severity_summary(&landed) },
+            "findings kept",
+        ))
+        .child(stat(total.to_string(), "events"));
+
+    // The track: one tick per event, colored by kind, dim past the held point. Click one to hold the log there.
+    let track = div().flex().items_end().gap(px(1.)).h(px(24.)).children(events.iter().enumerate().map(|(i, a)| {
+        let (h, c) = match &a.kind {
+            ActivityKind::Phase { .. } => (22., t.running),
+            ActivityKind::Finding { severity, .. } => (18., t.severity(*severity)),
+            ActivityKind::Run { .. } => (22., t.muted),
+            ActivityKind::Tool { .. } => (10., t.faint),
+        };
+        let tick = div()
+            .id(("tick", i))
             .flex_1()
-            .gap(space::S2)
-            .child(
-                div()
+            .h(px(24.))
+            .flex()
+            .items_end()
+            .justify_center()
+            .cursor_pointer()
+            .hover(|st| st.bg(t.hover))
+            .on_click(cx.listener(move |s, _: &ClickEvent, _, cx| {
+                s.scrub = Some(i);
+                cx.notify();
+            }))
+            .child(div().w(px(3.)).h(px(h)).rounded(px(1.)).bg(c).opacity(if i <= head { 1. } else { 0.3 }))
+            .when(held == Some(i), |d| d.border_b_2().border_color(t.text));
+        tip(tick, format!("{} · {}", clock_s(a.at.as_str()), event_words(t, a).2))
+    }));
+    let following =
+        div().flex().items_center().gap(space::S2).child(overline(t, "Activity")).child(div().flex_1()).child(
+            match held {
+                Some(i) => div()
                     .flex()
                     .items_center()
-                    .child(div().flex_1().h(px(2.)).bg(if i == 0 {
-                        t.bg.alpha(0.)
-                    } else if i <= at {
-                        t.running
-                    } else {
-                        t.border
-                    }))
+                    .gap(space::S2)
                     .child(
                         div()
-                            .size(px(18.))
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .rounded(radius::PILL)
-                            .border_2()
-                            .border_color(ring)
-                            .bg(fill)
-                            .when(i < at, |d| d.child(icon(IconName::Check, px(11.), t.on_accent)))
-                            .when(i == at, |d| d.child(div().size(px(6.)).rounded(radius::PILL).bg(t.running))),
+                            .font_family(text::MONO)
+                            .text_size(text::CAPTION)
+                            .text_color(t.muted)
+                            .child(format!("replaying {} of {total}", i + 1)),
                     )
-                    .child(div().flex_1().h(px(2.)).bg(if i == STEPS.len() - 1 {
-                        t.bg.alpha(0.)
-                    } else if i < at {
-                        t.running
-                    } else {
-                        t.border
-                    })),
-            )
-            .child(
-                div()
-                    .text_center()
-                    .text_size(text::SMALL)
-                    .font_weight(if i == at { FontWeight::SEMIBOLD } else { FontWeight::NORMAL })
-                    .text_color(fg)
-                    .child(label.to_string()),
-            )
-    }));
-    let recent: Vec<_> = m.domain.activity.iter().rev().filter(|a| a.pr_id.as_ref() == Some(&pr.id)).take(16).collect();
-    let window_ms = 10_000;
-    let rate = m
-        .domain
-        .activity
-        .iter()
-        .filter(|a| a.pr_id.as_ref() == Some(&pr.id) && m.now_ms.saturating_sub(a.recv_ms) < window_ms)
-        .count();
-    let stream = div().flex().flex_col().children(recent.into_iter().enumerate().map(|(i, a)| {
-        let fresh = m.now_ms.saturating_sub(a.recv_ms) < motion::ARRIVAL_MS;
+                    .child(button(
+                        t,
+                        "follow-live",
+                        "Follow live",
+                        None,
+                        Tone::Secondary,
+                        Some(Box::new(cx.listener(|s, _: &ClickEvent, _, cx| {
+                            s.scrub = None;
+                            cx.notify();
+                        })) as OnClick),
+                    ))
+                    .into_any_element(),
+                None => div()
+                    .flex()
+                    .items_center()
+                    .gap(px(6.))
+                    .text_size(text::CAPTION)
+                    .text_color(t.faint)
+                    .child(div().size(px(6.)).rounded(radius::PILL).bg(t.ok))
+                    .child(format!("following · {total} events · click the track to replay"))
+                    .into_any_element(),
+            },
+        );
+
+    // The log up to the held point, newest last, with a landed finding in its severity's wash.
+    let lo = (head + 1).saturating_sub(SHOWN);
+    let log = div().flex().flex_col().children(events.iter().enumerate().take(head + 1).skip(lo).map(|(i, a)| {
+        let current = i == head;
+        let fresh = held.is_none() && m.now_ms.saturating_sub(a.recv_ms) < motion::ARRIVAL_MS;
+        let (tag, tag_hue, words) = event_words(t, a);
+        let landed_hue = match &a.kind {
+            ActivityKind::Finding { severity, .. } => Some(t.severity_wash(*severity)),
+            _ => None,
+        };
         let row = div()
+            .id(("log", i))
             .flex()
             .items_center()
             .gap(space::S3)
             .h(px(30.))
             .px(space::S2)
             .rounded(radius::SM)
-            .when(i == 0 && fresh, |d| d.bg(t.running.alpha(0.08)))
+            .when(current, |d| d.bg(t.selected))
+            .when_some(landed_hue, |d, h| d.bg(h))
+            .when(matches!(a.kind, ActivityKind::Phase { .. }), |d| d.border_t_1().border_color(t.border))
+            .when(current && fresh, |d| d.bg(t.running.alpha(0.08)))
+            .cursor_pointer()
+            .hover(|st| st.bg(t.hover))
+            .on_click(cx.listener(move |s, _: &ClickEvent, _, cx| {
+                s.scrub = Some(i);
+                cx.notify();
+            }))
             .child(
                 div()
-                    .w(px(56.))
+                    .w(px(60.))
                     .flex_none()
                     .font_family(text::MONO)
                     .text_size(px(11.))
                     .text_color(t.faint)
                     .child(clock_s(a.at.as_str())),
+            )
+            .child(
+                div()
+                    .w(px(96.))
+                    .flex_none()
+                    .truncate()
+                    .font_family(if matches!(a.kind, ActivityKind::Tool { .. }) { text::MONO } else { text::UI })
+                    .text_size(if matches!(a.kind, ActivityKind::Tool { .. }) { px(11.) } else { text::SMALL })
+                    .font_weight(if matches!(a.kind, ActivityKind::Tool { .. }) {
+                        FontWeight::NORMAL
+                    } else {
+                        FontWeight::SEMIBOLD
+                    })
+                    .text_color(tag_hue)
+                    .child(tag),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(text::BODY)
+                    .font_weight(if landed_hue.is_some() { FontWeight::MEDIUM } else { FontWeight::NORMAL })
+                    .text_color(if current || landed_hue.is_some() { t.text } else { t.muted })
+                    .child(words),
             );
-        match &a.kind {
-            ActivityKind::Tool { tool, summary } => row
-                .child(
-                    div()
-                        .w(px(96.))
-                        .flex_none()
-                        .font_family(text::MONO)
-                        .text_size(px(11.))
-                        .text_color(t.accent)
-                        .child(tool.to_string()),
-                )
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .truncate()
-                        .text_size(text::BODY)
-                        .text_color(t.muted)
-                        .child(summary.to_string()),
-                ),
-            ActivityKind::Phase { to, .. } => row.child(icon(IconName::ArrowRight, px(13.), t.running)).child(
-                div()
-                    .text_size(text::BODY)
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .text_color(t.running)
-                    .child(phase_word(*to)),
-            ),
-            ActivityKind::Finding { title, severity, .. } => {
-                let (mark, word) = severity_mark(*severity);
-                row.bg(t.severity_wash(*severity))
-                    .child(
-                        div()
-                            .w(px(96.))
-                            .flex_none()
-                            .text_size(text::SMALL)
-                            .font_weight(FontWeight::SEMIBOLD)
-                            .text_color(t.severity(*severity))
-                            .child(format!("{mark} {word}")),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .truncate()
-                            .text_size(text::BODY)
-                            .font_weight(FontWeight::MEDIUM)
-                            .child(format!("Finding landed: {title}")),
-                    )
-            }
-            ActivityKind::Run { status, .. } => row.child(
-                div()
-                    .text_size(text::BODY)
-                    .text_color(t.muted)
-                    .child(format!("Run {}", format!("{status:?}").to_lowercase())),
-            ),
+        if current && fresh && !s.still {
+            row.with_animation(("arrive", i), Animation::new(motion::FADE), |d, v| d.opacity(0.4 + 0.6 * v))
+                .into_any_element()
+        } else {
+            row.into_any_element()
         }
     }));
-    let landed: Vec<&Finding> = m.domain.findings.values().filter(|f| f.run_id == run.id).collect();
+
     let body = div()
         .flex()
         .flex_col()
         .gap(space::S6)
-        .child(pr_header(t, pr, kicker))
-        .child(steps)
-        .child(section(t, &format!("Activity · {rate} steps in the last 10 seconds"), stream))
+        .child(pr_header(t, pr, kicker, pr_sentence(m, pr, Some(run))))
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(space::S3)
+                .p(space::S4)
+                .rounded(radius::LG)
+                .border_1()
+                .border_color(t.border)
+                .bg(t.surface)
+                .child(progress(t, step_of(run.phase), t.running, false, Gauge::Full))
+                .child(div().text_size(text::SMALL).text_color(t.muted).child(format!(
+                    "{} · {} · run {}",
+                    phase_word(run.phase),
+                    run.model,
+                    run.id.short()
+                ))),
+        )
+        .child(stats)
+        .child(div().flex().flex_col().gap(space::S2).child(following).child(track).child(log))
         .child(section(
             t,
             &format!("Findings so far · {}", landed.len()),
@@ -209,5 +237,20 @@ pub fn live(s: &Shell, t: &Colors, pr: &Pr, run: &Run, cx: &Context<Shell>) -> D
                 Box::new(cx.listener(|s, _: &ClickEvent, _, cx| s.act(Action::Mutation(Mutation::Cancel), cx)))
             }),
         ));
-    page("detail-live", body, Some(footer), t)
+    page("detail-live", body, Some(footer), t, false)
+}
+
+/// An event as its tag, the tag's hue and its words.
+fn event_words(t: &Colors, a: &Activity) -> (String, Hsla, String) {
+    match &a.kind {
+        ActivityKind::Tool { tool, summary } => (tool.to_string(), t.accent, summary.to_string()),
+        ActivityKind::Phase { to, .. } => ("phase".into(), t.running, format!("→ {}", phase_word(*to))),
+        ActivityKind::Finding { title, severity, .. } => {
+            let (mark, word) = severity_mark(*severity);
+            (format!("{mark} {word}"), t.severity(*severity), format!("Finding landed: {title}"))
+        }
+        ActivityKind::Run { status, .. } => {
+            ("run".into(), t.muted, format!("Run {}", format!("{status:?}").to_lowercase()))
+        }
+    }
 }

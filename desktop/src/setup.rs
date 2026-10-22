@@ -1,16 +1,18 @@
-//! Setup and the board: the daemon's checks, mode and accounts, and the overview when nothing is selected.
+//! Setup and the states around the board: the daemon's checks, mode and accounts; the overview when nothing is
+//! selected; the offline page with the command that starts the daemon; and the skeleton while the link comes up.
 
 use gpui_kit::assets::IconName;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use pr_review_tui::keymap::Action;
+use pr_review_tui::model::Link;
 use pr_review_tui::protocol::{CheckStatus, DaemonMode, Finding};
 
 use crate::detail::*;
-use crate::kit::{OnClick, Tone, button, callout, chip, icon, overline};
+use crate::kit::{OnClick, Tone, button, callout, chip, display, icon, icon_button, overline, summary};
 use crate::queue;
 use crate::tokens::{Colors, radius, space, text};
-use crate::ui::Shell;
+use crate::ui::{Shell, on};
 
 fn check_name(id: &str) -> &str {
     match id {
@@ -25,7 +27,134 @@ fn check_name(id: &str) -> &str {
 
 /// Setup: the daemon's checks, its mode and the GitHub accounts, with the fix for each gap.
 pub fn setup(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
-    div().flex().flex_1().min_h_0().child(page("setup", setup_body(s, t, cx), None, t))
+    div().flex().flex_1().min_h_0().child(page("setup", setup_body(s, t, cx), None, t, false))
+}
+
+/// The command that starts the daemon this window dials.
+fn daemon_command(m: &pr_review_tui::model::Model) -> String {
+    match m.diag.endpoint.strip_prefix("unix:") {
+        Some(path) => format!("pr-review daemon --allow-commands --socket {path}"),
+        None => "pr-review daemon --allow-commands".to_string(),
+    }
+}
+
+/// No daemon answers: what to run, in a copyable block, and a retry.
+pub fn offline(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
+    let m = &s.model;
+    let (title, why) = match &m.link {
+        Link::Disconnected { reason, retry_in_ms } => (
+            "Reviewer offline",
+            format!(
+                "{reason}.{}",
+                retry_in_ms.map_or(String::new(), |ms| format!(" The app retries in {}s.", ms.div_ceil(1000)))
+            ),
+        ),
+        Link::Stalled { reason } => ("Not connected", format!("{reason}.")),
+        Link::Incompatible { message, .. } => ("This daemon speaks another protocol", message.to_string()),
+        Link::Unusable { message } => ("This endpoint can't work", message.to_string()),
+        _ => ("Not connected", "The reviewer has not answered yet.".to_string()),
+    };
+    let cmd = daemon_command(m);
+    let copy = cmd.clone();
+    div()
+        .flex()
+        .flex_col()
+        .gap(space::S6)
+        .max_w(px(560.))
+        .pt(space::S8)
+        .child(
+            div()
+                .size(px(48.))
+                .flex()
+                .items_center()
+                .justify_center()
+                .rounded(radius::PILL)
+                .bg(t.danger.alpha(0.12))
+                .child(icon(IconName::Unplug, px(22.), t.danger)),
+        )
+        .child(div().flex().flex_col().gap(space::S2).child(display(t, title)).child(summary(t, why)))
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(space::S2)
+                .child(overline(t, "Start the daemon, then this window connects on its own"))
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(space::S2)
+                        .pl(space::S3)
+                        .pr(space::S1)
+                        .py(space::S1)
+                        .rounded(radius::SM)
+                        .bg(t.code_bg)
+                        .border_1()
+                        .border_color(t.border)
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .font_family(text::MONO)
+                                .text_size(text::CODE)
+                                .text_color(t.text)
+                                .child(cmd),
+                        )
+                        .child(icon_button(
+                            t,
+                            "copy-cmd",
+                            IconName::Copy,
+                            "Copy the command",
+                            Some(Box::new(move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
+                                cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()))
+                            }) as OnClick),
+                        )),
+                ),
+        )
+        .child(
+            div()
+                .flex()
+                .gap(space::S2)
+                .child(button(
+                    t,
+                    "retry-now",
+                    "Retry",
+                    Some("⌘R"),
+                    Tone::Primary,
+                    on(cx, |s, cx| s.act(Action::Refresh, cx)),
+                ))
+                .child(button(
+                    t,
+                    "offline-setup",
+                    "Setup",
+                    Some("⌘,"),
+                    Tone::Secondary,
+                    on(cx, |s, cx| s.act(Action::Goto(pr_review_tui::model::Screen::Settings), cx)),
+                )),
+        )
+}
+
+/// Dialing, or waiting for the first snapshot: the page's shapes, greyed.
+pub fn connecting(t: &Colors) -> Div {
+    let bone = |w: Pixels, h: Pixels| div().w(w).h(h).rounded(px(4.)).bg(t.border.alpha(0.7));
+    div()
+        .flex()
+        .flex_col()
+        .gap(space::S5)
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap(space::S2)
+                .child(icon(IconName::LoaderCircle, px(14.), t.faint))
+                .child(overline(t, "Connecting to the reviewer")),
+        )
+        .child(bone(px(420.), px(26.)))
+        .child(bone(px(320.), px(14.)))
+        .child(div().h(space::S2))
+        .child(bone(px(560.), px(72.)))
+        .child(bone(px(560.), px(56.)))
+        .child(bone(px(560.), px(56.)))
 }
 
 /// With nothing selected: the board, what waits and what runs, and where the keyboard starts.
@@ -40,14 +169,15 @@ pub fn board(s: &Shell, t: &Colors) -> Div {
             .gap(space::S1)
             .flex_1()
             .p(space::S4)
-            .rounded(radius::MD)
+            .rounded(radius::LG)
             .border_1()
             .border_color(t.border)
             .bg(t.surface)
             .child(
                 div()
+                    .font_family(text::SERIF)
                     .text_size(text::DISPLAY)
-                    .font_weight(FontWeight::BOLD)
+                    .font_weight(FontWeight::SEMIBOLD)
                     .text_color(if n == 0 { t.faint } else { hue })
                     .child(n.to_string()),
             )
@@ -58,19 +188,27 @@ pub fn board(s: &Shell, t: &Colors) -> Div {
     div()
         .flex()
         .flex_col()
-        .gap(space::S5)
-        .child(overline(t, "The board"))
-        .child(div().text_size(text::DISPLAY).font_weight(FontWeight::BOLD).child(if !m.link.accepts_events() {
-            "Waiting for the reviewer".to_string()
-        } else if cards.is_empty() {
-            "Nothing needs you".to_string()
-        } else {
-            format!("{} waiting on you", queue::count(cards.len(), "decision"))
-        }))
+        .gap(space::S6)
         .child(
             div()
                 .flex()
-                .gap(space::S3)
+                .flex_col()
+                .gap(space::S2)
+                .child(overline(t, "The board"))
+                .child(display(
+                    t,
+                    if cards.is_empty() {
+                        "Nothing needs you".to_string()
+                    } else {
+                        format!("{} waiting on you", queue::count(cards.len(), "decision"))
+                    },
+                ))
+                .child(summary(t, queue::summary(m))),
+        )
+        .child(
+            div()
+                .flex()
+                .gap(space::S4)
                 .child(tile(sev(S::Critical), "◆ critical open", t.critical))
                 .child(tile(sev(S::High), "▲ high open", t.high))
                 .child(tile(queue::running(m).len(), "reviews running", t.running))
@@ -91,7 +229,7 @@ pub fn setup_body(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
             div()
                 .flex()
                 .flex_col()
-                .rounded(radius::MD)
+                .rounded(radius::LG)
                 .border_1()
                 .border_color(t.border)
                 .bg(t.surface)
@@ -105,7 +243,7 @@ pub fn setup_body(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
     let server = m.server.as_ref();
     let mode = match server.and_then(|s| s.mode) {
         Some(DaemonMode::Engine) => ("Engine: reviews run here", t.ok),
-        Some(DaemonMode::ReadOnly) => ("Read-only: another pr-review owns the data", t.warn),
+        Some(DaemonMode::ReadOnly) => ("Read-only: this app can look, not act", t.warn),
         _ => ("Unknown mode", t.muted),
     };
     let mut conn = div()
@@ -180,7 +318,7 @@ pub fn setup_body(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                                     .mt(space::S1)
                                     .px(space::S2)
                                     .py(space::S1)
-                                    .rounded(radius::XS)
+                                    .rounded(radius::SM)
                                     .bg(t.code_bg)
                                     .border_1()
                                     .border_color(t.border)
@@ -246,39 +384,51 @@ pub fn setup_body(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                                         .child(a.scopes.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(" · ")),
                                 ),
                         )
-                        .child(button(
-                            t,
-                            ("acct", i),
-                            if a.selected { "In use" } else { "Use for GitHub" },
-                            None,
-                            Tone::Secondary,
-                            block.is_none().then(|| -> OnClick {
-                                Box::new(cx.listener(move |s, _: &ClickEvent, _, cx| {
+                        .child(match block {
+                            None => button(
+                                t,
+                                ("acct", i),
+                                "Use for GitHub",
+                                None,
+                                Tone::Secondary,
+                                Some(Box::new(cx.listener(move |s, _: &ClickEvent, _, cx| {
                                     s.model.ui.selected_account = Some(id.clone());
                                     s.act(Action::Open, cx);
-                                }))
-                            }),
-                        )),
+                                })) as OnClick),
+                            ),
+                            Some(why) => crate::kit::tip(
+                                button(
+                                    t,
+                                    ("acct", i),
+                                    if a.selected { "In use" } else { "Use for GitHub" },
+                                    None,
+                                    Tone::Secondary,
+                                    None,
+                                ),
+                                why,
+                            ),
+                        }),
                 );
             }
         }
     }
+    let issues = queue::setup_issues(m);
     let missing = server.map_or(0, |s| s.missing().count());
     let lead = if missing > 0 {
         callout(
             t,
             t.danger,
             IconName::CircleX,
-            format!("{} before reviews can run", queue::count(missing, "fix")),
+            format!("{} before reviews can run", queue::count(issues, "fix")),
             Some("Run the commands below in a terminal, then restart the daemon.".into()),
         )
-    } else if server.and_then(|s| s.commands_off()).is_some() {
+    } else if let Some(why) = server.and_then(|s| s.commands_off()) {
         callout(
             t,
             t.warn,
             IconName::TriangleAlert,
-            "Reviews run, but this app can't start or post them",
-            server.and_then(|s| s.commands_off()).map(String::from),
+            "Read-only daemon: this app can look, but not start, retry, cancel or post",
+            Some(format!("{why}. Every action button stays visible and says this when you hover it.")),
         )
     } else {
         callout(t, t.ok, IconName::CircleCheck, "Everything the reviewer needs is in place", None)
@@ -293,13 +443,8 @@ pub fn setup_body(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                 .flex_col()
                 .gap(space::S2)
                 .child(overline(t, "Setup"))
-                .child(div().text_size(text::DISPLAY).font_weight(FontWeight::BOLD).child("What the reviewer needs"))
-                .child(
-                    div()
-                        .text_size(text::BODY)
-                        .text_color(t.muted)
-                        .child("The same checks as pr-review setup --check, read from the daemon."),
-                ),
+                .child(display(t, "What the reviewer needs"))
+                .child(summary(t, "The same checks as pr-review setup --check, read from the daemon.")),
         )
         .child(lead)
         .child(card("Checks", list))

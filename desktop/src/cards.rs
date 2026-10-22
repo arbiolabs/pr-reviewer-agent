@@ -1,50 +1,91 @@
-//! The home's lists: the triage queue as cards, sectioned by tier, and the done list.
+//! The home's lists: the triage queue as cards, sectioned by tier, the done list, and the skeleton that holds their
+//! place while the first snapshot loads.
 
 use gpui_kit::assets::IconName;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
+use pr_review_tui::protocol::PublicationStatus;
 
 use crate::kit::{Tone, button, icon, overline};
 use crate::queue::{self, Card, Tier};
 use crate::tokens::{Colors, layout, radius, severity_mark, space, text};
 use crate::ui::*;
 
-fn column(t: &Colors) -> Stateful<Div> {
+/// The column, with a bottom inset so the last card clears the edge, and a fade where more cards scroll under.
+fn column(t: &Colors, id: &'static str, inner: Div) -> Div {
     div()
-        .id("column")
-        .flex()
-        .flex_col()
+        .relative()
         .flex_none()
         .w(layout::QUEUE)
         .h_full()
-        .overflow_y_scroll()
         .border_r_1()
         .border_color(t.border)
-        .px(space::S4)
-        .py(space::S4)
-        .gap(space::S2)
+        .child(
+            div()
+                .id(id)
+                .size_full()
+                .overflow_y_scroll()
+                .child(inner.flex().flex_col().gap(space::S4).px(space::S4).pt(space::S4).pb(space::S8)),
+        )
+        .child(div().absolute().bottom_0().left_0().right(px(1.)).h(space::S8).bg(linear_gradient(
+            180.,
+            linear_color_stop(t.bg.alpha(0.), 0.),
+            linear_color_stop(t.bg, 1.),
+        )))
 }
 
-pub fn queue_column(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Stateful<Div> {
+/// Grey shapes where cards will be, while the first snapshot loads.
+pub fn skeleton_column(t: &Colors) -> Div {
+    let bone = |w: Pixels, h: Pixels| div().w(w).h(h).rounded(px(4.)).bg(t.border.alpha(0.7));
+    let card = || {
+        div()
+            .flex()
+            .flex_col()
+            .gap(space::S3)
+            .p(space::S4)
+            .rounded(radius::LG)
+            .border_1()
+            .border_color(t.border.alpha(0.6))
+            .child(bone(px(120.), px(10.)))
+            .child(bone(px(280.), px(14.)))
+            .child(bone(px(220.), px(10.)))
+    };
+    column(
+        t,
+        "skeleton",
+        div()
+            .child(div().flex().items_center().gap(space::S2).child(overline(t, "Loading the queue")))
+            .child(card())
+            .child(card())
+            .child(card()),
+    )
+}
+
+pub fn queue_column(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
     let m = &s.model;
     let cards = queue::cards(m);
     let selected = queue::card_of(&cards, m.ui.selected_pr.as_ref());
-    let mut col = column(t);
+    let mut col = div();
     if cards.is_empty() {
-        let (title, body) = if !m.link.accepts_events() && m.domain.prs.is_empty() {
-            ("Not connected", "Nothing to show until the reviewer answers. The app retries on its own; ⌘R asks now.")
-        } else if m.domain.prs.is_empty() {
-            (
-                "No PRs yet",
-                "Tracked PRs show up here as soon as the reviewer picks one up. Start a review with pr-review review <url>.",
-            )
-        } else {
-            (
-                "Nothing needs you",
-                "Reviews land here when they need a decision: a post to approve, a finding to judge, a failure to retry.",
-            )
+        // Only a live board can say the reader is clear: an offline window never claims it.
+        let reviewed = queue::done(m).len();
+        let running = queue::running(m).len();
+        let body = match (m.domain.prs.is_empty(), running) {
+            (true, _) => {
+                "Tracked PRs show up here as soon as the reviewer picks one up. Start one with pr-review review <url>."
+                    .to_string()
+            }
+            (false, 0) => format!(
+                "{} reviewed. New decisions land here: a post to approve, a finding to judge, a failure to retry.",
+                queue::count(reviewed, "PR")
+            ),
+            (false, r) => format!(
+                "{} reviewed, {} running. Findings land here as the verifier keeps them.",
+                queue::count(reviewed, "PR"),
+                queue::count(r, "review")
+            ),
         };
-        return col.child(
+        col = col.child(
             div()
                 .flex()
                 .flex_col()
@@ -62,7 +103,13 @@ pub fn queue_column(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Stateful<Div>
                         .bg(t.ok.alpha(0.12))
                         .child(icon(IconName::Check, px(22.), t.ok)),
                 )
-                .child(div().text_size(text::TITLE).font_weight(FontWeight::SEMIBOLD).child(title))
+                .child(
+                    div()
+                        .font_family(text::SERIF)
+                        .text_size(text::DISPLAY)
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child("You're clear"),
+                )
                 .child(
                     div()
                         .text_center()
@@ -72,6 +119,7 @@ pub fn queue_column(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Stateful<Div>
                         .child(body),
                 ),
         );
+        return column(t, "column", col);
     }
     let mut tier: Option<Tier> = None;
     for (i, c) in cards.iter().enumerate() {
@@ -83,14 +131,14 @@ pub fn queue_column(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Stateful<Div>
                     .flex()
                     .items_center()
                     .gap(space::S2)
-                    .when(i > 0, |d| d.pt(space::S3))
+                    .when(i > 0, |d| d.pt(space::S2))
                     .child(overline(t, c.tier().label()))
                     .child(div().text_size(text::CAPTION).text_color(t.faint).child(n.to_string())),
             );
         }
         col = col.child(card(s, t, c, i, selected == Some(i), cx));
     }
-    col
+    column(t, "column", col)
 }
 
 struct Face {
@@ -98,12 +146,19 @@ struct Face {
     mark: Option<&'static str>,
     kicker: String,
     headline: String,
+    /// The top finding, quoted in the serif under the headline.
+    quote: Option<String>,
     sub: String,
     meta: String,
     action: &'static str,
 }
 
-fn face(c: &Card) -> Face {
+/// A review the daemon refused for size: the reader's next step is to shrink the PR, then retry.
+pub fn too_large(reason: &str) -> bool {
+    reason.to_lowercase().contains("too large")
+}
+
+fn face(c: &Card, selected: bool) -> Face {
     match c {
         Card::Setup { missing, commands_off } => Face {
             glyph: Some(IconName::TriangleAlert),
@@ -113,6 +168,7 @@ fn face(c: &Card) -> Face {
                 Some(c) => format!("Reviews can't run: {}", c.detail),
                 None => "Review commands are off".into(),
             },
+            quote: None,
             sub: missing
                 .first()
                 .and_then(|c| c.fix.as_ref().map(|f| f.to_string()))
@@ -129,26 +185,32 @@ fn face(c: &Card) -> Face {
             glyph: Some(IconName::Send),
             mark: None,
             kicker: "Awaiting your approval".into(),
-            headline: format!("Approve and post #{}", pr.number),
-            sub: pr.title.to_string(),
-            meta: if findings.is_empty() {
-                "No findings · posts a clean review".into()
+            headline: pr.title.to_string(),
+            quote: None,
+            sub: if findings.is_empty() {
+                "A clean review: no findings. Nothing posts until you approve the proof.".into()
             } else {
-                format!("{} · {}", queue::count(findings.len(), "finding"), queue::severity_summary(findings))
+                format!(
+                    "Posts {} · {}. Nothing posts until you approve the proof.",
+                    queue::count(findings.len(), "finding"),
+                    queue::severity_summary(findings)
+                )
             },
+            meta: format!("Stored for {}", pr.head_sha.short()),
             action: "Review post",
         },
         Card::Posting { pr, status, .. } => Face {
             glyph: Some(IconName::CircleAlert),
             mark: None,
             kicker: "Posting needs a look".into(),
-            headline: format!(
-                "Posting to #{} {}",
-                pr.number,
-                if *status == pr_review_tui::protocol::PublicationStatus::Failed { "failed" } else { "is unconfirmed" }
-            ),
-            sub: pr.title.to_string(),
-            meta: "The daemon is checking GitHub".into(),
+            headline: pr.title.to_string(),
+            quote: None,
+            sub: if *status == PublicationStatus::Failed {
+                "GitHub refused the post. Open the proof to see what it said.".into()
+            } else {
+                "GitHub never confirmed the post. The daemon is checking whether the review is there.".into()
+            },
+            meta: String::new(),
             action: "Open",
         },
         Card::Findings { pr, findings } => {
@@ -160,41 +222,50 @@ fn face(c: &Card) -> Face {
                 glyph: None,
                 mark: Some(mark),
                 kicker: format!("{word} · {}", top.category.label()),
-                headline: format!("{word} in #{}: {}", pr.number, top.title),
-                sub: format!(
-                    "{}{}{}",
+                headline: pr.title.to_string(),
+                quote: Some(top.title.to_string()),
+                // The pane lists every finding once the card is selected, so the card stops counting them then.
+                sub: if more.is_empty() || selected {
+                    String::new()
+                } else {
+                    format!("Also open: {}", queue::severity_summary(more))
+                },
+                meta: format!(
+                    "{}{} · {:.0}% sure · {}",
                     file,
                     top.line.map_or(String::new(), |l| format!(":{l}")),
-                    if more.is_empty() {
-                        String::new()
-                    } else {
-                        format!(" · +{} more: {}", more.len(), queue::severity_summary(more))
-                    }
-                ),
-                meta: format!(
-                    "{:.0}% sure · {}",
                     top.confidence * 100.,
                     queue::count(top.evidence_count as usize, "evidence item")
                 ),
                 action: "Open finding",
             }
         }
-        Card::Failed { pr, run } => Face {
-            glyph: Some(IconName::CircleX),
-            mark: None,
-            kicker: "Review failed".into(),
-            headline: format!("Review failed on #{}: retry?", pr.number),
-            sub: run.failure_reason.as_ref().map_or("No reason given".into(), |r| r.to_string()),
-            meta: pr.title.to_string(),
-            action: "Retry",
-        },
+        Card::Failed { pr, run } => {
+            let reason = run.failure_reason.as_ref().map_or("No reason given".to_string(), |r| r.to_string());
+            let large = too_large(&reason);
+            Face {
+                glyph: Some(IconName::CircleX),
+                mark: None,
+                kicker: if large { "Too large to review".into() } else { "Review failed".into() },
+                headline: pr.title.to_string(),
+                quote: None,
+                sub: reason,
+                meta: if large {
+                    "Next: exclude generated files or split the PR, then retry".into()
+                } else {
+                    run.attempt.map_or(String::new(), |a| format!("Attempt {a}"))
+                },
+                action: "Retry",
+            }
+        }
         Card::Start { pr } => Face {
             glyph: Some(IconName::Play),
             mark: None,
             kicker: "Not reviewed yet".into(),
-            headline: format!("Start a review of #{}", pr.number),
-            sub: pr.title.to_string(),
-            meta: format!("{} · by {}", pr.repository, pr.author.as_ref().map_or("unknown", |a| a.as_str())),
+            headline: pr.title.to_string(),
+            quote: None,
+            sub: String::new(),
+            meta: format!("by {}", pr.author.as_ref().map_or("unknown", |a| a.as_str())),
             action: "Start review",
         },
     }
@@ -211,9 +282,9 @@ fn hue_of(t: &Colors, c: &Card) -> Hsla {
 }
 
 fn card(_: &Shell, t: &Colors, c: &Card, i: usize, selected: bool, cx: &Context<Shell>) -> Stateful<Div> {
-    let f = face(c);
+    let f = face(c, selected);
     let hue = hue_of(t, c);
-    let repo = c.pr().map(|p| p.repository.to_string()).unwrap_or_default();
+    let place = c.pr().map(|p| format!("{} #{}", p.repository, p.number)).unwrap_or_default();
     let ring = BoxShadow {
         color: t.accent.alpha(0.30),
         offset: point(px(0.), px(0.)),
@@ -239,20 +310,14 @@ fn card(_: &Shell, t: &Colors, c: &Card, i: usize, selected: bool, cx: &Context<
         .pl(space::S5)
         .pr(space::S4)
         .py(space::S3)
-        .rounded(radius::MD)
+        .rounded(radius::LG)
         .border_1()
         .cursor_pointer()
         .bg(if selected { t.selected } else { t.surface })
         .border_color(if selected { t.accent.alpha(0.75) } else { t.border })
         .shadow(if selected { vec![ring, lift] } else { vec![lift] })
-        .hover(|d| {
-            d.bg(if selected { t.selected } else { t.surface_hover }).border_color(if selected {
-                t.accent
-            } else {
-                t.border_strong
-            })
-        })
-        .active(|d| d.bg(t.surface_press))
+        .hover(|d| d.bg(t.hover).border_color(if selected { t.accent } else { t.border_strong }))
+        .active(|d| d.bg(t.press))
         .on_click(cx.listener(move |s, _: &ClickEvent, _, cx| {
             let cards = queue::cards(&s.model);
             let again = queue::card_of(&cards, s.model.ui.selected_pr.as_ref()) == Some(i);
@@ -260,6 +325,19 @@ fn card(_: &Shell, t: &Colors, c: &Card, i: usize, selected: bool, cx: &Context<
             if again { s.primary(i, cx) } else { s.select_card(i, cx) }
         }))
         .child(div().absolute().left(px(7.)).top(space::S3).bottom(space::S3).w(px(3.)).rounded(px(2.)).bg(hue))
+        // The selected card is the source of the pane beside it: a pointer on its right edge says so.
+        .when(selected, |d| {
+            d.child(
+                div()
+                    .absolute()
+                    .right(px(-9.))
+                    .top_0()
+                    .bottom_0()
+                    .flex()
+                    .items_center()
+                    .child(div().text_size(px(11.)).text_color(t.accent).child("▶")),
+            )
+        })
         .child(
             div()
                 .flex()
@@ -275,7 +353,7 @@ fn card(_: &Shell, t: &Colors, c: &Card, i: usize, selected: bool, cx: &Context<
                         .child(f.kicker.to_uppercase()),
                 )
                 .child(div().flex_1())
-                .child(div().text_size(text::CAPTION).text_color(t.faint).child(repo)),
+                .child(div().text_size(text::CAPTION).text_color(t.faint).child(place)),
         )
         .child(
             div()
@@ -286,14 +364,26 @@ fn card(_: &Shell, t: &Colors, c: &Card, i: usize, selected: bool, cx: &Context<
                 .line_clamp(2)
                 .child(f.headline),
         )
-        .child(
+        .children(f.quote.map(|q| {
             div()
-                .text_size(text::SMALL)
-                .line_height(text::LINE_TIGHT)
-                .text_color(t.muted)
+                .font_family(text::SERIF)
+                .italic()
+                .text_size(text::LEAD)
+                .line_height(px(21.))
+                .text_color(t.text)
                 .line_clamp(2)
-                .child(crate::detail::md_line(t, &f.sub)),
-        )
+                .child(format!("\u{201c}{q}\u{201d}"))
+        }))
+        .when(!f.sub.is_empty(), |d| {
+            d.child(
+                div()
+                    .text_size(text::SMALL)
+                    .line_height(text::LINE_TIGHT)
+                    .text_color(t.muted)
+                    .line_clamp(2)
+                    .child(crate::detail::md_line(t, &f.sub)),
+            )
+        })
         .child(
             div()
                 .flex()
@@ -312,18 +402,22 @@ fn card(_: &Shell, t: &Colors, c: &Card, i: usize, selected: bool, cx: &Context<
         )
 }
 
-pub fn done_column(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Stateful<Div> {
+pub fn done_column(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
     let m = &s.model;
     let done = queue::done(m);
-    let mut col = column(t);
+    let mut col = div();
     if done.is_empty() {
-        return col.child(
-            div()
-                .pt(px(120.))
-                .text_center()
-                .text_size(text::BODY)
-                .text_color(t.muted)
-                .child("Finished reviews collect here."),
+        return column(
+            t,
+            "column",
+            col.child(
+                div()
+                    .pt(px(120.))
+                    .text_center()
+                    .text_size(text::BODY)
+                    .text_color(t.muted)
+                    .child("Finished reviews collect here."),
+            ),
         );
     }
     col = col.child(overline(t, "Nothing left for you"));
@@ -336,13 +430,13 @@ pub fn done_column(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Stateful<Div> 
                 .flex()
                 .gap(space::S3)
                 .p(space::S3)
-                .rounded(radius::MD)
+                .rounded(radius::LG)
                 .border_1()
                 .border_color(if selected { t.accent.alpha(0.75) } else { t.border })
                 .bg(if selected { t.selected } else { t.surface })
                 .cursor_pointer()
-                .hover(|d| d.bg(t.surface_hover))
-                .active(|d| d.bg(t.surface_press))
+                .hover(|d| d.bg(t.hover))
+                .active(|d| d.bg(t.press))
                 .on_click(cx.listener(move |s, _: &ClickEvent, _, cx| s.select_pr(id.clone(), cx)))
                 .child(div().pt(px(2.)).child(icon(IconName::CircleCheck, px(15.), t.ok)))
                 .child(
@@ -367,5 +461,5 @@ pub fn done_column(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Stateful<Div> 
                 ),
         );
     }
-    col
+    column(t, "column", col)
 }

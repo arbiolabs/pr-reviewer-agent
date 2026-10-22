@@ -1,17 +1,17 @@
-//! The publication page: exactly what approving a parked review would post, and what happened once approved.
+//! The proof: exactly what approving a parked review would post, and what happened once approved.
 
 use gpui_kit::assets::IconName;
 use gpui_kit::*;
 use pr_review_tui::keymap::Action;
-use pr_review_tui::model::{ConfirmState, DiffKey, Identity, Model, Preview};
+use pr_review_tui::model::{ConfirmState, DiffKey, Model, Preview};
 use pr_review_tui::protocol::{PublicationPreview, PublicationStatus, RunId};
 use pr_review_tui::update::{can_confirm, publish_block, published_url};
 
-use crate::code::hash_comments;
+use crate::code::Lexer;
 use crate::detail::*;
-use crate::kit::{OnClick, Tone, button, callout, icon};
+use crate::kit::{OnClick, Tone, button, callout, icon, summary};
 use crate::queue;
-use crate::tokens::{Colors, radius, space, text};
+use crate::tokens::{Colors, layout, radius, space, text};
 use crate::ui::{Shell, on};
 
 const MARKER: &str = "<!-- durable-review:";
@@ -48,7 +48,29 @@ fn markdown(t: &Colors, src: &str, raw: bool) -> Div {
             },
         );
     }
+    if !raw && src.contains(MARKER) {
+        out = out.child(
+            div()
+                .pt(space::S2)
+                .mt(space::S1)
+                .border_t_1()
+                .border_color(t.border)
+                .text_size(text::CAPTION)
+                .text_color(t.faint)
+                .child("Also sent, and hidden by GitHub: a durable-review marker comment."),
+        );
+    }
     out
+}
+
+/// The kind of review, as GitHub names it.
+fn event_words(event: &str) -> &'static str {
+    match event {
+        "APPROVE" => "an approval",
+        "REQUEST_CHANGES" => "a request for changes",
+        "COMMENT" => "a comment, not an approval or a request for changes",
+        _ => "a review",
+    }
 }
 
 pub fn publication(
@@ -63,71 +85,100 @@ pub fn publication(
     let m = &s.model;
     let run = m.domain.runs.get(run_id);
     let pr = run.and_then(|r| m.domain.prs.get(&r.pr_id));
-    let kicker = div().flex().items_center().gap(space::S2).child(icon(IconName::Send, px(12.), t.accent)).child(
-        div().text_size(text::CAPTION).font_weight(FontWeight::BOLD).text_color(t.accent).child("PUBLICATION PREVIEW"),
-    );
-    let mut body = div().flex().flex_col().gap(space::S5);
-    body = body.child(match pr {
-        Some(p) => pr_header(t, p, kicker),
-        None => kicker,
-    });
+    let posted = m.domain.publications.get(run_id).map(|x| x.status);
+    let done = posted == Some(PublicationStatus::Published);
+    let url = published_url(m, run_id);
+    let kicker = div()
+        .flex()
+        .items_center()
+        .gap(space::S2)
+        .child(icon(
+            if done { IconName::CircleCheck } else { IconName::Send },
+            px(12.),
+            if done { t.ok } else { t.accent },
+        ))
+        .child(
+            div()
+                .text_size(text::CAPTION)
+                .font_weight(FontWeight::BOLD)
+                .text_color(if done { t.ok } else { t.accent })
+                .child(if done { "PUBLISHED" } else { "PROOF · NOTHING IS POSTED YET" }),
+        )
+        .children(url.as_ref().filter(|_| done).map(|u| {
+            div().font_family(text::MONO).text_size(text::CAPTION).text_color(t.faint).truncate().child(u.clone())
+        }));
+    let target = pr.map_or("this PR".to_string(), |p| format!("{}#{}", p.repository, p.number));
+    let mut body = div().flex().flex_col().gap(space::S6);
     let p = match preview {
         Preview::Ready(p) => p,
         Preview::Loading(_) => {
             return page(
                 "detail-pub",
-                body.child(callout(t, t.muted, IconName::LoaderCircle, "Loading the stored review…", None)),
+                body.child(kicker).child(callout(
+                    t,
+                    t.muted,
+                    IconName::LoaderCircle,
+                    "Loading the stored review…",
+                    None,
+                )),
                 None,
                 t,
+                false,
             );
         }
         Preview::Failed(e) => {
             return page(
                 "detail-pub",
-                body.child(callout(
+                body.child(kicker).child(callout(
                     t,
                     t.danger,
                     IconName::CircleAlert,
-                    "The preview is unavailable",
+                    "The proof is unavailable",
                     Some(format!("{e}. ⌘R asks again.")),
                 )),
                 None,
                 t,
+                false,
             );
         }
     };
-    let posted = m.domain.publications.get(run_id).map(|x| x.status);
-    if let Some(c) = state_callout(m, t, run_id, p, publish, posted) {
-        body = body.child(c);
-    }
-    let who = match m.identity() {
-        Some(Identity::Selected(a) | Identity::GhActive(a)) => a.login.to_string(),
-        Some(Identity::Env) => "the daemon's GITHUB_TOKEN".into(),
-        _ => "the daemon's GitHub identity".into(),
-    };
     let n = p.comments.len();
+    let sentence = if done {
+        format!(
+            "Posted to {target} as {} at {}: one review with {}.",
+            who(m),
+            p.head_sha.short(),
+            queue::count(n, "inline comment")
+        )
+    } else {
+        format!(
+            "One review with {}, posted as {}, at {}. It posts as {}, and only when you choose Post.",
+            queue::count(n, "inline comment"),
+            event_words(p.event.as_str()),
+            p.head_sha.short(),
+            who(m)
+        )
+    };
     body = body.child(
         div()
             .flex()
-            .items_start()
+            .flex_col()
             .gap(space::S2)
-            .text_size(text::BODY)
-            .line_height(text::LINE_BODY)
-            .text_color(t.muted)
-            .child(div().pt(px(3.)).child(icon(IconName::Info, px(14.), t.faint)))
-            .child(div().flex_1().min_w_0().child(format!(
-                "{} one {} review by {who} at {}, with {}.",
-                if posted == Some(PublicationStatus::Published) { "Posted:" } else { "Exactly what posts:" },
-                p.event.as_str().to_lowercase().replace('_', " "),
-                p.head_sha.short(),
-                queue::count(n, "inline comment")
-            ))),
+            .child(kicker)
+            .child(crate::kit::display(
+                t,
+                if done { format!("Posted to {target}") } else { format!("What will be posted to {target}") },
+            ))
+            .child(summary(t, sentence)),
     );
+    if let Some(c) = state_callout(m, t, run_id, p, publish, posted) {
+        body = body.child(c);
+    }
     let frame = |head: Div, content: Div| {
         div()
             .flex()
             .flex_col()
-            .rounded(radius::MD)
+            .rounded(radius::LG)
             .border_1()
             .border_color(t.border_strong)
             .bg(t.surface)
@@ -146,16 +197,24 @@ pub fn publication(
             )
             .child(content.p(space::S4))
     };
+    let who = who(m);
     body = body.child(section(
         t,
-        "Review summary",
+        "Review body",
         frame(
             div()
                 .child(icon(IconName::Bot, px(13.), t.faint))
                 .child(div().font_weight(FontWeight::SEMIBOLD).text_color(t.text).child(who.clone()))
-                .child(if posted == Some(PublicationStatus::Published) { "commented" } else { "will comment" })
+                .child(if done { "commented" } else { "will comment" })
                 .child(div().flex_1())
-                .child(if raw { "raw markdown · M" } else { "as GitHub shows it · M for raw" }),
+                .child(button(
+                    t,
+                    "p-raw",
+                    if raw { "Raw markdown" } else { "As GitHub shows it" },
+                    Some("M"),
+                    Tone::Ghost,
+                    on(cx, |s, cx| s.act(Action::ToggleRaw, cx)),
+                )),
             markdown(t, p.body.as_str(), raw),
         ),
     ));
@@ -164,27 +223,29 @@ pub fn publication(
     for cm in &p.comments {
         let context = key.as_ref().and_then(|k| diff_context(m, k, cm.path.as_str(), cm.line.get()));
         let mut content = div().flex().flex_col().gap(space::S3);
-        if let Some(rows) = context {
-            content = content.child(
-                div()
-                    .rounded(radius::SM)
-                    .border_1()
-                    .border_color(t.border)
-                    .bg(t.code_bg)
-                    .py(space::S1)
-                    .font_family(text::MONO)
-                    .text_size(text::CODE)
-                    .children(rows.into_iter().map(|(n, l, hit)| {
-                        code_row(
-                            t,
-                            Some(n),
-                            &l,
-                            hash_comments(cm.path.as_str()),
-                            hit.then(|| t.accent.alpha(0.12)),
-                            hit.then_some(t.accent),
-                        )
-                    })),
-            );
+        if let Some(lines) = context {
+            let mut lx = Lexer::for_path(cm.path.as_str());
+            let mut rows = div()
+                .rounded(radius::SM)
+                .border_1()
+                .border_color(t.border)
+                .bg(t.code_bg)
+                .py(space::S1)
+                .font_family(text::MONO)
+                .text_size(text::CODE);
+            for (n, l, hit) in lines {
+                for (run, cont) in runs(t, &mut lx, &l, layout::COLS_WIDE) {
+                    rows = rows.child(code_row(
+                        t,
+                        Some(n),
+                        run,
+                        cont,
+                        hit.then(|| t.accent.alpha(0.12)),
+                        hit.then_some(t.accent),
+                    ));
+                }
+            }
+            content = content.child(rows);
         }
         content = content.child(markdown(t, cm.body.as_str(), raw));
         comments = comments.child(frame(
@@ -209,7 +270,6 @@ pub fn publication(
     body = body.child(section(t, &format!("Inline comments · {n}"), comments));
 
     let ready = can_confirm(m);
-    let done = posted == Some(PublicationStatus::Published);
     let mut footer = div().flex().items_center().gap(space::S2).flex_1();
     footer = if done {
         footer
@@ -221,7 +281,7 @@ pub fn publication(
                 "View on GitHub",
                 Some("⌘O"),
                 Tone::Primary,
-                published_url(m, run_id).map(|_| -> OnClick {
+                url.map(|_| -> OnClick {
                     Box::new(cx.listener(|s, _: &ClickEvent, _, cx| s.act(Action::OpenUrl, cx)))
                 }),
             ))
@@ -235,21 +295,19 @@ pub fn publication(
                     .truncate()
                     .text_size(text::SMALL)
                     .text_color(t.muted)
-                    .child("Public and final once posted."),
+                    .child("Public and final once posted. Post asks once more before it sends."),
             )
             .child(button(t, "p-close", "Not now", Some("esc"), Tone::Ghost, on(cx, |s, cx| s.act(Action::Back, cx))))
             .child(button(
                 t,
                 "p-post",
-                "Post review to GitHub",
+                "Post review to GitHub…",
                 Some("⌘⏎"),
                 Tone::Primary,
-                ready.then(|| -> OnClick {
-                    Box::new(cx.listener(|s, _: &ClickEvent, _, cx| s.act(Action::Confirm, cx)))
-                }),
+                ready.then(|| -> OnClick { Box::new(cx.listener(|s, _: &ClickEvent, _, cx| s.post(cx))) }),
             ))
     };
-    page("detail-pub", body, Some(footer), t)
+    page("detail-pub", body, Some(footer), t, false)
 }
 
 fn state_callout(
@@ -262,7 +320,7 @@ fn state_callout(
 ) -> Option<Div> {
     Some(match (posted, publish) {
         (Some(PublicationStatus::Published), _) => {
-            callout(t, t.ok, IconName::CircleCheck, "Posted", published_url(m, run_id))
+            callout(t, t.ok, IconName::CircleCheck, "GitHub has this review", published_url(m, run_id))
         }
         (Some(PublicationStatus::Publishing), _) => {
             callout(t, t.running, IconName::LoaderCircle, "Posting to GitHub…", None)
@@ -303,7 +361,7 @@ fn state_callout(
         ),
         (_, ConfirmState::Asking) => {
             let why = publish_block(m, p)?;
-            callout(t, t.warn, IconName::TriangleAlert, "This preview can't be posted", Some(why))
+            callout(t, t.warn, IconName::TriangleAlert, "This proof can't be posted", Some(why))
         }
     })
 }

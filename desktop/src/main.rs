@@ -12,11 +12,14 @@ mod publish;
 mod queue;
 mod script;
 mod setup;
+mod timeline;
 mod tokens;
 mod ui;
 
 use std::path::PathBuf;
 use std::process::ExitCode;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
 use gpui_kit::component::{Theme, ThemeMode};
@@ -136,7 +139,7 @@ fn start(opts: Opts) -> Result<(), String> {
     if let (Source::Playback(p), Some(_)) = (&settings.source, &opts.snapshot) {
         script::play(playback::load(p)?, &mut model, &opts.steps, opts.after_ms)?;
         let snapshot = opts.snapshot.map(|out| (out, 0));
-        let view = View { model, cmds, desk: desk(&opts.steps), still: true };
+        let view = View { model, cmds, desk: desk(&opts.steps), still: true, snapshot: true };
         run_app(view, None, snapshot, opts.window, opts.appearance);
         drop(cmd_rx);
         return Ok(());
@@ -157,8 +160,9 @@ fn start(opts: Opts) -> Result<(), String> {
     }
     drop(rt.spawn(ticks(msg_tx)));
     let snapshot = opts.snapshot.clone().map(|out| (out, opts.after_ms));
+    let is_snapshot = opts.snapshot.is_some();
     // `rt` lives until the process exits, since `run_app` returns only after the app quits.
-    let view = View { model, cmds, desk: Vec::new(), still: opts.snapshot.is_some() || reduce_motion() };
+    let view = View { model, cmds, desk: Vec::new(), still: is_snapshot || reduce_motion(), snapshot: is_snapshot };
     run_app(view, Some(msgs), snapshot, opts.window, opts.appearance);
     drop(rt);
     Ok(())
@@ -170,6 +174,7 @@ struct View {
     cmds: mpsc::Sender<NetCmd>,
     desk: Vec<script::Desk>,
     still: bool,
+    snapshot: bool,
 }
 
 fn desk(steps: &[script::Step]) -> Vec<script::Desk> {
@@ -217,6 +222,12 @@ fn run_app(
             Some(mode) => Theme::change(mode, None, cx),
             None => Theme::sync_system_appearance(None, cx),
         }
+        cx.on_action(|_: &ui::Quit, cx| cx.quit());
+        // A snapshot ignores the keyboard: its window takes focus, and keys typed elsewhere must not land in it.
+        if !view.snapshot {
+            cx.bind_keys(ui::bindings());
+        }
+        cx.set_menus(ui::menus());
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds::centered(None, size(px(w), px(h)), cx))),
             titlebar: Some(TitlebarOptions {
@@ -224,11 +235,12 @@ fn run_app(
                 appears_transparent: true,
                 traffic_light_position: Some(point(px(18.), px(18.))),
             }),
+            window_min_size: Some(size(px(960.), px(600.))),
             ..Default::default()
         };
-        let View { model, cmds, desk, still } = view;
+        let View { model, cmds, desk, still, snapshot: is_snapshot } = view;
         let built = gpui_kit::open_window(options, cx, |window, cx| {
-            let shell = cx.new(|cx| ui::Shell::new(model, cmds, still, &desk, cx));
+            let shell = cx.new(|cx| ui::Shell::new(model, cmds, still, is_snapshot, &desk, cx));
             let focus = shell.read(cx).focus.clone();
             window.focus(&focus, cx);
             shell
@@ -273,26 +285,42 @@ fn run_app(
     });
 }
 
-/// Captures once the window has settled: at its full size (macOS animates a new window in), painted (a frame before
-/// the first paint is one flat color) and showing the same pixels on two captures running.
+/// How long one frame may take to present before the harness asks for another.
+const FRAME_TIMEOUT: Duration = Duration::from_millis(1500);
+
+/// Captures once the window has settled: key (so the traffic lights are colored), at its full size (macOS animates
+/// a new window in), painted (a frame before the first paint is one flat color) and showing the same pixels on two
+/// captures running. A frame that never presents is asked for again, up to the attempt budget.
 async fn capture_settled(
     window: AnyWindowHandle,
     cx: &mut AsyncApp,
     size: (f32, f32),
 ) -> Result<capture::Image, String> {
     let (mut last, mut expected): (Option<capture::Image>, usize) = (None, 0);
+    let mut timeouts = 0;
     for _ in 0..50 {
-        let (done, presented) = tokio::sync::oneshot::channel();
+        let presented = Arc::new(AtomicBool::new(false));
+        let flag = presented.clone();
         let scale = cx
-            .update_window(window, |_, window, _| {
+            .update_window(window, |_, window, cx| {
+                cx.activate(true);
+                window.activate_window();
                 window.refresh();
-                window.on_next_frame(move |_, _| {
-                    let _ = done.send(());
-                });
+                window.on_next_frame(move |_, _| flag.store(true, Ordering::SeqCst));
                 window.scale_factor()
             })
             .map_err(|e| e.to_string())?;
-        let _ = presented.await;
+        let started = Instant::now();
+        while !presented.load(Ordering::SeqCst) {
+            if started.elapsed() > FRAME_TIMEOUT {
+                timeouts += 1;
+                break;
+            }
+            cx.background_executor().timer(Duration::from_millis(20)).await;
+        }
+        if !presented.load(Ordering::SeqCst) {
+            continue;
+        }
         let image = cx.update(|_| capture::window(size.1, scale))?;
         expected = (size.0 * scale).round() as usize;
         if image.width == expected && !image.is_uniform() && last.as_ref().is_some_and(|l| l.rgba == image.rgba) {
@@ -303,13 +331,13 @@ async fn capture_settled(
     }
     Err(match last {
         Some(l) => format!(
-            "the window never settled to the same painted frame twice; the last capture was {}x{} (expected width {}), {}",
+            "the window never settled to the same painted frame twice; the last capture was {}x{} (expected width {}), {}, after {timeouts} frames that never presented",
             l.width,
             l.height,
             expected,
             if l.is_uniform() { "one flat color" } else { "painted" }
         ),
-        None => "the window was never captured".into(),
+        None => format!("the window never presented a frame ({timeouts} attempts timed out)"),
     })
 }
 

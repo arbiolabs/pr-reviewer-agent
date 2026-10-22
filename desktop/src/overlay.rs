@@ -1,14 +1,15 @@
-//! What floats over the window: the command palette, the confirmation sheet, the shortcut sheet, the jump-to input
-//! and the reducer's notices.
+//! What floats over the window: the command palette, the sheets (a post, a cancel, a refusal), the shortcut
+//! sheet, the jump-to input and the reducer's notices.
 
 use gpui_kit::assets::IconName;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use pr_review_tui::keymap::{Action, Mutation};
-use pr_review_tui::model::{ConfirmState, InputPurpose, Modal, Screen, fuzzy};
+use pr_review_tui::model::{ConfirmState, InputPurpose, Modal, Model, Preview, Screen, fuzzy};
 use pr_review_tui::protocol::{Command, PrId};
-use pr_review_tui::update::can_confirm;
+use pr_review_tui::update::{can_confirm, can_mutate, write_block};
 
+use crate::detail::who;
 use crate::kit::{Tone, button, icon, keycap, overline};
 use crate::queue::{self, Card};
 use crate::tokens::{Colors, layout, radius, space, text};
@@ -18,8 +19,9 @@ use crate::ui::{Overlay, Shell, on};
 enum Run {
     Card(usize),
     Pr(PrId),
-    Mutate(PrId, Mutation),
+    Direct(Mutation),
     Act(Action),
+    GitHub,
     Tab(bool),
     Keys,
 }
@@ -28,10 +30,24 @@ struct Entry {
     group: &'static str,
     title: String,
     key: Option<&'static str>,
+    /// Why it would do nothing now. Shown, never hidden, so the palette also teaches what exists.
+    blocked: Option<String>,
     run: Run,
 }
 
-/// Every command, contextual ones first: each card's decision, then going to a PR, then the views.
+fn mutation(m: &Model, mu: Mutation, title: String, key: &'static str, otherwise: &str) -> Entry {
+    let blocked = (!can_mutate(m, mu)).then(|| match write_block(m, mu.capability()) {
+        Some(why) => why.to_string(),
+        None if m.selected_pr().is_none() => "no PR is selected".into(),
+        None => otherwise.to_string(),
+    });
+    let run =
+        if matches!(mu, Mutation::Start | Mutation::Retry) { Run::Direct(mu) } else { Run::Act(Action::Mutation(mu)) };
+    Entry { group: "Review", title, key: Some(key), blocked, run }
+}
+
+/// Every command, contextual ones first: each card's decision, the selected PR's actions with the reason any
+/// can't run, then going to a PR, then the views.
 fn entries(s: &Shell) -> Vec<Entry> {
     let m = &s.model;
     let mut out = Vec::new();
@@ -46,58 +62,126 @@ fn entries(s: &Shell) -> Vec<Entry> {
             Card::Failed { pr, .. } => format!("Retry the failed review of #{}", pr.number),
             Card::Start { pr } => format!("Start a review of #{}", pr.number),
         };
-        out.push(Entry { group: "Needs you", title, key: None, run: Run::Card(i) });
+        out.push(Entry { group: "Needs you", title, key: None, blocked: None, run: Run::Card(i) });
     }
     for (p, _) in queue::running(m) {
         out.push(Entry {
             group: "Needs you",
-            title: format!("Cancel the running review of #{}", p.number),
-            key: None,
-            run: Run::Mutate(p.id.clone(), Mutation::Cancel),
-        });
-        out.push(Entry {
-            group: "Go to",
             title: format!("Watch #{} live", p.number),
             key: None,
+            blocked: None,
             run: Run::Pr(p.id.clone()),
         });
     }
+    let n = m.selected_pr().map_or(String::new(), |p| format!(" #{}", p.number));
+    out.push(mutation(
+        m,
+        Mutation::Publish,
+        format!("Review and post the proof of{n}"),
+        "P",
+        "nothing is waiting for approval",
+    ));
+    out.push(mutation(
+        m,
+        Mutation::Start,
+        format!("Start a review of{n} at its head"),
+        "S",
+        "a review already holds this head",
+    ));
+    out.push(mutation(
+        m,
+        Mutation::Retry,
+        format!("Retry the failed review of{n}"),
+        "⇧R",
+        "its latest run has not failed",
+    ));
+    out.push(mutation(m, Mutation::Cancel, format!("Cancel the review of{n}"), "C", "no review is running on it"));
+    out.push(Entry {
+        group: "Review",
+        title: format!("Open{n} on GitHub"),
+        key: Some("⌘O"),
+        blocked: m.selected_pr().is_none().then(|| "no PR is selected".to_string()),
+        run: Run::GitHub,
+    });
     for p in m.inbox() {
         out.push(Entry {
             group: "Go to",
-            title: format!("#{} {}", p.number, p.title),
+            title: format!("#{} {} · {}", p.number, p.title, p.repository),
             key: None,
+            blocked: None,
             run: Run::Pr(p.id.clone()),
         });
     }
+    let selected = m.selected_pr().is_some();
     out.extend([
-        Entry { group: "View", title: "Needs you".into(), key: Some("⌘1"), run: Run::Tab(false) },
-        Entry { group: "View", title: "Done".into(), key: Some("⌘2"), run: Run::Tab(true) },
-        Entry {
-            group: "View",
-            title: "Setup and accounts".into(),
-            key: Some("⌘,"),
-            run: Run::Act(Action::Goto(Screen::Settings)),
-        },
+        Entry { group: "View", title: "Needs you".into(), key: Some("⌘1"), blocked: None, run: Run::Tab(false) },
+        Entry { group: "View", title: "Done".into(), key: Some("⌘2"), blocked: None, run: Run::Tab(true) },
         Entry {
             group: "View",
             title: "Diff of the selected PR".into(),
             key: Some("D"),
+            blocked: (!selected).then(|| "no PR is selected".to_string()),
             run: Run::Act(Action::OpenDiff),
+        },
+        Entry {
+            group: "View",
+            title: "Timeline of the selected PR".into(),
+            key: Some("T"),
+            blocked: (!selected).then(|| "no PR is selected".to_string()),
+            run: Run::Act(Action::OpenTimeline),
+        },
+        Entry {
+            group: "View",
+            title: "Setup and accounts".into(),
+            key: Some("⌘,"),
+            blocked: None,
+            run: Run::Act(Action::Goto(Screen::Settings)),
         },
         Entry {
             group: "App",
             title: "Refresh from the daemon".into(),
             key: Some("⌘R"),
+            blocked: None,
             run: Run::Act(Action::Refresh),
         },
-        Entry { group: "App", title: "Keyboard shortcuts".into(), key: Some("?"), run: Run::Keys },
+        Entry { group: "App", title: "Keyboard shortcuts".into(), key: Some("?"), blocked: None, run: Run::Keys },
     ]);
     out
 }
 
+/// How well `query` matches: 0 a prefix of the title, 1 every word a prefix of a title word, 2 the initials of the
+/// title's words, 3 a scattered subsequence. `None` when it does not match at all.
+pub fn score(query: &str, title: &str) -> Option<u8> {
+    let q = query.trim().to_lowercase();
+    if q.is_empty() {
+        return Some(0);
+    }
+    let title_l = title.to_lowercase();
+    let words: Vec<&str> = title_l.split(|c: char| !c.is_alphanumeric()).filter(|w| !w.is_empty()).collect();
+    let q_words: Vec<&str> = q.split_whitespace().collect();
+    if title_l.starts_with(&q) {
+        return Some(0);
+    }
+    if q_words.iter().all(|qw| words.iter().any(|w| w.starts_with(qw))) {
+        return Some(1);
+    }
+    let initials: String = words.iter().filter_map(|w| w.chars().next()).collect();
+    if !q.contains(' ') && initials.contains(&q) {
+        return Some(2);
+    }
+    fuzzy(query, title).then_some(3)
+}
+
 fn matching(s: &Shell, query: &str) -> Vec<Entry> {
-    entries(s).into_iter().filter(|e| fuzzy(query, &format!("{} {}", e.group, e.title))).collect()
+    let mut found: Vec<(u8, usize, Entry)> = entries(s)
+        .into_iter()
+        .enumerate()
+        .filter_map(|(i, e)| score(query, &format!("{} {}", e.group, e.title)).map(|sc| (sc, i, e)))
+        .collect();
+    if !query.trim().is_empty() {
+        found.sort_by_key(|(sc, i, e)| (*sc, e.blocked.is_some(), *i));
+    }
+    found.into_iter().map(|(_, _, e)| e).collect()
 }
 
 fn run(s: &mut Shell, r: Run, cx: &mut Context<Shell>) {
@@ -108,11 +192,9 @@ fn run(s: &mut Shell, r: Run, cx: &mut Context<Shell>) {
             s.done_tab = queue::done(&s.model).iter().any(|(p, _)| p.id == id);
             s.select_pr(id, cx)
         }
-        Run::Mutate(id, mu) => {
-            s.select_pr(id, cx);
-            s.act(Action::Mutation(mu), cx);
-        }
+        Run::Direct(mu) => s.direct(mu, cx),
         Run::Act(a) => s.act(a, cx),
+        Run::GitHub => s.open_github(cx),
         Run::Tab(done) => s.set_tab(done, cx),
         Run::Keys => s.overlay = Some(Overlay::Keys),
     }
@@ -120,22 +202,16 @@ fn run(s: &mut Shell, r: Run, cx: &mut Context<Shell>) {
 }
 
 /// Keys while the palette is open; true when it took the key.
-pub fn palette_key(
-    s: &mut Shell,
-    key: &str,
-    cmd: bool,
-    typed: Option<&str>,
-    _: &mut Window,
-    cx: &mut Context<Shell>,
-) -> bool {
+pub fn palette_key(s: &mut Shell, key: &str, typed: Option<&str>, cx: &mut Context<Shell>) -> bool {
     let Some(Overlay::Palette { query, selected }) = &s.overlay else { return false };
     let (mut q, mut sel) = (query.clone(), *selected);
     let n = matching(s, &q).len();
     match key {
         "escape" => s.overlay = None,
-        "k" if cmd => s.overlay = None,
         "enter" => {
-            if let Some(e) = matching(s, &q).into_iter().nth(sel) {
+            if let Some(e) = matching(s, &q).into_iter().nth(sel)
+                && e.blocked.is_none()
+            {
                 run(s, e.run, cx);
             }
             return true;
@@ -149,7 +225,7 @@ pub fn palette_key(
                     sel = 0;
                 }
                 _ => match typed {
-                    Some(c) if !cmd && !c.chars().any(char::is_control) => {
+                    Some(c) if !c.chars().any(char::is_control) => {
                         q.push_str(c);
                         sel = 0;
                     }
@@ -195,33 +271,24 @@ pub fn layer(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Vec<AnyElement> {
     let m = &s.model;
     let mut out = Vec::new();
     if let Some(n) = &m.notice {
-        out.push(
-            div()
-                .absolute()
-                .bottom(space::S6)
-                .left_0()
-                .right_0()
-                .flex()
-                .justify_center()
-                .child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(space::S2)
-                        .px(space::S4)
-                        .h(px(36.))
-                        .rounded(radius::PILL)
-                        .bg(t.text)
-                        .text_color(t.bg)
-                        .text_size(text::BODY)
-                        .child(icon(IconName::Info, px(14.), t.bg))
-                        .child(n.text.clone()),
-                )
-                .into_any_element(),
-        );
+        out.push(toast(IconName::Info, n.text.clone(), t.text, t.bg));
     }
     match m.top_modal() {
-        Some(Modal::Confirm { prompt, command, state }) => out.push(confirm(s, t, prompt, command, state, cx)),
+        Some(Modal::Confirm { prompt, command, state }) => {
+            // A start or retry in flight is a quiet status, not a sheet; a refusal or a question needs the reader.
+            let quiet = matches!(command, Command::Start(_) | Command::Retry(_))
+                && matches!(state, ConfirmState::Requested(_) | ConfirmState::Accepted { .. });
+            if quiet {
+                out.push(toast(
+                    IconName::LoaderCircle,
+                    format!("{} Sending…", prompt.trim_end_matches('?')),
+                    t.text,
+                    t.bg,
+                ));
+            } else {
+                out.push(confirm(s, t, prompt, command, state, cx));
+            }
+        }
         Some(Modal::Input { purpose, buffer, .. }) => out.push(input(t, *purpose, buffer, cx)),
         Some(Modal::Help { .. }) => out.push(keys(t, cx, true)),
         _ => {}
@@ -229,14 +296,40 @@ pub fn layer(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Vec<AnyElement> {
     match &s.overlay {
         Some(Overlay::Palette { query, selected }) => out.push(palette(s, t, query, *selected, cx)),
         Some(Overlay::Keys) => out.push(keys(t, cx, false)),
+        Some(Overlay::ConfirmPost) => out.push(confirm_post(s, t, cx)),
         None => {}
     }
     out
 }
 
+fn toast(glyph: IconName, words: String, bg: Hsla, fg: Hsla) -> AnyElement {
+    div()
+        .absolute()
+        .bottom(space::S6)
+        .left_0()
+        .right_0()
+        .flex()
+        .justify_center()
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .gap(space::S2)
+                .px(space::S4)
+                .h(px(36.))
+                .rounded(radius::PILL)
+                .bg(bg)
+                .text_color(fg)
+                .text_size(text::BODY)
+                .child(icon(glyph, px(14.), fg))
+                .child(words),
+        )
+        .into_any_element()
+}
+
 fn palette(s: &Shell, t: &Colors, query: &str, selected: usize, cx: &Context<Shell>) -> AnyElement {
     let found = matching(s, query);
-    let mut list = div().id("palette-list").flex().flex_col().max_h(px(420.)).overflow_y_scroll().p(space::S2);
+    let mut list = div().id("palette-list").flex().flex_col().max_h(px(440.)).overflow_y_scroll().p(space::S2);
     let mut group = "";
     if found.is_empty() {
         list = list.child(
@@ -253,6 +346,7 @@ fn palette(s: &Shell, t: &Colors, query: &str, selected: usize, cx: &Context<She
             list = list.child(div().px(space::S3).pt(space::S3).pb(space::S1).child(overline(t, group)));
         }
         let on_it = i == selected;
+        let blocked = e.blocked.is_some();
         let r = e.run.clone();
         list = list.child(
             div()
@@ -260,16 +354,38 @@ fn palette(s: &Shell, t: &Colors, query: &str, selected: usize, cx: &Context<She
                 .flex()
                 .items_center()
                 .gap(space::S3)
-                .h(px(34.))
+                .h(px(36.))
                 .px(space::S3)
                 .rounded(radius::SM)
                 .cursor_pointer()
-                .when(on_it, |d| d.bg(t.accent).text_color(t.on_accent))
-                .when(!on_it, |d| d.hover(|d| d.bg(t.surface_hover)))
-                .on_click(cx.listener(move |s, _: &ClickEvent, _, cx| run(s, r.clone(), cx)))
+                .when(on_it, |d| {
+                    d.bg(if blocked { t.selected } else { t.accent }).text_color(if blocked {
+                        t.text
+                    } else {
+                        t.on_accent
+                    })
+                })
+                .when(!on_it, |d| d.hover(|d| d.bg(t.hover)))
+                .when(blocked, |d| d.opacity(0.6))
+                .when(!blocked, |d| d.on_click(cx.listener(move |s, _: &ClickEvent, _, cx| run(s, r.clone(), cx))))
                 .child(div().flex_1().min_w_0().truncate().text_size(text::BODY).child(e.title))
-                .children(e.key.map(|k| keycap(t, k, on_it)))
-                .when(on_it, |d| d.child(keycap(t, "⏎", true))),
+                .children(e.blocked.map(|why| {
+                    div()
+                        .flex_none()
+                        .text_size(text::CAPTION)
+                        .text_color(if on_it { t.muted } else { t.faint })
+                        .child(why)
+                }))
+                .child(match e.key {
+                    Some(k) => keycap(t, k, on_it && !blocked),
+                    None => div()
+                        .w(px(18.))
+                        .text_center()
+                        .text_size(text::CAPTION)
+                        .text_color(if on_it && !blocked { t.on_accent.alpha(0.6) } else { t.faint })
+                        .child("—"),
+                })
+                .when(on_it && !blocked, |d| d.child(keycap(t, "⏎", true))),
         );
     }
     scrim(t, "palette-scrim", cx, true)
@@ -307,11 +423,30 @@ fn palette(s: &Shell, t: &Colors, query: &str, selected: usize, cx: &Context<She
                         )
                         .child(keycap(t, "esc", false)),
                 )
-                .child(list),
+                .child(list)
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .gap(space::S4)
+                        .h(px(36.))
+                        .px(space::S4)
+                        .border_t_1()
+                        .border_color(t.border)
+                        .bg(t.raised)
+                        .text_size(text::CAPTION)
+                        .text_color(t.faint)
+                        .children([("↑↓", "choose"), ("⏎", "run"), ("esc", "close")].map(|(k, what)| {
+                            div().flex().items_center().gap(px(6.)).child(keycap(t, k, false)).child(what)
+                        }))
+                        .child(div().flex_1())
+                        .child("dimmed actions say why they can't run"),
+                ),
         )
         .into_any_element()
 }
 
+/// The reducer's confirmation: a cancel asks with Keep as the default; a refused start or retry explains.
 fn confirm(
     s: &Shell,
     t: &Colors,
@@ -338,6 +473,7 @@ fn confirm(
     };
     let ready = can_confirm(&s.model);
     let done = matches!(state, ConfirmState::Accepted { .. } | ConfirmState::Refused { .. });
+    let keep = matches!(command, Command::Cancel(_));
     scrim(t, "confirm-scrim", cx, false)
         .flex()
         .items_center()
@@ -365,7 +501,9 @@ fn confirm(
                 )
                 .child(div().text_size(text::BODY).line_height(text::LINE_BODY).text_color(t.muted).child(
                     match command {
-                        Command::Cancel(_) => "The run stops where it is. Nothing it found so far is posted.",
+                        Command::Cancel(_) => {
+                            "The run stops where it is and its work so far is lost. Nothing it found is posted."
+                        }
                         Command::Start(_) | Command::Retry(_) => {
                             "The reviewer reads the diff with read-only tools. Nothing posts without your approval."
                         }
@@ -382,9 +520,15 @@ fn confirm(
                         .child(button(
                             t,
                             "c-no",
-                            if done { "Close" } else { "Not now" },
+                            if done {
+                                "Close"
+                            } else if keep {
+                                "Keep running"
+                            } else {
+                                "Not now"
+                            },
                             Some("esc"),
-                            Tone::Ghost,
+                            if keep && !done { Tone::Secondary } else { Tone::Ghost },
                             on(cx, |s, cx| s.act(Action::Back, cx)),
                         ))
                         .when(!done, |d| {
@@ -399,6 +543,100 @@ fn confirm(
                                 }),
                             ))
                         }),
+                ),
+        )
+        .into_any_element()
+}
+
+/// The one irreversible act asks once more, naming exactly what goes out. Cancel is the default; only ⌘⏎ posts.
+fn confirm_post(s: &Shell, t: &Colors, cx: &Context<Shell>) -> AnyElement {
+    let m = &s.model;
+    let Some(Modal::Publication { run_id, preview: Preview::Ready(p), .. }) = m.top_modal() else {
+        return div().into_any_element();
+    };
+    let pr = m.domain.runs.get(run_id).and_then(|r| m.domain.prs.get(&r.pr_id));
+    let target = pr.map_or("this PR".to_string(), |p| format!("{}#{}", p.repository, p.number));
+    let fact = |label: &str, value: String| {
+        div()
+            .flex()
+            .gap(space::S3)
+            .text_size(text::BODY)
+            .child(div().w(px(96.)).flex_none().text_color(t.faint).child(label.to_string()))
+            .child(div().flex_1().min_w_0().text_color(t.text).child(value))
+    };
+    scrim(t, "post-scrim", cx, true)
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(
+            sheet(t, layout::SHEET)
+                .id("post-sheet")
+                .occlude()
+                .on_click(|_, _, cx| cx.stop_propagation())
+                .p(space::S6)
+                .gap(space::S4)
+                .child(
+                    div()
+                        .size(px(36.))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded(radius::PILL)
+                        .bg(t.accent.alpha(0.14))
+                        .child(icon(IconName::Send, px(18.), t.accent)),
+                )
+                .child(
+                    div()
+                        .text_size(text::TITLE)
+                        .line_height(px(24.))
+                        .font_weight(FontWeight::SEMIBOLD)
+                        .child(format!("Post this review to {target}?")),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(space::S2)
+                        .child(fact("As", who(m)))
+                        .child(fact("At commit", p.head_sha.short().to_string()))
+                        .child(fact(
+                            "It posts",
+                            format!("1 review body and {}", queue::count(p.comments.len(), "inline comment")),
+                        ))
+                        .child(fact("Review kind", p.event.as_str().to_lowercase().replace('_', " "))),
+                )
+                .child(
+                    div()
+                        .text_size(text::BODY)
+                        .line_height(text::LINE_BODY)
+                        .text_color(t.danger)
+                        .child("This can't be undone from here. GitHub keeps the review once it is posted."),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .justify_end()
+                        .gap(space::S2)
+                        .pt(space::S2)
+                        .child(button(
+                            t,
+                            "post-no",
+                            "Cancel",
+                            Some("⏎"),
+                            Tone::Secondary,
+                            on(cx, |s, cx| {
+                                s.overlay = None;
+                                cx.notify();
+                            }),
+                        ))
+                        .child(button(
+                            t,
+                            "post-yes",
+                            "Post to GitHub",
+                            Some("⌘⏎"),
+                            Tone::Primary,
+                            on(cx, |s, cx| s.confirm_post(cx)),
+                        )),
                 ),
         )
         .into_any_element()
@@ -426,6 +664,7 @@ fn input(t: &Colors, purpose: InputPurpose, buffer: &str, cx: &Context<Shell>) -
                     .px(space::S4)
                     .child(div().text_size(text::SMALL).text_color(t.muted).child(label))
                     .child(div().flex_1().font_family(text::MONO).text_size(text::LEAD).child(buffer.to_string()))
+                    .child(div().w(px(2.)).h(px(18.)).bg(t.accent))
                     .child(keycap(t, "⏎", false)),
             ),
         )
@@ -440,17 +679,19 @@ const KEYS: &[(&str, &[(&str, &str)])] = &[
             ("⏎", "do what the card's button says"),
             ("N / ⇧N", "next or previous finding in the PR"),
             ("D", "open the diff at the finding"),
+            ("T", "the PR's timeline"),
+            ("⇥", "move between controls"),
             ("esc", "back"),
         ],
     ),
     (
         "Decide",
         &[
-            ("P", "preview what would post"),
-            ("⌘⏎", "post the preview to GitHub"),
-            ("S", "start a review"),
-            ("⇧R", "retry a failed review"),
-            ("C", "cancel a review"),
+            ("P", "open the proof of what would post"),
+            ("⌘⏎", "post the proof, after one confirmation"),
+            ("S", "start a review (no sheet)"),
+            ("⇧R", "retry a failed review (no sheet)"),
+            ("C", "cancel a review (asks first)"),
         ],
     ),
     (
@@ -461,6 +702,7 @@ const KEYS: &[(&str, &[(&str, &str)])] = &[
             ("⌘,", "setup and accounts"),
             ("⌘O", "open on GitHub"),
             ("⌘R", "refresh"),
+            ("⌘W", "close the window"),
             ("?", "this sheet"),
         ],
     ),
@@ -483,11 +725,26 @@ fn keys(t: &Colors, cx: &Context<Shell>, reducer: bool) -> AnyElement {
         .items_center()
         .justify_center()
         .child(
-            sheet(t, px(760.))
+            sheet(t, px(780.))
                 .p(space::S6)
                 .gap(space::S5)
                 .child(div().text_size(text::TITLE).font_weight(FontWeight::SEMIBOLD).child("Keyboard shortcuts"))
                 .child(groups),
         )
         .into_any_element()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::score;
+
+    #[test]
+    fn prefixes_and_initials_rank_before_subsequences() {
+        assert_eq!(score("retry", "Review Retry the failed review of #345"), Some(1));
+        assert_eq!(score("review retry", "Review Retry the failed review of #345"), Some(0));
+        assert_eq!(score("rtf", "Review Retry the failed review"), Some(2));
+        assert_eq!(score("rvw", "Review Retry the failed review"), Some(3));
+        assert_eq!(score("zzz", "Review Retry"), None);
+        assert_eq!(score("", "anything"), Some(0));
+    }
 }

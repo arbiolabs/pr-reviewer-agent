@@ -1,21 +1,19 @@
-//! Design tokens for direction C, the triage inbox: color for dark and light, the type scale, the spacing grid, radii
-//! and motion. Every view reads its look from here; DESIGN-C.md explains the choices.
+//! Design tokens: color for dark and light, the type scale, the 4-point grid, two radii and motion. Every view reads
+//! its look from here; DESIGN.md explains the choices.
 
 use std::time::Duration;
 
 use gpui_kit::{Hsla, Pixels, px, rgb};
 use pr_review_tui::protocol::Severity;
 
-/// One appearance's palette. Text tokens meet WCAG AA (4.5:1) on `bg`, `surface` and `raised`; `tests` checks it.
+/// One appearance's palette. Every text token meets WCAG AA (4.5:1) on every surface it sits on; `tests` checks it.
 #[derive(Clone, Copy)]
 pub struct Colors {
     pub bg: Hsla,
     pub sidebar: Hsla,
     pub surface: Hsla,
-    pub surface_hover: Hsla,
-    pub surface_press: Hsla,
-    pub selected: Hsla,
     pub raised: Hsla,
+    pub selected: Hsla,
     pub border: Hsla,
     pub border_strong: Hsla,
     pub text: Hsla,
@@ -43,8 +41,13 @@ pub struct Colors {
     pub syn_number: Hsla,
     pub syn_comment: Hsla,
     pub syn_fn: Hsla,
+    pub syn_type: Hsla,
     pub scrim: Hsla,
     pub shadow: Hsla,
+    /// The hover wash over any surface: 4 % of the text color.
+    pub hover: Hsla,
+    /// The pressed wash: 8 %.
+    pub press: Hsla,
 }
 
 fn c(hex: u32) -> Hsla {
@@ -61,10 +64,8 @@ pub fn dark() -> Colors {
         bg: c(0x0F1217),
         sidebar: c(0x0B0D11),
         surface: c(0x161A21),
-        surface_hover: c(0x1B2029),
-        surface_press: c(0x141820),
-        selected: c(0x1E2431),
         raised: c(0x13171D),
+        selected: c(0x1E2431),
         border: c(0x242A34),
         border_strong: c(0x343C49),
         text: c(0xE9EDF2),
@@ -92,8 +93,11 @@ pub fn dark() -> Colors {
         syn_number: c(0xF5B57A),
         syn_comment: c(0x7F8A99),
         syn_fn: c(0x82C8FF),
+        syn_type: c(0x6FD6E4),
         scrim: ca(0x05070A, 0.62),
         shadow: ca(0x000000, 0.45),
+        hover: ca(0xE9EDF2, 0.04),
+        press: ca(0xE9EDF2, 0.08),
     }
 }
 
@@ -103,15 +107,13 @@ pub fn light() -> Colors {
         bg: c(0xF5F4F0),
         sidebar: c(0xECEAE4),
         surface: c(0xFFFFFF),
-        surface_hover: c(0xFBFAF7),
-        surface_press: c(0xF1EFEA),
+        raised: c(0xFBFAF7),
         selected: c(0xEEF0FF),
-        raised: c(0xFFFFFF),
         border: c(0xE1DED6),
         border_strong: c(0xCCC7BC),
         text: c(0x1A1E24),
-        muted: c(0x535C69),
-        faint: c(0x5D6672),
+        muted: c(0x4F5866),
+        faint: c(0x566070),
         accent: c(0x4A51D4),
         accent_hover: c(0x3D44C4),
         accent_press: c(0x343AAE),
@@ -126,16 +128,19 @@ pub fn light() -> Colors {
         low: c(0x52627A),
         add_bg: ca(0x2DA44E, 0.12),
         del_bg: ca(0xCF222E, 0.10),
-        add_fg: c(0x1A7F37),
+        add_fg: c(0x16743A),
         del_fg: c(0xB3242E),
         code_bg: c(0xFAF9F6),
         syn_keyword: c(0x7A3DC8),
         syn_string: c(0x2B7A24),
         syn_number: c(0xA14F00),
-        syn_comment: c(0x6A7380),
+        syn_comment: c(0x667080),
         syn_fn: c(0x0B5FAD),
+        syn_type: c(0x0B6E82),
         scrim: ca(0x1A1E24, 0.28),
         shadow: ca(0x1A1E24, 0.16),
+        hover: ca(0x1A1E24, 0.04),
+        press: ca(0x1A1E24, 0.08),
     }
 }
 
@@ -166,25 +171,29 @@ pub fn severity_mark(s: Severity) -> (&'static str, &'static str) {
     }
 }
 
-/// The type scale, in points, on macOS's 13-point body.
+/// The type scale, in points, on macOS's 13-point body. The interface is set in the system sans; what is said (page
+/// and PR titles, the quoted finding) in the system serif; paths, ids and code in Menlo.
 pub mod text {
     use super::{Pixels, px};
     pub const UI: &str = ".SystemUIFont";
+    pub const SERIF: &str = ".AppleSystemUIFontSerif";
     pub const MONO: &str = "Menlo";
     pub const CAPTION: Pixels = px(11.);
     pub const SMALL: Pixels = px(12.);
     pub const BODY: Pixels = px(13.);
     pub const LEAD: Pixels = px(15.);
     pub const TITLE: Pixels = px(18.);
+    /// Serif: a PR or finding title in the detail.
     pub const DISPLAY: Pixels = px(24.);
     pub const CODE: Pixels = px(12.);
     pub const LINE_TIGHT: Pixels = px(16.);
     pub const LINE_BODY: Pixels = px(20.);
     pub const LINE_READ: Pixels = px(21.);
     pub const LINE_CODE: Pixels = px(19.);
+    pub const LINE_DISPLAY: Pixels = px(30.);
 }
 
-/// The 4-point spacing grid.
+/// The 4-point spacing grid: 16 between cards, 24 between detail sections.
 pub mod space {
     use super::{Pixels, px};
     pub const S1: Pixels = px(4.);
@@ -196,38 +205,45 @@ pub mod space {
     pub const S8: Pixels = px(32.);
 }
 
-/// Radii: one per element size, never mixed within a size.
+/// Two radii: 8 for controls, chips and rows; 12 for cards, code, sheets and the palette. Dots and count badges are
+/// circles.
 pub mod radius {
     use super::{Pixels, px};
-    /// Chips, key caps, severity badges.
-    pub const XS: Pixels = px(4.);
-    /// Buttons, list rows, inputs.
-    pub const SM: Pixels = px(6.);
-    /// Cards and code blocks.
-    pub const MD: Pixels = px(10.);
-    /// Sheets and the palette.
-    pub const LG: Pixels = px(14.);
+    pub const SM: Pixels = px(8.);
+    pub const LG: Pixels = px(12.);
     pub const PILL: Pixels = px(999.);
 }
 
-/// The window grid at 1280 points: sidebar, queue column, and the detail takes the rest.
+/// The window grid at 1280 points: title bar across the top, sidebar, queue column, and the detail takes the rest.
 pub mod layout {
     use super::{Pixels, px};
-    pub const SIDEBAR: Pixels = px(216.);
-    pub const QUEUE: Pixels = px(408.);
+    pub const SIDEBAR: Pixels = px(232.);
+    pub const QUEUE: Pixels = px(400.);
     pub const TOOLBAR: Pixels = px(52.);
     pub const STRIP: Pixels = px(44.);
-    /// Reading measure for prose: about 72 characters at 13 points.
-    pub const MEASURE: Pixels = px(600.);
+    /// The pinned action bar under a page.
+    pub const BAR: Pixels = px(56.);
+    /// Where the traffic lights end, so the title bar's content starts after them.
+    pub const TRAFFIC: Pixels = px(84.);
+    /// Reading measure for prose: 68 characters at 13 points.
+    pub const MEASURE: Pixels = px(440.);
     pub const PALETTE: Pixels = px(600.);
-    pub const SHEET: Pixels = px(440.);
+    pub const SHEET: Pixels = px(460.);
+    /// Code never clips: a line longer than this many characters wraps with a continuation mark. These are the
+    /// columns each code surface fits at 1280 points. ponytail: fixed counts instead of measuring the pane, so a
+    /// narrower window wraps late; measure the pane if the window gets resizable.
+    pub const COLS_EVIDENCE: usize = 60;
+    pub const COLS_DIFF: usize = 84;
+    pub const COLS_WIDE: usize = 108;
 }
 
-/// Motion: short, eased, and only where it says something changed. Reduced motion turns every one off.
+/// Motion: short, eased, and only where it says something changed. Reduce Motion turns every one off.
 pub mod motion {
     use super::Duration;
     /// The live dot's breath: a review is working.
     pub const PULSE: Duration = Duration::from_millis(1600);
+    /// A row that just landed fades in over this.
+    pub const FADE: Duration = Duration::from_millis(150);
     /// How long a finding that just landed stays lit, in model milliseconds.
     pub const ARRIVAL_MS: u64 = 2400;
 }
@@ -254,7 +270,7 @@ mod tests {
     #[test]
     fn every_text_token_meets_aa_on_every_surface() {
         for (name, t) in [("dark", dark()), ("light", light())] {
-            let Colors { bg, surface, selected, sidebar, .. } = t;
+            let Colors { bg, surface, selected, sidebar, raised, code_bg, .. } = t;
             let texts = [
                 ("text", t.text),
                 ("muted", t.muted),
@@ -268,12 +284,30 @@ mod tests {
                 ("high", t.high),
                 ("medium", t.medium),
                 ("low", t.low),
+                ("add_fg", t.add_fg),
+                ("del_fg", t.del_fg),
             ];
+            let surfaces =
+                [("bg", bg), ("surface", surface), ("selected", selected), ("sidebar", sidebar), ("raised", raised)];
             for (tn, fg) in texts {
-                for (sn, back) in [("bg", bg), ("surface", surface), ("selected", selected), ("sidebar", sidebar)] {
+                for (sn, back) in surfaces {
                     let r = contrast(fg, back);
                     assert!(r >= 4.5, "{name}: {tn} on {sn} is {r:.2}:1");
                 }
+            }
+            let code = [
+                ("text", t.text),
+                ("faint", t.faint),
+                ("keyword", t.syn_keyword),
+                ("string", t.syn_string),
+                ("number", t.syn_number),
+                ("comment", t.syn_comment),
+                ("fn", t.syn_fn),
+                ("type", t.syn_type),
+            ];
+            for (tn, fg) in code {
+                let r = contrast(fg, code_bg);
+                assert!(r >= 4.5, "{name}: syntax {tn} on code_bg is {r:.2}:1");
             }
             assert!(contrast(t.on_accent, t.accent) >= 4.5, "{name}: on_accent");
         }
