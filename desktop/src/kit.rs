@@ -176,3 +176,24 @@ pub fn clock(iso: &str) -> String {
 pub fn clock_s(iso: &str) -> String {
     iso.split('T').nth(1).map(|t| t.chars().take(8).collect()).unwrap_or_default()
 }
+
+/// The first `n` sentences of `s`: a preview that ends on a full stop instead of a clipped word.
+pub fn lead(s: &str, n: usize) -> String {
+    let mut end = 0;
+    for _ in 0..n {
+        match s[end..].find(". ") {
+            Some(i) => end += i + 1,
+            None => return s.to_string(),
+        }
+    }
+    s[..end].to_string()
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn lead_keeps_whole_sentences() {
+        assert_eq!(super::lead("One. Two. Three.", 2), "One. Two.");
+        assert_eq!(super::lead("Only one.", 2), "Only one.");
+    }
+}

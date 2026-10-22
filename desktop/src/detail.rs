@@ -161,7 +161,7 @@ fn pr_page(s: &Shell, t: &Colors, pr: &Pr, run: Option<&Run>, cx: &Context<Shell
                 }
                 _ if current.is_empty() => (t.ok, "Reviewed: nothing found".to_string()),
                 _ => (
-                    t.text,
+                    t.accent,
                     format!(
                         "Reviewed: {} to judge",
                         queue::count(current.iter().filter(|f| queue::open_finding(f)).count(), "finding")
@@ -171,7 +171,7 @@ fn pr_page(s: &Shell, t: &Colors, pr: &Pr, run: Option<&Run>, cx: &Context<Shell
             callout(
                 t,
                 hue,
-                if hue == t.text { IconName::Eye } else { IconName::CircleCheck },
+                if hue == t.accent { IconName::Eye } else { IconName::CircleCheck },
                 title,
                 Some(format!(
                     "{} at {} with {}{}.",
@@ -357,8 +357,7 @@ pub fn finding_row(s: &Shell, t: &Colors, f: &Finding, cx: &Context<Shell>) -> S
                     .text_size(text::BODY)
                     .line_height(text::LINE_BODY)
                     .text_color(t.muted)
-                    .line_clamp(3)
-                    .child(x.explanation.to_string())
+                    .child(md_line(t, &crate::kit::lead(x.explanation.as_str(), 2)))
             }))
         })
 }

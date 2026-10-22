@@ -161,17 +161,21 @@ fn face(c: &Card) -> Face {
                 mark: Some(mark),
                 kicker: format!("{word} · {}", top.category.label()),
                 headline: format!("{word} in #{}: {}", pr.number, top.title),
-                sub: format!("{}{}", file, top.line.map_or(String::new(), |l| format!(":{l}"))),
-                meta: if more.is_empty() {
-                    format!("{:.0}% sure", top.confidence * 100.)
-                } else {
-                    format!(
-                        "{:.0}% sure · +{} more: {}",
-                        top.confidence * 100.,
-                        more.len(),
-                        queue::severity_summary(more)
-                    )
-                },
+                sub: format!(
+                    "{}{}{}",
+                    file,
+                    top.line.map_or(String::new(), |l| format!(":{l}")),
+                    if more.is_empty() {
+                        String::new()
+                    } else {
+                        format!(" · +{} more: {}", more.len(), queue::severity_summary(more))
+                    }
+                ),
+                meta: format!(
+                    "{:.0}% sure · {}",
+                    top.confidence * 100.,
+                    queue::count(top.evidence_count as usize, "evidence item")
+                ),
                 action: "Open finding",
             }
         }

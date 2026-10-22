@@ -1,6 +1,6 @@
 # pr-review-desktop
 
-`pr-review-desktop` is a macOS client for pr-review, built on [GPUI](https://www.gpui.rs) through [gpui-kit](https://crates.io/crates/gpui-kit) 0.8.0. It is a foundation: the window shows the connection state and the PR list, and nothing else yet.
+`pr-review-desktop` is a macOS client for pr-review, built on [GPUI](https://www.gpui.rs) through [gpui-kit](https://crates.io/crates/gpui-kit) 0.8.0. The window is a triage inbox: a queue of the decisions waiting on you, each with its detail beside it, a live strip of running reviews, the diff with findings anchored, and a command palette (⌘K). [DESIGN-C.md](DESIGN-C.md) describes the design and its tokens.
 
 The app links the terminal client in `../tui` as a library and runs its reducer, `update(&mut Model, Msg) -> Vec<Effect>`, and its network task unchanged. The protocol rules, the key guards and the playback all come from there. The terminal client stays as it is.
 
@@ -72,6 +72,9 @@ With `--socket`, the capture happens `--snapshot-after-ms` milliseconds after la
 | `goto:SCREEN` | Go to `inbox`, `review`, `diff`, `timeline` or `settings`. |
 | `type:TEXT` | Type TEXT into the focused input, one character at a time. TEXT cannot contain a comma. |
 | an action name | Do what the key for that action does. |
+| `tab:done`, `tab:queue` | Show the done list or the queue. |
+| `palette:TEXT` | Open the command palette with TEXT typed. |
+| `keys` | Open the shortcut sheet. |
 
 The action names are `quit`, `up`, `down`, `page-up`, `page-down`, `top`, `bottom`, `left`, `right`, `focus-next`, `focus-prev`, `open`, `back`, `search`, `jump-to`, `open-diff`, `open-timeline`, `watch`, `scroll-down`, `scroll-up`, `next-finding`, `prev-finding`, `refresh`, `help`, `accounts`, `start`, `retry`, `cancel`, `publish`, `cycle-scope`, `cycle-category`, `cycle-phase`, `backspace`, `submit`, `cancel-input`, `confirm`, `open-url` and `toggle-raw`. Each one maps onto `keymap::Action` in the terminal client.
 
@@ -86,7 +89,7 @@ desktop/snap.sh                      # every state, into desktop/snapshots/
 desktop/snap.sh /tmp/snaps diff help # two states, into /tmp/snaps
 ```
 
-The states are listed at the end of `snap.sh`, one per line: a name, the appearance, the capture time and the steps.
+The states are listed at the end of `snap.sh`, one per line: a name, the appearance, the capture time, the steps and, optionally, another playback script. `08-disconnected` dials a socket that doesn't exist and captures in real time.
 
 ## How the parts connect
 

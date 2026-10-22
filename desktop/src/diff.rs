@@ -254,8 +254,7 @@ pub fn view(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                                     .text_size(text::BODY)
                                     .line_height(text::LINE_BODY)
                                     .text_color(t.muted)
-                                    .line_clamp(2)
-                                    .child(crate::detail::md_line(t, x.explanation.as_str()))
+                                    .child(crate::detail::md_line(t, &crate::kit::lead(x.explanation.as_str(), 2)))
                             })),
                     ),
             );

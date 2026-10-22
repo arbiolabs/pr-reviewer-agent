@@ -197,7 +197,7 @@ pub fn live(s: &Shell, t: &Colors, pr: &Pr, run: &Run, cx: &Context<Shell>) -> D
                 .flex_1()
                 .text_size(text::SMALL)
                 .text_color(t.muted)
-                .child(format!("{} · findings post only after you approve.", phase_word(run.phase))),
+                .child(format!("{} · findings land here as the verifier keeps them.", phase_word(run.phase))),
         )
         .child(button(
             t,
