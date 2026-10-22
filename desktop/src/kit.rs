@@ -26,7 +26,9 @@ pub fn icon(name: IconName, size: Pixels, color: Hsla) -> Svg {
     svg().path(name.path()).size(size).flex_none().text_color(color)
 }
 
-/// The 2-point accent ring every focused control wears, 2 points off its edge so it never reads as a border.
+/// The 2-point accent ring every focused control wears, 2 points off its edge so it never reads as a border. A
+/// later shadow paints over an earlier one, so the gap's fill comes last and a control with no background of its
+/// own still shows a ring, not a filled block.
 pub fn ring(t: &Colors) -> Vec<BoxShadow> {
     let shadow = |color: Hsla, spread: Pixels| BoxShadow {
         color,
@@ -35,7 +37,7 @@ pub fn ring(t: &Colors) -> Vec<BoxShadow> {
         spread_radius: spread,
         inset: false,
     };
-    vec![shadow(t.bg, px(2.)), shadow(t.accent, px(4.))]
+    vec![shadow(t.accent, px(4.)), shadow(t.bg, px(2.))]
 }
 
 /// A tab stop that shows the ring when it has the keyboard.
