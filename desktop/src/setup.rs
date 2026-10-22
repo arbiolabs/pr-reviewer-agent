@@ -73,11 +73,11 @@ fn fix_line(t: &Colors, fix: &str) -> Div {
                             SharedString::from(format!("copy-{i}-{}", part.len())),
                             IconName::Copy,
                             "Copy the command",
+                            px(24.),
                             Some(Box::new(move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
                                 cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()))
                             }) as OnClick),
-                        )
-                        .size(px(24.)),
+                        ),
                     ),
             );
         }
@@ -165,6 +165,7 @@ pub fn offline(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                         "copy-cmd",
                         IconName::Copy,
                         "Copy the command",
+                        px(32.),
                         Some(Box::new(move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
                             cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()))
                         }) as OnClick),

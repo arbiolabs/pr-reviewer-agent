@@ -16,8 +16,8 @@ use pr_review_tui::view::Hit;
 
 use crate::code::{Inline, Lexer, Tok, clip, inline_markdown, wrap};
 use crate::kit::{
-    Gauge, OnClick, Tone, button, callout, chip, clock, display, heading, icon, icon_button, overline, progress,
-    severity_badge, step_of, summary, tabular, tip,
+    Gauge, OnClick, Tone, button, callout, chip, clock, display, heading, icon, icon_button, lift, overline,
+    progress, rail, severity_badge, step_of, summary, tabular, tip,
 };
 use crate::queue::{self, Stage, phase_word};
 use crate::tokens::{Colors, layout, radius, severity_mark, space, text};
@@ -250,7 +250,7 @@ pub fn pr_sentence(m: &Model, pr: &Pr, run: Option<&Run>) -> String {
 /// A tab of the detail pane: Findings or Timeline.
 fn tab(t: &Colors, id: &'static str, label: &str, count: Option<usize>, active: bool, on: OnClick) -> Stateful<Div> {
     let row = div()
-        .id(id)
+        .id(SharedString::from(format!("{id}-face")))
         .flex()
         .items_center()
         .gap(space::S2)
@@ -263,10 +263,9 @@ fn tab(t: &Colors, id: &'static str, label: &str, count: Option<usize>, active: 
         .font_weight(if active { FontWeight::SEMIBOLD } else { FontWeight::NORMAL })
         .text_color(if active { t.text } else { t.muted })
         .hover(|d| d.text_color(t.text))
-        .on_click(on)
         .child(label.to_string())
         .children(count.map(|n| div().text_size(text::SMALL).text_color(t.faint).child(n.to_string())));
-    crate::kit::focusable(row, t)
+    crate::kit::focusable(id, row, t, px(0.), on)
 }
 
 pub fn tabs(t: &Colors, findings: usize, timeline: bool, cx: &Context<Shell>) -> Div {
@@ -616,8 +615,10 @@ pub fn finding_row(s: &Shell, t: &Colors, f: &Finding, cx: &Context<Shell>) -> S
     let detail = m.details.get(&f.id);
     let place = format!("{}{}", f.file, f.line.map_or(String::new(), |l| format!(":{l}")));
     let (status, _) = status_sentence(f, detail.map_or(&[][..], |d| &d.history));
+    let base = if selected { t.selected } else { t.surface };
     let row = div()
-        .id(SharedString::from(format!("f-{}", f.id.as_str())))
+        .id(SharedString::from(format!("f-{}-face", f.id.as_str())))
+        .relative()
         .flex()
         .flex_col()
         .gap(space::S2)
@@ -625,13 +626,12 @@ pub fn finding_row(s: &Shell, t: &Colors, f: &Finding, cx: &Context<Shell>) -> S
         .py(px(10.))
         .rounded(radius::LG)
         .border_1()
-        .border_color(if selected { t.border_strong } else { t.border })
-        .bg(if selected { t.selected } else { t.surface })
-        .cursor_pointer()
-        .hover(|d| d.bg(if selected { t.selected } else { t.hover }))
+        .border_color(t.border)
+        .bg(base)
+        .hover(move |d| d.bg(lift(t, base)))
         .active(|d| d.bg(t.press))
         .when(f.stale, |d| d.opacity(0.75))
-        .on_click(cx.listener(move |s, _: &ClickEvent, _, cx| s.send(Msg::Pick(Hit::Finding(id.clone())), cx)))
+        .when(selected, |d| d.child(rail(t)))
         .child(
             div()
                 .flex()
@@ -689,7 +689,13 @@ pub fn finding_row(s: &Shell, t: &Colors, f: &Finding, cx: &Context<Shell>) -> S
                     .child(md_line(t, &crate::kit::lead(x.explanation.as_str(), 2)))
             }))
         });
-    crate::kit::focusable(row, t)
+    crate::kit::focusable(
+        SharedString::from(format!("f-{}", f.id.as_str())),
+        row,
+        t,
+        radius::LG,
+        Box::new(cx.listener(move |s, _: &ClickEvent, _, cx| s.send(Msg::Pick(Hit::Finding(id.clone())), cx))),
+    )
 }
 
 /// The words for a confidence: the number, then what it means for the reader.
@@ -723,6 +729,7 @@ fn finding_page(s: &Shell, t: &Colors, id: &FindingId, cx: &Context<Shell>) -> D
             "f-prev",
             IconName::ChevronUp,
             "Previous finding (⇧N)",
+            px(32.),
             (at > 1).then(|| crate::ui::click(cx, |s, cx| s.act(Action::PrevFinding, cx))),
         ))
         .child(icon_button(
@@ -730,6 +737,7 @@ fn finding_page(s: &Shell, t: &Colors, id: &FindingId, cx: &Context<Shell>) -> D
             "f-next",
             IconName::ChevronDown,
             "Next finding (N)",
+            px(32.),
             (at < all.len()).then(|| crate::ui::click(cx, |s, cx| s.act(Action::NextFinding, cx))),
         ));
     let detail = m.details.get(id);

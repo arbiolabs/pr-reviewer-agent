@@ -16,8 +16,8 @@ use pr_review_tui::view::Hit;
 use tokio::sync::mpsc;
 
 use crate::kit::{
-    Gauge, OnClick, Tone, button, count_badge, focusable, icon, keycap, overline, progress, severity_count, step_of,
-    tip,
+    Gauge, OnClick, Tone, button, count_badge, focusable, icon, keycap, lift, overline, progress, rail,
+    severity_count, step_of, tip,
 };
 use crate::queue::{self, Card, RowState, Stage, phase_word};
 use crate::script::Desk;
@@ -575,7 +575,7 @@ fn titlebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
     };
     let away = !matches!(m.ui.screen, Screen::Inbox | Screen::Review) || front(m).is_some();
     let search = div()
-        .id("search")
+        .id("search-face")
         .flex()
         .items_center()
         .gap(space::S2)
@@ -586,10 +586,8 @@ fn titlebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         .bg(t.surface)
         .border_1()
         .border_color(t.border)
-        .cursor_pointer()
-        .hover(|d| d.bg(t.hover))
+        .hover(move |d| d.bg(lift(t, t.surface)))
         .active(|d| d.bg(t.press))
-        .on_click(cx.listener(|s, _: &ClickEvent, _, cx| s.toggle_palette(cx)))
         .child(icon(IconName::Search, px(14.), t.muted))
         .child(div().flex_1().text_size(text::SMALL).text_color(t.muted).child("Search or command"))
         .child(keycap(t, "⌘K", None, false));
@@ -618,7 +616,10 @@ fn titlebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                 .child(div().flex_none().text_size(text::LEAD).font_weight(FontWeight::SEMIBOLD).child(title))
                 .child(div().min_w_0().truncate().text_size(text::SMALL).text_color(t.muted).child(sub)),
         )
-        .child(tip(focusable(search, t), "Search PRs and findings, or run a command"))
+        .child(tip(
+            focusable("search", search, t, radius::SM, click(cx, |s, cx| s.toggle_palette(cx))),
+            "Search PRs and findings, or run a command",
+        ))
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -641,18 +642,17 @@ fn nav_item(
         t.muted
     };
     let row = div()
-        .id(id)
+        .id(SharedString::from(format!("{id}-face")))
+        .relative()
         .flex()
         .items_center()
         .gap(space::S2)
         .h(px(32.))
         .px(space::S2)
         .rounded(radius::SM)
-        .cursor_pointer()
-        .when(active, |d| d.bg(t.selected))
-        .hover(|d| d.bg(t.hover))
+        .when(active, |d| d.bg(t.selected).child(rail(t)))
+        .hover(move |d| d.bg(if active { lift(t, t.selected) } else { t.hover }))
         .active(|d| d.bg(t.press))
-        .on_click(f)
         .child(icon(glyph, px(15.), if active && !dim { t.accent } else { fg }))
         .child(
             div()
@@ -663,7 +663,7 @@ fn nav_item(
                 .child(label.to_string()),
         )
         .when(count > 0, |d| d.child(count_badge(t, count, hue)));
-    focusable(row, t)
+    focusable(id, row, t, radius::SM, f)
 }
 
 /// The sidebar: the smart lists, then every PR grouped by repository with its state, then the connection.
@@ -775,7 +775,8 @@ fn pr_row(s: &Shell, t: &Colors, pr: &Pr, state: RowState, on: bool, cx: &Contex
         _ => None,
     };
     let row = div()
-        .id(SharedString::from(format!("nav-pr-{}", pr.number)))
+        .id(SharedString::from(format!("nav-pr-{}-face", pr.number)))
+        .relative()
         .flex()
         .items_start()
         .gap(space::S2)
@@ -783,14 +784,9 @@ fn pr_row(s: &Shell, t: &Colors, pr: &Pr, state: RowState, on: bool, cx: &Contex
         .px(space::S2)
         .py(px(6.))
         .rounded(radius::SM)
-        .cursor_pointer()
-        .when(on, |d| d.bg(t.selected))
-        .hover(|d| d.bg(if on { t.selected } else { t.hover }))
+        .when(on, |d| d.bg(t.selected).child(rail(t)))
+        .hover(move |d| d.bg(if on { lift(t, t.selected) } else { t.hover }))
         .active(|d| d.bg(t.press))
-        .on_click(cx.listener(move |s, _: &ClickEvent, _, cx| {
-            s.done_tab = queue::done(&s.model).iter().any(|(p, _)| p.id == id);
-            s.select_pr(id.clone(), cx)
-        }))
         .child(div().w(px(14.)).h(px(18.)).flex().items_center().justify_center().flex_none().child(glyph))
         .child(
             div()
@@ -820,7 +816,16 @@ fn pr_row(s: &Shell, t: &Colors, pr: &Pr, state: RowState, on: bool, cx: &Contex
                 ),
         )
         .child(div().w(px(44.)).h(px(18.)).flex_none().flex().items_center().justify_end().children(badge));
-    focusable(row, t)
+    focusable(
+        SharedString::from(format!("nav-pr-{}", pr.number)),
+        row,
+        t,
+        radius::SM,
+        Box::new(cx.listener(move |s, _: &ClickEvent, _, cx| {
+            s.done_tab = queue::done(&s.model).iter().any(|(p, _)| p.id == id);
+            s.select_pr(id.clone(), cx)
+        })),
+    )
 }
 
 fn connection(m: &Model, t: &Colors) -> Stateful<Div> {
@@ -965,8 +970,9 @@ fn pill(s: &Shell, t: &Colors, p: &Pr, r: &Run, cx: &Context<Shell>) -> Stateful
     let selected = m.ui.selected_pr.as_ref() == Some(&p.id) && matches!(m.ui.screen, Screen::Inbox | Screen::Review);
     let id = p.id.clone();
     let tools = m.domain.activity.iter().filter(|a| a.pr_id.as_ref() == Some(&p.id)).count();
+    let base = if selected { t.running.alpha(0.14) } else { t.surface };
     let pill = div()
-        .id(SharedString::from(format!("pill-{}", p.number)))
+        .id(SharedString::from(format!("pill-{}-face", p.number)))
         .flex()
         .items_center()
         .gap(space::S2)
@@ -974,13 +980,11 @@ fn pill(s: &Shell, t: &Colors, p: &Pr, r: &Run, cx: &Context<Shell>) -> Stateful
         .px(space::S3)
         .rounded(radius::PILL)
         .min_w_0()
-        .bg(if selected { t.running.alpha(0.14) } else { t.surface })
+        .bg(base)
         .border_1()
         .border_color(if selected { t.running.alpha(0.6) } else { t.border })
-        .cursor_pointer()
-        .hover(|d| d.bg(t.hover))
+        .hover(move |d| d.bg(lift(t, base)))
         .active(|d| d.bg(t.press))
-        .on_click(cx.listener(move |s, _: &ClickEvent, _, cx| s.select_pr(id.clone(), cx)))
         .child(live_dot(t, s.still, ("pill-dot", p.number as usize)))
         .child(div().text_size(text::SMALL).font_weight(FontWeight::SEMIBOLD).child(format!("#{}", p.number)))
         .child(div().min_w_0().truncate().text_size(text::SMALL).text_color(t.muted).child(p.title.to_string()))
@@ -989,5 +993,15 @@ fn pill(s: &Shell, t: &Colors, p: &Pr, r: &Run, cx: &Context<Shell>) -> Stateful
         .when(tools > 0, |d| {
             d.child(div().text_size(text::CAPTION).text_color(t.faint).child(format!("{tools} steps")))
         });
-    tip(focusable(pill, t), format!("Watch #{} live", p.number))
+    tip(
+        focusable(
+            SharedString::from(format!("pill-{}", p.number)),
+            pill,
+            t,
+            radius::PILL,
+            Box::new(cx.listener(move |s, _: &ClickEvent, _, cx| s.select_pr(id.clone(), cx))),
+        )
+        .min_w_0(),
+        format!("Watch #{} live", p.number),
+    )
 }

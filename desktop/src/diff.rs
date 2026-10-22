@@ -12,7 +12,7 @@ use pr_review_tui::view::Hit;
 
 use crate::code::Lexer;
 use crate::detail::{action_bar, code_row, runs};
-use crate::kit::{Tone, button, callout, focusable, icon, overline, severity_count};
+use crate::kit::{Tone, button, callout, focusable, icon, lift, overline, rail, severity_count};
 use crate::tokens::{Colors, layout, radius, severity_mark, space, text};
 use crate::ui::{Shell, on};
 
@@ -81,7 +81,8 @@ pub fn view(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
             };
             let line = || div().h(px(18.)).flex().items_center().flex_none();
             let row = div()
-                .id(("file", i))
+                .id(("file-face", i))
+                .relative()
                 .flex()
                 .items_start()
                 .gap(space::S2)
@@ -89,13 +90,9 @@ pub fn view(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                 .px(space::S2)
                 .py(px(5.))
                 .rounded(radius::SM)
-                .cursor_pointer()
-                .when(selected, |d| d.bg(t.selected))
-                .hover(|d| d.bg(if selected { t.selected } else { t.hover }))
+                .when(selected, |d| d.bg(t.selected).child(rail(t)))
+                .hover(move |d| d.bg(if selected { lift(t, t.selected) } else { t.hover }))
                 .active(|d| d.bg(t.press))
-                .on_click(
-                    cx.listener(move |s, _: &ClickEvent, _, cx| s.send(Msg::Pick(Hit::DiffFile(path.clone())), cx)),
-                )
                 .child(
                     line()
                         .w(px(14.))
@@ -124,7 +121,15 @@ pub fn view(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                 .children(worst.map(|w| line().child(severity_count(t, w, here.len()))))
                 .child(line().text_size(text::CAPTION).text_color(t.add_fg).child(format!("+{}", f.additions)))
                 .child(line().text_size(text::CAPTION).text_color(t.del_fg).child(format!("−{}", f.deletions)));
-            focusable(row, t)
+            focusable(
+                ("file", i),
+                row,
+                t,
+                radius::SM,
+                Box::new(
+                    cx.listener(move |s, _: &ClickEvent, _, cx| s.send(Msg::Pick(Hit::DiffFile(path.clone())), cx)),
+                ),
+            )
         }));
     let Some(file) = d.file() else { return shell.child(files) };
     let rows = file_rows(file);

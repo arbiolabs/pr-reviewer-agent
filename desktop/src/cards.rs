@@ -249,7 +249,7 @@ fn card(_: &Shell, t: &Colors, c: &Card, i: usize, selected: bool, cx: &Context<
         .bg(if selected { t.selected } else { t.surface })
         .border_color(if selected { t.accent.alpha(0.75) } else { t.border })
         .shadow(vec![lift])
-        .hover(|d| d.bg(if selected { t.selected } else { t.hover }))
+        .hover(move |d| d.bg(crate::kit::lift(t, if selected { t.selected } else { t.surface })))
         .active(|d| d.bg(t.press))
         .on_click(cx.listener(move |s, _: &ClickEvent, _, cx| {
             let cards = queue::cards(&s.model);
@@ -402,7 +402,7 @@ pub fn done_column(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                 .border_color(if selected { t.accent.alpha(0.75) } else { t.border })
                 .bg(if selected { t.selected } else { t.surface })
                 .cursor_pointer()
-                .hover(|d| d.bg(if selected { t.selected } else { t.hover }))
+                .hover(move |d| d.bg(crate::kit::lift(t, if selected { t.selected } else { t.surface })))
                 .active(|d| d.bg(t.press))
                 .on_click(cx.listener(move |s, _: &ClickEvent, _, cx| s.select_pr(id.clone(), cx)))
                 .child(div().pt(px(2.)).child(icon(IconName::CircleCheck, px(15.), t.ok)))

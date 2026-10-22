@@ -26,24 +26,53 @@ pub fn icon(name: IconName, size: Pixels, color: Hsla) -> Svg {
     svg().path(name.path()).size(size).flex_none().text_color(color)
 }
 
-/// The 2-point accent ring every focused control wears, 2 points off its edge so it never reads as a border. A
-/// later shadow paints over an earlier one, so the gap's fill comes last and a control with no background of its
-/// own still shows a ring, not a filled block.
-pub fn ring(t: &Colors) -> Vec<BoxShadow> {
-    let shadow = |color: Hsla, spread: Pixels| BoxShadow {
-        color,
-        offset: point(px(0.), px(0.)),
-        blur_radius: px(0.),
-        spread_radius: spread,
-        inset: false,
-    };
-    vec![shadow(t.accent, px(4.)), shadow(t.bg, px(2.))]
+/// The ring's offset from the control's edge, and its width.
+const RING_GAP: Pixels = px(2.);
+const RING: Pixels = px(2.);
+
+/// A tab stop: `inner` inside a frame that is 4 points larger on every side and pulled back by as much, so the
+/// layout doesn't move. The frame's border is the focus ring, 2 points wide and 2 points off the control's edge.
+/// It shows only while the keyboard holds focus there and clears when focus moves; it never paints the control's
+/// own background, so a focused row keeps its fill. The frame takes the click, so ⏎ and space press it too.
+/// `radius` is the control's own; the ring's corners follow it.
+pub fn focusable(
+    id: impl Into<ElementId>,
+    inner: impl IntoElement,
+    t: &Colors,
+    radius: Pixels,
+    on: OnClick,
+) -> Stateful<Div> {
+    let accent = t.accent;
+    div()
+        .id(id)
+        .tab_index(0)
+        .flex()
+        .flex_col()
+        .m(-(RING_GAP + RING))
+        .p(RING_GAP)
+        .border(RING)
+        .border_color(accent.alpha(0.))
+        .rounded(radius + RING_GAP + RING)
+        .cursor_pointer()
+        .focus_visible(move |s| s.border_color(accent))
+        .on_click(on)
+        .child(inner)
 }
 
-/// A tab stop that shows the ring when it has the keyboard.
-pub fn focusable<E: InteractiveElement>(el: E, t: &Colors) -> E {
-    let ring = ring(t);
-    el.tab_index(0).focus(move |s| s.shadow(ring.clone()))
+/// A hover lift: `base` one step toward the text color, opaque, so a hovered surface brightens in dark and
+/// deepens in light without changing its border.
+pub fn lift(t: &Colors, base: Hsla) -> Hsla {
+    if base.a < 1. {
+        return t.hover;
+    }
+    let (b, f) = (base.to_rgb(), t.text.to_rgb());
+    let mix = |x: f32, y: f32| y * 0.05 + x * 0.95;
+    Rgba { r: mix(b.r, f.r), g: mix(b.g, f.g), b: mix(b.b, f.b), a: 1. }.into()
+}
+
+/// The selection rail: a 3-point accent bar inside a selected row's left edge. The row must be `relative`.
+pub fn rail(t: &Colors) -> Div {
+    div().absolute().left(px(2.)).top(space::S2).bottom(space::S2).w(px(3.)).rounded(px(2.)).bg(t.accent)
 }
 
 /// Digits that line up: one width per figure, so a column of numbers reads as a column.
@@ -102,12 +131,13 @@ pub fn button(
         (Tone::Primary, _) => (t.accent, t.on_accent, t.accent_hover, t.accent_press, t.accent),
         (Tone::Destructive, _) => (t.danger, t.on_danger, t.danger.alpha(0.88), t.danger.alpha(0.76), t.danger),
         (Tone::Danger, _) => (t.surface, t.danger, t.danger.alpha(0.10), t.danger.alpha(0.18), t.danger.alpha(0.45)),
-        (Tone::Secondary, _) => (t.surface, t.text, t.hover, t.press, t.border_strong),
+        (Tone::Secondary, _) => (t.surface, t.text, lift(t, t.surface), t.press, t.border_strong),
         (Tone::Ghost, _) => (t.surface.alpha(0.), t.muted, t.hover, t.press, t.surface.alpha(0.)),
     };
     let filled = matches!(tone, Tone::Primary | Tone::Destructive) && on.is_some();
+    let id = id.into();
+    let face = ElementId::Name(format!("{id}-face").into());
     let b = div()
-        .id(id)
         .flex()
         .flex_none()
         .items_center()
@@ -124,10 +154,8 @@ pub fn button(
         .child(label.to_string())
         .children(key.map(|k| keycap(t, k, if filled { Some(fg) } else { None }, on.is_none())));
     match on {
-        Some(on) => {
-            focusable(b, t).cursor_pointer().hover(move |s| s.bg(hover)).active(move |s| s.bg(press)).on_click(on)
-        }
-        None => b,
+        Some(on) => focusable(id, b.id(face).hover(move |s| s.bg(hover)).active(move |s| s.bg(press)), t, radius::SM, on),
+        None => b.id(id),
     }
 }
 
@@ -137,21 +165,25 @@ pub fn icon_button(
     id: impl Into<ElementId>,
     glyph: IconName,
     name: &str,
+    side: Pixels,
     on: Option<OnClick>,
 ) -> Stateful<Div> {
-    let b =
-        div().id(id).flex().flex_none().items_center().justify_center().size(px(32.)).rounded(radius::SM).child(icon(
-            glyph,
-            px(16.),
-            if on.is_some() { t.muted } else { t.disabled },
-        ));
-    let b = tip(b, name.to_string());
+    let id = id.into();
+    let face = ElementId::Name(format!("{id}-face").into());
+    let b = div()
+        .flex()
+        .flex_none()
+        .items_center()
+        .justify_center()
+        .size(side)
+        .rounded(radius::SM)
+        .child(icon(glyph, px(16.), if on.is_some() { t.muted } else { t.disabled }));
     match on {
         Some(on) => {
             let (hover, press) = (t.hover, t.press);
-            focusable(b, t).cursor_pointer().hover(move |s| s.bg(hover)).active(move |s| s.bg(press)).on_click(on)
+            tip(focusable(id, b.id(face).hover(move |s| s.bg(hover)).active(move |s| s.bg(press)), t, radius::SM, on), name.to_string())
         }
-        None => b,
+        None => tip(b.id(id), name.to_string()),
     }
 }
 

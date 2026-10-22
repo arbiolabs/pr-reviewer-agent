@@ -71,18 +71,17 @@ pub fn timeline(s: &Shell, t: &Colors, pr: &Pr, cx: &Context<Shell>) -> Div {
         let seq = e.sequence.get();
         let on_it = tl.selected == Some(seq);
         let row = div()
-            .id(("ev", seq as usize))
+            .id(("ev-face", seq as usize))
+            .relative()
             .flex()
             .items_start()
             .gap(space::S3)
             .px(space::S2)
             .py(px(6.))
             .rounded(radius::SM)
-            .cursor_pointer()
-            .when(on_it, |d| d.bg(t.selected))
-            .hover(|d| d.bg(t.hover))
+            .when(on_it, |d| d.bg(t.selected).child(crate::kit::rail(t)))
+            .hover(move |d| d.bg(if on_it { crate::kit::lift(t, t.selected) } else { t.hover }))
             .active(|d| d.bg(t.press))
-            .on_click(cx.listener(move |s, _: &ClickEvent, _, cx| s.send(Msg::Pick(Hit::Event(seq)), cx)))
             .child(
                 div()
                     .w(px(64.))
@@ -102,7 +101,13 @@ pub fn timeline(s: &Shell, t: &Colors, pr: &Pr, cx: &Context<Shell>) -> Div {
                     .child(EventCategory::of(&e.body).label()),
             )
             .child(event_line(t, e));
-        list = list.child(crate::kit::focusable(row, t));
+        list = list.child(crate::kit::focusable(
+            ("ev", seq as usize),
+            row,
+            t,
+            radius::SM,
+            Box::new(cx.listener(move |s, _: &ClickEvent, _, cx| s.send(Msg::Pick(Hit::Event(seq)), cx))),
+        ));
     }
     if tl.pending.is_some() {
         list = list.child(div().py(space::S3).text_size(text::SMALL).text_color(t.faint).child("Loading…"));
