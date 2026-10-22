@@ -9,6 +9,9 @@ use pr_review_tui::protocol::{Phase, Severity};
 
 use crate::queue::Mark;
 use crate::tokens::{Colors, DISABLED_OUTLINE, radius, severity_mark, space, text};
+use std::cell::Cell;
+use std::sync::OnceLock;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 pub type OnClick = Box<dyn Fn(&ClickEvent, &mut Window, &mut App) + 'static>;
 
@@ -31,6 +34,36 @@ pub fn icon(name: IconName, size: Pixels, color: Hsla) -> Svg {
 const RING_GAP: Pixels = px(2.);
 const RING: Pixels = px(2.);
 
+/// The keyboard owns focus: ⇥ sets it and a mouse press clears it. GPUI's own focus-visible clears on any pointer
+/// move too, and macOS sends one when the window activates, which hid the ring a frame after ⇥. One window, so
+/// one flag.
+pub static KEYBOARD: AtomicBool = AtomicBool::new(false);
+
+/// The ring's color: the macOS accent color in a live window. Unset, the brand accent: a snapshot's pixels must
+/// not depend on the machine's settings.
+pub static RING_COLOR: OnceLock<Hsla> = OnceLock::new();
+
+thread_local! {
+    /// While a sheet is open, only the controls built inside it are tab stops, so ⇥ stays in the sheet. The window
+    /// renders on one thread, page first and the sheet last, so the flags follow the build.
+    static SHEET_OPEN: Cell<bool> = const { Cell::new(false) };
+    static IN_SHEET: Cell<bool> = const { Cell::new(false) };
+}
+
+/// Marks the frame about to render: whether a sheet will float over the page.
+pub fn sheet_open(open: bool) {
+    SHEET_OPEN.set(open);
+    IN_SHEET.set(false);
+}
+
+/// Builds a sheet's controls as the only tab stops of the frame.
+pub fn in_sheet<R>(build: impl FnOnce() -> R) -> R {
+    IN_SHEET.set(true);
+    let out = build();
+    IN_SHEET.set(false);
+    out
+}
+
 /// A tab stop: `inner` inside a frame that is 4 points larger on every side and pulled back by as much, so the
 /// layout doesn't move. The frame's border is the focus ring, 2 points wide and 2 points off the control's edge.
 /// It shows only while the keyboard holds focus there and clears when focus moves; it never paints the control's
@@ -43,19 +76,19 @@ pub fn focusable(
     radius: Pixels,
     on: OnClick,
 ) -> Stateful<Div> {
-    let accent = t.accent;
+    let ring = RING_COLOR.get().copied().unwrap_or(t.accent);
     div()
         .id(id)
-        .tab_index(0)
+        .when(!SHEET_OPEN.get() || IN_SHEET.get(), |d| d.tab_index(0))
         .flex()
         .flex_col()
         .m(-(RING_GAP + RING))
         .p(RING_GAP)
         .border(RING)
-        .border_color(accent.alpha(0.))
+        .border_color(ring.alpha(0.))
         .rounded(radius + RING_GAP + RING)
         .cursor_pointer()
-        .focus_visible(move |s| s.border_color(accent))
+        .when(KEYBOARD.load(Ordering::Relaxed), |d| d.focus(move |s| s.border_color(ring)))
         .on_click(on)
         .child(inner)
 }

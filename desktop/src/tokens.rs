@@ -275,30 +275,44 @@ pub mod motion {
     pub const ARRIVAL_MS: u64 = 2400;
 }
 
+/// WCAG relative luminance.
+fn luminance(c: Hsla) -> f64 {
+    let rgba = c.to_rgb();
+    let lin = |v: f32| {
+        let v = v as f64;
+        if v <= 0.03928 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+    };
+    0.2126 * lin(rgba.r) + 0.7152 * lin(rgba.g) + 0.0722 * lin(rgba.b)
+}
+
+/// The WCAG contrast ratio of two opaque colors.
+pub fn contrast(a: Hsla, b: Hsla) -> f64 {
+    let (x, y) = (luminance(a), luminance(b));
+    (x.max(y) + 0.05) / (x.min(y) + 0.05)
+}
+
+/// A focus ring color holds 3:1 against the window in both appearances, as WCAG asks of a focus indicator.
+pub fn ring_holds(c: Hsla) -> bool {
+    contrast(c, dark().bg) >= 3. && contrast(c, light().bg) >= 3.
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{Colors, DISABLED_OUTLINE, dark, light};
+    use super::{Colors, DISABLED_OUTLINE, contrast, dark, light};
     use gpui_kit::Hsla;
-
-    fn luminance(c: Hsla) -> f64 {
-        let rgba = c.to_rgb();
-        let lin = |v: f32| {
-            let v = v as f64;
-            if v <= 0.03928 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
-        };
-        0.2126 * lin(rgba.r) + 0.7152 * lin(rgba.g) + 0.0722 * lin(rgba.b)
-    }
-
-    fn contrast(a: Hsla, b: Hsla) -> f64 {
-        let (x, y) = (luminance(a), luminance(b));
-        (x.max(y) + 0.05) / (x.min(y) + 0.05)
-    }
 
     /// `fg` at `alpha` over `bg`, as the screen shows it.
     fn over(fg: Hsla, alpha: f32, bg: Hsla) -> Hsla {
         let (f, b) = (fg.to_rgb(), bg.to_rgb());
         let mix = |x: f32, y: f32| x * alpha + y * (1. - alpha);
         gpui_kit::Rgba { r: mix(f.r, b.r), g: mix(f.g, b.g), b: mix(f.b, b.b), a: 1. }.into()
+    }
+
+    #[test]
+    fn a_system_accent_rings_focus_only_where_it_holds_three_to_one() {
+        let rgb = |r, g, b| gpui_kit::Rgba { r, g, b, a: 1. }.into();
+        assert!(super::ring_holds(rgb(0.0, 0.48, 1.0)), "macOS blue");
+        assert!(!super::ring_holds(rgb(1.0, 0.78, 0.0)), "yellow fades into the light window");
     }
 
     #[test]

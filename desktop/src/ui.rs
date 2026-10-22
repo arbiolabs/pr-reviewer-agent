@@ -420,6 +420,16 @@ impl Shell {
         if overlay::palette_key(self, key, typed.as_deref(), cx) {
             return;
         }
+        // ⇥ first: an open sheet keeps it among its own controls (see `kit::sheet_open`).
+        if key == "tab" {
+            crate::kit::KEYBOARD.store(true, std::sync::atomic::Ordering::Relaxed);
+            if mods.shift {
+                window.focus_prev(cx)
+            } else {
+                window.focus_next(cx)
+            }
+            return cx.notify();
+        }
         match self.overlay {
             Some(Overlay::Keys) => {
                 if key == "escape" || typed.as_deref() == Some("?") {
@@ -437,14 +447,6 @@ impl Shell {
                 return;
             }
             _ => {}
-        }
-        if key == "tab" {
-            if mods.shift {
-                window.focus_prev(cx)
-            } else {
-                window.focus_next(cx)
-            }
-            return cx.notify();
         }
         // A focused control takes ⏎ and space itself: GPUI clicks it.
         if matches!(key, "enter" | "space") && window.focused(cx).is_some_and(|f| f != self.focus) {
@@ -541,6 +543,21 @@ impl Shell {
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.width = window.viewport_size().width;
+        let quiet = matches!(
+            self.model.top_modal(),
+            Some(Modal::Confirm {
+                command: Command::Start(_) | Command::Retry(_),
+                state: ConfirmState::Requested(_) | ConfirmState::Accepted { .. },
+                ..
+            })
+        );
+        crate::kit::sheet_open(
+            self.overlay.is_some()
+                || matches!(
+                    self.model.top_modal(),
+                    Some(Modal::Confirm { .. } | Modal::Input { .. } | Modal::Help { .. })
+                ) && !quiet,
+        );
         // A focused control that a state change removed (a card's button once its proof opens, the proof's Post
         // under its sheet) leaves no element focused, and then no key reaches the window: focus returns to it.
         if !self.snapshot && window.focused(cx).is_none() {
@@ -574,6 +591,12 @@ impl Render for Shell {
             .key_context("pr-review")
             .track_focus(&self.focus)
             .on_key_down(cx.listener(Self::on_key))
+            // A press hands focus back to the mouse: the ring goes until the next ⇥.
+            .capture_any_mouse_down(cx.listener(|_, _: &MouseDownEvent, _, cx| {
+                if crate::kit::KEYBOARD.swap(false, std::sync::atomic::Ordering::Relaxed) {
+                    cx.notify();
+                }
+            }))
             .on_key_up(cx.listener(|s, ev: &KeyUpEvent, _, _| {
                 if let (Some(Overlay::ConfirmPost(arm)), "enter") = (&mut s.overlay, ev.keystroke.key.as_str()) {
                     arm.release();
@@ -716,9 +739,14 @@ fn titlebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         .border_color(t.border)
         .window_control_area(WindowControlArea::Drag)
         .when(away, |d| {
-            // While a sheet asks, the title bar's Back waits for it, as ⌘[ does.
-            let back = s.overlay.is_none().then(|| click(cx, |s, cx| s.act(Action::Back, cx)));
-            d.child(button(t, "back", "Back", Some("⌘["), Tone::Ghost, back))
+            d.child(button(
+                t,
+                "back",
+                "Back",
+                Some("⌘["),
+                Tone::Ghost,
+                Some(click(cx, |s, cx| s.act(Action::Back, cx))),
+            ))
         })
         .child(
             div()

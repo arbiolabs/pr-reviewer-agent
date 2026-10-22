@@ -11,7 +11,7 @@ use pr_review_tui::update::{can_confirm, can_mutate, write_block};
 use std::ops::Range;
 
 use crate::detail::who;
-use crate::kit::{Tone, button, icon, keycap, overline};
+use crate::kit::{Tone, button, icon, keycap, overline, tip};
 use crate::queue::{self, Card, Stage};
 use crate::tokens::{Colors, layout, radius, space, text};
 use crate::ui::{Overlay, Shell, on};
@@ -36,17 +36,20 @@ struct Entry {
     run: Run,
 }
 
-/// The reason every command shares on a read-only daemon: said once, in the group's header, not on each row.
-const READ_ONLY: &str = "Read-only daemon";
+/// The reason every command shares on a read-only daemon, on each row it dims.
+const READ_ONLY: &str = "read-only daemon";
 
 fn mutation(m: &Model, mu: Mutation, title: String, key: &'static str, otherwise: &str) -> Entry {
-    let read_only = queue::read_only(m);
-    let blocked = (!can_mutate(m, mu)).then(|| match write_block(m, mu.capability()) {
-        Some(_) if read_only => READ_ONLY.into(),
-        Some(why) => why.to_string(),
-        None if m.selected_pr().is_none() => "no PR is selected".into(),
-        None => otherwise.to_string(),
-    });
+    // On a read-only daemon every command is off for that one reason, whatever else holds.
+    let blocked = if queue::read_only(m) {
+        Some(READ_ONLY.into())
+    } else {
+        (!can_mutate(m, mu)).then(|| match write_block(m, mu.capability()) {
+            Some(why) => why.to_string(),
+            None if m.selected_pr().is_none() => "no PR is selected".into(),
+            None => otherwise.to_string(),
+        })
+    };
     let run =
         if matches!(mu, Mutation::Start | Mutation::Retry) { Run::Direct(mu) } else { Run::Act(Action::Mutation(mu)) };
     Entry { group: "Review", title, key: Some(key), blocked, run }
@@ -54,8 +57,7 @@ fn mutation(m: &Model, mu: Mutation, title: String, key: &'static str, otherwise
 
 /// Every command, contextual ones first: each card's decision, the selected PR's actions with the reason any
 /// can't run, then going to a PR, then the views.
-fn entries(s: &Shell) -> Vec<Entry> {
-    let m = &s.model;
+fn entries(m: &Model) -> Vec<Entry> {
     let mut out = Vec::new();
     for (i, c) in queue::cards(m).iter().enumerate() {
         let title = match c {
@@ -207,13 +209,18 @@ pub fn matched(query: &str, title: &str) -> Vec<Range<usize>> {
         }
         from = b;
     }
+    // Bold reads only as one run or as word prefixes; letters lit across the middle of words read as noise.
+    let starts_word = |r: &Range<usize>| !title[..r.start].ends_with(char::is_alphanumeric);
+    if out.len() > 1 && !out.iter().all(starts_word) {
+        return Vec::new();
+    }
     out
 }
 
 /// The entries `query` matches, best first. Groups stay together: a group sorts by its best entry, and its entries
 /// by their own score, runnable before blocked, then in the order `entries` gives.
-fn matching(s: &Shell, query: &str) -> Vec<Entry> {
-    let found: Vec<(u8, usize, Entry)> = entries(s)
+fn matching(m: &Model, query: &str) -> Vec<Entry> {
+    let found: Vec<(u8, usize, Entry)> = entries(m)
         .into_iter()
         .enumerate()
         .filter_map(|(i, e)| score(query, &e.title).or_else(|| fuzzy(query, e.group).then_some(3)).map(|sc| (sc, i, e)))
@@ -257,11 +264,11 @@ fn run(s: &mut Shell, r: Run, cx: &mut Context<Shell>) {
 pub fn palette_key(s: &mut Shell, key: &str, typed: Option<&str>, cx: &mut Context<Shell>) -> bool {
     let Some(Overlay::Palette { query, selected }) = &s.overlay else { return false };
     let (mut q, mut sel) = (query.clone(), *selected);
-    let n = matching(s, &q).len();
+    let n = matching(&s.model, &q).len();
     match key {
         "escape" => s.overlay = None,
         "enter" => {
-            if let Some(e) = matching(s, &q).into_iter().nth(sel)
+            if let Some(e) = matching(&s.model, &q).into_iter().nth(sel)
                 && e.blocked.is_none()
             {
                 run(s, e.run, cx);
@@ -353,7 +360,7 @@ pub fn layer(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Vec<AnyElement> {
             if quiet {
                 out.push(toast(t, left, IconName::LoaderCircle, format!("{} Sending…", prompt.trim_end_matches('?'))));
             } else {
-                out.push(confirm(s, t, prompt, command, state, cx));
+                out.push(crate::kit::in_sheet(|| confirm(s, t, prompt, command, state, cx)));
             }
         }
         Some(Modal::Input { purpose, buffer, .. }) => out.push(input(t, *purpose, buffer, cx)),
@@ -363,7 +370,7 @@ pub fn layer(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Vec<AnyElement> {
     match &s.overlay {
         Some(Overlay::Palette { query, selected }) => out.push(palette(s, t, query, *selected, cx)),
         Some(Overlay::Keys) => out.push(keys(t, cx, false)),
-        Some(Overlay::ConfirmPost(_)) => out.push(confirm_post(s, t, cx)),
+        Some(Overlay::ConfirmPost(_)) => out.push(crate::kit::in_sheet(|| confirm_post(s, t, cx))),
         None => {}
     }
     out
@@ -461,7 +468,7 @@ const HEADER: f32 = 30.;
 
 fn palette(s: &Shell, t: &Colors, query: &str, selected: usize, cx: &Context<Shell>) -> AnyElement {
     let m = &s.model;
-    let found = matching(s, query);
+    let found = matching(m, query);
     let mut list = div().id("palette-list").flex().flex_col().overflow_y_scroll().p(space::S2);
     let mut group = "";
     let (mut tall, mut fits, mut more) = (8., 8., false);
@@ -475,8 +482,6 @@ fn palette(s: &Shell, t: &Colors, query: &str, selected: usize, cx: &Context<She
         );
         fits = 60.;
     }
-    let notes: Vec<&'static str> =
-        found.iter().filter(|e| e.blocked.as_deref() == Some(READ_ONLY)).map(|e| e.group).collect();
     for (i, e) in found.into_iter().enumerate() {
         if e.group != group {
             group = e.group;
@@ -489,15 +494,7 @@ fn palette(s: &Shell, t: &Colors, query: &str, selected: usize, cx: &Context<She
                     .h(px(HEADER))
                     .px(space::S3)
                     .pt(space::S2)
-                    .child(overline(t, group))
-                    .when(notes.contains(&group), |d| {
-                        d.child(icon(IconName::Lock, px(11.), t.faint)).child(
-                            div()
-                                .text_size(text::CAPTION)
-                                .text_color(t.faint)
-                                .child(format!("{READ_ONLY}: restart it with --allow-commands")),
-                        )
-                    }),
+                    .child(overline(t, group)),
             );
         }
         tall += ROW;
@@ -517,49 +514,67 @@ fn palette(s: &Shell, t: &Colors, query: &str, selected: usize, cx: &Context<She
             .map(|r| (r, HighlightStyle { font_weight: Some(FontWeight::BOLD), ..Default::default() }))
             .collect();
         let mark = glyph(m, &e);
-        let why = e.blocked.filter(|w| w != READ_ONLY);
-        list = list.child(
-            div()
-                .id(("pal", i))
-                .relative()
-                .flex()
-                .flex_none()
-                .items_center()
-                .gap(space::S3)
-                .h(px(ROW))
-                .px(space::S3)
-                .rounded(radius::SM)
-                .cursor_pointer()
-                .text_color(fg)
-                .when(on_it, |d| d.bg(t.selected).child(crate::kit::rail(t)))
-                .when(!on_it, |d| d.hover(|d| d.bg(t.hover)))
-                .when(!blocked, |d| d.on_click(cx.listener(move |s, _: &ClickEvent, _, cx| run(s, r.clone(), cx))))
-                .child(icon(
-                    mark,
-                    px(14.),
-                    if blocked {
-                        t.disabled
-                    } else if on_it {
-                        t.accent
-                    } else {
-                        t.muted
-                    },
-                ))
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .truncate()
-                        .text_size(text::BODY)
-                        .child(StyledText::new(e.title).with_highlights(hits)),
-                )
-                .children(why.map(|w| div().flex_none().pr(space::S4).text_size(text::CAPTION).child(w)))
-                .child(match e.key {
-                    Some(k) => keycap(t, k, None, blocked),
-                    None => div().w(px(18.)),
-                })
-                .when(on_it && !blocked, |d| d.child(keycap(t, "⏎", None, false))),
-        );
+        let locked = e.blocked.as_deref() == Some(READ_ONLY);
+        let why = e.blocked;
+        let row = div()
+            .id(("pal", i))
+            .relative()
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap(space::S3)
+            .h(px(ROW))
+            .px(space::S3)
+            .rounded(radius::SM)
+            .cursor_pointer()
+            .text_color(fg)
+            .when(on_it, |d| d.bg(t.selected).child(crate::kit::rail(t)))
+            // The pointer moves the one selection, so a hovered row and the chosen row are never two rows.
+            .on_hover(cx.listener(move |s, over: &bool, _, cx| {
+                if let (true, Some(Overlay::Palette { selected, .. })) = (*over, &mut s.overlay)
+                    && *selected != i
+                {
+                    *selected = i;
+                    cx.notify();
+                }
+            }))
+            .when(!blocked, |d| d.on_click(cx.listener(move |s, _: &ClickEvent, _, cx| run(s, r.clone(), cx))))
+            .child(icon(
+                mark,
+                px(14.),
+                if blocked {
+                    t.disabled
+                } else if on_it {
+                    t.accent
+                } else {
+                    t.muted
+                },
+            ))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .truncate()
+                    .text_size(text::BODY)
+                    .child(StyledText::new(e.title).with_highlights(hits)),
+            )
+            .children(why.map(|w| {
+                div()
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .gap(px(5.))
+                    .pr(space::S4)
+                    .text_size(text::CAPTION)
+                    .when(locked, |d| d.child(icon(IconName::Lock, px(11.), t.disabled)))
+                    .child(w)
+            }))
+            .child(match e.key {
+                Some(k) => keycap(t, k, None, blocked),
+                None => div().w(px(18.)),
+            })
+            .when(on_it && !blocked, |d| d.child(keycap(t, "⏎", None, false)));
+        list = list.child(if locked { tip(row, "Restart the daemon with --allow-commands to run it.") } else { row });
     }
     let list = div().relative().h(px(if more { fits } else { fits + 8. })).child(list.size_full()).when(more, |d| {
         d.child(div().absolute().bottom_0().left_0().right_0().h(space::S6).bg(linear_gradient(
@@ -658,7 +673,7 @@ fn confirm(
         .flex()
         .items_start()
         .justify_center()
-        .top(layout::TOOLBAR)
+        .pt(layout::TOOLBAR)
         .child(
             drop_sheet(t, layout::SHEET)
                 .p(space::S6)
@@ -750,7 +765,7 @@ fn confirm_post(s: &Shell, t: &Colors, cx: &Context<Shell>) -> AnyElement {
         .flex()
         .items_start()
         .justify_center()
-        .top(layout::TOOLBAR)
+        .pt(layout::TOOLBAR)
         .child(
             drop_sheet(t, layout::SHEET)
                 .id("post-sheet")
@@ -936,6 +951,35 @@ mod tests {
         assert_eq!(super::matched("rtf", "Retry the failed review"), [0..1, 6..7, 10..11]);
         assert_eq!(super::matched("zz", "Retry"), Vec::<std::ops::Range<usize>>::new());
         assert_eq!(super::matched("", "Retry"), Vec::<std::ops::Range<usize>>::new());
+        // "start" scattered through "Orders: self-serve refunds, stock holds at…" lights nothing.
+        assert_eq!(
+            super::matched("start", "#1287 Orders: self-serve refunds, stock holds at checkout"),
+            Vec::<std::ops::Range<usize>>::new()
+        );
+        assert_eq!(super::matched("start", "Start a review of #1296"), vec![0..5]);
+    }
+
+    #[test]
+    fn a_read_only_daemon_dims_every_command_row_with_its_reason() {
+        use pr_review_tui::model::{Look, Model, Screen};
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../protocol/playback/showcase.ndjson");
+        let mut m = Model::new("test", Look::default(), Screen::Review, None);
+        let steps = crate::script::parse("wait:19000,pr:1287").unwrap();
+        crate::script::play(pr_review_tui::playback::load(&path).unwrap(), &mut m, &steps, 20_000).unwrap();
+        m.server.as_mut().unwrap().capabilities.clear();
+        let rows: Vec<(String, Option<String>)> =
+            super::entries(&m).into_iter().filter(|e| e.group == "Review").map(|e| (e.title, e.blocked)).collect();
+        let locked = Some(super::READ_ONLY.to_string());
+        assert_eq!(
+            rows,
+            [
+                ("Review and post the proof of #1287".to_string(), locked.clone()),
+                ("Start a review of #1287 at its head".to_string(), locked.clone()),
+                ("Retry the failed review of #1287".to_string(), locked.clone()),
+                ("Cancel the review of #1287".to_string(), locked),
+                ("Open #1287 on GitHub".to_string(), None),
+            ]
+        );
     }
 
     #[test]

@@ -181,6 +181,20 @@ fn desk(steps: &[script::Step]) -> Vec<script::Desk> {
     steps.iter().filter_map(|s| if let script::Step::Desk(d) = s { Some(d.clone()) } else { None }).collect()
 }
 
+/// The accent color the reader picked in System Settings, for the focus ring, so keyboard focus looks as it does in
+/// every other app.
+#[cfg(target_os = "macos")]
+fn system_accent() -> Option<Hsla> {
+    use objc2_app_kit::{NSColor, NSColorSpace};
+    let c = NSColor::controlAccentColor().colorUsingColorSpace(&NSColorSpace::sRGBColorSpace())?;
+    Some(Rgba { r: c.redComponent() as f32, g: c.greenComponent() as f32, b: c.blueComponent() as f32, a: 1. }.into())
+}
+
+#[cfg(not(target_os = "macos"))]
+fn system_accent() -> Option<Hsla> {
+    None
+}
+
 /// macOS's Reduce motion setting, or `PR_REVIEW_REDUCE_MOTION=1`.
 fn reduce_motion() -> bool {
     if std::env::var_os("PR_REVIEW_REDUCE_MOTION").is_some_and(|v| v == "1") {
@@ -246,6 +260,9 @@ fn run_app(
             ..Default::default()
         };
         let View { model, cmds, desk, still, snapshot: is_snapshot } = view;
+        if !is_snapshot && let Some(c) = system_accent().filter(|c| tokens::ring_holds(*c)) {
+            let _ = kit::RING_COLOR.set(c);
+        }
         let built = gpui_kit::open_window(options, cx, |window, cx| {
             let shell = cx.new(|cx| ui::Shell::new(model, cmds, still, is_snapshot, &desk, cx));
             let focus = shell.read(cx).focus.clone();

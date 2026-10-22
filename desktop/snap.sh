@@ -44,10 +44,13 @@ with open(out, "w") as w:
         zero(o)
         w.write(json.dumps(o, separators=(",", ":")) + "\n")' \
   desktop/target/fixtures/server.finding.detail.showcase-3.json "$script" "$derived_script"
-# A read-only daemon: the showcase with its welcome rewritten.
+# A read-only daemon: the showcase with its welcome rewritten, answering from the fixtures as they are.
+rm -rf desktop/target/readonly
+mkdir -p desktop/target/readonly/playback
+cp -R protocol/fixtures desktop/target/readonly/fixtures
+readonly_script=desktop/target/readonly/playback/readonly.ndjson
 sed '1s/"capabilities":\["account.select","review.start","review.retry","review.cancel","review.publish"\],"mode":"engine"/"capabilities":["account.select"],"mode":"read-only","readOnlyReason":"another pr-review holds the data directory; start this daemon with --allow-commands"/' \
-  "$script" > desktop/target/playback/readonly.ndjson
-readonly_script=desktop/target/playback/readonly.ndjson
+  "$script" > "$readonly_script"
 
 # One capture, retried up to three times when the app exits without its PNG or never writes it within 60 s.
 capture() {
@@ -98,6 +101,7 @@ for look in dark light; do
   snap 06-approval-$look       $look 20000 "wait:19000,pr:1291,publish"
   snap 06b-confirm-post-$look  $look 20000 "wait:19000,pr:1291,publish,confirm-post"
   snap 07-palette-$look        $look 20000 "wait:19000,palette:re"
+  snap 07b-palette-readonly-$look $look 20000 "wait:19000,pr:1287,palette:start" "$readonly_script"
   snap 08-setup-$look          $look 1000  "" protocol/playback/setup.ndjson
   case $only in "  " | *" 08-disconnected-$look "*)
     capture "$out/08-disconnected-$look.png" --socket /private/tmp/prdc/s.sock --window 1280x800 \

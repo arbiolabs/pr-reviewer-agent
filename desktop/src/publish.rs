@@ -12,7 +12,7 @@ use crate::detail::*;
 use crate::kit::{OnClick, Tone, button, callout, icon, summary};
 use crate::queue;
 use crate::tokens::{Colors, layout, radius, space, text};
-use crate::ui::{Overlay, Shell, on};
+use crate::ui::{Shell, on};
 
 const MARKER: &str = "<!-- durable-review:";
 
@@ -289,9 +289,8 @@ pub fn publication(
     }
     body = body.child(section(t, &format!("Inline comments · {n}"), comments));
 
-    // While the sheet asks, the page's own buttons step back, so the sheet holds the only live controls.
-    let asking = matches!(s.overlay, Some(Overlay::ConfirmPost(_)));
-    let ready = can_confirm(m) && !asking;
+    // While the sheet asks, the page keeps its look under the scrim; the scrim takes every click, and ⇥ stays in the sheet.
+    let ready = can_confirm(m);
     let footer = if done {
         Bar {
             lead: vec![],
@@ -327,7 +326,7 @@ pub fn publication(
                 Some(Box::new(cx.listener(|s, _: &ClickEvent, _, cx| s.post(false, cx))) as OnClick),
             ),
             false => Item {
-                why: (!asking).then(|| match publish_block(m, p) {
+                why: Some(match publish_block(m, p) {
                     Some(_) if queue::read_only(m) => why_not(m, pr_review_tui::keymap::Mutation::Publish, "post"),
                     Some(w) => format!("Can't post: {w}"),
                     None => "Can't post right now.".into(),
@@ -344,7 +343,7 @@ pub fn publication(
                     "Not now",
                     "esc",
                     Tone::Ghost,
-                    (!asking).then(|| crate::ui::click(cx, |s, cx| s.act(Action::Back, cx))),
+                    Some(crate::ui::click(cx, |s, cx| s.act(Action::Back, cx))),
                 ),
                 post,
             ],
