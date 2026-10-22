@@ -145,6 +145,8 @@ pub struct Shell {
     pub width: Pixels,
     /// The action bar's More menu is open.
     pub more_open: bool,
+    /// The timeline's "Verifier discarded" groups that are open, by the sequence of their CANDIDATES_DISPOSED.
+    pub open_discards: Vec<u64>,
 }
 
 /// A page the reader went into: a finding, the proof, the diff or setup. The live strip steps aside there.
@@ -183,6 +185,7 @@ impl Shell {
             scrub: None,
             width: px(1280.),
             more_open: false,
+            open_discards: Vec::new(),
         };
         for d in desk {
             match d {
@@ -191,6 +194,10 @@ impl Shell {
                 Desk::Keys => s.overlay = Some(Overlay::Keys),
                 Desk::ConfirmPost => s.post(false, cx),
                 Desk::Scrub(n) => s.scrub = Some(n.saturating_sub(1)),
+                Desk::Discards => {
+                    s.open_discards =
+                        s.model.timeline.iter().flat_map(|tl| &tl.events).map(|e| e.sequence.get()).collect()
+                }
             }
         }
         s
@@ -631,9 +638,17 @@ fn titlebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
     let pr_title = pr.map_or(String::new(), |p| p.title.to_string());
     let (title, sub) = match (m.ui.screen, front(m)) {
         (_, Some(Modal::Finding { id, .. })) => {
-            let all = pr.map(|p| m.domain.pr_findings(&p.id)).unwrap_or_default();
+            // Counted within the list the PR page shows it in, so "of N" matches that list's count.
+            let stale = m.domain.findings.get(id).is_some_and(|f| f.stale);
+            let all: Vec<_> = pr
+                .map(|p| m.domain.pr_findings(&p.id))
+                .unwrap_or_default()
+                .into_iter()
+                .filter(|f| f.stale == stale)
+                .collect();
             let at = all.iter().position(|f| &f.id == id).map_or(0, |i| i + 1);
-            (format!("{number} · finding {at} of {}", all.len()), pr_title)
+            let what = if stale { "earlier finding" } else { "finding" };
+            (format!("{number} · {what} {at} of {}", all.len()), pr_title)
         }
         (_, Some(Modal::Publication { run_id, publish, .. })) => {
             let word = match crate::publish::stage(m, run_id, publish) {

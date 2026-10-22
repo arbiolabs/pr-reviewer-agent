@@ -109,6 +109,114 @@ pub fn open_finding(f: &Finding) -> bool {
     !f.stale && matches!(f.status, FindingStatus::Detected | FindingStatus::StillPresent | FindingStatus::Uncertain)
 }
 
+/// Where a finding stands across the PR's heads, as the reader reads it: the daemon's status, with a reopening
+/// told apart from a new finding.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Tracking {
+    New,
+    Posted,
+    StillPresent,
+    LooksResolved,
+    Reopened,
+    Uncertain,
+    Outdated,
+    Resolved,
+    Unknown,
+}
+
+pub fn tracking(m: &Model, f: &Finding) -> Tracking {
+    if reopens(m, f).is_some() { Tracking::Reopened } else { Tracking::from(f.status) }
+}
+
+/// A status as the daemon sent it, with no knowledge of what a new finding reopens.
+impl From<FindingStatus> for Tracking {
+    fn from(s: FindingStatus) -> Tracking {
+        match s {
+            FindingStatus::Detected => Tracking::New,
+            FindingStatus::Published => Tracking::Posted,
+            FindingStatus::StillPresent => Tracking::StillPresent,
+            FindingStatus::PotentiallyResolved => Tracking::LooksResolved,
+            FindingStatus::Uncertain => Tracking::Uncertain,
+            FindingStatus::Outdated => Tracking::Outdated,
+            FindingStatus::Resolved => Tracking::Resolved,
+            FindingStatus::Unknown => Tracking::Unknown,
+        }
+    }
+}
+
+/// What a reopened finding reopens: a reopening is a new finding seeded from a resolved one with the same
+/// fingerprint. `Some(None)` when its own history says it reopened but the resolved one is not in the snapshot.
+pub fn reopens<'a>(m: &'a Model, f: &Finding) -> Option<Option<&'a Finding>> {
+    if f.status != FindingStatus::Detected {
+        return None;
+    }
+    let twin = m
+        .domain
+        .pr_findings(&f.pr_id)
+        .into_iter()
+        .find(|x| x.id != f.id && x.fingerprint == f.fingerprint && x.status == FindingStatus::Resolved);
+    let said = m.details.get(&f.id).is_some_and(|d| {
+        d.history.iter().any(|h| {
+            h.basis.as_ref().is_some_and(|b| b.as_str() == "reopened") || h.disposition == FindingStatus::Resolved
+        })
+    });
+    match twin {
+        Some(t) => Some(Some(t)),
+        None if said => Some(None),
+        None => None,
+    }
+}
+
+/// The commit the reviewer last looked at `f` on: the head of the run that last reported it.
+pub fn sighted_at(m: &Model, f: &Finding) -> Option<String> {
+    m.domain.runs.get(&f.run_id).map(|r| r.head_sha.short().to_string())
+}
+
+/// A history entry's basis in the reader's words; `None` for one the daemon gave none or this client doesn't know.
+pub fn basis_words(basis: &str) -> Option<&'static str> {
+    Some(match basis {
+        "reverified" => "verified again",
+        "located" => "its code was found again",
+        "changed" => "its cited lines changed",
+        "file_gone" => "its file is gone",
+        "resolution_checked" => "the fix was verified",
+        "resolution_refused" => "a claimed fix did not hold up",
+        "reported_unverified" => "reported again, not verified",
+        "reopened" => "its fixed code came back",
+        _ => return None,
+    })
+}
+
+/// What the verifier did with a run's candidates, from its CANDIDATES_DISPOSED detail
+/// ("3 verified, 2 discarded, 1 carried, 0 resolved, 1 reopened"). The daemon sends counts, not each discard's
+/// reason: `pr-review inspect` lists those.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Disposed {
+    pub verified: usize,
+    pub discarded: usize,
+    pub carried: usize,
+    pub resolved: usize,
+    pub reopened: usize,
+}
+
+/// `None` unless every part parses: a detail this client can't read is shown as the daemon wrote it.
+pub fn disposed(detail: &str) -> Option<Disposed> {
+    let mut d = Disposed::default();
+    for part in detail.split(", ") {
+        let (n, what) = part.split_once(' ')?;
+        let n: usize = n.parse().ok()?;
+        match what {
+            "verified" => d.verified = n,
+            "discarded" => d.discarded = n,
+            "carried" => d.carried = n,
+            "resolved" => d.resolved = n,
+            "reopened" => d.reopened = n,
+            _ => return None,
+        }
+    }
+    Some(d)
+}
+
 /// How much evidence a finding cites, as every surface prints it: the loaded detail's own list once it is here,
 /// and the summary's count until then, so a row and the page it opens never disagree.
 pub fn evidence_count(m: &Model, f: &Finding) -> usize {
@@ -461,7 +569,7 @@ pub fn stage(m: &Model) -> Stage {
     }
 }
 
-fn one(n: usize) -> String {
+pub fn one(n: usize) -> String {
     match n {
         1 => "One".into(),
         2 => "Two".into(),
@@ -583,6 +691,63 @@ mod tests {
         let m = at(30_000, "wait:20000,pr:1291,publish,wait:100,confirm");
         assert!(!shape(&m).iter().any(|(_, n)| *n == 1291), "{:?}", shape(&m));
         assert!(done(&m).iter().any(|(p, _)| p.number == 1291));
+    }
+
+    fn session(name: &str, ms: u64) -> Model {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join(format!("../protocol/playback/{name}.ndjson"));
+        let mut m = Model::new("test", Look::default(), Screen::Review, None);
+        play(pr_review_tui::playback::load(&path).unwrap(), &mut m, &[], ms).unwrap();
+        m
+    }
+
+    #[test]
+    fn tracking_reads_each_finding_across_heads_and_links_a_reopening_to_its_fix() {
+        use super::Tracking::*;
+        let m = session("tracking", 3_000);
+        let pr = m.domain.prs.values().find(|p| p.number == 1302).unwrap();
+        let mut got: Vec<(String, super::Tracking)> =
+            m.domain.pr_findings(&pr.id).into_iter().map(|f| (f.title.to_string(), super::tracking(&m, f))).collect();
+        got.sort();
+        let want = [
+            ("Cancelling a hold may leave an authorized deposit uncaptured and unreleased", Uncertain),
+            ("Hold expiry lives in a timer in the web process", StillPresent),
+            ("Slot times ignore the venue's time zone", LooksResolved),
+            ("The payment webhook can confirm a released hold", Reopened),
+            ("The payment webhook can confirm a released hold", Resolved),
+        ];
+        assert_eq!(got, want.map(|(t, s)| (t.to_string(), s)));
+        let reopened = m.domain.pr_findings(&pr.id).into_iter().find(|f| super::tracking(&m, f) == Reopened).unwrap();
+        let fixed = super::reopens(&m, reopened).flatten().unwrap();
+        assert_eq!(fixed.status, pr_review_tui::protocol::FindingStatus::Resolved);
+        assert_ne!(super::sighted_at(&m, fixed), super::sighted_at(&m, reopened), "fixed on one head, back on another");
+        assert_eq!(super::sighted_at(&m, reopened).as_deref(), Some(pr.head_sha.short()));
+        assert_eq!(super::basis_words("changed"), Some("its cited lines changed"));
+    }
+
+    #[test]
+    fn the_timeline_reads_what_each_run_s_verifier_discarded() {
+        let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("../protocol/playback/tracking.ndjson");
+        let mut m = Model::new("test", Look::default(), Screen::Review, None);
+        play(
+            pr_review_tui::playback::load(&path).unwrap(),
+            &mut m,
+            &parse("wait:2000,pr:1302,open-timeline").unwrap(),
+            3_000,
+        )
+        .unwrap();
+        let got: Vec<super::Disposed> = m
+            .timeline
+            .iter()
+            .flat_map(|tl| &tl.events)
+            .filter_map(|e| match &e.body {
+                pr_review_tui::protocol::EventBody::PhaseChanged(p) if p.event.as_str() == "CANDIDATES_DISPOSED" => {
+                    super::disposed(p.detail.as_ref()?.as_str())
+                }
+                _ => None,
+            })
+            .collect();
+        assert_eq!(got.iter().map(|d| d.discarded).collect::<Vec<_>>(), [2, 1, 3], "newest first");
+        assert_eq!(super::disposed("2 verified, a few discarded"), None);
     }
 
     #[test]

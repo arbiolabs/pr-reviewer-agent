@@ -9,7 +9,7 @@ use pr_review_tui::update::{Msg, event_text, is_heading, timeline_rows};
 use pr_review_tui::view::Hit;
 
 use crate::detail::{Bar, Item, bar_view, page, pr_header, pr_sentence, tabs};
-use crate::kit::{Tone, callout, overline};
+use crate::kit::{Tone, callout, icon, overline};
 use crate::queue::phase_word;
 use crate::tokens::{Colors, radius, severity_mark, space, text};
 use crate::ui::{Shell, on};
@@ -53,6 +53,19 @@ pub fn timeline(s: &Shell, t: &Colors, pr: &Pr, cx: &Context<Shell>) -> Div {
     }
     let rows = timeline_rows(m, tl);
     let mut list = div().flex().flex_col();
+    // What each run's verifier discarded, from its CANDIDATES_DISPOSED. The timeline folds a phase change with nothing
+    // under it into the next heading, so the group sits under the run's Verifying heading instead.
+    let disposals: Vec<(&pr_review_tui::protocol::RunId, u64, crate::queue::Disposed)> = tl
+        .events
+        .iter()
+        .filter_map(|e| match &e.body {
+            EventBody::PhaseChanged(p) if p.event.as_str() == "CANDIDATES_DISPOSED" => {
+                let d = crate::queue::disposed(p.detail.as_ref()?.as_str())?;
+                (d.discarded > 0).then_some((&p.run_id, e.sequence.get(), d))
+            }
+            _ => None,
+        })
+        .collect();
     let mut last_phase = None;
     for (e, phase) in rows {
         if phase != last_phase {
@@ -65,6 +78,11 @@ pub fn timeline(s: &Shell, t: &Colors, pr: &Pr, cx: &Context<Shell>) -> Div {
                         .border_color(t.border)
                         .child(overline(t, phase_word(p))),
                 );
+                if p == pr_review_tui::protocol::Phase::Verify
+                    && let Some((_, seq, d)) = disposals.iter().find(|(r, ..)| e.run_id.as_ref() == Some(*r))
+                {
+                    list = list.child(discards(s, t, pr, *seq, *d, cx));
+                }
             }
             last_phase = phase;
         }
@@ -154,6 +172,68 @@ pub fn timeline(s: &Shell, t: &Colors, pr: &Pr, cx: &Context<Shell>) -> Div {
     page("detail-tl", body, Some(footer), t, false)
 }
 
+/// What the verifier discarded in one run: a collapsed row with the count, which opens on what it kept and
+/// where each discard's reason lives. The daemon streams the counts only, so the reasons are one command away.
+fn discards(s: &Shell, t: &Colors, pr: &Pr, seq: u64, d: crate::queue::Disposed, cx: &Context<Shell>) -> Stateful<Div> {
+    use gpui_kit::assets::IconName;
+    let open = s.open_discards.contains(&seq);
+    let count = crate::queue::count(d.discarded, "candidate");
+    let head = div()
+        .flex()
+        .items_center()
+        .gap(space::S2)
+        .child(icon(if open { IconName::ChevronDown } else { IconName::ChevronRight }, px(14.), t.muted))
+        .child(icon(IconName::Funnel, px(14.), t.muted))
+        .child(div().text_size(text::BODY).font_weight(FontWeight::MEDIUM).child(format!("Verifier discarded {count}")))
+        .child(div().text_size(text::SMALL).text_color(t.muted).child(format!(
+            "· kept {}, carried {}, resolved {}, reopened {}",
+            d.verified, d.carried, d.resolved, d.reopened
+        )));
+    let command = format!("pr-review inspect --pr {}#{}", pr.repository, pr.number);
+    let body = div()
+        .flex()
+        .flex_col()
+        .gap(space::S2)
+        .pl(px(44.))
+        .child(div().max_w(crate::tokens::layout::MEASURE).text_size(text::BODY).line_height(text::LINE_BODY).child(
+            format!(
+                "The verifier dropped {count} it could not confirm against the pinned code, so none of them \
+                 is a finding and nothing about them is posted. The daemon streams how many, not why. Each discard \
+                 and its reason is in the daemon's record:"
+            ),
+        ))
+        .child(div().flex().child(crate::setup::copy_chip(t, ("inspect", seq as usize), &command)));
+    let row = div()
+        .id(("discards-face", seq as usize))
+        .flex()
+        .flex_col()
+        .gap(space::S3)
+        .my(space::S2)
+        .px(space::S3)
+        .py(space::S2)
+        .rounded(radius::SM)
+        .border_1()
+        .border_color(t.border)
+        .bg(t.surface)
+        .hover(move |d| d.bg(crate::kit::lift(t, t.surface)))
+        .child(head)
+        .when(open, |d| d.child(body));
+    crate::kit::focusable(
+        ("discards", seq as usize),
+        row,
+        t,
+        radius::SM,
+        Box::new(cx.listener(move |s, _: &ClickEvent, _, cx| {
+            if let Some(i) = s.open_discards.iter().position(|x| *x == seq) {
+                s.open_discards.remove(i);
+            } else {
+                s.open_discards.push(seq);
+            }
+            cx.notify();
+        })),
+    )
+}
+
 /// An event in words, its severity or tool set the way the rest of the window sets them.
 fn event_line(t: &Colors, e: &SequencedEvent) -> Div {
     // Every row starts with the same 16-point glyph slot, so the words line up whether or not a row has a glyph.
@@ -194,7 +274,7 @@ fn event_line(t: &Colors, e: &SequencedEvent) -> Div {
         // The glyph already says the severity; a status other than new follows the title.
         EventBody::FindingUpdated(f) => {
             let (mark, _) = severity_mark(f.severity);
-            let status = crate::detail::status_sentence(f, &[]).0;
+            let status = crate::detail::status_sentence(f.status.into()).0;
             row().child(glyph(Some((mark, t.severity(f.severity))))).child(words(if status == "New" {
                 f.title.to_string()
             } else {

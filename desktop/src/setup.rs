@@ -48,8 +48,8 @@ pub fn read_only_sentence(m: &pr_review_tui::model::Model) -> String {
 fn plain(c: &pr_review_tui::protocol::SetupCheck) -> (String, Option<String>) {
     match (c.id.as_str(), c.status) {
         ("jev", CheckStatus::Warn | CheckStatus::Missing) => (
-            "Jev rates how risky each change is, so risky PRs get a deeper review. Without a key it is skipped, and \
-             every PR gets the standard review."
+            "Jev rates each change's risk so risky PRs get a deeper review. Without a key, every PR gets the \
+             standard one."
                 .into(),
             Some("Set `TYPESAFE_API_KEY` in the daemon's environment to turn it on.".into()),
         ),
@@ -57,50 +57,97 @@ fn plain(c: &pr_review_tui::protocol::SetupCheck) -> (String, Option<String>) {
     }
 }
 
-/// A fix from a setup check, with its `commands` as mono chips the reader can copy, and the prose between them.
-fn fix_line(t: &Colors, fix: &str) -> Div {
-    let mut row = div().flex().flex_wrap().items_center().gap_x(space::S2).gap_y(space::S1).mt(space::S1);
+/// A fix's parts: prose, and the commands and environment variables the reader can copy. A command is what the
+/// daemon set in backticks; a variable is a bare `UPPER_CASE` word, which the daemon leaves unquoted.
+fn fix_parts(fix: &str) -> Vec<(bool, String)> {
+    let var = |w: &str| {
+        let w = w.trim_end_matches([',', '.', ';', ':']);
+        w.len() > 2 && w.contains('_') && w.chars().all(|c| c.is_ascii_uppercase() || c.is_ascii_digit() || c == '_')
+    };
+    let mut out: Vec<(bool, String)> = Vec::new();
     for (i, part) in fix.split('`').enumerate() {
-        if part.is_empty() {
+        if i % 2 == 1 {
+            out.push((true, part.to_string()));
             continue;
         }
-        if i % 2 == 0 {
-            // Punctuation after a command sits against its chip, not a gap away from it.
-            let text = part.trim();
-            let glued = i > 0 && text.starts_with([',', '.', ';', ':']);
-            row = row.child(
-                div()
-                    .max_w(relative(1.))
-                    .when(glued, |d| d.ml(px(-6.)))
-                    .text_size(text::SMALL)
-                    .text_color(t.muted)
-                    .child(text.to_string()),
-            );
-        } else {
-            let copy = part.to_string();
-            row = row.child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(2.))
-                    .pl(space::S2)
-                    .rounded(radius::SM)
-                    .bg(t.code_bg)
-                    .border_1()
-                    .border_color(t.border)
-                    .child(div().font_family(text::MONO).text_size(px(11.)).text_color(t.text).child(part.to_string()))
-                    .child(icon_button(
-                        t,
-                        SharedString::from(format!("copy-{i}-{}", part.len())),
-                        IconName::Copy,
-                        "Copy the command",
-                        px(24.),
-                        Some(Box::new(move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
-                            cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()))
-                        }) as OnClick),
-                    )),
-            );
+        for word in part.split(' ').filter(|w| !w.is_empty()) {
+            if var(word) {
+                let name = word.trim_end_matches([',', '.', ';', ':']);
+                out.push((true, name.to_string()));
+                let tail = &word[name.len()..];
+                if !tail.is_empty() {
+                    out.push((false, tail.to_string()));
+                }
+            } else {
+                match out.last_mut() {
+                    Some((false, prose)) => {
+                        prose.push(' ');
+                        prose.push_str(word);
+                    }
+                    _ => out.push((false, word.to_string())),
+                }
+            }
         }
+    }
+    out
+}
+
+/// Every command the failing and limited checks name, one per line, for Copy all commands.
+fn all_commands(m: &pr_review_tui::model::Model) -> Vec<String> {
+    let checks = m.server.as_ref().and_then(|s| s.checks.as_ref());
+    checks
+        .into_iter()
+        .flatten()
+        .filter(|c| c.status != CheckStatus::Ok)
+        .filter_map(|c| plain(c).1)
+        .flat_map(|f| f.split('`').skip(1).step_by(2).map(str::to_string).collect::<Vec<_>>())
+        .filter(|c| c.contains(' '))
+        .collect()
+}
+
+/// Mono text the reader can copy, with room before its copy button.
+pub fn copy_chip(t: &Colors, id: impl Into<ElementId>, text: &str) -> Div {
+    let copy = text.to_string();
+    div()
+        .flex()
+        .flex_none()
+        .items_center()
+        .gap(space::S1)
+        .pl(space::S2)
+        .rounded(radius::SM)
+        .bg(t.code_bg)
+        .border_1()
+        .border_color(t.border)
+        .child(div().font_family(text::MONO).text_size(px(11.)).text_color(t.text).child(text.to_string()))
+        .child(icon_button(
+            t,
+            id,
+            IconName::Copy,
+            "Copy",
+            px(24.),
+            Some(Box::new(move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
+                cx.stop_propagation();
+                cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()))
+            }) as OnClick),
+        ))
+}
+
+/// A fix from a setup check: prose, with every command and variable as a chip the reader can copy.
+fn fix_line(t: &Colors, check: &str, fix: &str) -> Div {
+    let mut row = div().flex().flex_wrap().items_center().gap_x(space::S2).gap_y(space::S1).mt(space::S1);
+    for (i, (code, part)) in fix_parts(fix).into_iter().enumerate() {
+        row = row.child(if code {
+            copy_chip(t, SharedString::from(format!("copy-{check}-{i}")), &part)
+        } else {
+            // Punctuation after a chip sits against it, not a gap away from it.
+            let glued = i > 0 && part.starts_with([',', '.', ';', ':']);
+            div()
+                .max_w(relative(1.))
+                .when(glued, |d| d.ml(px(-6.)))
+                .text_size(text::SMALL)
+                .text_color(t.muted)
+                .child(part.trim().to_string())
+        });
     }
     row
 }
@@ -425,7 +472,7 @@ pub fn setup_body(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                                     .child(chip(t, word, hue)),
                             )
                             .child(div().text_size(text::SMALL).text_color(t.muted).child(detail.to_string()))
-                            .children(fix.map(|f| fix_line(t, &f))),
+                            .children(fix.map(|f| fix_line(t, c.id.as_str(), &f))),
                     ),
                 );
             }
@@ -557,6 +604,21 @@ pub fn setup_body(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                 .child(summary(t, "The checks pr-review setup --check runs, as the daemon reports them.")),
         )
         .child(lead)
+        .children({
+            let commands = all_commands(m).join("\n");
+            (!commands.is_empty()).then(|| {
+                div().flex().child(button(
+                    t,
+                    "copy-all",
+                    "Copy all commands",
+                    None,
+                    Tone::Secondary,
+                    Some(Box::new(move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
+                        cx.write_to_clipboard(ClipboardItem::new_string(commands.clone()))
+                    }) as OnClick),
+                ))
+            })
+        })
         .child(card("Checks", list))
         .child(card("Connection", conn))
         .child(card("GitHub accounts", accounts))

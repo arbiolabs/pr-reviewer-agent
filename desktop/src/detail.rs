@@ -19,7 +19,7 @@ use crate::kit::{
     Gauge, OnClick, Tone, button, callout, chip, clock, display, heading, icon, icon_button, lift, overline, progress,
     rail, severity_badge, summary, tabular, tip,
 };
-use crate::queue::{self, Ending, Stage, phase_word};
+use crate::queue::{self, Ending, Stage, Tracking, phase_word};
 use crate::tokens::{Colors, layout, radius, severity_mark, space, text};
 use crate::ui::{Shell, on};
 
@@ -420,11 +420,15 @@ pub fn pr_sentence(m: &Model, pr: &Pr, run: Option<&Run>) -> String {
         Some(PublicationStatus::Uncertain) => "Posting unconfirmed: the daemon is checking GitHub.".into(),
         _ if current.is_empty() => format!("Reviewed at {when} with {}. Nothing found.", r.model),
         _ => {
-            let worst = open.first().map(|f| severity_mark(f.severity).1.to_lowercase());
+            let worst = open.iter().map(|f| f.severity).min().map(|w| {
+                let n = open.iter().filter(|f| f.severity == w).count();
+                let how = if n > 1 && n == open.len() { "all".to_string() } else { queue::one(n).to_lowercase() };
+                format!(", {how} {}", severity_mark(w).1.to_lowercase())
+            });
             format!(
                 "{} to judge{}. Nothing was posted.",
                 queue::count(open.len(), "finding"),
-                worst.map_or(String::new(), |w| format!(", one {w}"))
+                worst.unwrap_or_default()
             )
         }
     }
@@ -740,38 +744,51 @@ fn pr_actions(s: &Shell, pr: &Pr, run: Option<&Run>, cx: &Context<Shell>) -> Bar
     bar
 }
 
-/// A finding's tracking status as a word and the sentence that explains it, in the reviewer's terms.
-pub fn status_sentence(f: &Finding, history: &[HistoryEntry]) -> (&'static str, &'static str) {
-    if f.status == FindingStatus::Detected && history.iter().any(|h| h.disposition == FindingStatus::Resolved) {
-        return ("Reopened", "It looked resolved on an earlier head, but its code is still here.");
-    }
-    match f.status {
-        FindingStatus::Detected => ("New", "First reported by this run. Not posted to GitHub yet."),
-        FindingStatus::Published => ("Posted", "On GitHub as an inline comment."),
-        FindingStatus::StillPresent => {
+/// A finding's tracking state as a word and the sentence that explains it, in the reviewer's terms.
+pub fn status_sentence(s: Tracking) -> (&'static str, &'static str) {
+    match s {
+        Tracking::Reopened => {
+            ("Reopened", "It was verified fixed on an earlier head, and its code is back on this one.")
+        }
+        Tracking::New => ("New", "First reported by this run. Not posted to GitHub yet."),
+        Tracking::Posted => ("Posted", "On GitHub as an inline comment."),
+        Tracking::StillPresent => {
             ("Still present", "Seen again on the newest head: the cited code did not change the outcome.")
         }
-        FindingStatus::PotentiallyResolved => (
+        Tracking::LooksResolved => (
             "Looks resolved",
             "The cited lines changed on the newest head. It may be fixed; the reviewer has not verified that.",
         ),
-        FindingStatus::Outdated => ("Outdated", "The code it cites is no longer in the diff."),
-        FindingStatus::Resolved => ("Resolved", "Verified fixed on a later commit."),
-        FindingStatus::Uncertain => {
+        Tracking::Outdated => ("Outdated", "The code it cites is no longer in the diff."),
+        Tracking::Resolved => ("Resolved", "Verified fixed on a later commit."),
+        Tracking::Uncertain => {
             ("Uncertain", "The verifier could neither confirm nor rule it out. Read it as a question.")
         }
-        FindingStatus::Unknown => ("Unknown", "The daemon sent a status this client does not know."),
+        Tracking::Unknown => ("Unknown", "The daemon sent a status this client does not know."),
     }
 }
 
-fn status_hue(t: &Colors, f: &Finding) -> Hsla {
-    match f.status {
-        FindingStatus::StillPresent => t.high,
-        FindingStatus::Resolved => t.ok,
-        FindingStatus::PotentiallyResolved | FindingStatus::Uncertain => t.warn,
-        FindingStatus::Published => t.accent,
+fn status_hue(t: &Colors, s: Tracking) -> Hsla {
+    match s {
+        Tracking::StillPresent | Tracking::Reopened => t.high,
+        Tracking::Resolved => t.ok,
+        Tracking::LooksResolved | Tracking::Uncertain => t.warn,
         _ => t.accent,
     }
+}
+
+/// The tracking chip: the state, and the commit the reviewer last looked at it on, so "still present" says where.
+fn status_chip(t: &Colors, m: &Model, f: &Finding) -> Div {
+    let s = queue::tracking(m, f);
+    let word = status_sentence(s).0;
+    chip(
+        t,
+        match (s, queue::sighted_at(m, f)) {
+            (Tracking::New | Tracking::Posted | Tracking::Unknown, _) | (_, None) => word.to_string(),
+            (_, Some(sha)) => format!("{word} · {sha}"),
+        },
+        status_hue(t, s),
+    )
 }
 
 pub fn finding_row(s: &Shell, t: &Colors, f: &Finding, cx: &Context<Shell>) -> Stateful<Div> {
@@ -782,7 +799,7 @@ pub fn finding_row(s: &Shell, t: &Colors, f: &Finding, cx: &Context<Shell>) -> S
     let id = f.id.clone();
     let detail = m.details.get(&f.id);
     let place = format!("{}{}", f.file, f.line.map_or(String::new(), |l| format!(":{l}")));
-    let (status, _) = status_sentence(f, detail.map_or(&[][..], |d| &d.history));
+    let state = queue::tracking(m, f);
     let base = if selected { t.selected } else { t.surface };
     let row = div()
         .id(SharedString::from(format!("f-{}-face", f.id.as_str())))
@@ -827,7 +844,7 @@ pub fn finding_row(s: &Shell, t: &Colors, f: &Finding, cx: &Context<Shell>) -> S
                         .font_weight(FontWeight::MEDIUM)
                         .child(f.title.to_string()),
                 )
-                .when(status != "New", |d| d.child(chip(t, status, status_hue(t, f)))),
+                .when(state != Tracking::New, |d| d.child(status_chip(t, m, f))),
         )
         .child(
             div()
@@ -916,7 +933,7 @@ fn finding_page(s: &Shell, t: &Colors, id: &FindingId, cx: &Context<Shell>) -> D
         ));
     let detail = m.details.get(id);
     let history: &[HistoryEntry] = detail.map_or(&[], |d| &d.history);
-    let (status, why) = status_sentence(f, history);
+    let (status, why) = status_sentence(queue::tracking(m, f));
     let mut badges = div()
         .flex()
         .flex_wrap()
@@ -924,7 +941,7 @@ fn finding_page(s: &Shell, t: &Colors, id: &FindingId, cx: &Context<Shell>) -> D
         .gap(space::S2)
         .child(severity_badge(t, f.severity))
         .child(chip(t, f.category.label(), t.muted))
-        .child(chip(t, status, status_hue(t, f)));
+        .child(status_chip(t, m, f));
     if f.stale {
         badges = badges.child(chip(t, "From an earlier head", t.warn));
     }
@@ -940,7 +957,8 @@ fn finding_page(s: &Shell, t: &Colors, id: &FindingId, cx: &Context<Shell>) -> D
                 "{}{}",
                 f.file,
                 f.line.map_or(String::new(), |l| format!(":{l}"))
-            ))),
+            )))
+            .children(reopened_link(t, m, f, cx)),
     );
     let mut right = div().flex().flex_col().flex_1().min_w_0().gap(space::S6);
     match detail {
@@ -955,9 +973,9 @@ fn finding_page(s: &Shell, t: &Colors, id: &FindingId, cx: &Context<Shell>) -> D
             left = left.child(callout(t, t.muted, IconName::LoaderCircle, title, Some(note)));
         }
         Some(d) => {
-            left = left.child(section(t, "What's wrong", paragraphs(t, d.explanation.as_str(), t.text))).child(
-                section(t, "Why the reviewer believes it", paragraphs(t, d.reasoning_summary.as_str(), t.muted)),
-            );
+            left = left
+                .child(section(t, "What's wrong", paragraphs(t, d.explanation.as_str(), t.text)))
+                .child(section(t, "Why the reviewer believes it", paragraphs(t, d.reasoning_summary.as_str(), t.text)));
             if let Some(fix) = &d.suggested_fix {
                 left = left.child(section(t, "Suggested fix", fix_block(t, fix.as_str(), f.file.as_str())));
             }
@@ -965,15 +983,17 @@ fn finding_page(s: &Shell, t: &Colors, id: &FindingId, cx: &Context<Shell>) -> D
                 .child(section(
                     t,
                     "Status",
-                    div().max_w(layout::MEASURE).text_size(text::BODY).line_height(text::LINE_READ).child(
-                        StyledText::new(format!("{status}. {why}")).with_highlights(vec![(
-                            0..status.len() + 1,
-                            HighlightStyle { font_weight: Some(FontWeight::SEMIBOLD), ..Default::default() },
-                        )]),
+                    div().flex().flex_col().gap(space::S3).child(
+                        div().max_w(layout::MEASURE).text_size(text::BODY).line_height(text::LINE_READ).child(
+                            StyledText::new(format!("{status}. {why}")).with_highlights(vec![(
+                                0..status.len() + 1,
+                                HighlightStyle { font_weight: Some(FontWeight::SEMIBOLD), ..Default::default() },
+                            )]),
+                        ),
                     ),
                 ))
                 .child(section(t, "Confidence", confidence(t, f.confidence, conf_word, conf_why)))
-                .child(section(t, "History", history_rows(t, f, history)));
+                .child(section(t, "History", history_rows(t, m, f, history)));
             right = right.child(section(
                 t,
                 &format!("Evidence · {}", queue::evidence_count(m, f)),
@@ -1032,13 +1052,13 @@ fn no_evidence(t: &Colors) -> Div {
         )
 }
 
-fn history_rows(t: &Colors, f: &Finding, history: &[HistoryEntry]) -> Div {
+fn history_rows(t: &Colors, m: &Model, f: &Finding, history: &[HistoryEntry]) -> Div {
     div()
         .flex()
         .flex_col()
         .gap(space::S2)
         .child(div().text_size(text::SMALL).text_color(t.muted).child(format!(
-            "Tracked across commits by fingerprint {}. Each review says whether it still holds.",
+            "Tracked across commits by fingerprint {}. Each review says whether it still holds, and why.",
             &f.fingerprint.as_str()[..f.fingerprint.as_str().len().min(8)]
         )))
         .children(history.iter().map(|h| {
@@ -1052,19 +1072,79 @@ fn history_rows(t: &Colors, f: &Finding, history: &[HistoryEntry]) -> Div {
                 FindingStatus::Uncertain => "Uncertain",
                 FindingStatus::Unknown => "Unknown",
             };
+            let sha = m.domain.runs.get(&h.run_id).map(|r| format!("@{} · ", r.head_sha.short()));
+            let why = h.basis.as_ref().and_then(|b| queue::basis_words(b.as_str()));
             div()
                 .flex()
-                .items_center()
+                .items_start()
                 .gap(space::S3)
-                .child(div().size(px(6.)).rounded(radius::PILL).bg(t.accent))
-                .child(div().w(px(110.)).text_size(text::BODY).font_weight(FontWeight::MEDIUM).child(word))
-                .child(div().font_family(text::MONO).text_size(text::CAPTION).text_color(t.faint).child(format!(
-                    "{} {} · run {}",
-                    h.at.as_str().get(..10).unwrap_or(""),
-                    clock(h.at.as_str()),
-                    h.run_id.short()
-                )))
+                .child(div().mt(px(7.)).size(px(6.)).rounded(radius::PILL).bg(t.accent))
+                .child(div().w(px(110.)).flex_none().text_size(text::BODY).font_weight(FontWeight::MEDIUM).child(word))
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(2.))
+                        .min_w_0()
+                        .children(
+                            why.map(|w| div().text_size(text::BODY).text_color(t.text).child(crate::kit::sentence(w))),
+                        )
+                        .child(div().font_family(text::MONO).text_size(text::SMALL).text_color(t.muted).child(
+                            format!(
+                                "{}{} {} · run {}",
+                                sha.unwrap_or_default(),
+                                h.at.as_str().get(..10).unwrap_or(""),
+                                clock(h.at.as_str()),
+                                h.run_id.short()
+                            ),
+                        )),
+                )
         }))
+}
+
+/// A reopened finding's way back to the one it reopens: when it was fixed, on which commit, and a click to it.
+fn reopened_link(t: &Colors, m: &Model, f: &Finding, cx: &Context<Shell>) -> Option<Div> {
+    let twin = queue::reopens(m, f)?;
+    let fixed = twin.and_then(|x| m.domain.runs.get(&x.run_id)).map(|r| r.head_sha.short().to_string());
+    let now = queue::sighted_at(m, f);
+    let text = match (fixed, now) {
+        (Some(a), Some(b)) => format!("Verified fixed on {a}, then its code came back on {b}."),
+        _ => "Verified fixed on an earlier head, then its code came back.".to_string(),
+    };
+    let open = twin.map(|x| {
+        let id = x.id.clone();
+        button(
+            t,
+            "f-reopened",
+            "Open the resolved finding",
+            None,
+            Tone::Secondary,
+            Some(Box::new(cx.listener(move |s, _: &ClickEvent, _, cx| {
+                s.send(Msg::Pick(Hit::Finding(id.clone())), cx);
+                s.send(Msg::Pick(Hit::Finding(id.clone())), cx);
+            })) as OnClick),
+        )
+    });
+    Some(
+        div()
+            .flex()
+            .flex_col()
+            .items_start()
+            .gap(space::S2)
+            .p(space::S3)
+            .rounded(radius::LG)
+            .border_1()
+            .border_color(t.high.alpha(0.4))
+            .bg(t.high.alpha(0.06))
+            .child(
+                div()
+                    .flex()
+                    .gap(space::S2)
+                    .child(div().pt(px(3.)).child(icon(IconName::RotateCcw, px(14.), t.high)))
+                    .child(div().text_size(text::BODY).line_height(text::LINE_BODY).text_color(t.text).child(text)),
+            )
+            .children(open),
+    )
 }
 
 /// The cited code, each block pinned to its path, lines and commit, and the tool summaries between them.

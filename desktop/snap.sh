@@ -110,4 +110,8 @@ for look in dark light; do
   snap 12-readonly-$look       $look 20000 "wait:19000,pr:1296" "$readonly_script"
   snap 13-huge-pr-$look        $look 20000 "wait:19000,pr:345"
   snap 14-finding-no-evidence-$look $look 20000 "wait:19000,pr:1287,finding:3,finding:3" "$derived_script"
+  snap 15-tracking-$look       $look 3000  "wait:2000,pr:1302" protocol/playback/tracking.ndjson
+  snap 15b-reopened-$look      $look 3000  "wait:2000,pr:1302,finding:2,finding:2" protocol/playback/tracking.ndjson
+  snap 16-discards-$look       $look 3000  "wait:2000,pr:1302,open-timeline,discards" protocol/playback/tracking.ndjson
+  snap 17-big-diff-$look       $look 3000  "wait:2000,pr:1310,open-diff" protocol/playback/big-diff.ndjson
 done
