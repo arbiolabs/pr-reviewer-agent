@@ -265,8 +265,9 @@ pub fn publication(
     }
     body = body.child(section(t, &format!("Inline comments · {n}"), comments));
 
-    // While the sheet asks, the page's own Post steps back, so one primary is on screen.
-    let ready = can_confirm(m) && !matches!(s.overlay, Some(Overlay::ConfirmPost));
+    // While the sheet asks, the page's own buttons step back, so the sheet holds the only live controls.
+    let asking = matches!(s.overlay, Some(Overlay::ConfirmPost));
+    let ready = can_confirm(m) && !asking;
     let mut footer = div().flex().items_center().gap(space::S2).flex_1();
     footer = if done {
         footer.child(div().flex_1()).child(button(
@@ -289,7 +290,14 @@ pub fn publication(
                     .text_color(t.muted)
                     .child("Public and final once posted."),
             )
-            .child(button(t, "p-close", "Not now", Some("esc"), Tone::Ghost, on(cx, |s, cx| s.act(Action::Back, cx))))
+            .child(button(
+                t,
+                "p-close",
+                "Not now",
+                Some("esc"),
+                Tone::Ghost,
+                (!asking).then(|| crate::ui::click(cx, |s, cx| s.act(Action::Back, cx))),
+            ))
             .child(button(
                 t,
                 "p-post",

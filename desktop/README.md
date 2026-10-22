@@ -56,7 +56,7 @@ The window must fit on the screen, because macOS shrinks a larger one and the ca
 
 With `--playback`, the script plays in virtual time before the window opens. Script lines, the 125 ms ticks and the steps apply in time order up to `--snapshot-after-ms`, and the window then shows that model without further changes. The same flags give the same pixels on the same machine, however slow the build, wherever the pointer is and whichever app is in front: a snapshot window ignores the keyboard, covers itself with a layer that takes the pointer so nothing under it hovers or presses, and activates itself before every capture so the traffic lights are colored. The harness captures only after the window shows the same painted frame at its full size on two captures in a row. It retries a capture that is one flat color, asks for another frame when one does not present within 1.5 s, and exits with code 1 if the window never settles. `snap.sh` retries a run that exits without its PNG or runs past 60 s, three times.
 
-The window shows the endpoint, so a path to the script that differs gives different pixels. `snap.sh` passes a relative path for this reason.
+The window shows the endpoint, so a path to the script that differs gives different pixels. `snap.sh` passes a relative path for this reason. A snapshot's window is opaque, while a normal window blurs the desktop through its sidebar and title bar, so a capture never depends on what is behind the window.
 
 With `--socket`, the capture happens `--snapshot-after-ms` milliseconds after launch in real time, and `--actions` is refused.
 

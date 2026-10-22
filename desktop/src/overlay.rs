@@ -12,7 +12,7 @@ use std::ops::Range;
 
 use crate::detail::who;
 use crate::kit::{Tone, button, icon, keycap, overline};
-use crate::queue::{self, Card};
+use crate::queue::{self, Card, Stage};
 use crate::tokens::{Colors, layout, radius, space, text};
 use crate::ui::{Overlay, Shell, on};
 
@@ -311,8 +311,13 @@ fn sheet(t: &Colors, w: Pixels) -> Div {
 pub fn layer(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Vec<AnyElement> {
     let m = &s.model;
     let mut out = Vec::new();
+    // A toast floats over the detail pane, above its action bar, so it never covers a card's button in the queue.
+    let queue_shown = queue::stage(m) == Stage::Ready
+        && matches!(m.ui.screen, Screen::Inbox | Screen::Review)
+        && !matches!(crate::ui::front(m), Some(Modal::Finding { .. }));
+    let left = layout::SIDEBAR + if queue_shown { layout::QUEUE } else { px(0.) };
     if let Some(n) = &m.notice {
-        out.push(toast(IconName::Info, n.text.clone(), t.text, t.bg));
+        out.push(toast(left, IconName::Info, n.text.clone(), t.text, t.bg));
     }
     match m.top_modal() {
         Some(Modal::Confirm { prompt, command, state }) => {
@@ -321,6 +326,7 @@ pub fn layer(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Vec<AnyElement> {
                 && matches!(state, ConfirmState::Requested(_) | ConfirmState::Accepted { .. });
             if quiet {
                 out.push(toast(
+                    left,
                     IconName::LoaderCircle,
                     format!("{} Sending…", prompt.trim_end_matches('?')),
                     t.text,
@@ -343,11 +349,11 @@ pub fn layer(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Vec<AnyElement> {
     out
 }
 
-fn toast(glyph: IconName, words: String, bg: Hsla, fg: Hsla) -> AnyElement {
+fn toast(left: Pixels, glyph: IconName, words: String, bg: Hsla, fg: Hsla) -> AnyElement {
     div()
         .absolute()
         .bottom(layout::BAR + space::S4)
-        .left_0()
+        .left(left)
         .right_0()
         .flex()
         .justify_center()

@@ -853,6 +853,8 @@ fn no_evidence(t: &Colors) -> Div {
             div()
                 .flex()
                 .flex_col()
+                .flex_1()
+                .min_w_0()
                 .gap(space::S1)
                 .child(div().text_size(text::BODY).font_weight(FontWeight::SEMIBOLD).child("No code cited"))
                 .child(div().text_size(text::BODY).line_height(text::LINE_BODY).text_color(t.muted).child(

@@ -14,8 +14,21 @@ bin=$here/target/release/pr-review-desktop
 cd "$here/.."
 script=protocol/playback/showcase.ndjson
 
-# A read-only daemon: the showcase with its welcome rewritten, kept under target/ at a path every checkout shares.
+# Derived sessions, kept under target/ at paths every checkout shares. A script under target/playback answers
+# requests from target/fixtures, a copy of protocol/fixtures with one change: the showcase's third finding cites
+# no code, so the empty evidence state renders.
 mkdir -p desktop/target/playback
+rm -rf desktop/target/fixtures
+cp -R protocol/fixtures desktop/target/fixtures
+python3 -c 'import json, sys
+p = sys.argv[1]
+d = json.load(open(p))
+d["finding"]["evidence"] = []
+d["finding"]["evidenceCount"] = 0
+json.dump(d, open(p, "w"))' desktop/target/fixtures/server.finding.detail.showcase-3.json
+cp "$script" desktop/target/playback/showcase.ndjson
+derived_script=desktop/target/playback/showcase.ndjson
+# A read-only daemon: the showcase with its welcome rewritten.
 sed '1s/"capabilities":\["account.select","review.start","review.retry","review.cancel","review.publish"\],"mode":"engine"/"capabilities":["account.select"],"mode":"read-only","readOnlyReason":"another pr-review holds the data directory; start this daemon with --allow-commands"/' \
   "$script" > desktop/target/playback/readonly.ndjson
 readonly_script=desktop/target/playback/readonly.ndjson
@@ -79,4 +92,5 @@ for look in dark light; do
   snap 11-empty-queue-$look    $look 1000  "" desktop/playback/clear.ndjson
   snap 12-readonly-$look       $look 20000 "wait:19000,pr:1296" "$readonly_script"
   snap 13-huge-pr-$look        $look 20000 "wait:19000,pr:345"
+  snap 14-finding-no-evidence-$look $look 20000 "wait:19000,pr:1287,finding:3,finding:3" "$derived_script"
 done
