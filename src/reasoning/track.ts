@@ -1,5 +1,6 @@
 // Finding identity across heads (docs/design/finding-tracking.md). A finding is the code it cites, not a line number:
-// each observation stores the normalized text of its head-side evidence, and a later head is searched for that text.
+// each observation stores the normalized text of its head-side evidence, and a later head is searched for that text,
+// compared as code tokens so that comments, blank lines, spacing and separators never count as a change.
 import { transition } from "../domain/machine.ts";
 import { FINDING_MACHINE, type FindingEvent, type FindingState } from "../domain/machines.ts";
 import type { CandidateFinding, ChangedFile, ResolutionVerdict } from "../domain/types.ts";
@@ -35,11 +36,11 @@ export type PriorFinding = {
 /** One observation per finding per revision: the states it walked and the candidate and location it ended with. */
 export type Observation = { findingId: string; path: FindingState[]; basis: Basis | null; candidate: CandidateFinding; location: ObservedLocation };
 
-/** Reads one head: file contents, the head path of a rename, and the paths whose text has a literal line (undefined when too many to list). */
+/** Reads one head: file contents, the head path of a rename, and the paths whose text contains a literal word (undefined when too many to list). */
 export type HeadReader = {
   read(path: string): Promise<string | undefined>;
   renamedTo(path: string): string | undefined;
-  grep(line: string): Promise<string[] | undefined>;
+  grep(word: string): Promise<string[] | undefined>;
 };
 
 /** The repository's head, with the renames the revision's diff reports (base to head, so a rename of a file the PR added is found by the tree-wide search instead). */
@@ -49,15 +50,17 @@ export function headReader(repo: PinnedRepo, changedFiles: ChangedFile[]): HeadR
   return {
     read: (path) => texts.get(path) ?? texts.set(path, repo.show(repo.headSha, path)).get(path)!,
     renamedTo: (path) => renames.get(path),
-    grep: (line) => repo.grepPaths(line),
+    grep: (word) => repo.grepPaths(word),
   };
 }
 
 /** A candidate within this many lines of a located anchor is the same defect when its category agrees. */
 export const LINK_DISTANCE = 3;
-/** A tree-wide search or a text match needs this much text, so `}` alone never relocates a finding. */
-const MIN_LINES = 2;
-const MIN_CHARS = 40;
+/**
+ * A tree-wide search, a text match or a shared run needs this many code tokens, so `}` or `return x;` never relocates
+ * a finding or links two reports, while one distinctive line such as `db.orders.delete(id);` does.
+ */
+export const MIN_TOKENS = 6;
 /** A finding whose evidence cites only the base SHA is located by this many lines on each side of its anchor. */
 const ANCHOR_CONTEXT = 2;
 
@@ -65,26 +68,150 @@ const normalizeLine = (line: string) => line.trim().replace(/\s+/g, " ");
 export const normalize = (lines: string[]) => lines.map(normalizeLine).join("\n");
 export const splitLines = (text: string | undefined) => (text === undefined ? undefined : (text.endsWith("\n") ? text.slice(0, -1) : text).split("\n"));
 
-/** The 1-based start of the occurrence of `snippet` in `lines` nearest to `near`, or undefined. */
-export function findSnippet(snippet: string, lines: string[], near: number): number | undefined {
-  const wanted = snippet.split("\n");
-  const normalized = lines.map(normalizeLine);
-  let best: number | undefined;
-  for (let i = 0; i + wanted.length <= normalized.length; i++) {
-    if (wanted.every((line, k) => normalized[i + k] === line) && (best === undefined || Math.abs(i + 1 - near) < Math.abs(best - near))) best = i + 1;
+/** One code token: its text, and the 1-based line it starts on in the text it was read from. */
+export type Token = { text: string; line: number };
+
+const WORD = /[\p{L}\p{N}_$]/u;
+const isSpace = (code: number) => code === 32 || (code >= 9 && code <= 13) || (code > 127 && /\s/u.test(String.fromCharCode(code)));
+const isWord = (code: number) => (code >= 97 && code <= 122) || (code >= 65 && code <= 90) || (code >= 48 && code <= 57) || code === 95 || code === 36 || (code > 127 && WORD.test(String.fromCharCode(code)));
+/** Brackets and separators say nothing about which code this is: without them `f(a);` and `f(a)` read the same. */
+const SEPARATORS = new Set([";", ",", "(", ")", "{", "}", "[", "]"].map((c) => c.charCodeAt(0)));
+const [NEWLINE, HASH, DASH, SLASH, STAR, LESS, DQUOTE, SQUOTE, BACKTICK, BACKSLASH] = [10, 35, 45, 47, 42, 60, 34, 39, 96, 92];
+
+/**
+ * The code in `text` as tokens, read the same way for every language that uses these markers: words (letters, digits,
+ * `_`, `$`), string literals as one token each with `'` folded to `"`, and every other character on its own.
+ * Whitespace, `//` comments, `#` and `--` comments at a line start or after a space (so `i--` and `this.#x` stay
+ * code), `/* *\/` and `<!-- -->` comments, triple-quoted strings and separators drop out. A `"` or `'` string ends at
+ * its line end when unterminated; a backtick string spans lines.
+ * Limits, each the same on both sides of a comparison: `#include` and a CSS `#id` lose the rest of their line, as does
+ * Python's `//` floor division; an apostrophe outside a string eats to the line end; a change inside a docstring is
+ * invisible; a regex literal holding a quote or `//` is misread to its line end.
+ */
+export function tokenize(text: string): Token[] {
+  const out: Token[] = [];
+  const n = text.length;
+  let line = 1;
+  let i = 0;
+  const at = (k: number) => text.charCodeAt(k);
+  const skipTo = (close: string, from: number) => {
+    const found = text.indexOf(close, from);
+    const stop = found === -1 ? n : found + close.length;
+    for (let k = i; k < stop; k++) if (at(k) === NEWLINE) line++;
+    i = stop;
+  };
+  while (i < n) {
+    const c = at(i);
+    const next = at(i + 1);
+    if (c === NEWLINE) {
+      line++;
+      i++;
+    } else if (isSpace(c)) {
+      i++;
+    } else if ((c === SLASH && next === SLASH) || ((c === HASH || (c === DASH && next === DASH)) && (i === 0 || isSpace(at(i - 1))))) {
+      const eol = text.indexOf("\n", i);
+      i = eol === -1 ? n : eol;
+    } else if (c === SLASH && next === STAR) {
+      skipTo("*/", i + 2);
+    } else if (c === LESS && text.startsWith("<!--", i)) {
+      skipTo("-->", i + 4);
+    } else if (c === DQUOTE || c === SQUOTE || c === BACKTICK) {
+      const quote = text[i]!;
+      if (next === c && at(i + 2) === c) {
+        skipTo(quote.repeat(3), i + 3);
+        continue;
+      }
+      const start = line;
+      let j = i + 1;
+      while (j < n && at(j) !== c && (at(j) !== NEWLINE || c === BACKTICK)) {
+        if (at(j) === BACKSLASH) j++;
+        if (at(j) === NEWLINE) line++;
+        j++;
+      }
+      const closed = j < n && at(j) === c;
+      const shown = c === BACKTICK ? "`" : '"';
+      out.push({ text: `${shown}${text.slice(i + 1, j)}${closed ? shown : ""}`, line: start });
+      i = closed ? j + 1 : j;
+    } else if (isWord(c)) {
+      let j = i + 1;
+      while (j < n && isWord(at(j))) j++;
+      out.push({ text: text.slice(i, j), line });
+      i = j;
+    } else {
+      if (!SEPARATORS.has(c)) out.push({ text: text[i]!, line });
+      i++;
+    }
   }
-  return best;
+  return out;
 }
 
-/** A snippet below the floor (`}`, an empty line, one short statement) is no evidence of identity, however equal. */
-const substantial = (text: string) => text.split("\n").length >= MIN_LINES && text.length >= MIN_CHARS;
+/**
+ * The token streams a stored text may stand for. A text cut from a file can begin inside a block comment, an HTML
+ * comment, a docstring or a backtick string, whose tail would then read as code; when its closer comes before any
+ * opener, the text is also read as that tail, so the code after it is still found.
+ */
+function parses(text: string): Token[][] {
+  const out = [tokenize(text)];
+  const tailOf = (open: string, close: string) => {
+    const at = text.indexOf(close);
+    return at !== -1 && (text.indexOf(open) === -1 || at < text.indexOf(open));
+  };
+  if (tailOf("/*", "*/")) out.push(tokenize(`/*${text}`));
+  if (tailOf("<!--", "-->")) out.push(tokenize(`<!--${text}`));
+  for (const q of ['"""', "'''", "`"]) if (text.split(q).length % 2 === 0) out.push(tokenize(`${q}${text}`).filter((t, k) => k > 0 || !t.text.startsWith(q)));
+  return out.filter((p) => p.length > 0);
+}
 
-/** True when the snippet's normalized lines sit at `start` in `lines`. */
-const foundAt = (snippet: string, lines: string[], start: number) => snippet.split("\n").every((line, k) => lines[start - 1 + k] !== undefined && normalizeLine(lines[start - 1 + k]!) === line);
+const texts = (tokens: Token[]) => tokens.map((t) => t.text);
 
-/** True when both texts are substantial and equal. A broad range that merely contains the other is not the same text. */
+/** The index in `hay` at or after `from` where `needle` sits whole, or -1. */
+function indexOfRun(needle: string[], hay: string[], from = 0): number {
+  search: for (let i = from; i + needle.length <= hay.length; i++) {
+    for (let k = 0; k < needle.length; k++) if (hay[i + k] !== needle[k]) continue search;
+    return i;
+  }
+  return -1;
+}
+
+export const hasCode = (text: string) => tokenize(text).length > 0;
+
+/** True when some parse of `a` sits whole in some parse of `b`: `a` is a piece of `b`'s code, unchanged. */
+export const within = (a: string, b: string) => parses(a).some((pa) => parses(b).some((pb) => indexOfRun(texts(pa), texts(pb)) !== -1));
+
+/** True when some parse of `a` and the tokens of `b` share a run of MIN_TOKENS or more: `b` still holds a substantial piece of `a`'s code. */
+export const sharesCode = (a: string, b: string) => parses(a).some((pa) => commonRun(texts(pa), texts(tokenize(b))) >= MIN_TOKENS);
+
+/** A 1-based line range. */
+type Range = { start: number; end: number };
+
+/**
+ * Every line range of `file` where a parse of `text` sits whole, in file order. The range starts where the text's
+ * first line would and ends where its last line would, so a comment inserted inside widens it by a line.
+ */
+function occurrences(text: string, file: Token[]): Range[] {
+  const hay = texts(file);
+  const lines = text.split("\n").length;
+  const found: Range[] = [];
+  for (const parse of parses(text)) {
+    const needle = texts(parse);
+    for (let i = indexOfRun(needle, hay); i !== -1; i = indexOfRun(needle, hay, i + 1)) {
+      found.push({ start: file[i]!.line - parse[0]!.line + 1, end: file[i + needle.length - 1]!.line + lines - parse.at(-1)!.line });
+    }
+  }
+  return found.sort((a, b) => a.start - b.start);
+}
+
+const nearest = (ranges: Range[], near: number) => ranges.reduce<Range | undefined>((best, r) => (best === undefined || Math.abs(r.start - near) < Math.abs(best.start - near) ? r : best), undefined);
+
+/** Text with enough tokens to be looked for across the tree, or to say that two texts are the same code. */
+const substantial = (text: string) => tokenize(text).length >= MIN_TOKENS;
+
+/** True when the text's lines sit at `start` in `lines` as written: how a text with no code tokens, such as `}`, is found in place. */
+const foundAt = (text: string, lines: string[], start: number) => text.split("\n").every((line, k) => lines[start - 1 + k] !== undefined && normalizeLine(lines[start - 1 + k]!) === line);
+
+/** True when both texts are substantial and the same code: equal token by token, whatever their comments, spacing and separators. */
 export function sameText(a: string, b: string): boolean {
-  return substantial(a) && a === b;
+  return substantial(a) && texts(tokenize(a)).join("\0") === texts(tokenize(b)).join("\0");
 }
 
 /**
@@ -94,7 +221,7 @@ export function sameText(a: string, b: string): boolean {
 export async function evidenceTexts(candidate: CandidateFinding, headSha: string, read: (sha: string, path: string) => Promise<string | undefined>): Promise<EvidenceText[]> {
   const out: EvidenceText[] = [];
   for (const e of candidate.codeEvidence) {
-    if (e.refSha !== headSha) continue;
+    if (e.refSha !== headSha || e.start < 1 || e.end < e.start) continue;
     const lines = splitLines(await read(headSha, e.path));
     if (lines) out.push({ path: e.path, start: e.start, end: e.end, text: normalize(lines.slice(e.start - 1, e.end)) });
   }
@@ -108,53 +235,69 @@ export async function evidenceTexts(candidate: CandidateFinding, headSha: string
   return out;
 }
 
-type LinesOf = (path: string) => Promise<string[] | undefined>;
-/** The lines of each file at head, read once. */
-const lineCache = (head: HeadReader): LinesOf => {
-  const files = new Map<string, Promise<string[] | undefined>>();
-  return (path) => files.get(path) ?? files.set(path, head.read(path).then(splitLines)).get(path)!;
+type FileAt = { lines: string[]; tokens: Token[] };
+type FilesOf = (path: string) => Promise<FileAt | undefined>;
+/** Each file at head, read and tokenized once. */
+const fileCache = (head: HeadReader): FilesOf => {
+  const files = new Map<string, Promise<FileAt | undefined>>();
+  const load = async (path: string) => {
+    const lines = splitLines(await head.read(path));
+    return lines && { lines, tokens: tokenize(lines.join("\n")) };
+  };
+  return (path) => files.get(path) ?? files.set(path, load(path)).get(path)!;
 };
 
+/** The longest word of a parse, the token a tree-wide search looks for: a word is written the same in every file that holds it, where a stored line is not once its spacing or separators changed. */
+const searchWord = (parse: Token[]) => texts(parse).filter((t) => WORD.test(t[0]!)).reduce((a, b) => (b.length > a.length ? b : a), "");
+
 /**
- * Every place at head where a substantial `item`'s text sits, by one tree-wide search for its longest line, or undefined
- * when the path list was cut at its cap and so names no place.
+ * Every file at head where a substantial `item` sits, with the place nearest its old line, by one tree-wide search per
+ * parse for its longest word and a token comparison of each file found, or undefined when a path list was cut at its
+ * cap and so names no place.
  */
-async function treeHits(item: EvidenceText, head: HeadReader, linesOf: LinesOf): Promise<{ path: string; start: number }[] | undefined> {
-  const query = item.text.split("\n").reduce((a, b) => (b.length > a.length ? b : a));
-  const paths = await head.grep(query);
-  if (paths === undefined) return undefined;
-  const hits: { path: string; start: number }[] = [];
+async function treeHits(item: EvidenceText, head: HeadReader, filesOf: FilesOf): Promise<(Range & { path: string })[] | undefined> {
+  const paths = new Set<string>();
+  for (const word of new Set(parses(item.text).map(searchWord))) {
+    const found = word === "" ? [] : await head.grep(word);
+    if (found === undefined) return undefined;
+    for (const path of found) paths.add(path);
+  }
+  const hits: (Range & { path: string })[] = [];
   for (const path of paths) {
-    const start = findSnippet(item.text, (await linesOf(path)) ?? [], item.start);
-    if (start !== undefined) hits.push({ path, start });
+    const file = await filesOf(path);
+    const hit = file && nearest(occurrences(item.text, file.tokens), item.start);
+    if (hit) hits.push({ path, ...hit });
   }
   return hits;
 }
 
 /**
  * Search a new head for a finding's evidence text: the same path, then the head path of its rename, then once across
- * the tree when the snippet is substantial and exactly one file holds it. Every item found is `same`, with the anchor
+ * the tree when the text is substantial and exactly one file holds it. Every item found is `same`, with the anchor
  * shifted by the same offset as the evidence that contains it. Otherwise the finding is `changed` while its file (or
  * rename) still exists, and `file_gone` when neither does. `treeWide: false` skips the tree-wide search, for a finding
  * whose text an earlier head already searched for and missed.
  */
 export async function locate(location: ObservedLocation, headSha: string, head: HeadReader, options: { treeWide: boolean } = { treeWide: true }): Promise<Located> {
-  const linesOf = lineCache(head);
+  const filesOf = fileCache(head);
   const present = async (path: string) => {
-    if (await linesOf(path)) return path;
+    if (await filesOf(path)) return path;
     const renamed = head.renamedTo(path);
-    return renamed !== undefined && (await linesOf(renamed)) ? renamed : undefined;
+    return renamed !== undefined && (await filesOf(renamed)) ? renamed : undefined;
   };
-  const findItem = async (item: EvidenceText): Promise<{ path: string; start: number } | undefined> => {
+  const findItem = async (item: EvidenceText): Promise<(Range & { path: string }) | undefined> => {
     const own = await present(item.path);
+    const code = tokenize(item.text).length;
     if (own !== undefined) {
-      const lines = (await linesOf(own))!;
-      // A snippet below the floor is found only where it was: moving it would pin the finding to any `}` in the file.
-      const start = substantial(item.text) ? findSnippet(item.text, lines, item.start) : foundAt(item.text, lines, item.start) ? item.start : undefined;
-      if (start !== undefined) return { path: own, start };
+      const file = (await filesOf(own))!;
+      // No code tokens, as in `}`: found only as written, in place. Below the floor: found in place, since moving it would pin the finding to any `return x;` in the file.
+      if (code === 0) return foundAt(item.text, file.lines, item.start) ? { path: own, start: item.start, end: item.end } : undefined;
+      const found = occurrences(item.text, file.tokens);
+      const hit = code >= MIN_TOKENS ? nearest(found, item.start) : found.find((r) => r.start === item.start);
+      if (hit) return { path: own, ...hit };
     }
-    if (!substantial(item.text) || !options.treeWide) return undefined;
-    const hits = (await treeHits(item, head, linesOf))?.filter((hit) => hit.path !== own);
+    if (code < MIN_TOKENS || !options.treeWide) return undefined;
+    const hits = (await treeHits(item, head, filesOf))?.filter((hit) => hit.path !== own);
     return hits?.length === 1 ? hits[0] : undefined;
   };
 
@@ -164,7 +307,7 @@ export async function locate(location: ObservedLocation, headSha: string, head: 
   for (const item of location.evidence) {
     const hit = await findItem(item);
     if (!hit) return miss();
-    found.push({ ...item, path: hit.path, start: hit.start, end: hit.start + item.end - item.start });
+    found.push({ ...item, path: hit.path, start: hit.start, end: hit.end });
   }
   if (found.length === 0) return miss();
   const inFile = location.evidence.map((e, i) => i).filter((i) => location.evidence[i]!.path === location.file);
@@ -179,24 +322,29 @@ export const currentFile = (f: PriorFinding) => (f.located.kind === "same" ? f.l
 
 /**
  * Where the finding's own-file code still sits at this head, as "at path:line", or undefined when none of it does.
- * `located` says only that some item went missing, which a changed helper in another file, a comment inserted in the
- * cited block, or a one-line shift of a short item also does, so a resolution check asks this instead: each own-file
- * item is looked for anywhere in the finding's current file, and a substantial one anywhere in the tree. A tree-wide
- * search cut at its cap counts as found, since an open finding beats a false resolution.
+ * `located` says only that some item went missing, which a changed helper in another file or a short item shifted a
+ * line also does, so a resolution check asks this instead: each own-file item's tokens are looked for anywhere in the
+ * finding's current file, and a substantial item's anywhere in the tree. A tree-wide search cut at its cap counts as
+ * found, since an open finding beats a false resolution.
  */
 export async function survivingCode(f: PriorFinding, head: HeadReader): Promise<string | undefined> {
-  const linesOf = lineCache(head);
+  const filesOf = fileCache(head);
   const file = currentFile(f);
-  const lines = file === undefined ? undefined : await linesOf(file);
+  const at = file === undefined ? undefined : await filesOf(file);
   for (const item of f.location.evidence) {
     if (item.path !== f.location.file || item.text === "") continue;
-    const start = lines && findSnippet(item.text, lines, item.start);
-    if (start !== undefined) return `at ${file}:${start}`;
-    if (!substantial(item.text)) continue;
-    const hits = await treeHits(item, head, linesOf);
+    const code = tokenize(item.text).length;
+    if (code === 0) {
+      if (at && foundAt(item.text, at.lines, item.start)) return `at ${file}:${item.start}`;
+      continue;
+    }
+    const hit = at && nearest(occurrences(item.text, at.tokens), item.start);
+    if (hit) return `at ${file}:${hit.start}`;
+    if (code < MIN_TOKENS) continue;
+    const hits = await treeHits(item, head, filesOf);
     if (hits === undefined) return "in more files than the search lists";
-    const hit = hits.find((h) => h.path !== file);
-    if (hit) return `at ${hit.path}:${hit.start}`;
+    const elsewhere = hits.find((h) => h.path !== file);
+    if (elsewhere) return `at ${elsewhere.path}:${elsewhere.start}`;
   }
   return undefined;
 }
@@ -207,38 +355,98 @@ type Fingerprint = (c: Pick<CandidateFinding, "category" | "file" | "title">) =>
 /** A verified candidate with its evidence text, plus, when it names a prior finding, that finding's own code found in the candidate's file (`findOwnEvidence`). */
 export type Report = { candidate: CandidateFinding; location: ObservedLocation; priorHits?: EvidenceText[] };
 
+const HASH_MOD = 2147483647;
+const HASH_BASE = 1 << 20;
+
+/** The polynomial hash of every window of `length` over `ids`, by window start; products stay under 2^53. */
+function windowHashes(ids: number[], length: number): number[] {
+  const out: number[] = [];
+  if (length === 0 || length > ids.length) return out;
+  let top = 1;
+  for (let k = 1; k < length; k++) top = (top * HASH_BASE) % HASH_MOD;
+  let h = 0;
+  for (let k = 0; k < length; k++) h = (h * HASH_BASE + ids[k]!) % HASH_MOD;
+  out.push(h);
+  for (let k = length; k < ids.length; k++) {
+    h = ((h - ((ids[k - length]! * top) % HASH_MOD) + HASH_MOD) * HASH_BASE + ids[k]!) % HASH_MOD;
+    out.push(h);
+  }
+  return out;
+}
+
+/** `a` and `b` as small integers under one numbering, so a window hash is cheap and a hit is confirmed by `equalAt`. */
+function numbered(a: string[], b: string[]): [number[], number[]] {
+  const ids = new Map<string, number>();
+  const id = (t: string) => ids.get(t) ?? (ids.set(t, ids.size), ids.size - 1);
+  return [a.map(id), b.map(id)];
+}
+
+const equalAt = (x: number[], o: number[], i: number, j: number, length: number) => {
+  for (let k = 0; k < length; k++) if (x[i + k] !== o[j + k]) return false;
+  return true;
+};
+
+/** The length of the longest run of tokens `a` and `b` share. */
+const commonRun = (a: string[], b: string[]) => longestShared(...numbered(a, b));
+
+/** The length of the longest run `x` and `y` share: halving on the length, since a shorter run exists whenever a longer one does. */
+function longestShared(x: number[], y: number[]): number {
+  const shares = (length: number) => {
+    const at = new Map<number, number[]>();
+    windowHashes(y, length).forEach((h, p) => at.set(h, [...(at.get(h) ?? []), p]));
+    return windowHashes(x, length).some((h, o) => at.get(h)?.some((p) => equalAt(x, y, o, p, length)) ?? false);
+  };
+  let lo = 0;
+  let hi = Math.min(x.length, y.length);
+  while (lo < hi) {
+    const mid = (lo + hi + 1) >> 1;
+    if (shares(mid)) lo = mid;
+    else hi = mid - 1;
+  }
+  return lo;
+}
+
+/** A run of `length` tokens of `x` whose content occurs exactly once in `y`, as `[offset in x, position in y]`, or undefined. */
+function uniqueRun(x: number[], y: number[], length: number): [number, number] | undefined {
+  const count = new Map<number, number>();
+  const first = new Map<number, number>();
+  windowHashes(y, length).forEach((h, p) => {
+    count.set(h, (count.get(h) ?? 0) + 1);
+    if (!first.has(h)) first.set(h, p);
+  });
+  for (const [o, h] of windowHashes(x, length).entries()) {
+    const p = first.get(h);
+    if (p !== undefined && count.get(h) === 1 && equalAt(x, y, o, p, length)) return [o, p];
+  }
+  return undefined;
+}
+
+/** How many shorter lengths `findLongestRun` tries once the longest shared run occurs more than once, before it gives up. */
+const SHORTER_RUNS = 64;
+
 /**
- * The longest substantial run of consecutive lines of `text` that occurs exactly once in `lines`, as a 1-based range
- * with its text. A cited block often spans the code that moved and the code that changed next to it; the part that
- * survived is still the finding's code. The floor keeps `}` or one short statement from counting, and a run that
- * occurs twice names no place.
+ * The longest run of code tokens that `text` and `lines` share, as the 1-based line range of `lines` that holds it
+ * and that range's text, when the run has MIN_TOKENS or more and occurs exactly once there, else the next shorter
+ * such run. A cited block often spans the code that moved and the code that changed next to it; the part that
+ * survived is still the finding's code. A run that occurs twice names no place. A run at either end of the text
+ * takes the text's leading or trailing comment and blank lines with it. Each shorter length costs one pass over both
+ * texts, so after SHORTER_RUNS of them the search gives up and names no place, which leaves the finding unlinked.
  */
 export function findLongestRun(text: string, lines: string[]): Omit<EvidenceText, "path"> | undefined {
-  const wanted = text.split("\n");
-  const normalized = lines.map(normalizeLine);
-  const positions = new Map<string, number[]>();
-  normalized.forEach((line, i) => {
-    const at = positions.get(line);
-    if (at) at.push(i);
-    else positions.set(line, [i]);
-  });
-  // Maximal runs only: a start that continues the previous line's run was found from there.
-  const runs: { o: number; p: number; k: number }[] = [];
-  for (let o = 0; o < wanted.length; o++) {
-    for (const p of positions.get(wanted[o]!) ?? []) {
-      if (o > 0 && p > 0 && normalized[p - 1] === wanted[o - 1]) continue;
-      let k = 1;
-      while (o + k < wanted.length && normalized[p + k] === wanted[o + k]) k++;
-      runs.push({ o, p, k });
+  if (!substantial(text)) return undefined;
+  const file = tokenize(lines.join("\n"));
+  const total = text.split("\n").length;
+  for (const parse of parses(text)) {
+    const [x, y] = numbered(texts(parse), texts(file));
+    const longest = longestShared(x, y);
+    for (let length = longest; length >= MIN_TOKENS && length > longest - SHORTER_RUNS; length--) {
+      const once = uniqueRun(x, y, length);
+      if (!once) continue;
+      const [o, p] = once;
+      const start = file[p]!.line - (o === 0 ? parse[0]!.line - 1 : 0);
+      const end = file[p + length - 1]!.line + (o + length === parse.length ? total - parse.at(-1)!.line : 0);
+      return { start, end, text: normalize(lines.slice(start - 1, end)) };
     }
-  }
-  for (const run of runs.sort((a, b) => b.k - a.k)) {
-    const sub = wanted.slice(run.o, run.o + run.k);
-    const text = sub.join("\n");
-    if (!substantial(text)) break;
-    // Every occurrence of this run's text starts at a position of its first line.
-    const occurrences = (positions.get(sub[0]!) ?? []).filter((p) => sub.every((line, k) => normalized[p + k] === line)).length;
-    if (occurrences === 1) return { start: run.p + 1, end: run.p + run.k, text };
   }
   return undefined;
 }
@@ -377,7 +585,9 @@ export type Claims = { verdicts: ResolutionVerdict[]; unverified: Iterable<strin
  */
 export function observe(prior: PriorFinding[], verified: { findingId: string; candidate: CandidateFinding; location: ObservedLocation }[], claims: Claims = { verdicts: [], unverified: [] }): Observation[] {
   const linked = new Map(verified.map((v) => [v.findingId, v]));
-  const verdicts = new Map(claims.verdicts.map((v) => [v.findingId, v.state]));
+  // The first claim on a finding was judged on its merits; a later one is refused as its duplicate and must not outvote it.
+  const verdicts = new Map<string, ResolutionVerdict["state"]>();
+  for (const v of claims.verdicts) if (!verdicts.has(v.findingId)) verdicts.set(v.findingId, v.state);
   const unverified = new Set(claims.unverified);
   const carried = prior.map((f): Observation => {
     const link = linked.get(f.findingId);

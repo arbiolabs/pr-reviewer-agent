@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { beforeAll, expect, it } from "vitest";
 import type { CandidateFinding } from "../src/domain/types.ts";
-import { evidenceTexts, findLongestRun, findOwnEvidence, findSnippet, headReader, linkPriors, locate, normalize, type ObservedLocation, observe, type PriorFinding, type Report, sameText, splitLines } from "../src/reasoning/track.ts";
+import { evidenceTexts, findLongestRun, findOwnEvidence, headReader, linkPriors, locate, normalize, type ObservedLocation, observe, type PriorFinding, type Report, sameText, splitLines, survivingCode, tokenize } from "../src/reasoning/track.ts";
 import { fingerprint } from "../src/reasoning/verify.ts";
 import { PinnedRepo, syncRepo } from "../src/source/git.ts";
 
@@ -79,6 +79,10 @@ beforeAll(async () => {
     rmSync(join(repoDir, FILE));
     write("src/we:ird/orders.ts", ROUTES);
   });
+  scenario("realign", () => {
+    rmSync(join(repoDir, FILE));
+    write("src/routes/order-routes.ts", `${PAD(5)}\n${ROUTES.replaceAll(", require", ",   require").replace("const order = db", "const order  =  db")}`);
+  });
   cache = mkdtempSync(join(tmpdir(), "track-cache-"));
   for (const sha of Object.values(heads)) git("update-ref", `refs/heads/keep-${sha.slice(0, 7)}`, sha);
 });
@@ -145,12 +149,36 @@ it("never relocates on a snippet too small to be distinctive, but still finds it
     kind: "same",
     location: { file: FILE, newLine: 11, headSha: heads.rewrite, evidence: [{ path: FILE, start: 7, end: 7, text: "}" }] },
   });
-  expect(findSnippet("}", ["a", "}", "b", "}"], 4)).toBe(4);
 });
 
-it("lists tree-wide hits by path alone, so a path with a colon survives, and refuses a list cut at the cap", async () => {
+it("reads code as tokens: comments, blank lines, whitespace, brackets and separators drop out, and strings stay whole", () => {
+  const code = (text: string) => tokenize(text).map((t) => t.text);
+  expect(code('  db.orders.delete(id);  // not "code"\n\n/* gone\n too */ res.status(204).end()')).toEqual(["db", ".", "orders", ".", "delete", "id", "res", ".", "status", "204", ".", "end"]);
+  expect(code("x = 'a // b' + \"c # d\" + `e\n-- f`")).toEqual(["x", "=", '"a // b"', "+", '"c # d"', "+", "`e\n-- f`"]);
+  expect(code("# a comment\n  -- another\n<!-- html\n -->\nSELECT 1 -- trailing\ni--; a #b")).toEqual(["SELECT", "1", "i", "-", "-", "a"]);
+  expect(code('def f():\n    """doc\n    string"""\n    return i // 2')).toEqual(["def", "f", ":", "return", "i"]);
+  expect(tokenize("a\n\n  b /* x\n y */ c").map((t) => t.line)).toEqual([1, 3, 4]);
+  // Limits: a `#include` and a Python floor division lose the rest of their line, and an apostrophe outside a string eats to the line end.
+  expect(code("#include <x>\nlet a: &'a str = x;")).toEqual(["let", "a", ":", "&", '"a str = x;']);
+});
+
+it("finds a finding's code at head wherever it sits in its file, modulo comments and separators, and reports the line it starts on", async () => {
+  const f: PriorFinding = { findingId: "f", status: "PUBLISHED", candidate, location: location(), located: { kind: "changed", file: FILE } };
+  const head = (lines: string[]) => ({ read: async (p: string) => (p === FILE ? lines.join("\n") : undefined), renamedTo: () => undefined, grep: async () => [] });
+  const routes = ROUTES.split("\n");
+  expect(await survivingCode(f, head(routes))).toBe(`at ${FILE}:9`);
+  expect(await survivingCode(f, head([...routes.slice(0, 9), "  // both routes need a user", ...routes.slice(9)]))).toBe(`at ${FILE}:9`);
+  expect(await survivingCode(f, head(routes.map((l) => l.replace(/;$/, ""))))).toBe(`at ${FILE}:9`);
+  expect(await survivingCode(f, head(["", "", ...routes]))).toBe(`at ${FILE}:11`);
+  expect(await survivingCode(f, head(routes.map((l) => l.replace("requireUser, refundOrder", "requireUser, requireAdmin, refundOrder"))))).toBe(undefined);
+});
+
+it("lists tree-wide hits by path alone, so a path with a colon survives, finds a file whose raw lines were re-aligned, and refuses a list cut at the cap", async () => {
   const colon = { file: "src/we:ird/orders.ts", newLine: 11, headSha: heads.colon, evidence: [{ path: "src/we:ird/orders.ts", start: 9, end: 12, text: normalize(EVIDENCE_LINES) }] };
   expect(await locate(location(), heads.colon!, { ...(await at("colon")), renamedTo: () => undefined })).toEqual({ kind: "same", location: colon });
+  // Runs of spaces inside the moved lines: a literal search for a stored line misses, a search for one token and a token comparison do not.
+  const realigned = { file: "src/routes/order-routes.ts", newLine: 16, headSha: heads.realign, evidence: [{ path: "src/routes/order-routes.ts", start: 14, end: 17, text: normalize(EVIDENCE_LINES) }] };
+  expect(await locate(location(), heads.realign!, { ...(await at("realign")), renamedTo: () => undefined })).toEqual({ kind: "same", location: realigned });
   const repo = new PinnedRepo(await syncRepo(cache, "acme/track", repoDir, 1), baseSha, heads.copies!);
   expect(await repo.grepPaths('router.post("/orders/:id/refund"')).toEqual(["src/a/orders.ts", "src/b/orders.ts"]);
   expect(await repo.grepPaths('router.post("/orders/:id/refund"', 16)).toBe(undefined);
@@ -165,13 +193,15 @@ it("skips the tree-wide search when told to, so an already doubted finding costs
   expect(await locate(location(), heads.rename!, head, { treeWide: false })).toEqual({ kind: "file_gone" });
 });
 
-it("calls two texts the same only when both are substantial and equal", () => {
+it("calls two texts the same only when both have enough tokens and the tokens are equal", () => {
   expect(sameText("", "")).toBe(false);
   expect(sameText("}", "}")).toBe(false);
   expect(sameText("return res.json(user);", "return res.json(user);")).toBe(false);
   expect(sameText("}\n}", "x\n}\n}\ny")).toBe(false);
   expect(sameText(normalize(EVIDENCE_LINES.slice(0, 2)), normalize(EVIDENCE_LINES))).toBe(false);
   expect(sameText(normalize(EVIDENCE_LINES), normalize(EVIDENCE_LINES))).toBe(true);
+  expect(sameText(normalize(EVIDENCE_LINES), normalize(EVIDENCE_LINES.map((l) => `${l.replace(/;$/, "")} // same`)))).toBe(true);
+  expect(sameText("db.orders.delete(id);", "db.orders.delete(id)")).toBe(true);
 });
 
 const prior = (located: PriorFinding["located"], status: PriorFinding["status"] = "PUBLISHED"): PriorFinding => ({
@@ -220,7 +250,7 @@ it("links across files once the finding's file is gone, but only on a substantia
   const moved = [{ path: "x.ts", start: 1, end: 4, text: normalize(EVIDENCE_LINES) }];
   expect(linkOne(reported({ title: "Anyone can refund", file: "x.ts", newLine: 1 }, moved), [gone])).toBe("f-1");
   expect(linkOne(reported({ title: "Anyone can refund", file: "x.ts", newLine: 1, category: "correctness" }, moved), [gone])).toBe(undefined);
-  expect(linkOne(reported({ title: "Anyone can refund", file: "x.ts", newLine: 1 }, [{ path: "x.ts", start: 1, end: 1, text: normalize([EVIDENCE_LINES[2]!]) }]), [gone])).toBe(undefined);
+  expect(linkOne(reported({ title: "Anyone can refund", file: "x.ts", newLine: 1 }, [{ path: "x.ts", start: 1, end: 1, text: "res.status(202).end();" }]), [gone])).toBe(undefined);
   expect(linkOne(reported({ file: "x.ts", newLine: 1 }), [gone])).toBe(undefined);
 });
 
@@ -253,10 +283,10 @@ it("finds a finding's own text in the file a named candidate reports, by the lon
   const tiny = { ...prior({ kind: "file_gone" }), location: { ...location(), evidence: [{ path: FILE, start: 12, end: 12, text: "}" }] } };
   expect(findOwnEvidence(tiny, "src/routes/order-routes.ts", lines)).toEqual([]);
   expect(findOwnEvidence(prior({ kind: "file_gone" }), "x.ts", ["nothing", "here"])).toEqual([]);
-  // A block that spans the handler and the registration survives the rewrite of its last line as the handler's lines.
+  // A block that spans the handler and the registration survives the rewrite of its last line as the handler's lines plus the start of that line.
   const block = { ...prior({ kind: "changed", file: FILE }), location: { ...location(), evidence: [{ path: FILE, start: 3, end: 11, text: normalize(ROUTES.split("\n").slice(2, 11)) }] } };
   const rewritten = splitLines(await repo.show(heads.rewrite!, FILE))!;
-  expect(findOwnEvidence(block, FILE, rewritten)).toEqual([{ path: FILE, start: 3, end: 10, text: normalize(ROUTES.split("\n").slice(2, 10)) }]);
+  expect(findOwnEvidence(block, FILE, rewritten)).toEqual([{ path: FILE, start: 3, end: 11, text: normalize(rewritten.slice(2, 11)) }]);
   // A run that occurs twice names no place, however long; a shorter run elsewhere in the block still can.
   const twice = ["const order = db.orders.find(req.params.id);", "queueRefund(order, order.total);", "res.status(202).end();"];
   expect(findLongestRun(twice.join("\n"), [...twice, "x", ...twice])).toBe(undefined);
@@ -264,14 +294,23 @@ it("finds a finding's own text in the file a named candidate reports, by the lon
   expect(findLongestRun("}\n}", ["}", "}"])).toBe(undefined);
 });
 
-it("finds the longest run in time that grows with the file, not with its square", () => {
+it("finds the longest run in time that grows with the file, not with its square, even when the citation and the file both repeat", () => {
   const text = "if (a) {\nfoo();\n}\n}\n}";
   const lines = (n: number) => Array.from({ length: n }, (_, i) => (i % 2 ? "}" : `call(${i});`));
   findLongestRun(text, lines(1_000));
-  const started = performance.now();
+  let started = performance.now();
   expect(findLongestRun(text, lines(80_000))).toBe(undefined);
-  // About 20 ms when linear; over a second when each line copied the position list of every `}` before it.
   expect(performance.now() - started).toBeLessThan(400);
+  // Thirty lines that repeat over eight thousand that repeat: every run occurs many times, and counting them once per run took seconds.
+  const braces = Array.from({ length: 8_000 }, () => "}");
+  const alternating = Array.from({ length: 8_000 }, (_, i) => (i % 2 ? "    return null;" : "  }"));
+  const prose = Array.from({ length: 8_000 }, (_, i) => `  ${["a", "b", "c"][i % 3]} = ${["x", "y"][i % 2]}(${i % 5});`);
+  started = performance.now();
+  expect(findLongestRun(normalize(braces.slice(0, 30)), braces)).toBe(undefined);
+  expect(findLongestRun(normalize(alternating.slice(0, 30)), alternating)).toBe(undefined);
+  expect(findLongestRun(normalize(prose.slice(0, 500)), prose)).toBe(undefined);
+  // About 250 ms on an idle laptop; 3.8 s before the rolling hashes and the bound on shorter lengths.
+  expect(performance.now() - started).toBeLessThan(1_000);
 });
 
 it("links a candidate that names its prior finding only where code sees the report: near the finding's anchor and on its lines at this head", () => {
@@ -349,4 +388,7 @@ it("resolves a doubted finding on an accepted claim, leaves one re-reported with
   expect(rows(prior(same()), accepted)).toEqual([["PUBLISHED>STILL_PRESENT", "located"]]);
   // A verified re-report wins over any claim about the finding.
   expect(observe([prior({ kind: "changed", file: FILE })], [{ findingId: "f-1", candidate, location: location() }], accepted).map((o) => [o.path.join(">"), o.basis])).toEqual([["PUBLISHED>STILL_PRESENT", "reverified"]]);
+  // Two claims on one finding: the first was judged and the second refused as its duplicate, so the first verdict decides.
+  const duplicated = { verdicts: [...accepted.verdicts, { findingId: "f-1", state: "REFUSED" as const, reason: "duplicate of an earlier claim" }], unverified: [] };
+  expect(rows(prior({ kind: "changed", file: FILE }), duplicated)).toEqual([["PUBLISHED>POTENTIALLY_RESOLVED>RESOLVED", "resolution_checked"]]);
 });

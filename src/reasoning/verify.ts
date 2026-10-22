@@ -4,7 +4,7 @@ import { CANDIDATE_MACHINE, type CandidateEvent, type CandidateState } from "../
 import { type CandidateFinding, type CodeEvidence, type Disposition, type ResolutionClaim, type ResolutionVerdict, SEVERITIES, sha256, stableId } from "../domain/types.ts";
 import type { FileDiff } from "../source/diff.ts";
 import { assertSafePath } from "../source/git.ts";
-import { currentFile, type EvidenceText, evidenceTexts, findLongestRun, findOwnEvidence, findSnippet, type HeadReader, linkPriors, normalize, type ObservedLocation, type PriorFinding, type Report, splitLines, survivingCode } from "./track.ts";
+import { currentFile, evidenceTexts, findOwnEvidence, hasCode, type HeadReader, linkPriors, normalize, type ObservedLocation, type PriorFinding, type Report, sharesCode, splitLines, survivingCode, within } from "./track.ts";
 
 export type VerifyContext = {
   prId: string;
@@ -36,13 +36,20 @@ export function fingerprint(candidate: Pick<CandidateFinding, "category" | "file
 const lineCount = (text: string) => (text === "" ? 0 : text.split("\n").length - (text.endsWith("\n") ? 1 : 0));
 const where = (e: CodeEvidence) => `${e.path}:${e.start}-${e.end}@${e.refSha.slice(0, 12)}`;
 
-/** The first reason one evidence range cannot be read from pinned data at one of the `allowed` SHAs, or `undefined`. */
-async function rangeProblem(evidence: CodeEvidence, ctx: VerifyContext, allowed: string[], outside: string): Promise<string | undefined> {
+/** Why `path` must not be read, or `undefined` when it is safe to. */
+function pathProblem(path: string): string | undefined {
   try {
-    assertSafePath(evidence.path);
+    assertSafePath(path);
+    return undefined;
   } catch (error) {
     return (error as Error).message;
   }
+}
+
+/** The first reason one evidence range cannot be read from pinned data at one of the `allowed` SHAs, or `undefined`. */
+async function rangeProblem(evidence: CodeEvidence, ctx: VerifyContext, allowed: string[], outside: string): Promise<string | undefined> {
+  const unsafe = pathProblem(evidence.path);
+  if (unsafe !== undefined) return unsafe;
   if (!allowed.includes(evidence.refSha)) return `evidence ${where(evidence)} ${outside}`;
   const text = await ctx.read(evidence.refSha, evidence.path);
   if (text === undefined) return `evidence ${where(evidence)} does not exist`;
@@ -53,11 +60,6 @@ async function rangeProblem(evidence: CodeEvidence, ctx: VerifyContext, allowed:
 
 /** The first structural reason a candidate cannot be anchored and reproduced from pinned data, or `undefined`. */
 async function structuralProblem(candidate: CandidateFinding, ctx: VerifyContext): Promise<string | undefined> {
-  try {
-    assertSafePath(candidate.file);
-  } catch (error) {
-    return (error as Error).message;
-  }
   const file = ctx.files.get(candidate.file);
   if (file === undefined) return `${candidate.file} is not in the changed set`;
   if (candidate.newLine === null) return "no line anchor";
@@ -75,14 +77,15 @@ export type Contradictions = { reported: Map<string, string>; cited: Pick<Verifi
 
 /**
  * Why a resolution claim fails, or `undefined` when code supports it. A claim must name an open finding none of whose
- * own-file code is found at this head (a changed line alone never resolves, and code still in place never does: a
- * changed helper, a comment inserted in the block, or a short item shifted a line is not a fix), which no candidate of
- * this revision reports again or still cites: a candidate whose evidence shares a substantial run with the finding's
- * own code says that code is still part of a live defect, as when a handler stays reachable through a second unguarded
- * route. The claim's evidence must be confirmed_by_static_trace, exist at the head SHA, include a range in the
- * finding's file at this head (or, when that file is gone, in a file this pull request changes), and cite no range
- * that is a run of the finding's own code unchanged or holds every line of it. Every code comparison reads only the
- * finding's own-file evidence: a helper both cite says nothing about the defect.
+ * own-file code is found at this head, compared as code tokens (a changed line alone never resolves, and code still in
+ * place never does: a changed helper, a comment or blank line inserted in the block, a dropped semicolon, or a short
+ * item shifted a line is not a fix), which no candidate of this revision reports again or still cites: a candidate
+ * whose evidence shares a substantial run of tokens with the finding's own code says that code is still part of a
+ * live defect, as when a handler stays reachable through a second unguarded route. The claim's evidence must be
+ * confirmed_by_static_trace, exist at the head SHA, include a range in the finding's file at this head (or, when that
+ * file is gone, in a file this pull request changes), and cite code: a range with no code tokens, such as a comment
+ * or a blank line, that sits whole in the finding's own code unchanged, or that holds all of it, is not a fix. Every
+ * code comparison reads only the finding's own-file evidence: a helper both cite says nothing about the defect.
  */
 async function refusal(claim: ResolutionClaim, ctx: VerifyContext, { reported, cited }: Contradictions, seen: Set<string>): Promise<string | undefined> {
   const f = ctx.prior.find((p) => p.findingId === claim.findingId);
@@ -92,7 +95,7 @@ async function refusal(claim: ResolutionClaim, ctx: VerifyContext, { reported, c
   if (by !== undefined) return `candidate ${by} reports it again`;
   const own = f.location.evidence.filter((e) => e.path === f.location.file);
   for (const c of cited) {
-    const cites = c.location.evidence.find((e) => own.some((old) => findLongestRun(old.text, e.text.split("\n")) !== undefined));
+    const cites = c.location.evidence.find((e) => own.some((old) => sharesCode(old.text, e.text)));
     if (cites) return `candidate ${c.candidate.id} still cites its code at ${cites.path}:${cites.start}-${cites.end}`;
   }
   if (f.located.kind === "same") return `its cited code is unchanged at ${f.located.location.file}:${f.located.location.newLine ?? "?"}`;
@@ -104,13 +107,9 @@ async function refusal(claim: ResolutionClaim, ctx: VerifyContext, { reported, c
     const problem = await rangeProblem(evidence, ctx, [ctx.headSha], "cites a SHA other than the head");
     if (problem !== undefined) return problem;
     const text = normalize(splitLines(await ctx.read(ctx.headSha, evidence.path))!.slice(evidence.start - 1, evidence.end));
-    const lines = new Set(text.split("\n"));
-    const holds = (old: EvidenceText) => {
-      const wanted = old.text.split("\n").filter((l) => l !== "");
-      return wanted.length > 0 && wanted.every((l) => lines.has(l));
-    };
-    if (own.some((old) => findSnippet(text, old.text.split("\n"), 1) !== undefined)) return `evidence ${where(evidence)} is the finding's code unchanged`;
-    if (own.some(holds)) return `evidence ${where(evidence)} contains the finding's code unchanged`;
+    if (!hasCode(text)) return `evidence ${where(evidence)} cites no code`;
+    if (own.some((old) => within(text, old.text))) return `evidence ${where(evidence)} is the finding's code unchanged`;
+    if (own.some((old) => within(old.text, text))) return `evidence ${where(evidence)} contains the finding's code unchanged`;
   }
   const file = currentFile(f);
   const inScope = (path: string) => (file === undefined ? ctx.files.has(path) : path === file);
@@ -152,7 +151,8 @@ const step = (path: CandidateState[], event: CandidateEvent): CandidateState[] =
  * reported twice, so the second is a duplicate. Two that read as the same open finding are not: the second is new.
  * `unverified` names the open findings a candidate reported again (`priorFindingId`) without a verified link to it.
  * The resolution claims are checked last, because a finding any candidate reports again or still cites cannot be
- * resolved, and a candidate whose evidence reads still cites it when its kind or severity discards it.
+ * resolved. What a candidate cites is read before any other check, as soon as its paths are safe to read, so a
+ * candidate still cites the finding's code when its anchor, file, kind or severity discards it.
  */
 export async function verifyCandidates(
   candidates: CandidateFinding[],
@@ -168,13 +168,18 @@ export async function verifyCandidates(
   };
   for (const [index, candidate] of candidates.entries()) {
     let path = step(["DISCOVERED"], "INVESTIGATE");
+    const unsafe = [candidate.file, ...candidate.codeEvidence.map((e) => e.path)].map(pathProblem).find((p) => p !== undefined);
+    if (unsafe !== undefined) {
+      discard(index, candidate, path, unsafe);
+      continue;
+    }
+    const location: ObservedLocation = { file: candidate.file, newLine: candidate.newLine, headSha: ctx.headSha, evidence: await evidenceTexts(candidate, ctx.headSha, ctx.read) };
+    cited.push({ candidate, location });
     const structural = await structuralProblem(candidate, ctx);
     if (structural !== undefined) {
       discard(index, candidate, path, structural);
       continue;
     }
-    const location: ObservedLocation = { file: candidate.file, newLine: candidate.newLine, headSha: ctx.headSha, evidence: await evidenceTexts(candidate, ctx.headSha, ctx.read) };
-    cited.push({ candidate, location });
     if (candidate.evidenceKind !== "confirmed_by_static_trace") {
       discard(index, candidate, step(path, "EVIDENCE_INSUFFICIENT"), `evidence is ${candidate.evidenceKind}`);
       continue;

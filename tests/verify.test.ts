@@ -218,10 +218,11 @@ const BASE_A = ["import x;", "", "export function del(req, res) {", "  const id 
 const BASE_HELPER = ["export function auth(u) {", "  return u.admin === true;", "}"];
 const item = (path: string, lines: string[], start: number, end: number): EvidenceText => ({ path, start, end, text: normalize(lines.slice(start - 1, end)) });
 
-/** The verdict on a claim for a finding last seen on `BASE_A`, and the state the finding ends in, at a head of `files`. */
-async function resolve(files: Record<string, string[]>, evidence: EvidenceText[], ranges: [number, number][], candidates: CandidateFinding[] = [], head: Partial<VerifyContext["head"]> = {}) {
+/** The verdict on a claim for a finding last seen on `BASE_A`, and the state the finding ends in, at a head of `files`, whose diff hunks cover `hunks` (every line when absent). */
+async function resolve(files: Record<string, string[]>, evidence: EvidenceText[], ranges: [number, number][], candidates: CandidateFinding[] = [], head: Partial<VerifyContext["head"]> = {}, hunks: Record<string, number[]> = {}) {
   const at = { ...inMemory(files), prior: [] };
   at.head = { ...at.head, ...head };
+  for (const [path, lines] of Object.entries(hunks)) at.files.get(path)!.headLines = new Set(lines);
   const location: ObservedLocation = { file: A, newLine: 5, headSha: "older", evidence };
   const f: PriorFinding = { findingId: "f-a", status: "PUBLISHED", candidate: candidate({ file: A, newLine: 5, codeEvidence: [] }), location, located: await locate(location, ctx.headSha, at.head, { treeWide: false }) };
   const result = await verifyCandidates(candidates, { ...ctx, ...at, prior: [f] }, [claim({ findingId: "f-a", codeEvidence: ranges.map(([start, end]) => ({ path: A, start, end, refSha: ctx.headSha })) })]);
@@ -233,29 +234,81 @@ it("refuses a resolution while any of the finding's own-file code survives at he
   // Only a helper the finding also cited changed; its own lines are byte-identical.
   const helperChanged = { [A]: BASE_A, [HELPER]: ["export function auth(u) {", "  return Boolean(u?.admin);", "}"] };
   expect(await resolve(helperChanged, [item(A, BASE_A, 3, 6), item(HELPER, BASE_HELPER, 1, 3)], [[3, 7]])).toEqual(["its code survives at src/a.ts:3", "POTENTIALLY_RESOLVED"]);
-  // One short line, below the floor, shifted down a line by an insert above it.
+  // One line shifted down by an insert above it: with six tokens it is found where it went; with two it is found in place only, and then anywhere in its file by the survival check.
   const shifted = { [A]: ["import x;", "import y;", ...BASE_A.slice(1)], [HELPER]: BASE_HELPER };
-  expect(await resolve(shifted, [item(A, BASE_A, 5, 5)], [[5, 6]])).toEqual(["its code survives at src/a.ts:6", "POTENTIALLY_RESOLVED"]);
-  // A comment inserted inside the cited block: no run is contiguous, but the claim cites every line of it.
+  expect(await resolve(shifted, [item(A, BASE_A, 5, 5)], [[5, 6]])).toEqual(["its cited code is unchanged at src/a.ts:6", "STILL_PRESENT"]);
+  const headed = { [A]: ["// orders", ...BASE_A], [HELPER]: BASE_HELPER };
+  expect(await resolve(headed, [item(A, BASE_A, 1, 1)], [[5, 6]])).toEqual(["its code survives at src/a.ts:2", "POTENTIALLY_RESOLVED"]);
+  // A comment inserted inside the cited block is not a change: the block's code is found in place, so the finding is still present.
   const commented = { [A]: [...BASE_A.slice(0, 4), "  // checked upstream", ...BASE_A.slice(4)], [HELPER]: BASE_HELPER };
-  expect(await resolve(commented, [item(A, BASE_A, 3, 6)], [[3, 8]])).toEqual([`evidence src/a.ts:3-8@${sha} contains the finding's code unchanged`, "POTENTIALLY_RESOLVED"]);
+  expect(await resolve(commented, [item(A, BASE_A, 3, 6)], [[3, 8]])).toEqual(["its cited code is unchanged at src/a.ts:5", "STILL_PRESENT"]);
   // The file is gone and its code reappears verbatim in another file: a claim on any changed file does not resolve it.
   const moved = { "src/b.ts": BASE_A, "src/c.ts": ["x"] };
   expect(await resolve(moved, [item(A, BASE_A, 3, 6)], [[1, 1]])).toEqual(["its code survives at src/b.ts:3", "OUTDATED"]);
   expect(await resolve(moved, [item(A, BASE_A, 3, 6)], [[1, 1]], [], { grep: async () => undefined })).toEqual(["its code survives in more files than the search lists", "OUTDATED"]);
-  // A guard inserted where the delete was, and the claim cites the guard: nothing of the block is found whole, and the claim is new code.
+  // A guard inserted where the delete was: nothing of the block is found whole, and a claim that cites the guard, alone or with the block around it, is new code.
   const guarded = { [A]: [...BASE_A.slice(0, 4), "  if (!req.user.admin) return res.status(403).end();", ...BASE_A.slice(4)], [HELPER]: BASE_HELPER };
   expect(await resolve(guarded, [item(A, BASE_A, 3, 6)], [[5, 5]])).toEqual([null, "RESOLVED"]);
-  expect(await resolve(guarded, [item(A, BASE_A, 3, 6)], [[3, 8]])).toEqual([`evidence src/a.ts:3-8@${sha} contains the finding's code unchanged`, "POTENTIALLY_RESOLVED"]);
+  expect(await resolve(guarded, [item(A, BASE_A, 3, 6)], [[3, 8]])).toEqual([null, "RESOLVED"]);
+  // A claim that cites the old block without the guard cites the finding's code unchanged.
+  expect(await resolve(guarded, [item(A, BASE_A, 3, 6)], [[6, 7]])).toEqual([`evidence src/a.ts:6-7@${sha} is the finding's code unchanged`, "POTENTIALLY_RESOLVED"]);
 });
 
-it("refuses a resolution when a candidate the verifier discards still cites the finding's code", async () => {
+it("reads code as tokens: an edit that adds a comment, a blank line, whitespace or drops a semicolon leaves the finding present, and a claim on a comment cites no code", async () => {
+  const sha = ctx.headSha.slice(0, 12);
+  const block = [item(A, BASE_A, 3, 6)];
+  const commented = { [A]: [...BASE_A.slice(0, 4), "  // auth checked upstream", ...BASE_A.slice(4)], [HELPER]: BASE_HELPER };
+  const blank = { [A]: [...BASE_A.slice(0, 4), "", ...BASE_A.slice(4)], [HELPER]: BASE_HELPER };
+  const noSemicolon = { [A]: BASE_A.with(4, "  db.orders.delete(id)"), [HELPER]: BASE_HELPER };
+  const crlf = { [A]: BASE_A.map((l) => `\t${l}\r`), [HELPER]: BASE_HELPER };
+  const cases: [Record<string, string[]>, [number, number][]][] = [
+    [commented, [[5, 5]]],
+    [blank, [[5, 5]]],
+    [blank, [[5, 6]]],
+    [noSemicolon, [[5, 5]]],
+    [crlf, [[5, 5]]],
+  ];
+  for (const [files, ranges] of cases) expect(await resolve(files, block, ranges), JSON.stringify(ranges)).toEqual(["its cited code is unchanged at src/a.ts:5", "STILL_PRESENT"]);
+  // A helper the finding also cited changed, so locate doubts it, and the block gained a comment: its code still survives whole.
+  const helperAndComment = { ...commented, [HELPER]: ["export function auth(u) {", "  return Boolean(u?.admin);", "}"] };
+  expect(await resolve(helperAndComment, [...block, item(HELPER, BASE_HELPER, 1, 3)], [[5, 5]])).toEqual(["its code survives at src/a.ts:3", "POTENTIALLY_RESOLVED"]);
+  // A real guard went in, but the claim cites only the comment above it.
+  const guardedCommented = { [A]: [...BASE_A.slice(0, 4), "  // admins only", "  if (!req.user.admin) return res.status(403).end();", ...BASE_A.slice(4)], [HELPER]: BASE_HELPER };
+  expect(await resolve(guardedCommented, block, [[5, 5]])).toEqual([`evidence src/a.ts:5-5@${sha} cites no code`, "POTENTIALLY_RESOLVED"]);
+  expect(await resolve(guardedCommented, block, [[6, 6]])).toEqual([null, "RESOLVED"]);
+});
+
+it("searches the tree for a short item with enough tokens, and finds a moved block whose raw lines hold runs of spaces", async () => {
+  // One line of six tokens moved verbatim into a helper the route now calls.
+  const removeOrder = ["export function removeOrder(id) {", "  db.orders.delete(id);", "  return db.get(id);", "}"];
+  const callsHelper = { [A]: BASE_A.with(4, "  removeOrder(id);"), [HELPER]: removeOrder };
+  expect(await resolve(callsHelper, [item(A, BASE_A, 5, 5)], [[5, 5]])).toEqual(["its code survives at src/helper.ts:2", "POTENTIALLY_RESOLVED"]);
+  // Five tokens are not distinctive: the line is looked for in the finding's file only, and the helper's copy is not it.
+  expect(await resolve(callsHelper, [item(A, removeOrder, 3, 3)], [[5, 5]])).toEqual([null, "RESOLVED"]);
+  // The file was renamed with edits the diff does not call a rename, and the line is in the new file.
+  const renamed = { "src/b.ts": ["import x;", "import y;", "export function del(req, res) {", "  log(req);", "  db.orders.delete(id);", "}"], "src/c.ts": ["x"] };
+  expect(await resolve(renamed, [item(A, BASE_A, 5, 5)], [[1, 1]])).toEqual(["its code survives at src/b.ts:5", "OUTDATED"]);
+  // Aligned assignments: the raw lines hold runs of spaces that the stored text collapsed, which a literal search for a stored line never finds.
+  const aligned = ["import x;", "", "export function del(req, res) {", "  const id      =  req.params.id;", "  const reason  =  req.body.reason;", "  db.orders.delete(id, reason);", "}"];
+  const moved = { [A]: ["import x;", "", "export function del(req, res) {", "  removeOrder(req);", "}"], [HELPER]: ["export function removeOrder(req) {", ...aligned.slice(3, 6), "}"] };
+  expect(await resolve(moved, [item(A, aligned, 4, 6)], [[4, 4]])).toEqual(["its code survives at src/helper.ts:2", "POTENTIALLY_RESOLVED"]);
+});
+
+it("reads what every candidate cites before any other check, so a discarded one still contradicts a claim", async () => {
   // Line 4 changed; a re-report cites the surviving lines 5-7 without naming the finding, and fails VERIFY on its own terms.
   const partial = { [A]: BASE_A.with(3, "  const id = String(req.params.id);"), [HELPER]: BASE_HELPER };
+  const block = [item(A, BASE_A, 3, 6)];
   const again = (over: Partial<CandidateFinding>) => candidate({ id: "c9", title: "Delete route lacks authorization", file: A, newLine: 5, codeEvidence: [{ path: A, start: 5, end: 7, refSha: ctx.headSha }], ...over });
+  const refused = ["candidate c9 still cites its code at src/a.ts:5-7", "POTENTIALLY_RESOLVED"];
   for (const over of [{}, { evidenceKind: "suspected" as const }, { severity: "low" as const, confidence: 0.1 }]) {
-    expect(await resolve(partial, [item(A, BASE_A, 3, 6)], [[4, 4]], [again(over)])).toEqual(["candidate c9 still cites its code at src/a.ts:5-7", "POTENTIALLY_RESOLVED"]);
+    expect(await resolve(partial, block, [[4, 4]], [again(over)])).toEqual(refused);
   }
-  // A candidate whose evidence cannot be read says nothing.
-  expect(await resolve(partial, [item(A, BASE_A, 3, 6)], [[4, 4]], [again({ codeEvidence: [{ path: A, start: 5, end: 70, refSha: ctx.headSha }] })])).toEqual([null, "RESOLVED"]);
+  // Anchored outside every hunk, or in a file the PR does not change: the citation still reads.
+  expect(await resolve(partial, block, [[4, 4]], [again({})], {}, { [A]: [4] })).toEqual(refused);
+  expect(await resolve(partial, block, [[4, 4]], [again({ file: "src/route2.ts", newLine: 2 })])).toEqual(refused);
+  // Citing the base commit, the head lines around its anchor are what it cites; citing past the end of the file, the lines that exist are.
+  expect(await resolve(partial, block, [[4, 4]], [again({ newLine: 4, codeEvidence: [{ path: A, start: 5, end: 7, refSha: ctx.baseSha }] })])).toEqual(["candidate c9 still cites its code at src/a.ts:2-6", "POTENTIALLY_RESOLVED"]);
+  expect(await resolve(partial, block, [[4, 4]], [again({ codeEvidence: [{ path: A, start: 5, end: 70, refSha: ctx.headSha }] })])).toEqual(["candidate c9 still cites its code at src/a.ts:5-70", "POTENTIALLY_RESOLVED"]);
+  // Only a candidate whose paths are unsafe says nothing.
+  expect(await resolve(partial, block, [[4, 4]], [again({ codeEvidence: [{ path: "../../etc/passwd", start: 1, end: 1, refSha: ctx.headSha }] })])).toEqual([null, "RESOLVED"]);
 });
