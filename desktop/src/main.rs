@@ -264,7 +264,7 @@ async fn capture_settled(
     cx: &mut AsyncApp,
     size: (f32, f32),
 ) -> Result<capture::Image, String> {
-    let mut last: Option<capture::Image> = None;
+    let (mut last, mut expected): (Option<capture::Image>, usize) = (None, 0);
     for _ in 0..50 {
         let (done, presented) = tokio::sync::oneshot::channel();
         let scale = cx
@@ -278,14 +278,23 @@ async fn capture_settled(
             .map_err(|e| e.to_string())?;
         let _ = presented.await;
         let image = cx.update(|_| capture::window(size.1, scale))?;
-        let full = image.width == (size.0 * scale).round() as usize;
-        if full && !image.is_uniform() && last.as_ref().is_some_and(|l| l.rgba == image.rgba) {
+        expected = (size.0 * scale).round() as usize;
+        if image.width == expected && !image.is_uniform() && last.as_ref().is_some_and(|l| l.rgba == image.rgba) {
             return Ok(image);
         }
         last = Some(image);
         cx.background_executor().timer(Duration::from_millis(50)).await;
     }
-    Err("the window never settled to the same painted frame twice".into())
+    Err(match last {
+        Some(l) => format!(
+            "the window never settled to the same painted frame twice; the last capture was {}x{} (expected width {}), {}",
+            l.width,
+            l.height,
+            expected,
+            if l.is_uniform() { "one flat color" } else { "painted" }
+        ),
+        None => "the window was never captured".into(),
+    })
 }
 
 fn fail(e: impl std::fmt::Display) -> ! {
