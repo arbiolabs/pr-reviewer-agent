@@ -77,7 +77,7 @@ pub fn dark() -> Colors {
         border_strong: c(0x343C49),
         text: c(0xE9EDF2),
         muted: c(0xA0A9B6),
-        faint: c(0x8590A0),
+        faint: c(0x929DAD),
         accent: c(0x8E95FF),
         accent_hover: c(0xA2A8FF),
         accent_press: c(0x7980EE),
@@ -123,7 +123,7 @@ pub fn light() -> Colors {
         border_strong: c(0xCCC7BC),
         text: c(0x1A1E24),
         muted: c(0x4F5866),
-        faint: c(0x566070),
+        faint: c(0x525B6A),
         accent: c(0x4247C8),
         accent_hover: c(0x383DB8),
         accent_press: c(0x2F33A2),
@@ -349,6 +349,17 @@ mod tests {
             }
             if contrast(t.on_danger, t.danger) < 4.5 {
                 bad.push(format!("{name}: on_danger"));
+            }
+            // Secondary text is set at 11 and 12 points, where antialiasing leaves only a stroke's core at the
+            // token's own color: measured on the renders, the stroke reads at about 0.85 of the core's ratio. So
+            // the core keeps 5.5:1, and the text the eye reads keeps 4.5:1.
+            for (tn, fg) in [("muted", t.muted), ("faint", t.faint)] {
+                for (sn, back) in surfaces {
+                    let r = contrast(fg, back);
+                    if r < 5.5 {
+                        bad.push(format!("{name}: small {tn} on {sn} is {r:.2}:1, under 5.5"));
+                    }
+                }
             }
             // A dimmed control or palette row keeps AA text; the outline of a disabled control keeps 3:1.
             for (sn, back) in surfaces {
