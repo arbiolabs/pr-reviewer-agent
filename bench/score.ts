@@ -45,7 +45,8 @@ export type ExpectedStatus = "resolved" | "open" | "not_resolved";
 export type Expectation = { label: string; status: ExpectedStatus; file?: string; line_range?: [number, number] };
 /** `labels` are bugs the commit adds. */
 export type Commit = { dir: string; delete: string[]; expect: Expectation[]; labels: TrackedLabel[] };
-export type TrackedFinding = Finding & { findingId: string };
+/** `reopens` names the resolved finding this one was seeded from, when a later head found that finding's code again. */
+export type TrackedFinding = Finding & { findingId: string; reopens?: { findingId: string; resolvedAt: string } | null };
 export type InlineComment = { path: string; line: number };
 /** One review of one head: its JSON findings, the stored status of every finding of the PR, and the inline comments it posted. */
 export type Step = { findings: TrackedFinding[]; statuses: Record<string, string>; comments: InlineComment[] };

@@ -14,9 +14,9 @@ import {
   type ReviewState,
   TERMINAL_REVIEW_STATES,
 } from "../domain/machines.ts";
-import { type CandidateFinding, type ChangedFile, type Disposition, type PullInfo, stableId } from "../domain/types.ts";
+import { type CandidateFinding, type ChangedFile, type Disposition, type PullInfo, type ResolutionClaim, type ResolutionVerdict, stableId } from "../domain/types.ts";
 import { sanitize } from "../protocol/sanitize.ts";
-import type { Observation, ObservedLocation } from "../reasoning/track.ts";
+import type { Observation, ObservedLocation, Reopened } from "../reasoning/track.ts";
 
 const MIGRATIONS_DIR = new URL("../../migrations/", import.meta.url);
 
@@ -91,8 +91,12 @@ export type FindingView = {
   firstHeadSha: string;
   /** An inline comment is on GitHub, or in an outbox that may still reach it; such a finding is never commented again. */
   posted: boolean;
+  /** An earlier review that carries it in its body is on GitHub, or in an outbox that may still reach it: the reader has seen it. */
+  listed: boolean;
   /** `candidate.file` and `newLine` are valid at this revision's head, not carried from an older one. */
   anchored: boolean;
+  /** The resolved finding this one reopens, when its code came back after a resolution, and the head it was resolved on. */
+  reopens: Reopened | null;
 };
 
 /** An open finding at its latest observation before `excludeRevisionId`, with the head that observation was made on. */
@@ -517,21 +521,23 @@ export class AppStore {
   }
 
   /** First submission wins: a replayed or repeated submit_candidates call cannot replace the stored set. */
-  saveCandidateSet(revisionId: string, candidates: CandidateFinding[]): { id: string; stored: boolean } {
+  saveCandidateSet(revisionId: string, candidates: CandidateFinding[], resolutions: ResolutionClaim[] = []): { id: string; stored: boolean } {
     const id = stableId("candidates", revisionId);
     const info = this.db
-      .prepare("INSERT INTO candidate_sets (id, revision_id, candidates_json, created_at) VALUES (?, ?, ?, ?) ON CONFLICT (id) DO NOTHING")
-      .run(id, revisionId, JSON.stringify(candidates), now());
+      .prepare("INSERT INTO candidate_sets (id, revision_id, candidates_json, resolutions_json, created_at) VALUES (?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING")
+      .run(id, revisionId, JSON.stringify(candidates), JSON.stringify(resolutions), now());
     return { id, stored: info.changes === 1 };
   }
 
-  candidateSet(revisionId: string): { id: string; candidates: CandidateFinding[]; dispositions: Disposition[] | null } | undefined {
+  candidateSet(revisionId: string): { id: string; candidates: CandidateFinding[]; resolutions: ResolutionClaim[]; dispositions: Disposition[] | null; verdicts: ResolutionVerdict[] | null } | undefined {
     const row = this.db.prepare("SELECT * FROM candidate_sets WHERE revision_id = ?").get(revisionId) as Record<string, string | null> | undefined;
     if (!row) return undefined;
     return {
       id: row.id!,
       candidates: JSON.parse(row.candidates_json!),
+      resolutions: row.resolutions_json ? JSON.parse(row.resolutions_json) : [],
       dispositions: row.dispositions_json ? JSON.parse(row.dispositions_json) : null,
+      verdicts: row.resolution_verdicts_json ? JSON.parse(row.resolution_verdicts_json) : null,
     };
   }
 
@@ -543,11 +549,18 @@ export class AppStore {
    * Writes for VERIFY → PREPARE_PUBLICATION; call inside `advance()` so they commit with the transition. `verified`
    * upserts the finding rows (a re-report keeps its ID and refreshes the severity); `observations` writes one row per
    * finding this revision saw, with the state it ended in, and moves the finding there. The observation goes in before
-   * the status changes, so the journal trigger charges the change to this revision.
+   * the status changes, so the journal trigger charges the change to this revision. `verdicts` judge the submission's
+   * resolution claims; the observations already carry what each accepted one did.
    */
-  writeVerification(revision: RevisionRow, dispositions: Disposition[], verified: { findingId: string; fingerprint: string; candidate: CandidateFinding }[], observations: Observation[]): void {
+  writeVerification(
+    revision: RevisionRow,
+    dispositions: Disposition[],
+    verified: { findingId: string; fingerprint: string; candidate: CandidateFinding }[],
+    observations: Observation[],
+    verdicts: ResolutionVerdict[] = [],
+  ): void {
     const at = now();
-    this.db.prepare("UPDATE candidate_sets SET dispositions_json = ? WHERE revision_id = ?").run(JSON.stringify(dispositions), revision.id);
+    this.db.prepare("UPDATE candidate_sets SET dispositions_json = ?, resolution_verdicts_json = ? WHERE revision_id = ?").run(JSON.stringify(dispositions), JSON.stringify(verdicts), revision.id);
     for (const { findingId, fingerprint, candidate } of verified) {
       this.db
         .prepare(
@@ -557,7 +570,7 @@ export class AppStore {
         )
         .run(findingId, revision.pr_id, revision.id, fingerprint, candidate.severity, at, at);
     }
-    for (const { findingId, path, basis, candidate, location } of observations) {
+    for (const { findingId, path, basis, candidate, location, reopens } of observations) {
       const state = path.at(-1)!;
       // A retried VERIFY meets its first attempt's observation and leaves it, status included: the observation that
       // was journaled is the one that stands, so the retry adds no status change the history would call a publication.
@@ -568,6 +581,7 @@ export class AppStore {
         )
         .run(stableId("observation", findingId, revision.id), findingId, revision.id, state, JSON.stringify(candidate), JSON.stringify(location), at, JSON.stringify(path), basis);
       if (Number(changes) === 1) this.db.prepare("UPDATE findings SET status = ?, updated_at = ? WHERE id = ? AND status != ?").run(state, at, findingId, state);
+      if (reopens) this.db.prepare("UPDATE findings SET reopens = ? WHERE id = ? AND reopens IS NULL").run(reopens.findingId, findingId);
     }
   }
 
@@ -575,7 +589,9 @@ export class AppStore {
     const revision = this.revision(revisionId)!;
     const rows = this.db
       .prepare(
-        `SELECT f.id, f.fingerprint, f.status, f.current_severity, f.first_revision_id, f.github_review_id, o.evidence_json, o.location_json, fr.head_sha AS first_head_sha
+        `SELECT f.id, f.fingerprint, f.status, f.current_severity, f.first_revision_id, f.github_review_id, f.reopens, o.evidence_json, o.location_json, fr.head_sha AS first_head_sha,
+           (SELECT rr.head_sha FROM finding_observations ro JOIN review_revisions rr ON rr.id = ro.revision_id
+            WHERE ro.finding_id = f.reopens AND ro.disposition = 'RESOLVED' ORDER BY ro.created_at DESC LIMIT 1) AS resolved_at
          FROM finding_observations o JOIN findings f ON f.id = o.finding_id JOIN review_revisions fr ON fr.id = f.first_revision_id
          WHERE o.revision_id = ? ORDER BY o.created_at, f.id`,
       )
@@ -583,15 +599,21 @@ export class AppStore {
     // A finding counts as posted while an outbox may still put it on GitHub: its POST may have landed (`sending`,
     // `needs_reconciliation`), or a live revision is about to send it. A missed comment is cheaper than a duplicate.
     // A `pending` outbox of a finished revision was never sent or was proven absent, so its findings are not posted.
+    // It counts as listed once such an outbox, or a published one, belongs to a revision that observed it.
     const terminal = TERMINAL_REVIEW_STATES.map((s) => `'${s}'`).join(", ");
     const outboxes = this.db
       .prepare(
-        `SELECT o.revision_id, o.payload_json, o.inline_finding_ids_json FROM publication_outbox o JOIN review_revisions r ON r.id = o.revision_id
+        `SELECT o.revision_id, o.status, o.payload_json, o.inline_finding_ids_json FROM publication_outbox o JOIN review_revisions r ON r.id = o.revision_id
          WHERE r.pr_id = ? AND o.revision_id != ?
-         AND (o.status IN ('sending', 'needs_reconciliation') OR (o.status = 'pending' AND r.state NOT IN (${terminal})))`,
+         AND (o.status IN ('published', 'sending', 'needs_reconciliation') OR (o.status = 'pending' AND r.state NOT IN (${terminal})))`,
       )
-      .all(revision.pr_id, revisionId) as Pick<OutboxRow, "revision_id" | "payload_json" | "inline_finding_ids_json">[];
-    const inFlight = new Set(outboxes.flatMap((o) => this.inlineFindingIds(o)));
+      .all(revision.pr_id, revisionId) as Pick<OutboxRow, "revision_id" | "status" | "payload_json" | "inline_finding_ids_json">[];
+    const inFlight = new Set(outboxes.filter((o) => o.status !== "published").flatMap((o) => this.inlineFindingIds(o)));
+    const listed = new Set(
+      outboxes.length === 0
+        ? []
+        : (this.db.prepare(`SELECT DISTINCT finding_id FROM finding_observations WHERE revision_id IN (${outboxes.map(() => "?").join(", ")})`).all(...outboxes.map((o) => o.revision_id)) as { finding_id: string }[]).map((r) => r.finding_id),
+    );
     return rows.map((row) => {
       const location = JSON.parse(row.location_json!) as Partial<ObservedLocation>;
       return {
@@ -603,21 +625,37 @@ export class AppStore {
         carried: row.first_revision_id !== revisionId,
         firstHeadSha: row.first_head_sha!,
         posted: row.github_review_id !== null || inFlight.has(row.id!),
+        listed: listed.has(row.id!),
         anchored: location.headSha === undefined || location.headSha === revision.head_sha,
+        reopens: row.reopens == null ? null : { findingId: row.reopens, resolvedAt: row.resolved_at! },
       };
     });
   }
 
   /** Every finding of the PR not yet RESOLVED, as last observed by a revision other than `excludeRevisionId`. */
   openFindings(prId: string, excludeRevisionId: string): OpenFinding[] {
+    return this.findingsAsLastObserved("f.status != 'RESOLVED'", { pr: prId, exclude: excludeRevisionId, limit: -1 });
+  }
+
+  /**
+   * The RESOLVED findings of the PR that no revision other than `excludeRevisionId` has reopened, most recently
+   * resolved first and at most `limit` of them, as last observed: the location is where the code was last seen and
+   * `observedAt` the head it was resolved on. The revision that reopened one still sees it, so its retry derives the
+   * same successor.
+   */
+  resolvedFindings(prId: string, excludeRevisionId: string, limit: number): OpenFinding[] {
+    return this.findingsAsLastObserved("f.status = 'RESOLVED' AND NOT EXISTS (SELECT 1 FROM findings n WHERE n.reopens = f.id AND n.first_revision_id != :exclude)", { pr: prId, exclude: excludeRevisionId, limit }, "f.updated_at DESC, f.id");
+  }
+
+  private findingsAsLastObserved(where: string, params: { pr: string; exclude: string; limit: number }, order = "f.created_at, f.id"): OpenFinding[] {
     const rows = this.db
       .prepare(
         `SELECT f.id, f.status, o.evidence_json, o.location_json, r.head_sha FROM findings f
          JOIN finding_observations o ON o.id = (SELECT id FROM finding_observations WHERE finding_id = f.id AND revision_id != :exclude ORDER BY created_at DESC, id LIMIT 1)
          JOIN review_revisions r ON r.id = o.revision_id
-         WHERE f.pr_id = :pr AND f.status != 'RESOLVED' ORDER BY f.created_at, f.id`,
+         WHERE f.pr_id = :pr AND ${where} ORDER BY ${order} LIMIT :limit`,
       )
-      .all({ pr: prId, exclude: excludeRevisionId }) as Record<string, string>[];
+      .all(params) as Record<string, string>[];
     return rows.map((row) => ({
       findingId: row.id!,
       status: row.status as FindingState,

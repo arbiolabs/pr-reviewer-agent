@@ -15,17 +15,24 @@ import type { ReviewState } from "../domain/machines.ts";
 import { type ReviewCheckpoint, type ReviewMode, sha256 } from "../domain/types.ts";
 import type { PullSource } from "../github/pulls.ts";
 import { askJev, type JevOutcome, type JevRoute, selectReviewMode, type TriageInput, type TriageResult } from "../jev/decision.ts";
-import type { AppStore, RevisionRow } from "../persistence/store.ts";
+import type { AppStore, OpenFinding, RevisionRow } from "../persistence/store.ts";
 import { buildReviewRequest } from "../reasoning/request.ts";
 import { TargetDoc, type Workspace } from "../reasoning/tools.ts";
-import { evidenceTexts, headReader, locate, observe, type ObservedLocation, type PriorFinding } from "../reasoning/track.ts";
-import { verifyCandidates } from "../reasoning/verify.ts";
+import { evidenceTexts, type HeadReader, headReader, locate, observe, type ObservedLocation, type PriorFinding, reopen } from "../reasoning/track.ts";
+import { fingerprint, verifyCandidates } from "../reasoning/verify.ts";
 import { PinnedRepo, syncRepo } from "../source/git.ts";
 import type { GitHubClient } from "../github/client.ts";
-import { buildPayload, findReview, postReview, PUBLISHER_VERSION, type ReviewPayload, recordVerdict } from "../publish/publisher.ts";
+import { buildPayload, findReview, hasNews, postReview, PUBLISHER_VERSION, type ReviewPayload, recordVerdict } from "../publish/publisher.ts";
 import { parseDiff } from "../source/diff.ts";
 
 export const REVIEW_TASK_NAME = "pr-review.revision";
+
+/**
+ * Resolved findings checked for their code on each later head, most recently resolved first. The check costs a file
+ * read per finding, so the bound keeps a long PR's review from growing with every resolution; a finding past it stays
+ * resolved unchecked, which is the only way this bound fails, and it fails toward the status already shown.
+ */
+export const MAX_WATCHED = 50;
 
 /**
  * `retry` counts the reopenings (MANUAL_RETRY or APPROVED) before this task: each gets its own durable task. `publish`
@@ -193,12 +200,15 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
     }, context);
     const conversation = (await runtime.conversation(child!, context))!;
     const decision = store.decision(revision.id)!;
+    // The open findings are located here for the request and again in VERIFY: each phase stands alone after a crash.
+    const { prior } = await priorFindings(revision, await deps.workspace(revision.id));
     const content = buildReviewRequest({
       snapshot: store.snapshot(revision.id)!,
       baseSha: revision.base_sha,
       headSha: revision.head_sha,
       mode: decision.selectedMode as ReviewMode,
       reasons: decision.reasons,
+      prior,
     });
     // The same request ID finds the same submission after a restart; a retry asks again under a new one.
     const requestId = cp.attempt ? `analyze:${revision.id}:${cp.attempt}` : `analyze:${revision.id}`;
@@ -207,39 +217,54 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
   }
 
   /**
-   * Every open finding of the PR, located at this revision's head. Rows from before migration 055 get their evidence
-   * text from the head they were seen on. A finding already doubted was searched for tree-wide by the head that doubted
-   * it, so only its own file is read again: a defect that comes back elsewhere is a new finding.
+   * Every open finding of the PR, located at this revision's head, plus every resolved finding whose code is back
+   * (`reopen`). Rows from before migration 055 get their evidence text from the head they were seen on. A finding
+   * already doubted was searched for tree-wide by the head that doubted it, so only its own file is read again: a
+   * defect that comes back elsewhere is a new finding.
    */
-  async function priorFindings(revision: RevisionRow, ws: Workspace): Promise<PriorFinding[]> {
+  async function priorFindings(revision: RevisionRow, ws: Workspace): Promise<{ prior: PriorFinding[]; head: HeadReader }> {
     const read = (sha: string, path: string) => ws.repo.show(sha, path);
     const head = headReader(ws.repo, ws.snapshot.changedFiles);
+    const locationOf = async (f: OpenFinding): Promise<ObservedLocation> => ("evidence" in f.location ? f.location : { ...f.location, headSha: f.observedAt, evidence: await evidenceTexts(f.candidate, f.observedAt, read) });
     const prior: PriorFinding[] = [];
     for (const f of store.openFindings(revision.pr_id, revision.id)) {
-      const location: ObservedLocation = "evidence" in f.location ? f.location : { ...f.location, headSha: f.observedAt, evidence: await evidenceTexts(f.candidate, f.observedAt, read) };
+      const location = await locationOf(f);
       const treeWide = f.status !== "POTENTIALLY_RESOLVED" && f.status !== "OUTDATED";
       prior.push({ findingId: f.findingId, status: f.status, candidate: f.candidate, location, located: await locate(location, revision.head_sha, head, { treeWide }) });
     }
-    return prior;
+    for (const f of store.resolvedFindings(revision.pr_id, revision.id, MAX_WATCHED)) {
+      const reopened = await reopen({ ...f, location: await locationOf(f) }, revision.pr_id, revision.id, revision.head_sha, head);
+      if (reopened) prior.push(reopened);
+    }
+    return { prior, head };
   }
 
   const verify: PhaseBody<"verify"> = async (cp, revision) => {
     const set = store.candidateSet(revision.id)!;
     const ws = await deps.workspace(revision.id);
-    const prior = await priorFindings(revision, ws);
-    const { dispositions, verified } = await verifyCandidates(set.candidates, {
-      prId: revision.pr_id,
-      revisionId: revision.id,
-      baseSha: revision.base_sha,
-      headSha: revision.head_sha,
-      files: ws.files,
-      read: (sha, path) => ws.repo.show(sha, path),
-      thresholds: config.verification,
-      prior,
-    });
-    const observations = observe(prior, verified);
-    const detail = `${verified.length} verified, ${dispositions.length - verified.length} discarded, ${prior.length} carried`;
-    store.advance(revision.id, "VERIFY", "CANDIDATES_DISPOSED", detail, () => store.writeVerification(revision, dispositions, verified, observations));
+    const { prior, head } = await priorFindings(revision, ws);
+    const { dispositions, verified, unverified, verdicts } = await verifyCandidates(
+      set.candidates,
+      {
+        prId: revision.pr_id,
+        revisionId: revision.id,
+        baseSha: revision.base_sha,
+        headSha: revision.head_sha,
+        files: ws.files,
+        read: (sha, path) => ws.repo.show(sha, path),
+        head,
+        thresholds: config.verification,
+        prior,
+      },
+      set.resolutions,
+    );
+    const observations = observe(prior, verified, { verdicts, unverified });
+    // A reopened finding is new to the store: it gets a row like a verified candidate's, unless the model's re-report already linked to it.
+    const reopens = prior.filter((f) => f.reopens);
+    const reopened = reopens.filter((f) => !verified.some((v) => v.findingId === f.findingId)).map((f) => ({ findingId: f.findingId, fingerprint: fingerprint(f.candidate), candidate: f.candidate }));
+    const resolved = observations.filter((o) => o.path.at(-1) === "RESOLVED").length;
+    const detail = `${verified.length} verified, ${dispositions.length - verified.length} discarded, ${prior.length - reopens.length} carried, ${resolved} resolved, ${reopens.length} reopened`;
+    store.advance(revision.id, "VERIFY", "CANDIDATES_DISPOSED", detail, () => store.writeVerification(revision, dispositions, [...verified, ...reopened], observations, verdicts));
     return { phase: "prepare", revisionId: revision.id, verifiedSetId: set.id };
   };
 
@@ -247,9 +272,8 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
     const findings = store.findingsForRevision(revision.id);
     const snapshot = store.snapshot(revision.id)!;
     const { payload, hash, inlineFindingIds } = buildPayload({ revisionId: revision.id, headSha: revision.head_sha, findings, limitations: snapshot.limitations, files: parseDiff(snapshot.diff) });
-    // silent_no_findings posts only a review that says something new: a new finding, or a first comment on a carried one.
-    const news = inlineFindingIds.length > 0 || findings.some((f) => !f.carried);
-    const publish = input.publish === true && !(config.review.publish_mode === "silent_no_findings" && !news);
+    // silent_no_findings posts only a review that says something new: a new finding, a first comment on a carried one, or a newly resolved one.
+    const publish = input.publish === true && !(config.review.publish_mode === "silent_no_findings" && !hasNews(findings, inlineFindingIds));
     // Approval mode stores the payload the same way, then parks the revision for a human instead of posting.
     const approval = publish && config.review.publish_mode === "approval";
     if (revision.state === "PREPARE_PUBLICATION") {

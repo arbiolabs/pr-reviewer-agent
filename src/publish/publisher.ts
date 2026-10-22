@@ -1,5 +1,5 @@
 import { sha256 } from "../domain/types.ts";
-import { capitalize, renderSummary } from "../cli/report.ts";
+import { capitalize, renderSummary, unseen } from "../cli/report.ts";
 import { type GitHubClient, GitHubError } from "../github/client.ts";
 import type { AppStore, FindingView, OutboxRow } from "../persistence/store.ts";
 import type { FileDiff } from "../source/diff.ts";
@@ -56,6 +56,9 @@ export function buildPayload(input: {
   const hash = sha256(JSON.stringify({ body, commit_id: input.headSha, event: "COMMENT", comments }));
   return { payload: { commit_id: input.headSha, body: `${body}\n${marker(input.revisionId, hash)}\n`, event: "COMMENT", comments }, hash, inlineFindingIds: inline.map((f) => f.findingId) };
 }
+
+/** Whether a review says something the reader has not seen: an inline comment, a finding new to them (`unseen`), or a newly resolved one. */
+export const hasNews = (findings: FindingView[], inlineFindingIds: string[]) => inlineFindingIds.length > 0 || findings.some((f) => unseen(f) || f.status === "RESOLVED");
 
 export type PostOutcome =
   | { kind: "posted"; reviewId: number }

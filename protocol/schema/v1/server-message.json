@@ -1927,7 +1927,7 @@
                   },
                   "basis": {
                     "type": "string",
-                    "description": "why the run observed this state: reverified, located, changed or file_gone; absent on a first observation and a publication"
+                    "description": "why the run observed this state: reverified, located, changed, file_gone, resolution_checked, resolution_refused, reported_unverified, or reopened for the first observation of a finding seeded from a resolved one whose code came back; absent on any other first observation and on a publication"
                   }
                 }
               }

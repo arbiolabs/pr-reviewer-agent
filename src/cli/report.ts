@@ -1,4 +1,4 @@
-import { type Disposition, SEVERITIES } from "../domain/types.ts";
+import { type Disposition, type ResolutionVerdict, SEVERITIES } from "../domain/types.ts";
 import type { AppStore, AuditEvent, FindingView, OutboxRow, RevisionRow } from "../persistence/store.ts";
 
 export type ReviewReport = {
@@ -10,6 +10,7 @@ export type ReviewReport = {
   limitations: string[];
   findings: FindingView[];
   dispositions: Disposition[];
+  resolutions: ResolutionVerdict[];
   audit: AuditEvent[];
   outbox: OutboxRow | undefined;
 };
@@ -29,6 +30,7 @@ export function loadReport(store: AppStore, revisionId: string): ReviewReport {
       .findingsForRevision(revisionId)
       .sort((a, b) => SEVERITIES.indexOf(a.candidate.severity) - SEVERITIES.indexOf(b.candidate.severity)),
     dispositions: store.candidateSet(revisionId)?.dispositions ?? [],
+    resolutions: store.candidateSet(revisionId)?.verdicts ?? [],
     audit: store.auditEvents(revisionId),
     outbox: store.outboxForRevision(revisionId),
   };
@@ -43,22 +45,34 @@ export function renderMarkdown(report: ReviewReport): string {
   return renderSummary(report.revision.head_sha, report.findings, report.limitations, incomplete);
 }
 
-/** The body section a carried finding is listed under, by the state this revision observed it in; any other state goes last. */
+/**
+ * The body section a carried finding is listed under, by the state this revision observed it in; any other state goes
+ * last. "Looks resolved" is the only word on resolution: the bot never resolves or replies in a GitHub thread.
+ */
 const CARRIED_SECTIONS: [heading: string, states: string[]][] = [
   ["Still present from an earlier commit:", ["STILL_PRESENT"]],
+  ["Looks resolved since the last review:", ["RESOLVED"]],
   ["Possibly fixed, the cited code changed:", ["POTENTIALLY_RESOLVED"]],
   ["Outdated, the cited file is gone:", ["OUTDATED"]],
+  ["Uncertain, reported again without verifiable evidence:", ["UNCERTAIN"]],
   ["Carried from an earlier commit:", []],
 ];
 
 /** Carried findings listed per section before "and N more": a long PR's body stays readable and bounded. */
 const MAX_CARRIED_PER_SECTION = 20;
 
+/**
+ * A finding the reader has not seen: first found by this revision, or reopened by a revision whose review never reached
+ * GitHub, as when a newer push superseded it. It is listed as new, with the commit it looked resolved at, so the
+ * reopening is shown once whichever review carries it first.
+ */
+export const unseen = (f: FindingView) => !f.carried || (f.reopens !== null && !f.listed);
+
 /** The §12 body for a head; `incomplete` replaces the findings line for a run that did not finish. */
 export function renderSummary(headSha: string, findings: FindingView[], limitations: string[], incomplete?: string): string {
   const lines = ["## Automated PR review", "", `Reviewed commit: \`${headSha}\``, ""];
-  const fresh = findings.filter((f) => !f.carried);
-  const carried = findings.filter((f) => f.carried);
+  const fresh = findings.filter(unseen);
+  const carried = findings.filter((f) => !unseen(f));
   const where = (f: FindingView) => (f.anchored ? `${f.candidate.file}:${f.candidate.newLine}` : f.candidate.file);
   if (incomplete !== undefined) {
     lines.push(incomplete);
@@ -67,7 +81,10 @@ export function renderSummary(headSha: string, findings: FindingView[], limitati
   } else {
     const n = fresh.length;
     lines.push(`Found ${n} actionable ${n === 1 ? "issue" : "issues"}.`, "");
-    for (const { candidate: c } of fresh) lines.push(`- ${capitalize(c.severity)}: ${c.title} (\`${c.file}:${c.newLine}\`)`);
+    for (const { candidate: c, reopens } of fresh) {
+      const back = reopens ? `; looked resolved at \`${reopens.resolvedAt.slice(0, 7)}\`, but its code is still here` : "";
+      lines.push(`- ${capitalize(c.severity)}: ${c.title} (\`${c.file}:${c.newLine}\`${back})`);
+    }
   }
   const sectioned = new Set(CARRIED_SECTIONS.flatMap(([, states]) => states));
   for (const [heading, states] of CARRIED_SECTIONS) {
@@ -92,8 +109,9 @@ export function renderJson(report: ReviewReport) {
     reviewMode: report.mode,
     reviewModeReasons: report.modeReasons,
     limitations: report.limitations,
-    findings: report.findings.map((f) => ({ findingId: f.findingId, fingerprint: f.fingerprint, status: f.status, ...f.candidate })),
+    findings: report.findings.map((f) => ({ findingId: f.findingId, fingerprint: f.fingerprint, status: f.status, reopens: f.reopens, ...f.candidate })),
     discarded: report.dispositions.filter((d) => d.state === "DISCARDED"),
+    resolutions: report.resolutions,
     published: report.outbox?.status === "published",
     githubReviewId: report.outbox?.github_review_id ?? null,
     outboxStatus: report.outbox?.status ?? null,

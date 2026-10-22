@@ -13,7 +13,7 @@ export function registerOrderRoutes(app: App) {
 `;
 
 // The PR adds a destructive endpoint without the requireAdmin guard every other route uses.
-const ROUTES_HEAD = `import { requireAdmin } from "../auth/require-admin.ts";
+export const ROUTES_HEAD = `import { requireAdmin } from "../auth/require-admin.ts";
 
 export function registerOrderRoutes(app: App) {
   app.get("/orders", requireAdmin, listOrders);

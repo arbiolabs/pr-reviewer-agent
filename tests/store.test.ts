@@ -36,7 +36,7 @@ it("derives the same revision id on reopen and applies migrations once", () => {
   store.close();
   const reopened = AppStore.open(path);
   expect(reopened.ensureRevision(key).id).toBe(first.id);
-  expect(reopened.db.prepare("SELECT name FROM schema_migrations").all()).toEqual([{ name: "001_init.sql" }, { name: "002_code_read.sql" }, { name: "003_publication.sql" }, { name: "004_coordinator.sql" }, { name: "005_webhook_retry.sql" }, { name: "006_meta.sql" }, { name: "050_stream_meta.sql" }, { name: "051_journal_without_revision.sql" }, { name: "052_control_commands.sql" }, { name: "053_control_command_attempt.sql" }, { name: "054_pull_title.sql" }, { name: "055_finding_tracking.sql" }]);
+  expect(reopened.db.prepare("SELECT name FROM schema_migrations").all()).toEqual([{ name: "001_init.sql" }, { name: "002_code_read.sql" }, { name: "003_publication.sql" }, { name: "004_coordinator.sql" }, { name: "005_webhook_retry.sql" }, { name: "006_meta.sql" }, { name: "050_stream_meta.sql" }, { name: "051_journal_without_revision.sql" }, { name: "052_control_commands.sql" }, { name: "053_control_command_attempt.sql" }, { name: "054_pull_title.sql" }, { name: "055_finding_tracking.sql" }, { name: "056_resolution_claims.sql" }, { name: "057_reopened_findings.sql" }]);
   expect(reopened.revisionsForPr(prId).length).toBe(1);
 });
 
@@ -223,6 +223,34 @@ it("leaves a retried VERIFY's first observation and status in place, with no sec
   // The retry's model run read the code differently; the first observation stands.
   store.writeVerification(r2, [], [], [{ findingId: "f", path: ["DETECTED", "POTENTIALLY_RESOLVED"], basis: "changed", candidate, location }]);
   expect([...state(), store.db.prepare("SELECT disposition FROM finding_observations WHERE revision_id = ?").get(r2.id)]).toEqual([{ status: "STILL_PRESENT" }, { n: 1 }, { disposition: "STILL_PRESENT" }]);
+});
+
+it("watches a resolved finding until one later revision reopens it, and a retried write of that revision converges", () => {
+  const { store } = openFresh();
+  const prId = store.upsertPull(pull);
+  const key = { prId, baseSha: pull.baseSha, policyVersion: "1", reviewerVersion: "m" };
+  const [r1, r2, r3] = [store.ensureRevision({ ...key, headSha: pull.headSha }), store.ensureRevision({ ...key, headSha: "2".repeat(40) }), store.ensureRevision({ ...key, headSha: "3".repeat(40) })];
+  const location = { file: "src/x.ts", newLine: 5, headSha: pull.headSha, evidence: [{ path: "src/x.ts", start: 5, end: 5, text: "db.orders.delete(id);" }] };
+  store.writeVerification(r1, [], [{ findingId: "f", fingerprint: "fp", candidate }], [{ findingId: "f", path: ["DETECTED"], basis: null, candidate, location }]);
+  store.writeVerification(r2, [], [], [{ findingId: "f", path: ["DETECTED", "POTENTIALLY_RESOLVED", "RESOLVED"], basis: "resolution_checked", candidate, location }]);
+  expect(store.openFindings(prId, r3.id)).toEqual([]);
+  // Watched: resolved, with the location last seen and the head it was resolved on.
+  expect(store.resolvedFindings(prId, r3.id, 50)).toEqual([{ findingId: "f", status: "RESOLVED", candidate, location, observedAt: "2".repeat(40) }]);
+  expect(store.resolvedFindings(prId, r3.id, 0)).toEqual([]);
+  const reopens = { findingId: "f", resolvedAt: "2".repeat(40) };
+  const write = () => store.writeVerification(r3, [], [{ findingId: "g", fingerprint: "fp", candidate }], [{ findingId: "g", path: ["DETECTED"], basis: "reopened", candidate, location, reopens }]);
+  write();
+  write();
+  const rows = () => store.db.prepare("SELECT id, status, reopens FROM findings ORDER BY created_at").all();
+  expect(rows()).toEqual([
+    { id: "f", status: "RESOLVED", reopens: null },
+    { id: "g", status: "DETECTED", reopens: "f" },
+  ]);
+  expect(store.db.prepare("SELECT count(*) AS n FROM finding_observations WHERE finding_id = 'g'").get()).toEqual({ n: 1 });
+  // The revision that reopened it, retried, still sees it watched and derives the same successor; any other revision does not.
+  expect(store.resolvedFindings(prId, r3.id, 50).map((f) => f.findingId)).toEqual(["f"]);
+  expect(store.resolvedFindings(prId, store.ensureRevision({ ...key, headSha: "4".repeat(40) }).id, 50)).toEqual([]);
+  expect(store.findingsForRevision(r3.id).map((f) => [f.findingId, f.carried, f.reopens])).toEqual([["g", false, reopens]]);
 });
 
 it("backfills the review of record at migration 055 only for findings a published payload commented on", () => {

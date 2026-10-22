@@ -25,8 +25,27 @@ export const CandidateSchema = Type.Object({
   suggestedFix: Type.Optional(Type.String({ maxLength: 2000 })),
   confidence: Type.Number({ minimum: 0, maximum: 1 }),
   evidenceKind: literals(EVIDENCE_KINDS),
+  priorFindingId: Type.Optional(Type.String({ description: "The id of the open finding from an earlier review that this candidate reports again, if any" })),
 });
 
-export const SubmitCandidatesSchema = Type.Object({ candidates: Type.Array(CandidateSchema, { maxItems: 25 }) });
+const CodeEvidenceSchema = Type.Object({
+  path: Type.String(),
+  start: Type.Integer({ minimum: 1 }),
+  end: Type.Integer({ minimum: 1 }),
+  refSha: Type.String({ description: "The head SHA of this revision" }),
+});
+
+/** A claim that an open finding is fixed at the head; the verifier checks it like a candidate. */
+export const ResolutionSchema = Type.Object({
+  findingId: Type.String({ description: "The id of the open finding" }),
+  codeEvidence: Type.Array(CodeEvidenceSchema, { minItems: 1, maxItems: 10, description: "Head-side ranges whose code shows the defect is gone" }),
+  reason: Type.String({ maxLength: 2000 }),
+  evidenceKind: literals(EVIDENCE_KINDS),
+});
+
+export const SubmitCandidatesSchema = Type.Object({
+  candidates: Type.Array(CandidateSchema, { maxItems: 25 }),
+  resolutions: Type.Optional(Type.Array(ResolutionSchema, { maxItems: 25, description: "Open findings from earlier reviews that this head's code shows fixed" })),
+});
 
 export type CandidateInput = Static<typeof CandidateSchema>;
