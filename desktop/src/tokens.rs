@@ -51,6 +51,8 @@ pub struct Colors {
     pub tint: f32,
     pub scrim: Hsla,
     pub shadow: Hsla,
+    /// A sheet's or the palette's outline: stronger than `border_strong`, so it holds over the scrim.
+    pub sheet_edge: Hsla,
     /// The hover wash over any surface: 4 % of the text color.
     pub hover: Hsla,
     /// The pressed wash: 8 %.
@@ -105,7 +107,8 @@ pub fn dark() -> Colors {
         disabled: c(0x8A8E94),
         tint: 0.14,
         scrim: ca(0x05070A, 0.5),
-        shadow: ca(0x000000, 0.45),
+        shadow: ca(0x000000, 0.6),
+        sheet_edge: c(0x4A5363),
         hover: ca(0xE9EDF2, 0.04),
         press: ca(0xE9EDF2, 0.08),
     }
@@ -152,6 +155,7 @@ pub fn light() -> Colors {
         tint: 0.12,
         scrim: ca(0x1A1E24, 0.4),
         shadow: ca(0x1A1E24, 0.16),
+        sheet_edge: c(0xB9B3A6),
         hover: ca(0x1A1E24, 0.04),
         press: ca(0x1A1E24, 0.08),
     }

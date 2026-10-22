@@ -36,8 +36,13 @@ struct Entry {
     run: Run,
 }
 
+/// The reason every command shares on a read-only daemon: said once, in the group's header, not on each row.
+const READ_ONLY: &str = "Read-only daemon";
+
 fn mutation(m: &Model, mu: Mutation, title: String, key: &'static str, otherwise: &str) -> Entry {
+    let read_only = m.server.as_ref().and_then(|s| s.commands_off()).is_some();
     let blocked = (!can_mutate(m, mu)).then(|| match write_block(m, mu.capability()) {
+        Some(_) if read_only => READ_ONLY.into(),
         Some(why) => why.to_string(),
         None if m.selected_pr().is_none() => "no PR is selected".into(),
         None => otherwise.to_string(),
@@ -296,16 +301,27 @@ fn sheet(t: &Colors, w: Pixels) -> Div {
         .flex_col()
         .rounded(radius::LG)
         .border_1()
-        .border_color(t.border_strong)
+        .border_color(t.sheet_edge)
         .bg(t.surface)
         .overflow_hidden()
-        .shadow(vec![BoxShadow {
-            color: t.shadow,
-            offset: point(px(0.), px(16.)),
-            blur_radius: px(48.),
-            spread_radius: px(0.),
-            inset: false,
-        }])
+        .shadow(sheet_shadow(t))
+}
+
+/// A sheet's lift: a wide soft drop and a tight contact shadow, so it holds its edge over the scrim in dark too.
+fn sheet_shadow(t: &Colors) -> Vec<BoxShadow> {
+    let drop = |alpha: f32, y: f32, blur: f32| BoxShadow {
+        color: t.shadow.alpha(alpha),
+        offset: point(px(0.), px(y)),
+        blur_radius: px(blur),
+        spread_radius: px(0.),
+        inset: false,
+    };
+    vec![drop(t.shadow.a, 18., 48.), drop(t.shadow.a * 0.8, 2., 6.)]
+}
+
+/// A macOS sheet: it drops from under the title bar, its top edge flush there and its lower corners rounded.
+fn drop_sheet(t: &Colors, w: Pixels) -> Div {
+    sheet(t, w).rounded_t(px(0.)).border_t_0()
 }
 
 pub fn layer(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Vec<AnyElement> {
@@ -317,7 +333,11 @@ pub fn layer(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Vec<AnyElement> {
         && !matches!(crate::ui::front(m), Some(Modal::Finding { .. }));
     let left = layout::SIDEBAR + if queue_shown { layout::QUEUE } else { px(0.) };
     if let Some(n) = &m.notice {
-        out.push(toast(left, IconName::Info, n.text.clone(), t.text, t.bg));
+        let (glyph, words) = match read_only_notice(m, &n.text) {
+            Some(w) => (IconName::Lock, w),
+            None => (IconName::Info, n.text.clone()),
+        };
+        out.push(toast(t, left, glyph, words));
     }
     match m.top_modal() {
         Some(Modal::Confirm { prompt, command, state }) => {
@@ -325,13 +345,7 @@ pub fn layer(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Vec<AnyElement> {
             let quiet = matches!(command, Command::Start(_) | Command::Retry(_))
                 && matches!(state, ConfirmState::Requested(_) | ConfirmState::Accepted { .. });
             if quiet {
-                out.push(toast(
-                    left,
-                    IconName::LoaderCircle,
-                    format!("{} Sending…", prompt.trim_end_matches('?')),
-                    t.text,
-                    t.bg,
-                ));
+                out.push(toast(t, left, IconName::LoaderCircle, format!("{} Sending…", prompt.trim_end_matches('?'))));
             } else {
                 out.push(confirm(s, t, prompt, command, state, cx));
             }
@@ -349,7 +363,32 @@ pub fn layer(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Vec<AnyElement> {
     out
 }
 
-fn toast(left: Pixels, glyph: IconName, words: String, bg: Hsla, fg: Hsla) -> AnyElement {
+/// The reducer's refusal of a command on a read-only daemon, in the desktop's words: what is off and how to turn
+/// it on. `None` for any other notice.
+pub fn read_only_notice(m: &Model, text: &str) -> Option<String> {
+    let off = m.server.as_ref().and_then(|s| s.commands_off())?;
+    let (verb, why) = text.strip_prefix("Can't ")?.split_once(": ")?;
+    if why != off && why != "the daemon does not grant it" {
+        return None;
+    }
+    let what = match verb {
+        "start" => "starting reviews",
+        "retry" => "retrying",
+        "cancel" => "canceling",
+        "publish" => "posting",
+        _ => "commands",
+    };
+    let fix = if m.server.as_ref().is_some_and(|s| s.missing().next().is_some()) {
+        "Fix setup, then restart it with --allow-commands."
+    } else {
+        "Restart it with --allow-commands."
+    };
+    Some(format!("Read-only daemon: {what} is off. {fix}"))
+}
+
+/// A notice over the detail pane, 16 points above its action bar: a raised surface with the sheet's edge, never a
+/// bright pill.
+fn toast(t: &Colors, left: Pixels, glyph: IconName, words: String) -> AnyElement {
     div()
         .absolute()
         .bottom(layout::BAR + space::S4)
@@ -365,19 +404,57 @@ fn toast(left: Pixels, glyph: IconName, words: String, bg: Hsla, fg: Hsla) -> An
                 .px(space::S4)
                 .h(px(36.))
                 .rounded(radius::PILL)
-                .bg(bg)
-                .text_color(fg)
+                .bg(t.surface)
+                .border_1()
+                .border_color(t.sheet_edge)
+                .shadow(sheet_shadow(t))
+                .text_color(t.text)
                 .text_size(text::BODY)
-                .child(icon(glyph, px(14.), fg))
+                .child(icon(glyph, px(14.), t.muted))
                 .child(words),
         )
         .into_any_element()
 }
 
+/// A palette row's glyph, so an action, a place to go and a view read apart before their words do.
+fn glyph(m: &Model, e: &Entry) -> IconName {
+    match &e.run {
+        Run::Card(i) => match queue::cards(m).get(*i) {
+            Some(Card::Setup { .. }) => IconName::TriangleAlert,
+            Some(Card::Approve { .. }) => IconName::Send,
+            Some(Card::Posting { .. }) => IconName::CircleAlert,
+            Some(Card::Findings { .. }) => IconName::Eye,
+            Some(Card::Failed { .. }) => IconName::RotateCw,
+            Some(Card::Start { .. }) | None => IconName::Play,
+        },
+        Run::Pr(_) if e.group == "Go to" => IconName::GitPullRequest,
+        Run::Pr(_) => IconName::Activity,
+        Run::Direct(Mutation::Start) => IconName::Play,
+        Run::Direct(_) => IconName::RotateCw,
+        Run::Act(Action::Mutation(Mutation::Publish)) => IconName::Send,
+        Run::Act(Action::Mutation(_)) => IconName::CircleX,
+        Run::Act(Action::OpenDiff) => IconName::FileDiff,
+        Run::Act(Action::OpenTimeline) => IconName::Clock,
+        Run::Act(Action::Refresh) => IconName::RefreshCw,
+        Run::Act(_) => IconName::Settings,
+        Run::GitHub => IconName::ExternalLink,
+        Run::Tab(false) => IconName::Inbox,
+        Run::Tab(true) => IconName::CircleCheck,
+        Run::Keys => IconName::Keyboard,
+    }
+}
+
+/// The list's height: rows are 36 points, a group header 30, inside 8 of padding. It never ends mid-row: at most
+/// the whole rows that fit in 440 points, and a fade says the rest scrolls under.
+const ROW: f32 = 36.;
+const HEADER: f32 = 30.;
+
 fn palette(s: &Shell, t: &Colors, query: &str, selected: usize, cx: &Context<Shell>) -> AnyElement {
+    let m = &s.model;
     let found = matching(s, query);
-    let mut list = div().id("palette-list").flex().flex_col().max_h(px(440.)).overflow_y_scroll().p(space::S2);
+    let mut list = div().id("palette-list").flex().flex_col().overflow_y_scroll().p(space::S2);
     let mut group = "";
+    let (mut tall, mut fits, mut more) = (8., 8., false);
     if found.is_empty() {
         list = list.child(
             div()
@@ -386,39 +463,68 @@ fn palette(s: &Shell, t: &Colors, query: &str, selected: usize, cx: &Context<She
                 .text_color(t.muted)
                 .child(format!("Nothing matches \u{201c}{query}\u{201d}")),
         );
+        fits = 60.;
     }
+    let notes: Vec<&'static str> =
+        found.iter().filter(|e| e.blocked.as_deref() == Some(READ_ONLY)).map(|e| e.group).collect();
     for (i, e) in found.into_iter().enumerate() {
         if e.group != group {
             group = e.group;
-            list = list.child(div().px(space::S3).pt(space::S3).pb(space::S1).child(overline(t, group)));
+            tall += HEADER;
+            list = list.child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(space::S2)
+                    .h(px(HEADER))
+                    .px(space::S3)
+                    .pt(space::S2)
+                    .child(overline(t, group))
+                    .when(notes.contains(&group), |d| {
+                        d.child(icon(IconName::Lock, px(11.), t.faint)).child(
+                            div()
+                                .text_size(text::CAPTION)
+                                .text_color(t.faint)
+                                .child(format!("{READ_ONLY}: restart it with --allow-commands")),
+                        )
+                    }),
+            );
+        }
+        tall += ROW;
+        if tall <= 440. {
+            fits = tall;
+        } else {
+            more = true;
         }
         let on_it = i == selected;
         let blocked = e.blocked.is_some();
         let r = e.run.clone();
-        // A row that can't run is dimmed to about half, as one opaque color that still meets AA.
-        let fg = match (blocked, on_it) {
-            (true, _) => t.disabled,
-            (false, true) => t.on_accent,
-            (false, false) => t.text,
-        };
+        // A row that can't run is dimmed to about half, as one opaque color that still meets AA. The chosen row is
+        // the selection: its fill and the accent rail, with its text at full strength.
+        let fg = if blocked { t.disabled } else { t.text };
         let hits: Vec<_> = matched(query, &e.title)
             .into_iter()
             .map(|r| (r, HighlightStyle { font_weight: Some(FontWeight::BOLD), ..Default::default() }))
             .collect();
+        let mark = glyph(m, &e);
+        let why = e.blocked.filter(|w| w != READ_ONLY);
         list = list.child(
             div()
                 .id(("pal", i))
+                .relative()
                 .flex()
+                .flex_none()
                 .items_center()
                 .gap(space::S3)
-                .h(px(36.))
+                .h(px(ROW))
                 .px(space::S3)
                 .rounded(radius::SM)
                 .cursor_pointer()
                 .text_color(fg)
-                .when(on_it, |d| d.bg(if blocked { t.selected } else { t.accent }))
+                .when(on_it, |d| d.bg(t.selected).child(crate::kit::rail(t)))
                 .when(!on_it, |d| d.hover(|d| d.bg(t.hover)))
                 .when(!blocked, |d| d.on_click(cx.listener(move |s, _: &ClickEvent, _, cx| run(s, r.clone(), cx))))
+                .child(icon(mark, px(14.), if blocked { t.disabled } else if on_it { t.accent } else { t.muted }))
                 .child(
                     div()
                         .flex_1()
@@ -427,14 +533,25 @@ fn palette(s: &Shell, t: &Colors, query: &str, selected: usize, cx: &Context<She
                         .text_size(text::BODY)
                         .child(StyledText::new(e.title).with_highlights(hits)),
                 )
-                .children(e.blocked.map(|why| div().flex_none().text_size(text::CAPTION).child(why)))
+                .children(why.map(|w| div().flex_none().pr(space::S4).text_size(text::CAPTION).child(w)))
                 .child(match e.key {
-                    Some(k) => keycap(t, k, (on_it && !blocked).then_some(t.on_accent), blocked),
+                    Some(k) => keycap(t, k, None, blocked),
                     None => div().w(px(18.)),
                 })
-                .when(on_it && !blocked, |d| d.child(keycap(t, "⏎", Some(t.on_accent), false))),
+                .when(on_it && !blocked, |d| d.child(keycap(t, "⏎", None, false))),
         );
     }
+    let list = div()
+        .relative()
+        .h(px(if more { fits } else { fits + 8. }))
+        .child(list.size_full())
+        .when(more, |d| {
+            d.child(div().absolute().bottom_0().left_0().right_0().h(space::S6).bg(linear_gradient(
+                180.,
+                linear_color_stop(t.surface.alpha(0.), 0.),
+                linear_color_stop(t.surface, 1.),
+            )))
+        });
     scrim(t, "palette-scrim", cx, true)
         .flex()
         .items_start()
@@ -523,10 +640,11 @@ fn confirm(
     let keep = matches!(command, Command::Cancel(_));
     scrim(t, "confirm-scrim", cx, false)
         .flex()
-        .items_center()
+        .items_start()
         .justify_center()
+        .pt(layout::TOOLBAR)
         .child(
-            sheet(t, layout::SHEET)
+            drop_sheet(t, layout::SHEET)
                 .p(space::S6)
                 .gap(space::S4)
                 .child(
@@ -614,10 +732,11 @@ fn confirm_post(s: &Shell, t: &Colors, cx: &Context<Shell>) -> AnyElement {
     };
     scrim(t, "post-scrim", cx, true)
         .flex()
-        .items_center()
+        .items_start()
         .justify_center()
+        .pt(layout::TOOLBAR)
         .child(
-            sheet(t, layout::SHEET)
+            drop_sheet(t, layout::SHEET)
                 .id("post-sheet")
                 .occlude()
                 .on_click(|_, _, cx| cx.stop_propagation())
@@ -655,10 +774,19 @@ fn confirm_post(s: &Shell, t: &Colors, cx: &Context<Shell>) -> AnyElement {
                 )
                 .child(
                     div()
-                        .text_size(text::BODY)
-                        .line_height(text::LINE_BODY)
-                        .text_color(t.danger)
-                        .child("This can't be undone from here. GitHub keeps the review once it is posted."),
+                        .flex()
+                        .items_start()
+                        .gap(space::S2)
+                        .child(div().pt(px(3.)).child(icon(IconName::TriangleAlert, px(14.), t.warn)))
+                        .child(
+                            div()
+                                .flex_1()
+                                .min_w_0()
+                                .text_size(text::BODY)
+                                .line_height(text::LINE_BODY)
+                                .text_color(t.text)
+                                .child("This can't be undone from here. GitHub keeps the review once it is posted."),
+                        ),
                 )
                 .child(
                     div()
@@ -682,7 +810,7 @@ fn confirm_post(s: &Shell, t: &Colors, cx: &Context<Shell>) -> AnyElement {
                             "post-yes",
                             "Post to GitHub",
                             Some("⌘⏎"),
-                            Tone::Destructive,
+                            Tone::Primary,
                             on(cx, |s, cx| s.confirm_post(cx)),
                         )),
                 ),
