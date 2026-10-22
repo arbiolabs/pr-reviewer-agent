@@ -323,7 +323,7 @@ pub fn balanced(title: &str, room: f32) -> Option<f32> {
         return None;
     }
     let lines = (chars / per_line).ceil();
-    Some(((chars / lines).ceil() + 5.) * GLYPH).map(|w| w.min(room))
+    Some((((chars / lines).ceil() + 5.) * GLYPH).min(room))
 }
 
 /// A serif title balanced for a column `room` points wide.
@@ -461,14 +461,13 @@ pub fn sentence(s: &str) -> String {
 }
 
 /// `s` in at most `max` characters: a longer one keeps its head and its tail around " … ", each cut where a
-/// path or a list separates (a space, a slash, a comma), so a path is never split inside a name.
+/// list separates (a space) or else where a path does (a slash), so a path is never split inside a name.
 pub fn middle(s: &str, max: usize) -> String {
     let chars: Vec<char> = s.chars().collect();
     if chars.len() <= max {
         return s.to_string();
     }
     let half = (max - 3) / 2;
-    // A space first (between list items), then a slash; a name is cut only when neither falls in range.
     let at = |seps: &[char], range: std::ops::Range<usize>, back: bool| {
         let mut r: Vec<usize> = range.filter(|&i| seps.contains(&chars[i])).collect();
         if back {

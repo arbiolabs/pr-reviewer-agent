@@ -692,11 +692,7 @@ pub fn mutation_item(
 /// Why a mutation can't act now, as a tooltip: the read-only daemon in the desktop's words, else the reducer's.
 pub fn why_not(m: &Model, mu: Mutation, label: &str) -> String {
     if queue::read_only(m) {
-        return format!(
-            "{} Restart the daemon with --allow-commands to {}.",
-            "Read-only daemon.",
-            label.to_lowercase()
-        );
+        return format!("Read-only daemon. Restart it with --allow-commands to {}.", label.to_lowercase());
     }
     let why = write_block(m, mu.capability()).unwrap_or(match mu {
         Mutation::Start => "a review already holds this head",
