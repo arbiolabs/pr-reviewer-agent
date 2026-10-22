@@ -11,8 +11,8 @@ use pr_review_tui::update::{Msg, diff_findings, row_findings};
 use pr_review_tui::view::Hit;
 
 use crate::code::Lexer;
-use crate::detail::{action_bar, code_row, runs};
-use crate::kit::{Tone, button, callout, focusable, icon, lift, overline, rail, severity_count};
+use crate::detail::{Bar, Item, action_bar, bar_view, code_row, runs};
+use crate::kit::{Tone, callout, focusable, icon, lift, overline, rail, severity_count};
 use crate::tokens::{Colors, layout, radius, severity_mark, space, text};
 use crate::ui::{Shell, on};
 
@@ -335,21 +335,20 @@ pub fn view(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                     .child("This file is truncated: the daemon sent part of it.")
             })),
     );
-    let bar = div()
-        .flex()
-        .items_center()
-        .gap(space::S2)
-        .flex_1()
-        .child(button(t, "d-back", "Back", Some("esc"), Tone::Secondary, on(cx, |s, cx| s.act(Action::Back, cx))))
-        .child(button(
-            t,
-            "d-next",
-            "Next finding",
-            Some("N"),
-            Tone::Secondary,
-            (!in_file.is_empty()).then(|| crate::ui::click(cx, |s, cx| s.act(Action::NextFinding, cx))),
-        ))
-        .child(div().flex_1())
-        .child(button(t, "d-gh", "Open on GitHub", Some("⌘⇧O"), Tone::Ghost, on(cx, |s, cx| s.open_github(cx))));
+    let bar = Bar {
+        lead: vec![
+            Item::new("d-back", "Back", "⌘[", Tone::Secondary, on(cx, |s, cx| s.act(Action::Back, cx))),
+            Item::new(
+                "d-next",
+                "Next finding",
+                "N",
+                Tone::Secondary,
+                (!in_file.is_empty()).then(|| crate::ui::click(cx, |s, cx| s.act(Action::NextFinding, cx))),
+            ),
+        ],
+        note: None,
+        trail: vec![Item::new("d-gh", "Open on GitHub", "⌘⇧O", Tone::Ghost, on(cx, |s, cx| s.open_github(cx)))],
+    };
+    let bar = bar_view(s, t, bar, cx);
     div().flex().flex_col().flex_1().min_h_0().min_w_0().child(shell.child(files).child(pane)).child(action_bar(t, bar))
 }

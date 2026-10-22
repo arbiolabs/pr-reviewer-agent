@@ -8,8 +8,8 @@ use pr_review_tui::protocol::{EventBody, Pr, RunChange, SequencedEvent};
 use pr_review_tui::update::{Msg, event_text, is_heading, timeline_rows};
 use pr_review_tui::view::Hit;
 
-use crate::detail::{page, pr_header, pr_sentence, tabs};
-use crate::kit::{Tone, button, callout, overline};
+use crate::detail::{Bar, Item, bar_view, page, pr_header, pr_sentence, tabs};
+use crate::kit::{Tone, callout, overline};
 use crate::queue::phase_word;
 use crate::tokens::{Colors, radius, severity_mark, space, text};
 use crate::ui::{Shell, on};
@@ -129,15 +129,15 @@ pub fn timeline(s: &Shell, t: &Colors, pr: &Pr, cx: &Context<Shell>) -> Div {
             )
             .child(list),
     );
-    let footer = div()
-        .flex()
-        .items_center()
-        .gap(space::S2)
-        .flex_1()
-        .child(button(t, "tl-back", "Findings", Some("esc"), Tone::Secondary, on(cx, |s, cx| s.act(Action::Back, cx))))
-        .child(button(t, "tl-filter", "Filter", Some("F"), Tone::Ghost, on(cx, |s, cx| s.act(Action::Search, cx))))
-        .child(div().flex_1())
-        .child(button(t, "tl-gh", "Open on GitHub", Some("⌘⇧O"), Tone::Ghost, on(cx, |s, cx| s.open_github(cx))));
+    let footer = Bar {
+        lead: vec![
+            Item::new("tl-back", "Findings", "T", Tone::Secondary, on(cx, |s, cx| s.act(Action::Back, cx))),
+            Item::new("tl-filter", "Filter", "F", Tone::Ghost, on(cx, |s, cx| s.act(Action::Search, cx))),
+        ],
+        note: None,
+        trail: vec![Item::new("tl-gh", "Open on GitHub", "⌘⇧O", Tone::Ghost, on(cx, |s, cx| s.open_github(cx)))],
+    };
+    let footer = bar_view(s, t, footer, cx);
     page("detail-tl", body, Some(footer), t, false)
 }
 

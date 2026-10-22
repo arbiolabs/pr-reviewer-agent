@@ -234,13 +234,7 @@ pub fn publication(
                 ));
             }
             content = content.child(
-                div()
-                    .rounded(radius::SM)
-                    .border_1()
-                    .border_color(t.border)
-                    .bg(t.code_bg)
-                    .overflow_hidden()
-                    .child(rows),
+                div().rounded(radius::SM).border_1().border_color(t.border).bg(t.code_bg).overflow_hidden().child(rows),
             );
         }
         content = content.child(markdown(t, cm.body.as_str(), raw));
@@ -268,45 +262,56 @@ pub fn publication(
     // While the sheet asks, the page's own buttons step back, so the sheet holds the only live controls.
     let asking = matches!(s.overlay, Some(Overlay::ConfirmPost));
     let ready = can_confirm(m) && !asking;
-    let mut footer = div().flex().items_center().gap(space::S2).flex_1();
-    footer = if done {
-        footer.child(div().flex_1()).child(button(
-            t,
-            "p-view",
-            "View on GitHub",
-            Some("⌘⇧O"),
-            Tone::Primary,
-            url.map(|_| -> OnClick { Box::new(cx.listener(|s, _: &ClickEvent, _, cx| s.act(Action::OpenUrl, cx))) }),
-        ))
+    let footer = if done {
+        Bar {
+            lead: vec![],
+            note: None,
+            trail: vec![Item::new(
+                "p-view",
+                "View on GitHub",
+                "⌘⇧O",
+                Tone::Primary,
+                url.map(|_| -> OnClick {
+                    Box::new(cx.listener(|s, _: &ClickEvent, _, cx| s.act(Action::OpenUrl, cx)))
+                }),
+            )],
+        }
     } else {
-        footer
-            .child(icon(IconName::TriangleAlert, px(14.), t.faint))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .truncate()
-                    .text_size(text::SMALL)
-                    .text_color(t.muted)
-                    .child("Public and final once posted."),
-            )
-            .child(button(
-                t,
-                "p-close",
-                "Not now",
-                Some("esc"),
-                Tone::Ghost,
-                (!asking).then(|| crate::ui::click(cx, |s, cx| s.act(Action::Back, cx))),
-            ))
-            .child(button(
-                t,
+        let post = match ready {
+            true => Item::new(
                 "p-post",
                 "Post to GitHub…",
-                Some("⌘⏎"),
+                "⌘⏎",
                 Tone::Primary,
-                ready.then(|| -> OnClick { Box::new(cx.listener(|s, _: &ClickEvent, _, cx| s.post(cx))) }),
-            ))
+                Some(Box::new(cx.listener(|s, _: &ClickEvent, _, cx| s.post(cx))) as OnClick),
+            ),
+            false => Item {
+                why: (!asking).then(|| match publish_block(m, p) {
+                    Some(_) if m.server.as_ref().and_then(|s| s.commands_off()).is_some() => {
+                        why_not(m, pr_review_tui::keymap::Mutation::Publish, "post")
+                    }
+                    Some(w) => format!("Can't post: {w}"),
+                    None => "Can't post right now.".into(),
+                }),
+                ..Item::new("p-post", "Post to GitHub…", "⌘⏎", Tone::Primary, None)
+            },
+        };
+        Bar {
+            lead: vec![],
+            note: Some("Public and final once posted.".into()),
+            trail: vec![
+                Item::new(
+                    "p-close",
+                    "Not now",
+                    "esc",
+                    Tone::Ghost,
+                    (!asking).then(|| crate::ui::click(cx, |s, cx| s.act(Action::Back, cx))),
+                ),
+                post,
+            ],
+        }
     };
+    let footer = bar_view(s, t, footer, cx);
     page("detail-pub", body, Some(footer), t, false)
 }
 

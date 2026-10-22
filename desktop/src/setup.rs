@@ -67,18 +67,16 @@ fn fix_line(t: &Colors, fix: &str) -> Div {
                     .border_1()
                     .border_color(t.border)
                     .child(div().font_family(text::MONO).text_size(px(11.)).text_color(t.text).child(part.to_string()))
-                    .child(
-                        icon_button(
-                            t,
-                            SharedString::from(format!("copy-{i}-{}", part.len())),
-                            IconName::Copy,
-                            "Copy the command",
-                            px(24.),
-                            Some(Box::new(move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
-                                cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()))
-                            }) as OnClick),
-                        ),
-                    ),
+                    .child(icon_button(
+                        t,
+                        SharedString::from(format!("copy-{i}-{}", part.len())),
+                        IconName::Copy,
+                        "Copy the command",
+                        px(24.),
+                        Some(Box::new(move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
+                            cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()))
+                        }) as OnClick),
+                    )),
             );
         }
     }

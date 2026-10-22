@@ -154,9 +154,33 @@ pub fn button(
         .child(label.to_string())
         .children(key.map(|k| keycap(t, k, if filled { Some(fg) } else { None }, on.is_none())));
     match on {
-        Some(on) => focusable(id, b.id(face).hover(move |s| s.bg(hover)).active(move |s| s.bg(press)), t, radius::SM, on),
+        Some(on) => {
+            focusable(id, b.id(face).hover(move |s| s.bg(hover)).active(move |s| s.bg(press)), t, radius::SM, on)
+        }
         None => b.id(id),
     }
+}
+
+/// A command a read-only daemon refuses: outlined grey like any control that can't act, with a lock where its
+/// shortcut would be, so it reads as off for a reason and not as a quiet secondary.
+pub fn locked_button(t: &Colors, id: impl Into<ElementId>, label: &str) -> Stateful<Div> {
+    div()
+        .id(id)
+        .flex()
+        .flex_none()
+        .items_center()
+        .gap(space::S2)
+        .h(px(32.))
+        .px(space::S3)
+        .rounded(radius::SM)
+        .border_1()
+        .border_dashed()
+        .border_color(t.disabled.alpha(DISABLED_OUTLINE))
+        .text_size(text::BODY)
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(t.disabled)
+        .child(icon(IconName::Lock, px(13.), t.disabled))
+        .child(label.to_string())
 }
 
 /// A square icon button whose name is its tooltip.
@@ -170,18 +194,18 @@ pub fn icon_button(
 ) -> Stateful<Div> {
     let id = id.into();
     let face = ElementId::Name(format!("{id}-face").into());
-    let b = div()
-        .flex()
-        .flex_none()
-        .items_center()
-        .justify_center()
-        .size(side)
-        .rounded(radius::SM)
-        .child(icon(glyph, px(16.), if on.is_some() { t.muted } else { t.disabled }));
+    let b = div().flex().flex_none().items_center().justify_center().size(side).rounded(radius::SM).child(icon(
+        glyph,
+        px(16.),
+        if on.is_some() { t.muted } else { t.disabled },
+    ));
     match on {
         Some(on) => {
             let (hover, press) = (t.hover, t.press);
-            tip(focusable(id, b.id(face).hover(move |s| s.bg(hover)).active(move |s| s.bg(press)), t, radius::SM, on), name.to_string())
+            tip(
+                focusable(id, b.id(face).hover(move |s| s.bg(hover)).active(move |s| s.bg(press)), t, radius::SM, on),
+                name.to_string(),
+            )
         }
         None => tip(b.id(id), name.to_string()),
     }

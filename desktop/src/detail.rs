@@ -16,8 +16,8 @@ use pr_review_tui::view::Hit;
 
 use crate::code::{Inline, Lexer, Tok, clip, inline_markdown, wrap};
 use crate::kit::{
-    Gauge, OnClick, Tone, button, callout, chip, clock, display, heading, icon, icon_button, lift, overline,
-    progress, rail, severity_badge, step_of, summary, tabular, tip,
+    Gauge, OnClick, Tone, button, callout, chip, clock, display, heading, icon, icon_button, lift, overline, progress,
+    rail, severity_badge, step_of, summary, tabular, tip,
 };
 use crate::queue::{self, Stage, phase_word};
 use crate::tokens::{Colors, layout, radius, severity_mark, space, text};
@@ -70,6 +70,183 @@ pub fn action_bar(t: &Colors, f: Div) -> Div {
         .border_color(t.border)
         .bg(t.raised)
         .child(f.min_w_0())
+}
+
+/// One action in a page's bar. `on` is `None` for one that can't act now, and `why` says why in its tooltip.
+pub struct Item {
+    pub id: &'static str,
+    pub label: String,
+    pub key: Option<&'static str>,
+    pub tone: Tone,
+    pub on: Option<OnClick>,
+    pub why: Option<String>,
+    /// A command the read-only daemon refuses: drawn with a lock.
+    pub locked: bool,
+}
+
+impl Item {
+    pub fn new(id: &'static str, label: &str, key: &'static str, tone: Tone, on: Option<OnClick>) -> Item {
+        Item { id, label: label.into(), key: Some(key), tone, on, why: None, locked: false }
+    }
+}
+
+/// A page's actions: `lead` from the left (its first is the page's primary), an optional note after them, and
+/// `trail` at the right edge.
+#[derive(Default)]
+pub struct Bar {
+    pub lead: Vec<Item>,
+    pub note: Option<String>,
+    pub trail: Vec<Item>,
+}
+
+/// How a bar fits its width: everything; without the shortcut hints; or the primary alone, with the rest under
+/// More. A bar never clips.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Fit {
+    Full,
+    NoKeys,
+    More,
+}
+
+/// An estimate of a button's width at the 13-point label: its words, its padding and its key cap.
+fn width_of(label: &str, key: Option<&str>, keys: bool) -> f32 {
+    let cap = key.filter(|_| keys).map_or(0., |k| 8. + 12. + 8. * k.chars().count() as f32);
+    26. + 7.6 * label.chars().count() as f32 + cap
+}
+
+/// The fit for `items` and a note in `room` points.
+pub fn fit(items: &[(&str, Option<&str>)], note: Option<&str>, room: f32) -> Fit {
+    let need = |keys: bool| {
+        let gaps = 8. * items.len().saturating_sub(1) as f32 + 24.;
+        let note = note.map_or(0., |n| 22. + 6.8 * n.chars().count() as f32);
+        items.iter().map(|(l, k)| width_of(l, *k, keys)).sum::<f32>() + gaps + note
+    };
+    if need(true) <= room {
+        Fit::Full
+    } else if need(false) <= room {
+        Fit::NoKeys
+    } else {
+        Fit::More
+    }
+}
+
+/// The width the detail pane's bar has: the window, less the sidebar, the queue column where it shows, and the
+/// bar's own insets.
+pub fn bar_room(s: &Shell) -> f32 {
+    let m = &s.model;
+    let queue = queue::stage(m) == Stage::Ready
+        && !matches!(m.ui.screen, pr_review_tui::model::Screen::Diff | pr_review_tui::model::Screen::Settings)
+        && !matches!(crate::ui::front(m), Some(Modal::Finding { .. }));
+    f32::from(s.width) - f32::from(layout::SIDEBAR) - if queue { f32::from(layout::QUEUE) } else { 0. } - 64.
+}
+
+fn item_button(t: &Colors, it: Item, keys: bool) -> Stateful<Div> {
+    let key = it.key.filter(|_| keys);
+    let b = if it.locked {
+        crate::kit::locked_button(t, it.id, &it.label)
+    } else {
+        button(t, it.id, &it.label, key, it.tone, it.on)
+    };
+    match it.why {
+        Some(w) => tip(b, w),
+        None => b,
+    }
+}
+
+/// Lays a bar out at its fit. Under More, the primary stays and the rest open in a menu above the button; picking
+/// one closes it.
+pub fn bar_view(s: &Shell, t: &Colors, bar: Bar, cx: &Context<Shell>) -> Div {
+    let labels: Vec<(&str, Option<&str>)> =
+        bar.lead.iter().chain(&bar.trail).map(|i| (i.label.as_str(), i.key)).collect();
+    let fit = fit(&labels, bar.note.as_deref(), bar_room(s));
+    let row = div().flex().items_center().gap(space::S2).flex_1().min_w_0();
+    let note = |n: String| {
+        div()
+            .flex()
+            .items_center()
+            .gap(space::S2)
+            .flex_none()
+            .child(icon(IconName::TriangleAlert, px(14.), t.faint))
+            .child(div().text_size(text::SMALL).text_color(t.muted).child(n))
+    };
+    if fit != Fit::More {
+        let keys = fit == Fit::Full;
+        return row
+            .children(bar.lead.into_iter().map(|i| item_button(t, i, keys)))
+            .children(bar.note.map(note))
+            .child(div().flex_1())
+            .children(bar.trail.into_iter().map(|i| item_button(t, i, keys)));
+    }
+    let mut rest = bar.lead.into_iter().chain(bar.trail);
+    let first = rest.next();
+    let rest: Vec<Item> = rest.collect();
+    let open = s.more_open;
+    let shell = cx.entity().downgrade();
+    let menu = div()
+        .id("more-menu")
+        .absolute()
+        .bottom(px(40.))
+        .right_0()
+        .w(px(240.))
+        .flex()
+        .flex_col()
+        .p(space::S1)
+        .rounded(radius::LG)
+        .border_1()
+        .border_color(t.sheet_edge)
+        .bg(t.surface)
+        .occlude()
+        .children(rest.into_iter().map(|it| {
+            let enabled = it.on.is_some();
+            let shell = shell.clone();
+            let run = it.on.map(move |f| -> OnClick {
+                Box::new(move |e: &ClickEvent, w: &mut Window, cx: &mut App| {
+                    if let Some(s) = shell.upgrade() {
+                        s.update(cx, |s, cx| {
+                            s.more_open = false;
+                            cx.notify();
+                        });
+                    }
+                    f(e, w, cx)
+                })
+            });
+            let row = div()
+                .id(SharedString::from(format!("{}-more", it.id)))
+                .flex()
+                .items_center()
+                .gap(space::S2)
+                .h(px(32.))
+                .px(space::S3)
+                .rounded(radius::SM)
+                .text_size(text::BODY)
+                .text_color(if enabled { t.text } else { t.disabled })
+                .child(div().flex_1().child(it.label.clone()))
+                .children(it.key.map(|k| crate::kit::keycap(t, k, None, !enabled)));
+            let row = match run {
+                Some(f) => row.cursor_pointer().hover(|d| d.bg(t.hover)).on_click(f),
+                None => row,
+            };
+            match it.why {
+                Some(w) => tip(row, w),
+                None => row,
+            }
+        }));
+    row.children(first.map(|i| item_button(t, i, false))).child(div().flex_1()).child(
+        div()
+            .relative()
+            .child(button(
+                t,
+                "bar-more",
+                "More ⌄",
+                None,
+                Tone::Secondary,
+                crate::ui::on(cx, |s, cx| {
+                    s.more_open = !s.more_open;
+                    cx.notify();
+                }),
+            ))
+            .when(open, |d| d.child(menu)),
+    )
 }
 
 /// A fade along the bottom edge of a scroll area: what it covers continues under it.
@@ -301,7 +478,7 @@ pub fn tabs(t: &Colors, findings: usize, timeline: bool, cx: &Context<Shell>) ->
         ))
         .when(!timeline && findings > 1, |d| {
             d.child(div().flex_1())
-                .child(div().text_size(text::SMALL).text_color(t.muted).child("N / ⇧N walk · ⏎ opens"))
+                .child(div().text_size(text::SMALL).text_color(t.muted).child("N / ⇧N next / previous · ⏎ opens"))
         })
 }
 
@@ -338,7 +515,7 @@ fn pr_page(s: &Shell, t: &Colors, pr: &Pr, run: Option<&Run>, cx: &Context<Shell
                 .children(stale.iter().map(|f| finding_row(s, t, f, cx))),
         );
     }
-    page("detail-pr", body, Some(pr_actions(s, t, pr, run, cx)), t, false)
+    page("detail-pr", body, Some(bar_view(s, t, pr_actions(s, pr, run, cx), cx)), t, false)
 }
 
 /// The run's gauge and its state, or what stands in its way.
@@ -489,87 +666,80 @@ fn no_findings(t: &Colors, pr: &Pr, run: Option<&Run>) -> Option<Div> {
     Some(card)
 }
 
-/// A button for a mutation: live when the reducer allows it, dimmed with the reducer's reason when not.
-#[allow(clippy::too_many_arguments)]
-pub fn mutation_button(
+/// A bar item for a mutation: live when the reducer allows it, dimmed with the reason in its tooltip when not.
+pub fn mutation_item(
     s: &Shell,
-    t: &Colors,
     id: &'static str,
     label: &str,
-    key: &str,
+    key: &'static str,
     tone: Tone,
     mu: Mutation,
     cx: &Context<Shell>,
-) -> Stateful<Div> {
+) -> Item {
     let m = &s.model;
     if can_mutate(m, mu) {
         let direct = matches!(mu, Mutation::Start | Mutation::Retry);
-        return button(
-            t,
-            id,
-            label,
-            Some(key),
-            tone,
-            on(cx, move |s, cx| if direct { s.direct(mu, cx) } else { s.act(Action::Mutation(mu), cx) }),
-        );
+        let on = on(cx, move |s, cx| if direct { s.direct(mu, cx) } else { s.act(Action::Mutation(mu), cx) });
+        return Item::new(id, label, key, tone, on);
     }
-    let why = write_block(m, mu.capability()).map_or_else(
-        || match mu {
-            Mutation::Start => "a review already holds this head",
-            Mutation::Retry => "its latest run has not failed",
-            Mutation::Cancel => "no review is running on it",
-            Mutation::Publish => "nothing is waiting for approval",
-        },
-        |w| w,
-    );
-    tip(button(t, id, label, Some(key), tone, None), format!("Can't {}: {why}", label.to_lowercase()))
+    let locked = m.server.as_ref().and_then(|s| s.commands_off()).is_some();
+    Item { why: Some(why_not(m, mu, label)), locked, ..Item::new(id, label, key, tone, None) }
 }
 
-fn pr_actions(s: &Shell, t: &Colors, pr: &Pr, run: Option<&Run>, cx: &Context<Shell>) -> Div {
+/// Why a mutation can't act now, as a tooltip: the read-only daemon in the desktop's words, else the reducer's.
+pub fn why_not(m: &Model, mu: Mutation, label: &str) -> String {
+    if m.server.as_ref().and_then(|s| s.commands_off()).is_some() {
+        return format!(
+            "{} Restart the daemon with --allow-commands to {}.",
+            "Read-only daemon.",
+            label.to_lowercase()
+        );
+    }
+    let why = write_block(m, mu.capability()).unwrap_or(match mu {
+        Mutation::Start => "a review already holds this head",
+        Mutation::Retry => "its latest run has not failed",
+        Mutation::Cancel => "no review is running on it",
+        Mutation::Publish => "nothing is waiting for approval",
+    });
+    format!("Can't {}: {why}", label.to_lowercase())
+}
+
+fn pr_actions(s: &Shell, pr: &Pr, run: Option<&Run>, cx: &Context<Shell>) -> Bar {
     let m = &s.model;
-    let mut bar = div().flex().items_center().gap(space::S2).flex_1().min_w_0();
+    let mut bar = Bar::default();
     match run {
-        Some(r) if r.parked() => {
-            bar = bar.child(mutation_button(s, t, "a-post", "Review post", "P", Tone::Primary, Mutation::Publish, cx))
-        }
+        // Reading the proof is never a command; only its Post is. So Review post acts on a read-only daemon too,
+        // as the card's does.
+        Some(r) if r.parked() => bar.lead.push(Item::new(
+            "a-post",
+            "Review post",
+            "P",
+            Tone::Primary,
+            on(cx, |s, cx| s.send(Msg::Pick(Hit::Ready), cx)),
+        )),
         Some(r) if r.status == RunStatus::Failed => {
-            bar = bar.child(mutation_button(s, t, "a-retry", "Retry review", "⇧R", Tone::Primary, Mutation::Retry, cx))
+            bar.lead.push(mutation_item(s, "a-retry", "Retry review", "⇧R", Tone::Primary, Mutation::Retry, cx))
         }
-        None => {
-            bar = bar.child(mutation_button(s, t, "a-start", "Start review", "S", Tone::Primary, Mutation::Start, cx))
-        }
+        None => bar.lead.push(mutation_item(s, "a-start", "Start review", "S", Tone::Primary, Mutation::Start, cx)),
         _ => {}
     }
-    if m.ui.selected_finding.is_some() {
-        bar = bar.child(button(t, "a-open", "Open finding", Some("⏎"), Tone::Secondary, {
-            let id = m.ui.selected_finding.clone();
-            id.map(|id| -> OnClick {
-                Box::new(cx.listener(move |s, _: &ClickEvent, _, cx| s.send(Msg::Pick(Hit::Finding(id.clone())), cx)))
-            })
-        }));
-    }
-    bar =
-        bar.child(button(t, "a-diff", "Diff", Some("D"), Tone::Secondary, on(cx, |s, cx| s.act(Action::OpenDiff, cx))));
-    if pr.lifecycle == Lifecycle::Active && run.is_some_and(|r| r.parked()) {
-        bar = bar.child(mutation_button(s, t, "a-cancel", "Cancel", "C", Tone::Ghost, Mutation::Cancel, cx));
-    }
-    if m.server.as_ref().and_then(|sv| sv.commands_off()).is_some() {
-        bar = bar.child(tip(
-            div()
-                .id("read-only")
-                .flex()
-                .items_center()
-                .gap(px(6.))
-                .ml(space::S2)
-                .text_size(text::SMALL)
-                .text_color(t.warn)
-                .child(icon(IconName::Lock, px(13.), t.warn))
-                .child("Read-only daemon"),
-            crate::setup::read_only_sentence(m),
+    if let Some(id) = m.ui.selected_finding.clone() {
+        bar.lead.push(Item::new(
+            "a-open",
+            "Open finding",
+            "⏎",
+            Tone::Secondary,
+            Some(Box::new(
+                cx.listener(move |s, _: &ClickEvent, _, cx| s.send(Msg::Pick(Hit::Finding(id.clone())), cx)),
+            )),
         ));
     }
-    bar = bar.child(div().flex_1());
-    bar.child(button(t, "a-gh", "Open on GitHub", Some("⌘⇧O"), Tone::Ghost, on(cx, |s, cx| s.open_github(cx))))
+    bar.lead.push(Item::new("a-diff", "Diff", "D", Tone::Secondary, on(cx, |s, cx| s.act(Action::OpenDiff, cx))));
+    if pr.lifecycle == Lifecycle::Active && run.is_some_and(|r| r.parked()) {
+        bar.lead.push(mutation_item(s, "a-cancel", "Cancel", "C", Tone::Ghost, Mutation::Cancel, cx));
+    }
+    bar.trail.push(Item::new("a-gh", "Open on GitHub", "⌘⇧O", Tone::Ghost, on(cx, |s, cx| s.open_github(cx))));
+    bar
 }
 
 /// A finding's tracking status as a word and the sentence that explains it, in the reviewer's terms.
@@ -722,7 +892,13 @@ fn finding_page(s: &Shell, t: &Colors, id: &FindingId, cx: &Context<Shell>) -> D
         .flex()
         .items_center()
         .gap(space::S2)
-        .child(overline(t, pr.map_or("Finding".to_string(), |p| format!("{} #{}", p.repository, p.number))))
+        .child(
+            div()
+                .text_size(text::CAPTION)
+                .font_weight(FontWeight::SEMIBOLD)
+                .text_color(t.faint)
+                .child(pr.map_or("Finding".to_string(), |p| format!("{} #{}", p.repository, p.number))),
+        )
         .child(div().flex_1())
         .child(icon_button(
             t,
@@ -810,39 +986,22 @@ fn finding_page(s: &Shell, t: &Colors, id: &FindingId, cx: &Context<Shell>) -> D
         .gap(space::S5)
         .child(crumbs)
         .child(div().flex().gap(space::S8).child(left).child(right));
-    let footer = div()
-        .flex()
-        .items_center()
-        .gap(space::S2)
-        .flex_1()
-        .child(button(
-            t,
-            "f-diff",
-            "Open in diff",
-            Some("D"),
-            Tone::Primary,
-            on(cx, |s, cx| s.act(Action::OpenDiff, cx)),
-        ))
-        .child(button(
-            t,
-            "f-next-b",
-            "Next finding",
-            Some("N"),
-            Tone::Secondary,
-            (at < all.len()).then(|| -> OnClick {
-                Box::new(cx.listener(|s, _: &ClickEvent, _, cx| s.act(Action::NextFinding, cx)))
-            }),
-        ))
-        .child(button(
-            t,
-            "f-timeline",
-            "Timeline",
-            Some("T"),
-            Tone::Ghost,
-            on(cx, |s, cx| s.act(Action::OpenTimeline, cx)),
-        ))
-        .child(div().flex_1())
-        .child(button(t, "f-gh", "Open on GitHub", Some("⌘⇧O"), Tone::Ghost, on(cx, |s, cx| s.open_github(cx))));
+    let footer = Bar {
+        lead: vec![
+            Item::new("f-diff", "Open in diff", "D", Tone::Primary, on(cx, |s, cx| s.act(Action::OpenDiff, cx))),
+            Item::new(
+                "f-next-b",
+                "Next finding",
+                "N",
+                Tone::Secondary,
+                (at < all.len()).then(|| crate::ui::click(cx, |s, cx| s.act(Action::NextFinding, cx))),
+            ),
+            Item::new("f-timeline", "Timeline", "T", Tone::Ghost, on(cx, |s, cx| s.act(Action::OpenTimeline, cx))),
+        ],
+        note: None,
+        trail: vec![Item::new("f-gh", "Open on GitHub", "⌘⇧O", Tone::Ghost, on(cx, |s, cx| s.open_github(cx)))],
+    };
+    let footer = bar_view(s, t, footer, cx);
     page("detail-f", body, Some(footer), t, true)
 }
 
@@ -1326,4 +1485,25 @@ pub fn md_line(t: &Colors, src: &str) -> StyledText {
         })
         .collect();
     StyledText::new(plain).with_highlights(marks)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{Fit, fit};
+
+    #[test]
+    fn a_bar_drops_its_key_hints_then_folds_into_more_before_it_clips() {
+        let pr_page = [
+            ("Review post", Some("P")),
+            ("Open finding", Some("⏎")),
+            ("Diff", Some("D")),
+            ("Cancel", Some("C")),
+            ("Open on GitHub", Some("⌘⇧O")),
+        ];
+        assert_eq!(fit(&pr_page, None, 900.), Fit::Full);
+        // 1280 points with the queue column: the five actions fit only without their hints.
+        assert_eq!(fit(&pr_page, None, 584.), Fit::NoKeys);
+        assert_eq!(fit(&pr_page, None, 420.), Fit::More);
+        assert_eq!(fit(&[("Cancel review", Some("C"))], Some("Verifying · findings land here."), 584.), Fit::Full);
+    }
 }

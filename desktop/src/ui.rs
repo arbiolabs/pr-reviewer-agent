@@ -16,8 +16,8 @@ use pr_review_tui::view::Hit;
 use tokio::sync::mpsc;
 
 use crate::kit::{
-    Gauge, OnClick, Tone, button, count_badge, focusable, icon, keycap, lift, overline, progress, rail,
-    severity_count, step_of, tip,
+    Gauge, OnClick, Tone, button, count_badge, focusable, icon, keycap, lift, overline, progress, rail, severity_count,
+    step_of, tip,
 };
 use crate::queue::{self, Card, RowState, Stage, phase_word};
 use crate::script::Desk;
@@ -36,6 +36,7 @@ gpui_kit::actions!(
         Setup,
         Shortcuts,
         Post,
+        GoBack,
         NeedsYou,
         DoneList,
         AppearanceSystem,
@@ -55,6 +56,7 @@ pub fn bindings() -> Vec<KeyBinding> {
         KeyBinding::new("cmd-,", Setup, None),
         KeyBinding::new("cmd-shift-/", Shortcuts, None),
         KeyBinding::new("cmd-enter", Post, None),
+        KeyBinding::new("cmd-[", GoBack, None),
         KeyBinding::new("cmd-1", NeedsYou, None),
         KeyBinding::new("cmd-2", DoneList, None),
     ]
@@ -67,6 +69,7 @@ pub fn menus() -> Vec<Menu> {
         Menu::new("View").items([
             MenuItem::action("Needs You", NeedsYou),
             MenuItem::action("Done", DoneList),
+            MenuItem::action("Back", GoBack),
             MenuItem::separator(),
             MenuItem::action("Command Palette", Palette),
             MenuItem::action("Setup", Setup),
@@ -110,6 +113,10 @@ pub struct Shell {
     pub snapshot: bool,
     /// The live log held at an event, counted from 0, or `None` to follow the run.
     pub scrub: Option<usize>,
+    /// The window's width, as the last frame laid it out: a page's action bar fits itself to it.
+    pub width: Pixels,
+    /// The action bar's More menu is open.
+    pub more_open: bool,
 }
 
 /// A page the reader went into: a finding, the proof, the diff or setup. The live strip steps aside there.
@@ -146,6 +153,8 @@ impl Shell {
             still,
             snapshot,
             scrub: None,
+            width: px(1280.),
+            more_open: false,
         };
         for d in desk {
             match d {
@@ -169,6 +178,11 @@ impl Shell {
     /// and solid in a snapshot, whose pixels must not depend on the desktop.
     pub fn glass(&self, c: Hsla) -> Hsla {
         if self.snapshot { c } else { c.alpha(0.9) }
+    }
+
+    /// The reader is on a deep page or the timeline: Back (⌘[) has somewhere to go.
+    pub fn away(&self) -> bool {
+        !matches!(self.model.ui.screen, Screen::Inbox | Screen::Review) || front(&self.model).is_some()
     }
 
     pub fn send(&mut self, msg: Msg, cx: &mut Context<Self>) {
@@ -433,6 +447,8 @@ impl Shell {
             (None, Screen::Diff, _, "N") => Action::PrevFinding,
             (None, Screen::Diff, _, ":") => Action::JumpTo,
             (None, Screen::Timeline, _, "f") => Action::Search,
+            // T toggles the PR's two tabs, so leaving the timeline has a key of its own, apart from Back.
+            (None, Screen::Timeline, _, "t") => Action::Back,
             (Some(Modal::Finding { .. } | Modal::Publication { .. }) | None, Screen::Inbox | Screen::Review, ..) => {
                 match (key, ch) {
                     ("down", _) | (_, "j") => return self.move_card(1, cx),
@@ -464,6 +480,7 @@ impl Shell {
 
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.width = window.viewport_size().width;
         let t = colors(cx);
         let m = &self.model;
         let stage = queue::stage(m);
@@ -501,6 +518,11 @@ impl Render for Shell {
                 cx.notify();
             }))
             .on_action(cx.listener(|s, _: &Post, _, cx| s.post_key(cx)))
+            .on_action(cx.listener(|s, _: &GoBack, _, cx| {
+                if s.overlay.is_none() && s.away() {
+                    s.act(Action::Back, cx)
+                }
+            }))
             .on_action(cx.listener(|s, _: &NeedsYou, _, cx| s.set_tab(false, cx)))
             .on_action(cx.listener(|s, _: &DoneList, _, cx| s.set_tab(true, cx)))
             .on_action(cx.listener(|_, _: &CloseWindow, window, _| window.remove_window()))
@@ -571,9 +593,15 @@ fn titlebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         _ if s.done_tab && !queue::cards(m).is_empty() => {
             ("Done".into(), format!("{} with nothing left for you.", queue::count(queue::done(m).len(), "PR")))
         }
-        _ => ("Needs you".into(), queue::summary(m)),
+        // The home's title says how much waits, not the list's name the sidebar already shows.
+        _ => match (queue::stage(m), queue::cards(m).len()) {
+            (Stage::Ready, 0) => ("You're clear".into(), queue::summary(m)),
+            (Stage::Ready, n) => (format!("{} waiting", queue::count(n, "decision")), queue::summary(m)),
+            _ => ("pr-review".into(), queue::summary(m)),
+        },
     };
-    let away = !matches!(m.ui.screen, Screen::Inbox | Screen::Review) || front(m).is_some();
+    let read_only = m.server.as_ref().and_then(|sv| sv.commands_off()).is_some();
+    let away = s.away();
     let search = div()
         .id("search-face")
         .flex()
@@ -604,7 +632,7 @@ fn titlebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         .border_color(t.border)
         .window_control_area(WindowControlArea::Drag)
         .when(away, |d| {
-            d.child(button(t, "back", "Back", Some("esc"), Tone::Ghost, on(cx, |s, cx| s.act(Action::Back, cx))))
+            d.child(button(t, "back", "Back", Some("⌘["), Tone::Ghost, on(cx, |s, cx| s.act(Action::Back, cx))))
         })
         .child(
             div()
@@ -616,6 +644,28 @@ fn titlebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                 .child(div().flex_none().text_size(text::LEAD).font_weight(FontWeight::SEMIBOLD).child(title))
                 .child(div().min_w_0().truncate().text_size(text::SMALL).text_color(t.muted).child(sub)),
         )
+        .when(read_only, |d| {
+            d.child(tip(
+                div()
+                    .id("read-only")
+                    .flex()
+                    .flex_none()
+                    .items_center()
+                    .gap(px(5.))
+                    .h(px(24.))
+                    .px(space::S2)
+                    .rounded(radius::SM)
+                    .bg(t.warn.alpha(t.tint))
+                    .border_1()
+                    .border_color(t.warn.alpha(t.tint * 2.))
+                    .text_size(text::SMALL)
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(t.warn)
+                    .child(icon(IconName::Lock, px(12.), t.warn))
+                    .child("Read-only"),
+                crate::setup::read_only_sentence(m),
+            ))
+        })
         .child(tip(
             focusable("search", search, t, radius::SM, click(cx, |s, cx| s.toggle_palette(cx))),
             "Search PRs and findings, or run a command",
@@ -722,16 +772,17 @@ fn sidebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         ));
     let groups = queue::rows(m);
     if stage == Stage::Ready && !groups.is_empty() {
-        list = list.child(div().px(space::S2).pt(space::S5).pb(space::S1).child(overline(t, "Pull requests")));
-        for (repo, rows) in groups {
+        // One hierarchy: the repository is the group label, lowercase as GitHub writes it, in the sidebar's one
+        // label style; the smart lists above need no heading.
+        for (i, (repo, rows)) in groups.into_iter().enumerate() {
             list = list.child(
                 div()
                     .px(space::S2)
-                    .pt(space::S2)
+                    .pt(if i == 0 { space::S5 } else { space::S3 })
                     .pb(space::S1)
-                    .font_family(text::MONO)
                     .text_size(text::CAPTION)
-                    .text_color(t.muted)
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(t.faint)
                     .child(repo),
             );
             for r in rows {
@@ -780,9 +831,9 @@ fn pr_row(s: &Shell, t: &Colors, pr: &Pr, state: RowState, on: bool, cx: &Contex
         .flex()
         .items_start()
         .gap(space::S2)
-        .min_h(px(44.))
+        .h(px(44.))
         .px(space::S2)
-        .py(px(6.))
+        .py(px(5.))
         .rounded(radius::SM)
         .when(on, |d| d.bg(t.selected).child(rail(t)))
         .hover(move |d| d.bg(if on { lift(t, t.selected) } else { t.hover }))
@@ -795,27 +846,30 @@ fn pr_row(s: &Shell, t: &Colors, pr: &Pr, state: RowState, on: bool, cx: &Contex
                 .flex_1()
                 .min_w_0()
                 .gap(px(2.))
+                // The title takes the row's whole width on one line; the number, the state and the badge share
+                // the line under it, so a title is cut only at its end.
                 .child(
                     div()
                         .text_size(text::BODY)
                         .line_height(px(18.))
                         .font_weight(FontWeight::MEDIUM)
                         .text_color(t.text)
-                        .text_ellipsis()
-                        .line_clamp(2)
+                        .truncate()
                         .child(pr.title.to_string()),
                 )
                 .child(
                     div()
                         .flex()
-                        .items_baseline()
+                        .items_center()
+                        .h(px(16.))
                         .gap(px(6.))
                         .text_size(text::CAPTION)
-                        .child(div().text_color(t.muted).child(format!("#{}", pr.number)))
-                        .child(div().min_w_0().truncate().text_color(hue).child(state.word())),
+                        .child(div().flex_none().text_color(t.muted).child(format!("#{}", pr.number)))
+                        .child(div().flex_none().text_color(hue).child(state.word()))
+                        .child(div().flex_1())
+                        .children(badge),
                 ),
-        )
-        .child(div().w(px(44.)).h(px(18.)).flex_none().flex().items_center().justify_end().children(badge));
+        );
     focusable(
         SharedString::from(format!("nav-pr-{}", pr.number)),
         row,

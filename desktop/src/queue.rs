@@ -243,9 +243,12 @@ pub enum RowState {
 impl RowState {
     pub fn word(self) -> &'static str {
         match self {
-            RowState::Running(p) => phase_word(p),
-            RowState::Parked => "Awaiting approval",
-            RowState::Failed => "Review failed",
+            RowState::Running(p) => match p {
+                Phase::CollectContext => "Collecting",
+                p => phase_word(p),
+            },
+            RowState::Parked => "To approve",
+            RowState::Failed => "Failed",
             RowState::Findings(..) => "To judge",
             RowState::Posted => "Posted",
             RowState::Clean => "Clean",

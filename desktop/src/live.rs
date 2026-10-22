@@ -3,10 +3,9 @@
 
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
-use pr_review_tui::keymap::{Action, Mutation};
+use pr_review_tui::keymap::Mutation;
 use pr_review_tui::model::{Activity, ActivityKind};
 use pr_review_tui::protocol::{Finding, Pr, Run};
-use pr_review_tui::update::can_mutate;
 
 use crate::detail::*;
 use crate::kit::{Gauge, OnClick, Tone, button, clock_s, overline, progress, step_of, tabular, tip};
@@ -221,28 +220,12 @@ pub fn live(s: &Shell, t: &Colors, pr: &Pr, run: &Run, cx: &Context<Shell>) -> D
                 div().flex().flex_col().gap(space::S2).children(landed.into_iter().map(|f| finding_row(s, t, f, cx)))
             },
         ));
-    let footer = div()
-        .flex()
-        .items_center()
-        .gap(space::S2)
-        .flex_1()
-        .child(
-            div()
-                .flex_1()
-                .text_size(text::SMALL)
-                .text_color(t.muted)
-                .child(format!("{} · findings land here as the verifier keeps them.", phase_word(run.phase))),
-        )
-        .child(button(
-            t,
-            "l-cancel",
-            "Cancel review",
-            Some("C"),
-            Tone::Danger,
-            can_mutate(m, Mutation::Cancel).then(|| -> OnClick {
-                Box::new(cx.listener(|s, _: &ClickEvent, _, cx| s.act(Action::Mutation(Mutation::Cancel), cx)))
-            }),
-        ));
+    let footer = Bar {
+        lead: vec![],
+        note: Some(format!("{} · findings land as the verifier keeps them.", phase_word(run.phase))),
+        trail: vec![mutation_item(s, "l-cancel", "Cancel review", "C", Tone::Danger, Mutation::Cancel, cx)],
+    };
+    let footer = bar_view(s, t, footer, cx);
     page("detail-live", body, Some(footer), t, false)
 }
 

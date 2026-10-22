@@ -221,8 +221,20 @@ fn hue_of(t: &Colors, c: &Card) -> Hsla {
     }
 }
 
-fn card(_: &Shell, t: &Colors, c: &Card, i: usize, selected: bool, cx: &Context<Shell>) -> Stateful<Div> {
+fn card(s: &Shell, t: &Colors, c: &Card, i: usize, selected: bool, cx: &Context<Shell>) -> Stateful<Div> {
     let f = face(c, selected);
+    // A selected card whose PR page fills the pane docks: its title, quote, reason and button are all on that page,
+    // so the card keeps only its kicker and its meta line, and the title is said once beside the sidebar.
+    let docked = selected && matches!(c, Card::Findings { .. } | Card::Failed { .. } | Card::Start { .. });
+    // On a read-only daemon a card's command stays visible, dimmed, with the reason in its tooltip.
+    let command = match c {
+        Card::Start { .. } => Some(pr_review_tui::keymap::Mutation::Start),
+        Card::Failed { .. } => Some(pr_review_tui::keymap::Mutation::Retry),
+        _ => None,
+    };
+    let refused = command
+        .filter(|_| s.model.server.as_ref().and_then(|sv| sv.commands_off()).is_some())
+        .map(|mu| crate::detail::why_not(&s.model, mu, f.action));
     let hue = hue_of(t, c);
     let place = c.pr().map(|p| format!("{} #{}", p.repository, p.number)).unwrap_or_default();
     let lift = BoxShadow {
@@ -275,17 +287,19 @@ fn card(_: &Shell, t: &Colors, c: &Card, i: usize, selected: bool, cx: &Context<
                 .child(div().flex_1())
                 .child(div().text_size(text::CAPTION).text_color(t.faint).child(place)),
         )
-        .child(
-            div()
-                .text_size(text::LEAD)
-                .line_height(px(20.))
-                .font_weight(FontWeight::SEMIBOLD)
-                .text_color(t.text)
-                .text_ellipsis()
-                .line_clamp(2)
-                .child(f.headline),
-        )
-        .children(f.quote.map(|q| {
+        .when(!docked, |d| {
+            d.child(
+                div()
+                    .text_size(text::LEAD)
+                    .line_height(px(20.))
+                    .font_weight(FontWeight::SEMIBOLD)
+                    .text_color(t.text)
+                    .text_ellipsis()
+                    .line_clamp(2)
+                    .child(f.headline),
+            )
+        })
+        .children(f.quote.filter(|_| !docked).map(|q| {
             div()
                 .font_family(text::SERIF)
                 .italic()
@@ -296,7 +310,7 @@ fn card(_: &Shell, t: &Colors, c: &Card, i: usize, selected: bool, cx: &Context<
                 .line_clamp(2)
                 .child(format!("\u{201c}{q}\u{201d}"))
         }))
-        .when(!f.sub.is_empty(), |d| {
+        .when(!f.sub.is_empty() && !docked, |d| {
             d.child(
                 div()
                     .text_size(text::SMALL)
@@ -311,14 +325,23 @@ fn card(_: &Shell, t: &Colors, c: &Card, i: usize, selected: bool, cx: &Context<
         .when(!f.meta.is_empty(), |d| {
             d.child(div().text_size(text::SMALL).line_height(text::LINE_TIGHT).text_color(t.muted).child(f.meta))
         })
-        .child(div().flex().justify_end().pt(space::S1).child(button(
-            t,
-            ("card-go", i),
-            f.action,
-            key,
-            if selected { Tone::Primary } else { Tone::Secondary },
-            on(cx, move |s, cx| s.primary(i, cx)),
-        )))
+        .when(!docked, |d| {
+            let b = match refused {
+                Some(_) => crate::kit::locked_button(t, ("card-go", i), f.action),
+                None => button(
+                    t,
+                    ("card-go", i),
+                    f.action,
+                    key,
+                    if selected { Tone::Primary } else { Tone::Secondary },
+                    on(cx, move |s, cx| s.primary(i, cx)),
+                ),
+            };
+            d.child(div().flex().justify_end().pt(space::S1).child(match refused {
+                Some(why) => crate::kit::tip(b, why),
+                None => b,
+            }))
+        })
 }
 
 /// The reader is clear: said once, at the head of the done list, only by a window with a live snapshot.

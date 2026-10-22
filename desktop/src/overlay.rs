@@ -524,7 +524,17 @@ fn palette(s: &Shell, t: &Colors, query: &str, selected: usize, cx: &Context<She
                 .when(on_it, |d| d.bg(t.selected).child(crate::kit::rail(t)))
                 .when(!on_it, |d| d.hover(|d| d.bg(t.hover)))
                 .when(!blocked, |d| d.on_click(cx.listener(move |s, _: &ClickEvent, _, cx| run(s, r.clone(), cx))))
-                .child(icon(mark, px(14.), if blocked { t.disabled } else if on_it { t.accent } else { t.muted }))
+                .child(icon(
+                    mark,
+                    px(14.),
+                    if blocked {
+                        t.disabled
+                    } else if on_it {
+                        t.accent
+                    } else {
+                        t.muted
+                    },
+                ))
                 .child(
                     div()
                         .flex_1()
@@ -541,17 +551,13 @@ fn palette(s: &Shell, t: &Colors, query: &str, selected: usize, cx: &Context<She
                 .when(on_it && !blocked, |d| d.child(keycap(t, "⏎", None, false))),
         );
     }
-    let list = div()
-        .relative()
-        .h(px(if more { fits } else { fits + 8. }))
-        .child(list.size_full())
-        .when(more, |d| {
-            d.child(div().absolute().bottom_0().left_0().right_0().h(space::S6).bg(linear_gradient(
-                180.,
-                linear_color_stop(t.surface.alpha(0.), 0.),
-                linear_color_stop(t.surface, 1.),
-            )))
-        });
+    let list = div().relative().h(px(if more { fits } else { fits + 8. })).child(list.size_full()).when(more, |d| {
+        d.child(div().absolute().bottom_0().left_0().right_0().h(space::S6).bg(linear_gradient(
+            180.,
+            linear_color_stop(t.surface.alpha(0.), 0.),
+            linear_color_stop(t.surface, 1.),
+        )))
+    });
     scrim(t, "palette-scrim", cx, true)
         .flex()
         .items_start()
@@ -855,9 +861,9 @@ const KEYS: &[(&str, &[(&str, &str)])] = &[
             ("⏎", "do what the card's button says"),
             ("N / ⇧N", "next or previous finding in the PR"),
             ("D", "open the diff at the finding"),
-            ("T", "the PR's timeline"),
+            ("T", "the PR's timeline, and back to its findings"),
             ("⇥", "move between controls"),
-            ("esc", "back"),
+            ("⌘[  esc", "back"),
         ],
     ),
     (
