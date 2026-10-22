@@ -54,7 +54,7 @@ The gauge only claims what the run did. It draws one mark per step from the run'
 - **Radii.** Two: 8 for controls, chips and rows; 12 for cards, code, sheets and the palette. Dots and count badges are circles.
 - **Titles.** A serif title that needs more than one line wraps at a measure that splits its characters evenly, so no word sits alone on the last line.
 - **Motion.** The live dot breathes over 1.6 s. A log row that just landed fades in over 150 ms, and wears the running hue on its left edge while it is the newest. A spinner turns while the window retries or connects. Nothing else moves. Reduce Motion, `PR_REVIEW_REDUCE_MOTION=1` or a snapshot stills all three. Entering replay moves nothing: the activity header keeps one height whether it follows or replays.
-- **Window.** The window's background is blurred (`WindowBackgroundAppearance::Blurred`), and the sidebar and title bar let it through at 90 % so the desktop tints them faintly; every text token keeps AA against the solid color underneath. A snapshot's window is opaque, since its pixels must not depend on what is behind it.
+- **Window.** The window's background is blurred (`WindowBackgroundAppearance::Blurred`), and the sidebar and title bar let it through at 90 % so the desktop tints them faintly; every text token keeps AA against the solid color underneath. gpui-kit's root paints the theme's opaque background over the window, which hid the blur entirely, so a live window clears it. Measured on a live capture over a saturated gradient, the sidebar's muted text holds 6.5:1 in dark and 4.9:1 in light, the repository labels 6.5:1 and 5.1:1. A snapshot's window is opaque, since its pixels must not depend on what is behind it.
 
 ## Interaction
 

@@ -107,7 +107,8 @@ pub enum Overlay {
 
 /// The post sheet's guard against the chord that opened it. ⌘⏎ both opens the sheet and posts from it, so a
 /// double press would post before the sheet could be read. The sheet arms ⌘⏎ only once ⏎ has come up since it
-/// opened, and `DELAY` has passed: a double press, a held chord and its key repeat all land on an unarmed sheet.
+/// opened (⏎ comes up, or ⌘ does) and `DELAY` has passed: a double press, a held chord and its key repeat all land
+/// on an unarmed sheet.
 /// A sheet opened by a click or Y needs no release. The sheet's Post button acts at once: it sits far from the
 /// button that opened the sheet, so no double click reaches it.
 #[derive(Clone, Copy, Debug)]
@@ -156,6 +157,8 @@ pub struct Shell {
     pub diff_flagged_only: bool,
     /// The diff's Generated group is open.
     pub diff_generated_open: bool,
+    /// A sheet was open in the last frame.
+    pub sheet_was_open: bool,
 }
 
 /// A page the reader went into: a finding, the proof, the diff or setup. The live strip steps aside there.
@@ -197,6 +200,7 @@ impl Shell {
             open_discards: Vec::new(),
             diff_flagged_only: false,
             diff_generated_open: false,
+            sheet_was_open: false,
         };
         for d in desk {
             match d {
@@ -546,13 +550,16 @@ impl Render for Shell {
                 ..
             })
         );
-        crate::kit::sheet_open(
-            self.overlay.is_some()
-                || matches!(
-                    self.model.top_modal(),
-                    Some(Modal::Confirm { .. } | Modal::Input { .. } | Modal::Help { .. })
-                ) && !quiet,
-        );
+        let sheet = self.overlay.is_some()
+            || matches!(self.model.top_modal(), Some(Modal::Confirm { .. } | Modal::Input { .. } | Modal::Help { .. }))
+                && !quiet;
+        crate::kit::sheet_open(sheet);
+        // A sheet opening takes the page's tab stops away, and one closing takes its own: a control focused there
+        // would hold focus outside the frame, where no key reaches. The window takes focus back on either change.
+        if sheet != self.sheet_was_open && !self.snapshot {
+            window.focus(&self.focus, cx);
+        }
+        self.sheet_was_open = sheet;
         // A focused control that a state change removed (a card's button once its proof opens, the proof's Post
         // under its sheet) leaves no element focused, and then no key reaches the window: focus returns to it.
         if !self.snapshot && window.focused(cx).is_none() {
@@ -598,8 +605,15 @@ impl Render for Shell {
                     cx.notify();
                 }
             }))
+            // macOS sends no key-up for a key pressed under ⌘, so lifting ⌘ is the release of a ⌘⏎ chord; a plain
+            // ⏎ coming up counts too.
             .on_key_up(cx.listener(|s, ev: &KeyUpEvent, _, _| {
                 if let (Some(Overlay::ConfirmPost(arm)), "enter") = (&mut s.overlay, ev.keystroke.key.as_str()) {
+                    arm.release();
+                }
+            }))
+            .on_modifiers_changed(cx.listener(|s, ev: &ModifiersChangedEvent, _, _| {
+                if let (Some(Overlay::ConfirmPost(arm)), false) = (&mut s.overlay, ev.modifiers.platform) {
                     arm.release();
                 }
             }))

@@ -273,6 +273,15 @@ fn run_app(
             Ok(opened) => opened,
             Err(e) => fail(format!("could not open a window: {e}")),
         };
+        // gpui-kit's root paints the theme's opaque background over the whole window, which hid the blur: the
+        // root goes clear, so the sidebar and the title bar show the desktop through their glass.
+        if !is_snapshot {
+            let _ = window.update(cx, |_, window, cx| {
+                gpui_kit::base::Root::update(window, cx, |root, _, _| {
+                    root.style().background = Some(transparent_black().into());
+                })
+            });
+        }
         cx.on_window_closed(|cx, _| cx.quit()).detach();
         cx.activate(true);
         if let Some(mut msgs) = msgs {
