@@ -481,6 +481,11 @@ impl Shell {
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.width = window.viewport_size().width;
+        // A focused control that a state change removed (a card's button once its proof opens, the proof's Post
+        // under its sheet) leaves no element focused, and then no key reaches the window: focus returns to it.
+        if !self.snapshot && window.focused(cx).is_none() {
+            window.focus(&self.focus, cx);
+        }
         let t = colors(cx);
         let m = &self.model;
         let stage = queue::stage(m);
