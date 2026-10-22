@@ -203,13 +203,26 @@ pub fn resolve(screen: Screen, modal: Option<&Modal>, key: KeyEvent) -> Option<A
             _ => None,
         };
     }
-    let ctx = context(screen, modal);
     let lookup = |c: Context| {
         TABLE.iter().find(|(tc, code, mods, _)| *tc == c && *code == key.code && *mods == key.modifiers).map(|t| t.3)
     };
+    contexts(screen, modal).find_map(lookup)
+}
+
+/// The contexts a key is looked up in, most specific first.
+fn contexts(screen: Screen, modal: Option<&Modal>) -> impl Iterator<Item = Context> {
+    let ctx = context(screen, modal);
     let page = (ctx == C::Inbox).then_some(C::Review);
     let screens = modal.is_none().then_some(C::Screens);
-    [Some(ctx), page, screens, Some(C::Global)].into_iter().flatten().find_map(lookup)
+    [Some(ctx), page, screens, Some(C::Global)].into_iter().flatten()
+}
+
+/// Whether some key reaches `a` here, so an action sent without a key (`Msg::Action`) acts exactly where a key would.
+pub fn reachable(screen: Screen, modal: Option<&Modal>, a: Action) -> bool {
+    if let Some(Modal::Input { .. }) = modal {
+        return matches!(a, A::InputChar(_) | A::InputBackspace | A::InputSubmit | A::InputCancel);
+    }
+    contexts(screen, modal).any(|c| TABLE.iter().any(|(tc, _, _, ta)| *tc == c && *ta == a))
 }
 
 /// The help page's rows by context, read from the same table so help never drifts from behavior: the context, its keys,

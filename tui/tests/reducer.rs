@@ -1169,3 +1169,49 @@ fn a_taller_terminal_pulls_the_scroll_back_to_what_still_hides() {
     assert!(short > limit, "{short} {limit}");
     assert_eq!(m.ui.doc_scroll, limit);
 }
+
+#[test]
+fn an_action_does_what_its_key_does_and_nothing_where_no_key_reaches_it() {
+    use pr_review_tui::keymap::Action;
+    let mut by_key = live();
+    let mut by_action = live();
+    press(&mut by_key, KeyCode::Char('j'));
+    press(&mut by_key, KeyCode::Enter);
+    update(&mut by_action, Msg::Action(Action::Down));
+    update(&mut by_action, Msg::Action(Action::Open));
+    assert_eq!((by_action.ui.screen, by_action.ui.focus), (Screen::Review, Pane::Main));
+    assert_eq!(by_action.ui.selected_pr.as_ref().map(|p| p.as_str()), Some("acme/shop#184"));
+    assert_eq!(by_action.ui.selected_pr, by_key.ui.selected_pr);
+    assert_eq!(by_action.ui.selected_finding, by_key.ui.selected_finding);
+    assert_eq!(update(&mut by_action, Msg::Action(Action::Quit)), [Effect::Quit]);
+
+    // y is bound only in a confirmation, so outside one Confirm sends nothing.
+    assert_eq!(update(&mut by_action, Msg::Action(Action::Confirm)), []);
+
+    // A focused input takes only input actions, as it takes every key.
+    update(&mut by_action, Msg::Action(Action::Search));
+    assert_eq!(update(&mut by_action, Msg::Action(Action::Quit)), []);
+    update(&mut by_action, Msg::Action(Action::InputChar('z')));
+    assert!(matches!(by_action.top_modal(), Some(Modal::Input { buffer, .. }) if buffer == "z"));
+}
+
+#[test]
+fn a_pick_selects_like_a_click_and_ignores_a_finding_the_selected_pr_lacks() {
+    use pr_review_tui::view::Hit;
+    let mut m = showcase(usize::MAX / 2);
+    let pr = m.domain.prs.values().find(|p| p.number == 1287).unwrap().id.clone();
+    update(&mut m, Msg::Pick(Hit::Pr(pr.clone())));
+    assert_eq!(m.selected_pr().map(|p| p.number), Some(1287));
+
+    let other = m.domain.findings.values().find(|f| f.pr_id != pr).unwrap().id.clone();
+    let before = m.ui.selected_finding.clone();
+    update(&mut m, Msg::Pick(Hit::Finding(other)));
+    assert_eq!(m.ui.selected_finding, before, "a finding of another PR is not selectable");
+
+    let second = m.domain.pr_findings(&pr)[1].id.clone();
+    update(&mut m, Msg::Pick(Hit::Finding(second.clone())));
+    assert_eq!(m.ui.selected_finding.as_ref(), Some(&second));
+    assert_eq!(m.top_modal(), None);
+    update(&mut m, Msg::Pick(Hit::Finding(second.clone())));
+    assert!(matches!(m.top_modal(), Some(Modal::Finding { id, .. }) if id == &second), "a second pick reads it");
+}

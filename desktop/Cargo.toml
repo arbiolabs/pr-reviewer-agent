@@ -1,0 +1,21 @@
+[package]
+name = "pr-review-desktop"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[[bin]]
+name = "pr-review-desktop"
+path = "src/main.rs"
+
+[dependencies]
+gpui-kit = "=0.8.0"
+pr-review-tui = { path = "../tui" }
+tokio = { version = "=1.54.0", features = ["rt-multi-thread", "time", "sync"] }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "=0.3.2", default-features = false, features = ["std", "NSApplication", "NSResponder", "NSWindow"] }
+objc2 = "=0.6.5"
+objc2-core-foundation = { version = "=0.3.2", default-features = false, features = ["std", "CFCGTypes", "CFData"] }
+objc2-core-graphics = { version = "=0.3.2", default-features = false, features = ["std", "CGDataProvider", "CGImage", "CGWindow"] }
+png = "=0.18.1"
