@@ -1,0 +1,56 @@
+{
+  "type": "finding.detail",
+  "requestId": "req-finding",
+  "finding": {
+    "id": "2ec26a25dc028b22f99edafdbe24d17f",
+    "prId": "241b38c26bccd93acf0a42d7fb9c840e",
+    "runId": "58a405ae197e618c81165e7f440edecc",
+    "fingerprint": "64f988c5ee3cfd0d5dafd0e671acdc98",
+    "status": "POTENTIALLY_RESOLVED",
+    "evidenceCount": 1,
+    "stale": false,
+    "title": "Slot times ignore the venue's time zone",
+    "category": "correctness",
+    "severity": "medium",
+    "confidence": 0.86,
+    "file": "src/server/bookings/slots.ts",
+    "line": 9,
+    "explanation": "slotsFor computed the day's start in the server's zone, so a venue east of UTC listed its slots shifted by its offset. On this head the line builds the start in `venue.timeZone`, which may fix it.",
+    "reasoningSummary": "The cited line changed on the newest head. The reviewer did not verify the new line, so it reads as looking resolved, not resolved.",
+    "suggestedFix": "Build the start of the day in the venue's zone, as this head now does, and add a test for a venue east of UTC.",
+    "evidence": [
+      {
+        "kind": "code_ref",
+        "path": "src/server/bookings/slots.ts",
+        "start": 9,
+        "end": 10,
+        "refSha": "b131fd06b1d67937237583d627fc65b51a5a0282",
+        "text": "  const start = startOfDay(parseISO(`${day}T00:00:00`), { in: tz(venue.timeZone) });\n  return venue.openings.map((o) => addMinutes(start, o.minuteOfDay));"
+      }
+    ],
+    "history": [
+      {
+        "runId": "32544c84ea9d13d27ff165430630d3fb",
+        "disposition": "DETECTED",
+        "at": "2026-10-20T13:04:30Z"
+      },
+      {
+        "runId": "32544c84ea9d13d27ff165430630d3fb",
+        "disposition": "PUBLISHED",
+        "at": "2026-10-20T13:04:30Z"
+      },
+      {
+        "runId": "f9182e006aab8032b870ef25ac840dbc",
+        "disposition": "STILL_PRESENT",
+        "at": "2026-10-20T13:18:30Z",
+        "basis": "located"
+      },
+      {
+        "runId": "58a405ae197e618c81165e7f440edecc",
+        "disposition": "POTENTIALLY_RESOLVED",
+        "at": "2026-10-20T13:32:30Z",
+        "basis": "changed"
+      }
+    ]
+  }
+}

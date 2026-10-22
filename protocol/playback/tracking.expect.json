@@ -1,0 +1,82 @@
+{
+  "streamEpoch": "epoch-1",
+  "lastSequence": 49,
+  "resyncRequested": false,
+  "toolActivityCount": 7,
+  "prs": [
+    {
+      "id": "241b38c26bccd93acf0a42d7fb9c840e",
+      "headSha": "b131fd06b1d67937237583d627fc65b51a5a0282",
+      "title": "Bookings: hold a slot while the guest pays"
+    }
+  ],
+  "runs": [
+    {
+      "id": "32544c84ea9d13d27ff165430630d3fb",
+      "phase": "COMPLETED",
+      "status": "COMPLETED"
+    },
+    {
+      "id": "58a405ae197e618c81165e7f440edecc",
+      "phase": "COMPLETED",
+      "status": "COMPLETED"
+    },
+    {
+      "id": "f9182e006aab8032b870ef25ac840dbc",
+      "phase": "COMPLETED",
+      "status": "COMPLETED"
+    }
+  ],
+  "findings": [
+    {
+      "id": "19a271da18787f49dbfc50135603ffa4",
+      "title": "Cancelling a hold may leave an authorized deposit uncaptured and unreleased",
+      "status": "UNCERTAIN",
+      "stale": false
+    },
+    {
+      "id": "2ec26a25dc028b22f99edafdbe24d17f",
+      "title": "Slot times ignore the venue's time zone",
+      "status": "POTENTIALLY_RESOLVED",
+      "stale": false
+    },
+    {
+      "id": "392e62ffc5f2782e10b220591b76f1df",
+      "title": "The payment webhook can confirm a released hold",
+      "status": "RESOLVED",
+      "stale": true
+    },
+    {
+      "id": "6d83d3f851b503c547f11e0ae7c76c7e",
+      "title": "The payment webhook can confirm a released hold",
+      "status": "DETECTED",
+      "stale": false
+    },
+    {
+      "id": "b5e893697573b8c7474f859f2c63da97",
+      "title": "Hold expiry lives in a timer in the web process",
+      "status": "STILL_PRESENT",
+      "stale": false
+    }
+  ],
+  "accounts": [
+    {
+      "id": "github.com/acme-review-bot",
+      "state": "ok",
+      "ghActive": false,
+      "selected": true
+    },
+    {
+      "id": "github.com/dperalta",
+      "state": "ok",
+      "ghActive": true,
+      "selected": false
+    }
+  ],
+  "publications": [
+    {
+      "runId": "32544c84ea9d13d27ff165430630d3fb",
+      "status": "published"
+    }
+  ]
+}

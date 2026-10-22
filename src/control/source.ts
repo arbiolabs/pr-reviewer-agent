@@ -150,9 +150,20 @@ export class FixtureSource implements ControlSource {
     const updates = journal.flatMap((e) => (e.eventType === "finding.updated" ? [e.data as Finding] : []));
     const finding = [...snapshot.findings, ...updates].findLast((f) => f.id === findingId);
     if (finding === undefined) throw new ControlError("NOT_FOUND", `no finding ${findingId}`);
-    const scripted = (fixtures["server.finding.detail"] as Extract<ServerMessage, { type: "finding.detail" }>).finding;
-    if (scripted.id === findingId) return { ...scripted, ...finding };
-    return { ...finding, explanation: "Fixture finding.", reasoningSummary: "Fixture finding.", evidence: [], history: [] };
+    // Every recorded detail, the showcase's included, the way the TUI's playback answers finding.get.
+    const scripted = Object.entries(fixtures)
+      .filter(([name]) => name.startsWith("server.finding.detail"))
+      .map(([, m]) => (m as Extract<ServerMessage, { type: "finding.detail" }>).finding)
+      .find((d) => d.id === findingId);
+    if (scripted !== undefined) return { ...scripted, ...finding };
+    const where = finding.line === null ? finding.file : `${finding.file}:${finding.line}`;
+    return {
+      ...finding,
+      explanation: `${finding.title}. The reviewer traced it to ${where} and kept it after verification.`,
+      reasoningSummary: `The verifier re-read ${where} and found nothing in the change that rules the ${finding.category} finding out.`,
+      evidence: [],
+      history: [{ runId: finding.runId, disposition: finding.status, at: new Date(this.start ?? this.now()).toISOString() }],
+    };
   }
 
   timeline(request: TimelineRequest): TimelinePage {

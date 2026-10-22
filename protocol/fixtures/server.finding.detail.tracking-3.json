@@ -1,0 +1,40 @@
+{
+  "type": "finding.detail",
+  "requestId": "req-finding",
+  "finding": {
+    "id": "6d83d3f851b503c547f11e0ae7c76c7e",
+    "prId": "241b38c26bccd93acf0a42d7fb9c840e",
+    "runId": "58a405ae197e618c81165e7f440edecc",
+    "fingerprint": "dd3732019357f228e587694c2da568c8",
+    "status": "DETECTED",
+    "evidenceCount": 1,
+    "stale": false,
+    "title": "The payment webhook can confirm a released hold",
+    "category": "data_integrity",
+    "severity": "high",
+    "confidence": 0.89,
+    "file": "src/server/bookings/webhook.ts",
+    "line": 5,
+    "explanation": "onPaymentSucceeded books the slot for any hold it finds, released or not. A guest who pays after the hold expired gets a booking for a slot that may already be someone else's.",
+    "reasoningSummary": "The second head guarded it with `if (!hold || hold.releasedAt) return;`, and the reviewer verified that fixed. This head is back to `if (!hold) return;`, so the code that was fixed has returned.",
+    "suggestedFix": "Skip a released hold, and refund its payment instead of booking:\n\nif (!hold || hold.releasedAt) return refundLatePayment(event);",
+    "evidence": [
+      {
+        "kind": "code_ref",
+        "path": "src/server/bookings/webhook.ts",
+        "start": 4,
+        "end": 6,
+        "refSha": "b131fd06b1d67937237583d627fc65b51a5a0282",
+        "text": "  const hold = await db.hold.findUnique({ where: { paymentIntentId: event.intentId } });\n  if (!hold) return;\n  await db.booking.create({ data: { slotId: hold.slotId, guestId: hold.guestId } });"
+      }
+    ],
+    "history": [
+      {
+        "runId": "58a405ae197e618c81165e7f440edecc",
+        "disposition": "DETECTED",
+        "at": "2026-10-20T13:32:30Z",
+        "basis": "reopened"
+      }
+    ]
+  }
+}

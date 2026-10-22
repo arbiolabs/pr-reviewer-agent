@@ -22,6 +22,27 @@ pub enum Step {
     Finding(usize),
     /// Milliseconds before the next step.
     Wait(u64),
+    /// A step for the desktop's own view state, which the reducer never sees.
+    Desk(Desk),
+}
+
+/// The desktop's own view state: which list the home shows and what floats over it.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Desk {
+    /// `tab:done` or `tab:queue`.
+    Done(bool),
+    /// `palette:QUERY`: the command palette, open with QUERY typed.
+    Palette(String),
+    /// `keys`: the shortcut sheet.
+    Keys,
+    /// `confirm-post`: the sheet that asks before posting the proof in front.
+    ConfirmPost,
+    /// `flagged`: the diff lists only the files with findings.
+    Flagged,
+    /// `discards`: every "Verifier discarded" group on the timeline, open.
+    Discards,
+    /// `scrub:N`: the live log held at its Nth event, counted from 1.
+    Scrub(usize),
 }
 
 #[rustfmt::skip]
@@ -49,8 +70,8 @@ const SCREENS: &[(&str, Screen)] = &[
     ("settings", Screen::Settings),
 ];
 
-/// Comma-separated steps: an action name, `goto:<screen>`, `type:<text>`, `pr:<number>`, `finding:<n>` or
-/// `wait:<ms>`.
+/// Comma-separated steps: an action name, `goto:<screen>`, `type:<text>`, `pr:<number>`, `finding:<n>`,
+/// `wait:<ms>`, or a desktop step (`tab:done`, `palette:<text>`, `keys`, `confirm-post`, `scrub:<n>`).
 pub fn parse(s: &str) -> Result<Vec<Step>, String> {
     let mut steps = Vec::new();
     for t in s.split(',').map(str::trim).filter(|t| !t.is_empty()) {
@@ -62,6 +83,20 @@ pub fn parse(s: &str) -> Result<Vec<Step>, String> {
                 0 => return Err(format!("{t:?}: findings count from 1")),
                 n => steps.push(Step::Finding(n as usize)),
             },
+            Some(("scrub", v)) => match number(v)? {
+                0 => return Err(format!("{t:?}: events count from 1")),
+                n => steps.push(Step::Desk(Desk::Scrub(n as usize))),
+            },
+            Some(("tab", v)) => match v {
+                "done" | "queue" => steps.push(Step::Desk(Desk::Done(v == "done"))),
+                _ => return Err(format!("{t:?}: tabs are queue and done")),
+            },
+            Some(("palette", v)) => steps.push(Step::Desk(Desk::Palette(v.into()))),
+            None if t == "palette" => steps.push(Step::Desk(Desk::Palette(String::new()))),
+            None if t == "keys" => steps.push(Step::Desk(Desk::Keys)),
+            None if t == "confirm-post" => steps.push(Step::Desk(Desk::ConfirmPost)),
+            None if t == "discards" => steps.push(Step::Desk(Desk::Discards)),
+            None if t == "flagged" => steps.push(Step::Desk(Desk::Flagged)),
             Some(("type", v)) => steps.extend(v.chars().map(|c| Step::Act(Action::InputChar(c)))),
             Some(("goto", v)) => match SCREENS.iter().find(|(n, _)| *n == v) {
                 Some((_, s)) => steps.push(Step::Act(Action::Goto(*s))),
@@ -83,7 +118,7 @@ fn names<T>(table: &[(&str, T)]) -> String {
 /// The message a step sends now, `None` for a wait.
 fn message(m: &Model, step: &Step) -> Result<Option<Msg>, String> {
     Ok(Some(match step {
-        Step::Wait(_) => return Ok(None),
+        Step::Wait(_) | Step::Desk(_) => return Ok(None),
         Step::Act(a) => Msg::Action(*a),
         Step::Pr(n) => match m.domain.prs.values().find(|p| p.number == *n) {
             Some(p) => Msg::Pick(Hit::Pr(p.id.clone())),
@@ -195,7 +230,7 @@ mod tests {
     #[test]
     fn steps_parse_from_names_and_prefixes() {
         assert_eq!(
-            parse("down, goto:diff,wait:300,type:ab,pr:1287,finding:2,start").unwrap(),
+            parse("down, goto:diff,wait:300,type:ab,pr:1287,finding:2,start,confirm-post,scrub:12").unwrap(),
             [
                 Step::Act(Action::Down),
                 Step::Act(Action::Goto(Screen::Diff)),
@@ -205,11 +240,14 @@ mod tests {
                 Step::Pr(1287),
                 Step::Finding(2),
                 Step::Act(Action::Mutation(Mutation::Start)),
+                Step::Desk(Desk::ConfirmPost),
+                Step::Desk(Desk::Scrub(12)),
             ]
         );
         assert!(parse("sideways").unwrap_err().contains("known: quit, up"));
         assert!(parse("goto:nowhere").is_err());
         assert!(parse("finding:0").is_err());
+        assert!(parse("scrub:0").is_err());
     }
 
     #[test]

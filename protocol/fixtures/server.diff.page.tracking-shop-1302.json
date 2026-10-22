@@ -1,0 +1,231 @@
+{
+  "type": "diff.page",
+  "requestId": "req-diff",
+  "prId": "241b38c26bccd93acf0a42d7fb9c840e",
+  "baseSha": "80225dae42c87385ce216c5b244360c11f35ae98",
+  "headSha": "b131fd06b1d67937237583d627fc65b51a5a0282",
+  "files": [
+    {
+      "path": "src/server/bookings/holds.ts",
+      "status": "added",
+      "additions": 21,
+      "deletions": 0,
+      "hunks": [
+        {
+          "header": "@@ -0,0 +1,21 @@",
+          "oldStart": 0,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "import type { Clock, Db, Payments } from \"../deps.ts\";"
+            },
+            {
+              "kind": "add",
+              "new": 2,
+              "text": ""
+            },
+            {
+              "kind": "add",
+              "new": 3,
+              "text": "export const HOLD_MINUTES = 10;"
+            },
+            {
+              "kind": "add",
+              "new": 4,
+              "text": ""
+            },
+            {
+              "kind": "add",
+              "new": 5,
+              "text": "export async function placeHold(db: Db, clock: Clock, slotId: string, guestId: string) {"
+            },
+            {
+              "kind": "add",
+              "new": 6,
+              "text": "  const hold = await db.hold.create({"
+            },
+            {
+              "kind": "add",
+              "new": 7,
+              "text": "    data: { slotId, guestId, expiresAt: addMinutes(clock.now(), HOLD_MINUTES) },"
+            },
+            {
+              "kind": "add",
+              "new": 8,
+              "text": "  });"
+            },
+            {
+              "kind": "add",
+              "new": 9,
+              "text": "  setTimeout(() => releaseHold(db, hold.id), HOLD_MINUTES * 60_000);"
+            },
+            {
+              "kind": "add",
+              "new": 10,
+              "text": "  return hold;"
+            },
+            {
+              "kind": "add",
+              "new": 11,
+              "text": "}"
+            },
+            {
+              "kind": "add",
+              "new": 12,
+              "text": ""
+            },
+            {
+              "kind": "add",
+              "new": 13,
+              "text": "export async function releaseHold(db: Db, holdId: string) {"
+            },
+            {
+              "kind": "add",
+              "new": 14,
+              "text": "  await db.hold.update({ where: { id: holdId }, data: { releasedAt: new Date() } });"
+            },
+            {
+              "kind": "add",
+              "new": 15,
+              "text": "}"
+            },
+            {
+              "kind": "add",
+              "new": 16,
+              "text": ""
+            },
+            {
+              "kind": "add",
+              "new": 17,
+              "text": "export async function cancelHold(db: Db, payments: Payments, holdId: string) {"
+            },
+            {
+              "kind": "add",
+              "new": 18,
+              "text": "  const hold = await db.hold.findUniqueOrThrow({ where: { id: holdId }, include: { deposit: true } });"
+            },
+            {
+              "kind": "add",
+              "new": 19,
+              "text": "  await releaseHold(db, holdId);"
+            },
+            {
+              "kind": "add",
+              "new": 20,
+              "text": "  if (hold.deposit?.capturedAt) await payments.refund(hold.deposit.providerId, hold.deposit.amountCents);"
+            },
+            {
+              "kind": "add",
+              "new": 21,
+              "text": "}"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/server/bookings/webhook.ts",
+      "status": "added",
+      "additions": 8,
+      "deletions": 0,
+      "hunks": [
+        {
+          "header": "@@ -0,0 +1,8 @@",
+          "oldStart": 0,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "import type { Db, PaymentEvent } from \"../deps.ts\";"
+            },
+            {
+              "kind": "add",
+              "new": 2,
+              "text": ""
+            },
+            {
+              "kind": "add",
+              "new": 3,
+              "text": "export async function onPaymentSucceeded(db: Db, event: PaymentEvent) {"
+            },
+            {
+              "kind": "add",
+              "new": 4,
+              "text": "  const hold = await db.hold.findUnique({ where: { paymentIntentId: event.intentId } });"
+            },
+            {
+              "kind": "add",
+              "new": 5,
+              "text": "  if (!hold) return;"
+            },
+            {
+              "kind": "add",
+              "new": 6,
+              "text": "  await db.booking.create({ data: { slotId: hold.slotId, guestId: hold.guestId } });"
+            },
+            {
+              "kind": "add",
+              "new": 7,
+              "text": "  await db.hold.delete({ where: { id: hold.id } });"
+            },
+            {
+              "kind": "add",
+              "new": 8,
+              "text": "}"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/server/bookings/slots.ts",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 1,
+      "hunks": [
+        {
+          "header": "@@ -8,4 +8,4 @@ export function slotsFor(venue: Venue, day: string) {",
+          "oldStart": 8,
+          "newStart": 8,
+          "lines": [
+            {
+              "kind": "context",
+              "old": 8,
+              "new": 8,
+              "text": "export function slotsFor(venue: Venue, day: string) {"
+            },
+            {
+              "kind": "del",
+              "old": 9,
+              "text": "  const start = startOfDay(parseISO(day));"
+            },
+            {
+              "kind": "add",
+              "new": 9,
+              "text": "  const start = startOfDay(parseISO(`${day}T00:00:00`), { in: tz(venue.timeZone) });"
+            },
+            {
+              "kind": "context",
+              "old": 10,
+              "new": 10,
+              "text": "  return venue.openings.map((o) => addMinutes(start, o.minuteOfDay));"
+            },
+            {
+              "kind": "context",
+              "old": 11,
+              "new": 11,
+              "text": "}"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    }
+  ],
+  "truncated": false
+}

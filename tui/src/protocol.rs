@@ -430,6 +430,9 @@ pub struct HistoryEntry {
     pub run_id: RunId,
     pub disposition: FindingStatus,
     pub at: Text,
+    /// Why the run observed this state (`located`, `changed`, `reopened`, ...); absent on a first observation and on
+    /// a publication. Open, so a newer daemon may add reasons.
+    pub basis: Option<Text>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize)]

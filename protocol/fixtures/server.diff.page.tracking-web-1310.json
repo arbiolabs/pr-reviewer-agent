@@ -1,0 +1,1814 @@
+{
+  "type": "diff.page",
+  "requestId": "req-diff",
+  "prId": "120d7293df440aea95dda1169f44ad64",
+  "baseSha": "c3804bce661402b38c091b7c3249da89b75fa24f",
+  "headSha": "eab709aa02d67bfc67da7aaa3a9e7e6d70283e43",
+  "files": [
+    {
+      "path": "src/tokens/colors.ts",
+      "status": "added",
+      "additions": 6,
+      "deletions": 0,
+      "hunks": [
+        {
+          "header": "@@ -0,0 +1,6 @@",
+          "oldStart": 0,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "export const color = {"
+            },
+            {
+              "kind": "add",
+              "new": 2,
+              "text": "  text: \"#1d1d1f\","
+            },
+            {
+              "kind": "add",
+              "new": 3,
+              "text": "  muted: \"#6e6e73\","
+            },
+            {
+              "kind": "add",
+              "new": 4,
+              "text": "  danger: \"#ff6b6b\","
+            },
+            {
+              "kind": "add",
+              "new": 5,
+              "text": "  accent: \"#4247c8\","
+            },
+            {
+              "kind": "add",
+              "new": 6,
+              "text": "};"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/tokens/spacing.ts",
+      "status": "added",
+      "additions": 1,
+      "deletions": 0,
+      "hunks": [
+        {
+          "header": "@@ -0,0 +1,1 @@",
+          "oldStart": 0,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "export const space = [0, 4, 8, 12, 16, 24, 32];"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/tokens/typography.ts",
+      "status": "added",
+      "additions": 1,
+      "deletions": 0,
+      "hunks": [
+        {
+          "header": "@@ -0,0 +1,1 @@",
+          "oldStart": 0,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "export const type = { body: 13, small: 12, title: 18, family: \"system-ui\" };"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/tokens/index.ts",
+      "status": "added",
+      "additions": 1,
+      "deletions": 0,
+      "hunks": [
+        {
+          "header": "@@ -0,0 +1,1 @@",
+          "oldStart": 0,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "export * as tokens from \"./all\";"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/components/Button/Button.tsx",
+      "status": "modified",
+      "additions": 9,
+      "deletions": 2,
+      "hunks": [
+        {
+          "header": "@@ -1,5 +1,12 @@",
+          "oldStart": 1,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": "import styles from \"./Button.module.css\";"
+            },
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "import { tokens } from \"../../tokens\";"
+            },
+            {
+              "kind": "context",
+              "old": 2,
+              "new": 2,
+              "text": ""
+            },
+            {
+              "kind": "context",
+              "old": 3,
+              "new": 3,
+              "text": "export function Button({ disabled, onClick, ...props }: ButtonProps) {"
+            },
+            {
+              "kind": "del",
+              "old": 4,
+              "text": "  return <button className={styles.root} disabled={disabled} onClick={onClick} {...props} />;"
+            },
+            {
+              "kind": "add",
+              "new": 4,
+              "text": "  return ("
+            },
+            {
+              "kind": "add",
+              "new": 5,
+              "text": "    <button"
+            },
+            {
+              "kind": "add",
+              "new": 6,
+              "text": "      style={tokens.button}"
+            },
+            {
+              "kind": "add",
+              "new": 7,
+              "text": "      aria-disabled={disabled}"
+            },
+            {
+              "kind": "add",
+              "new": 8,
+              "text": "      onClick={disabled ? undefined : onClick}"
+            },
+            {
+              "kind": "add",
+              "new": 9,
+              "text": "      {...props}"
+            },
+            {
+              "kind": "add",
+              "new": 10,
+              "text": "    />"
+            },
+            {
+              "kind": "add",
+              "new": 11,
+              "text": "  );"
+            },
+            {
+              "kind": "context",
+              "old": 5,
+              "new": 12,
+              "text": "}"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/components/Button/Button.test.tsx",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 1,
+      "hunks": [
+        {
+          "header": "@@ -1,1 +1,1 @@",
+          "oldStart": 1,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": "// src/components/Button/Button.test.tsx"
+            },
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "it(\"renders Button from tokens\", () => expect(render(<Button />)).toMatchSnapshot());"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/components/Button/Button.stories.tsx",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 1,
+      "hunks": [
+        {
+          "header": "@@ -1,1 +1,1 @@",
+          "oldStart": 1,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": "// src/components/Button/Button.stories.tsx"
+            },
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "export const Default = { args: { tokens: \"default\" } };"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/components/Button/Button.module.css",
+      "status": "deleted",
+      "additions": 0,
+      "deletions": 1,
+      "hunks": [
+        {
+          "header": "@@ -1,1 +0,0 @@",
+          "oldStart": 1,
+          "newStart": 0,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": ".root { color: #1d1d1f; }"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/components/Input/Input.tsx",
+      "status": "modified",
+      "additions": 3,
+      "deletions": 2,
+      "hunks": [
+        {
+          "header": "@@ -1,5 +1,6 @@",
+          "oldStart": 1,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": "import styles from \"./Input.module.css\";"
+            },
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "import { tokens } from \"../../tokens\";"
+            },
+            {
+              "kind": "context",
+              "old": 2,
+              "new": 2,
+              "text": ""
+            },
+            {
+              "kind": "context",
+              "old": 3,
+              "new": 3,
+              "text": "export function Input({ invalid, ...props }: InputProps) {"
+            },
+            {
+              "kind": "del",
+              "old": 4,
+              "text": "  return <input className={invalid ? styles.invalid : styles.root} {...props} />;"
+            },
+            {
+              "kind": "add",
+              "new": 4,
+              "text": "  const color = invalid ? tokens.color.danger : tokens.color.text;"
+            },
+            {
+              "kind": "add",
+              "new": 5,
+              "text": "  return <input style={{ ...tokens.input, color, borderColor: color }} {...props} />;"
+            },
+            {
+              "kind": "context",
+              "old": 5,
+              "new": 6,
+              "text": "}"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/components/Input/Input.test.tsx",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 1,
+      "hunks": [
+        {
+          "header": "@@ -1,1 +1,1 @@",
+          "oldStart": 1,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": "// src/components/Input/Input.test.tsx"
+            },
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "it(\"renders Input from tokens\", () => expect(render(<Input />)).toMatchSnapshot());"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/components/Input/Input.stories.tsx",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 1,
+      "hunks": [
+        {
+          "header": "@@ -1,1 +1,1 @@",
+          "oldStart": 1,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": "// src/components/Input/Input.stories.tsx"
+            },
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "export const Default = { args: { tokens: \"default\" } };"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/components/Input/Input.module.css",
+      "status": "deleted",
+      "additions": 0,
+      "deletions": 1,
+      "hunks": [
+        {
+          "header": "@@ -1,1 +0,0 @@",
+          "oldStart": 1,
+          "newStart": 0,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": ".root { color: #1d1d1f; }"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/components/Select/Select.tsx",
+      "status": "modified",
+      "additions": 2,
+      "deletions": 2,
+      "hunks": [
+        {
+          "header": "@@ -1,5 +1,5 @@",
+          "oldStart": 1,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": "import styles from \"./Select.module.css\";"
+            },
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "import { tokens } from \"../../tokens\";"
+            },
+            {
+              "kind": "context",
+              "old": 2,
+              "new": 2,
+              "text": ""
+            },
+            {
+              "kind": "context",
+              "old": 3,
+              "new": 3,
+              "text": "export function Select(props: SelectProps) {"
+            },
+            {
+              "kind": "del",
+              "old": 4,
+              "text": "  return <selectBase className={styles.root} {...props} />;"
+            },
+            {
+              "kind": "add",
+              "new": 4,
+              "text": "  return <selectBase style={tokens.select} {...props} />;"
+            },
+            {
+              "kind": "context",
+              "old": 5,
+              "new": 5,
+              "text": "}"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/components/Select/Select.test.tsx",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 1,
+      "hunks": [
+        {
+          "header": "@@ -1,1 +1,1 @@",
+          "oldStart": 1,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": "// src/components/Select/Select.test.tsx"
+            },
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "it(\"renders Select from tokens\", () => expect(render(<Select />)).toMatchSnapshot());"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/components/Select/Select.stories.tsx",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 1,
+      "hunks": [
+        {
+          "header": "@@ -1,1 +1,1 @@",
+          "oldStart": 1,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": "// src/components/Select/Select.stories.tsx"
+            },
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "export const Default = { args: { tokens: \"default\" } };"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/components/Select/Select.module.css",
+      "status": "deleted",
+      "additions": 0,
+      "deletions": 1,
+      "hunks": [
+        {
+          "header": "@@ -1,1 +0,0 @@",
+          "oldStart": 1,
+          "newStart": 0,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": ".root { color: #1d1d1f; }"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/components/Checkbox/Checkbox.tsx",
+      "status": "modified",
+      "additions": 2,
+      "deletions": 2,
+      "hunks": [
+        {
+          "header": "@@ -1,5 +1,5 @@",
+          "oldStart": 1,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": "import styles from \"./Checkbox.module.css\";"
+            },
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "import { tokens } from \"../../tokens\";"
+            },
+            {
+              "kind": "context",
+              "old": 2,
+              "new": 2,
+              "text": ""
+            },
+            {
+              "kind": "context",
+              "old": 3,
+              "new": 3,
+              "text": "export function Checkbox(props: CheckboxProps) {"
+            },
+            {
+              "kind": "del",
+              "old": 4,
+              "text": "  return <checkboxBase className={styles.root} {...props} />;"
+            },
+            {
+              "kind": "add",
+              "new": 4,
+              "text": "  return <checkboxBase style={tokens.checkbox} {...props} />;"
+            },
+            {
+              "kind": "context",
+              "old": 5,
+              "new": 5,
+              "text": "}"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/components/Checkbox/Checkbox.test.tsx",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 1,
+      "hunks": [
+        {
+          "header": "@@ -1,1 +1,1 @@",
+          "oldStart": 1,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": "// src/components/Checkbox/Checkbox.test.tsx"
+            },
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "it(\"renders Checkbox from tokens\", () => expect(render(<Checkbox />)).toMatchSnapshot());"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/components/Checkbox/Checkbox.stories.tsx",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 1,
+      "hunks": [
+        {
+          "header": "@@ -1,1 +1,1 @@",
+          "oldStart": 1,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": "// src/components/Checkbox/Checkbox.stories.tsx"
+            },
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "export const Default = { args: { tokens: \"default\" } };"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/components/Checkbox/Checkbox.module.css",
+      "status": "deleted",
+      "additions": 0,
+      "deletions": 1,
+      "hunks": [
+        {
+          "header": "@@ -1,1 +0,0 @@",
+          "oldStart": 1,
+          "newStart": 0,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": ".root { color: #1d1d1f; }"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/components/Radio/Radio.tsx",
+      "status": "modified",
+      "additions": 2,
+      "deletions": 2,
+      "hunks": [
+        {
+          "header": "@@ -1,5 +1,5 @@",
+          "oldStart": 1,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": "import styles from \"./Radio.module.css\";"
+            },
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "import { tokens } from \"../../tokens\";"
+            },
+            {
+              "kind": "context",
+              "old": 2,
+              "new": 2,
+              "text": ""
+            },
+            {
+              "kind": "context",
+              "old": 3,
+              "new": 3,
+              "text": "export function Radio(props: RadioProps) {"
+            },
+            {
+              "kind": "del",
+              "old": 4,
+              "text": "  return <radioBase className={styles.root} {...props} />;"
+            },
+            {
+              "kind": "add",
+              "new": 4,
+              "text": "  return <radioBase style={tokens.radio} {...props} />;"
+            },
+            {
+              "kind": "context",
+              "old": 5,
+              "new": 5,
+              "text": "}"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/components/Radio/Radio.test.tsx",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 1,
+      "hunks": [
+        {
+          "header": "@@ -1,1 +1,1 @@",
+          "oldStart": 1,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": "// src/components/Radio/Radio.test.tsx"
+            },
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "it(\"renders Radio from tokens\", () => expect(render(<Radio />)).toMatchSnapshot());"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/components/Radio/Radio.stories.tsx",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 1,
+      "hunks": [
+        {
+          "header": "@@ -1,1 +1,1 @@",
+          "oldStart": 1,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": "// src/components/Radio/Radio.stories.tsx"
+            },
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "export const Default = { args: { tokens: \"default\" } };"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/components/Radio/Radio.module.css",
+      "status": "deleted",
+      "additions": 0,
+      "deletions": 1,
+      "hunks": [
+        {
+          "header": "@@ -1,1 +0,0 @@",
+          "oldStart": 1,
+          "newStart": 0,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": ".root { color: #1d1d1f; }"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/components/Form/Form.tsx",
+      "status": "modified",
+      "additions": 2,
+      "deletions": 2,
+      "hunks": [
+        {
+          "header": "@@ -1,5 +1,5 @@",
+          "oldStart": 1,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": "import styles from \"./Form.module.css\";"
+            },
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "import { tokens } from \"../../tokens\";"
+            },
+            {
+              "kind": "context",
+              "old": 2,
+              "new": 2,
+              "text": ""
+            },
+            {
+              "kind": "context",
+              "old": 3,
+              "new": 3,
+              "text": "export function Form(props: FormProps) {"
+            },
+            {
+              "kind": "del",
+              "old": 4,
+              "text": "  return <formBase className={styles.root} {...props} />;"
+            },
+            {
+              "kind": "add",
+              "new": 4,
+              "text": "  return <formBase style={tokens.form} {...props} />;"
+            },
+            {
+              "kind": "context",
+              "old": 5,
+              "new": 5,
+              "text": "}"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/components/Form/Form.test.tsx",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 1,
+      "hunks": [
+        {
+          "header": "@@ -1,1 +1,1 @@",
+          "oldStart": 1,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": "// src/components/Form/Form.test.tsx"
+            },
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "it(\"renders Form from tokens\", () => expect(render(<Form />)).toMatchSnapshot());"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/components/Form/Form.stories.tsx",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 1,
+      "hunks": [
+        {
+          "header": "@@ -1,1 +1,1 @@",
+          "oldStart": 1,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": "// src/components/Form/Form.stories.tsx"
+            },
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "export const Default = { args: { tokens: \"default\" } };"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/components/Form/Form.module.css",
+      "status": "deleted",
+      "additions": 0,
+      "deletions": 1,
+      "hunks": [
+        {
+          "header": "@@ -1,1 +0,0 @@",
+          "oldStart": 1,
+          "newStart": 0,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": ".root { color: #1d1d1f; }"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/components/Field/Field.tsx",
+      "status": "modified",
+      "additions": 2,
+      "deletions": 1,
+      "hunks": [
+        {
+          "header": "@@ -1,8 +1,9 @@",
+          "oldStart": 1,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "context",
+              "old": 1,
+              "new": 1,
+              "text": "export function Field({ label, children }: FieldProps) {"
+            },
+            {
+              "kind": "add",
+              "new": 2,
+              "text": "  const id = useId();"
+            },
+            {
+              "kind": "context",
+              "old": 2,
+              "new": 3,
+              "text": "  return ("
+            },
+            {
+              "kind": "context",
+              "old": 3,
+              "new": 4,
+              "text": "    <div style={tokens.field}>"
+            },
+            {
+              "kind": "del",
+              "old": 4,
+              "text": "      <label>{label}</label>"
+            },
+            {
+              "kind": "add",
+              "new": 5,
+              "text": "      <label htmlFor={id}>{label}</label>"
+            },
+            {
+              "kind": "context",
+              "old": 5,
+              "new": 6,
+              "text": "      {children}"
+            },
+            {
+              "kind": "context",
+              "old": 6,
+              "new": 7,
+              "text": "    </div>"
+            },
+            {
+              "kind": "context",
+              "old": 7,
+              "new": 8,
+              "text": "  );"
+            },
+            {
+              "kind": "context",
+              "old": 8,
+              "new": 9,
+              "text": "}"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/components/Field/Field.test.tsx",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 1,
+      "hunks": [
+        {
+          "header": "@@ -1,1 +1,1 @@",
+          "oldStart": 1,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": "// src/components/Field/Field.test.tsx"
+            },
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "it(\"renders Field from tokens\", () => expect(render(<Field />)).toMatchSnapshot());"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/components/Field/Field.stories.tsx",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 1,
+      "hunks": [
+        {
+          "header": "@@ -1,1 +1,1 @@",
+          "oldStart": 1,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": "// src/components/Field/Field.stories.tsx"
+            },
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "export const Default = { args: { tokens: \"default\" } };"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/components/Field/Field.module.css",
+      "status": "deleted",
+      "additions": 0,
+      "deletions": 1,
+      "hunks": [
+        {
+          "header": "@@ -1,1 +0,0 @@",
+          "oldStart": 1,
+          "newStart": 0,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": ".root { color: #1d1d1f; }"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/components/Label/Label.tsx",
+      "status": "modified",
+      "additions": 2,
+      "deletions": 2,
+      "hunks": [
+        {
+          "header": "@@ -1,5 +1,5 @@",
+          "oldStart": 1,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": "import styles from \"./Label.module.css\";"
+            },
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "import { tokens } from \"../../tokens\";"
+            },
+            {
+              "kind": "context",
+              "old": 2,
+              "new": 2,
+              "text": ""
+            },
+            {
+              "kind": "context",
+              "old": 3,
+              "new": 3,
+              "text": "export function Label(props: LabelProps) {"
+            },
+            {
+              "kind": "del",
+              "old": 4,
+              "text": "  return <labelBase className={styles.root} {...props} />;"
+            },
+            {
+              "kind": "add",
+              "new": 4,
+              "text": "  return <labelBase style={tokens.label} {...props} />;"
+            },
+            {
+              "kind": "context",
+              "old": 5,
+              "new": 5,
+              "text": "}"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/components/Label/Label.test.tsx",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 1,
+      "hunks": [
+        {
+          "header": "@@ -1,1 +1,1 @@",
+          "oldStart": 1,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": "// src/components/Label/Label.test.tsx"
+            },
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "it(\"renders Label from tokens\", () => expect(render(<Label />)).toMatchSnapshot());"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/components/Label/Label.stories.tsx",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 1,
+      "hunks": [
+        {
+          "header": "@@ -1,1 +1,1 @@",
+          "oldStart": 1,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": "// src/components/Label/Label.stories.tsx"
+            },
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "export const Default = { args: { tokens: \"default\" } };"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/components/Label/Label.module.css",
+      "status": "deleted",
+      "additions": 0,
+      "deletions": 1,
+      "hunks": [
+        {
+          "header": "@@ -1,1 +0,0 @@",
+          "oldStart": 1,
+          "newStart": 0,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": ".root { color: #1d1d1f; }"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/components/Toggle/Toggle.tsx",
+      "status": "modified",
+      "additions": 2,
+      "deletions": 2,
+      "hunks": [
+        {
+          "header": "@@ -1,5 +1,5 @@",
+          "oldStart": 1,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": "import styles from \"./Toggle.module.css\";"
+            },
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "import { tokens } from \"../../tokens\";"
+            },
+            {
+              "kind": "context",
+              "old": 2,
+              "new": 2,
+              "text": ""
+            },
+            {
+              "kind": "context",
+              "old": 3,
+              "new": 3,
+              "text": "export function Toggle(props: ToggleProps) {"
+            },
+            {
+              "kind": "del",
+              "old": 4,
+              "text": "  return <toggleBase className={styles.root} {...props} />;"
+            },
+            {
+              "kind": "add",
+              "new": 4,
+              "text": "  return <toggleBase style={tokens.toggle} {...props} />;"
+            },
+            {
+              "kind": "context",
+              "old": 5,
+              "new": 5,
+              "text": "}"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/components/Toggle/Toggle.test.tsx",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 1,
+      "hunks": [
+        {
+          "header": "@@ -1,1 +1,1 @@",
+          "oldStart": 1,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": "// src/components/Toggle/Toggle.test.tsx"
+            },
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "it(\"renders Toggle from tokens\", () => expect(render(<Toggle />)).toMatchSnapshot());"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/components/Toggle/Toggle.stories.tsx",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 1,
+      "hunks": [
+        {
+          "header": "@@ -1,1 +1,1 @@",
+          "oldStart": 1,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": "// src/components/Toggle/Toggle.stories.tsx"
+            },
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "export const Default = { args: { tokens: \"default\" } };"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/components/Toggle/Toggle.module.css",
+      "status": "deleted",
+      "additions": 0,
+      "deletions": 1,
+      "hunks": [
+        {
+          "header": "@@ -1,1 +0,0 @@",
+          "oldStart": 1,
+          "newStart": 0,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": ".root { color: #1d1d1f; }"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/components/TextArea/TextArea.tsx",
+      "status": "modified",
+      "additions": 2,
+      "deletions": 2,
+      "hunks": [
+        {
+          "header": "@@ -1,5 +1,5 @@",
+          "oldStart": 1,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": "import styles from \"./TextArea.module.css\";"
+            },
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "import { tokens } from \"../../tokens\";"
+            },
+            {
+              "kind": "context",
+              "old": 2,
+              "new": 2,
+              "text": ""
+            },
+            {
+              "kind": "context",
+              "old": 3,
+              "new": 3,
+              "text": "export function TextArea(props: TextAreaProps) {"
+            },
+            {
+              "kind": "del",
+              "old": 4,
+              "text": "  return <textareaBase className={styles.root} {...props} />;"
+            },
+            {
+              "kind": "add",
+              "new": 4,
+              "text": "  return <textareaBase style={tokens.textarea} {...props} />;"
+            },
+            {
+              "kind": "context",
+              "old": 5,
+              "new": 5,
+              "text": "}"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/components/TextArea/TextArea.test.tsx",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 1,
+      "hunks": [
+        {
+          "header": "@@ -1,1 +1,1 @@",
+          "oldStart": 1,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": "// src/components/TextArea/TextArea.test.tsx"
+            },
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "it(\"renders TextArea from tokens\", () => expect(render(<TextArea />)).toMatchSnapshot());"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/components/TextArea/TextArea.stories.tsx",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 1,
+      "hunks": [
+        {
+          "header": "@@ -1,1 +1,1 @@",
+          "oldStart": 1,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": "// src/components/TextArea/TextArea.stories.tsx"
+            },
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "export const Default = { args: { tokens: \"default\" } };"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/components/TextArea/TextArea.module.css",
+      "status": "deleted",
+      "additions": 0,
+      "deletions": 1,
+      "hunks": [
+        {
+          "header": "@@ -1,1 +0,0 @@",
+          "oldStart": 1,
+          "newStart": 0,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": ".root { color: #1d1d1f; }"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/styles/global.css",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 1,
+      "hunks": [
+        {
+          "header": "@@ -1,1 +1,1 @@",
+          "oldStart": 1,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": "// src/styles/global.css"
+            },
+            {
+              "kind": "add",
+              "new": 1,
+              "text": ":root { color-scheme: light dark; }"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/styles/theme.css",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 1,
+      "hunks": [
+        {
+          "header": "@@ -1,1 +1,1 @@",
+          "oldStart": 1,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": "// src/styles/theme.css"
+            },
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "@import \"../tokens/generated/tokens.css\";"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": ".storybook/preview.ts",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 1,
+      "hunks": [
+        {
+          "header": "@@ -1,1 +1,1 @@",
+          "oldStart": 1,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": "// .storybook/preview.ts"
+            },
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "import \"../src/tokens/generated/tokens.css\";"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "docs/design-system.md",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 1,
+      "hunks": [
+        {
+          "header": "@@ -1,1 +1,1 @@",
+          "oldStart": 1,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": "// docs/design-system.md"
+            },
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "Every component reads its colors, spacing and type from src/tokens."
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "package.json",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 1,
+      "hunks": [
+        {
+          "header": "@@ -1,1 +1,1 @@",
+          "oldStart": 1,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": "// package.json"
+            },
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "    \"tokens\": \"style-dictionary build\","
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "eslint.config.js",
+      "status": "modified",
+      "additions": 1,
+      "deletions": 1,
+      "hunks": [
+        {
+          "header": "@@ -1,1 +1,1 @@",
+          "oldStart": 1,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "del",
+              "old": 1,
+              "text": "// eslint.config.js"
+            },
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "  \"no-restricted-imports\": [\"error\", { patterns: [\"*.module.css\"] }],"
+            }
+          ]
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "path": "src/tokens/generated/tokens.css",
+      "status": "added",
+      "additions": 412,
+      "deletions": 0,
+      "hunks": [
+        {
+          "header": "@@ -0,0 +1,1 @@",
+          "oldStart": 0,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "add",
+              "new": 1,
+              "text": ":root { --color-text: #1d1d1f; }"
+            }
+          ]
+        }
+      ],
+      "truncated": true
+    },
+    {
+      "path": "src/tokens/generated/tokens.json",
+      "status": "added",
+      "additions": 388,
+      "deletions": 0,
+      "hunks": [
+        {
+          "header": "@@ -0,0 +1,1 @@",
+          "oldStart": 0,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "{ \"color\": { \"text\": { \"value\": \"#1d1d1f\" } } }"
+            }
+          ]
+        }
+      ],
+      "truncated": true
+    },
+    {
+      "path": "src/tokens/generated/tokens.d.ts",
+      "status": "added",
+      "additions": 96,
+      "deletions": 0,
+      "hunks": [
+        {
+          "header": "@@ -0,0 +1,1 @@",
+          "oldStart": 0,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "export declare const tokens: Tokens;"
+            }
+          ]
+        }
+      ],
+      "truncated": true
+    },
+    {
+      "path": "src/components/Button/__snapshots__/Button.test.tsx.snap",
+      "status": "added",
+      "additions": 58,
+      "deletions": 0,
+      "hunks": [
+        {
+          "header": "@@ -0,0 +1,1 @@",
+          "oldStart": 0,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "exports[`renders Button from tokens 1`] = `<div />`;"
+            }
+          ]
+        }
+      ],
+      "truncated": true
+    },
+    {
+      "path": "src/components/Input/__snapshots__/Input.test.tsx.snap",
+      "status": "added",
+      "additions": 55,
+      "deletions": 0,
+      "hunks": [
+        {
+          "header": "@@ -0,0 +1,1 @@",
+          "oldStart": 0,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "exports[`renders Input from tokens 1`] = `<div />`;"
+            }
+          ]
+        }
+      ],
+      "truncated": true
+    },
+    {
+      "path": "src/components/Select/__snapshots__/Select.test.tsx.snap",
+      "status": "added",
+      "additions": 58,
+      "deletions": 0,
+      "hunks": [
+        {
+          "header": "@@ -0,0 +1,1 @@",
+          "oldStart": 0,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "exports[`renders Select from tokens 1`] = `<div />`;"
+            }
+          ]
+        }
+      ],
+      "truncated": true
+    },
+    {
+      "path": "src/components/Checkbox/__snapshots__/Checkbox.test.tsx.snap",
+      "status": "added",
+      "additions": 64,
+      "deletions": 0,
+      "hunks": [
+        {
+          "header": "@@ -0,0 +1,1 @@",
+          "oldStart": 0,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "exports[`renders Checkbox from tokens 1`] = `<div />`;"
+            }
+          ]
+        }
+      ],
+      "truncated": true
+    },
+    {
+      "path": "src/components/Radio/__snapshots__/Radio.test.tsx.snap",
+      "status": "added",
+      "additions": 55,
+      "deletions": 0,
+      "hunks": [
+        {
+          "header": "@@ -0,0 +1,1 @@",
+          "oldStart": 0,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "exports[`renders Radio from tokens 1`] = `<div />`;"
+            }
+          ]
+        }
+      ],
+      "truncated": true
+    },
+    {
+      "path": "src/components/Form/__snapshots__/Form.test.tsx.snap",
+      "status": "added",
+      "additions": 52,
+      "deletions": 0,
+      "hunks": [
+        {
+          "header": "@@ -0,0 +1,1 @@",
+          "oldStart": 0,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "exports[`renders Form from tokens 1`] = `<div />`;"
+            }
+          ]
+        }
+      ],
+      "truncated": true
+    },
+    {
+      "path": "pnpm-lock.yaml",
+      "status": "added",
+      "additions": 1204,
+      "deletions": 0,
+      "hunks": [
+        {
+          "header": "@@ -0,0 +1,1 @@",
+          "oldStart": 0,
+          "newStart": 1,
+          "lines": [
+            {
+              "kind": "add",
+              "new": 1,
+              "text": "  style-dictionary@4.3.0:"
+            }
+          ]
+        }
+      ],
+      "truncated": true
+    }
+  ],
+  "truncated": false
+}

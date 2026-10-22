@@ -13,7 +13,7 @@
     "confidence": 0.82,
     "file": "src/booking.ts",
     "line": 42,
-    "evidenceCount": 1,
+    "evidenceCount": 5,
     "stale": false,
     "explanation": "Two concurrent bookings can both observe `slot.free` before either sets `held`.",
     "reasoningSummary": "Traced book() -> lock(); lock() is advisory and not awaited by the second caller.",

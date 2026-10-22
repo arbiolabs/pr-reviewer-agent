@@ -1,0 +1,47 @@
+{
+  "type": "finding.detail",
+  "requestId": "req-finding",
+  "finding": {
+    "id": "f906473359011f4ed5dfb8b4e8ad6a19",
+    "prId": "120d7293df440aea95dda1169f44ad64",
+    "runId": "fcde70b61bd57fc9c65daf3ae7b5ea5e",
+    "fingerprint": "3ea11e8a659d8d6cfbc1b4cb9739950d",
+    "status": "DETECTED",
+    "evidenceCount": 2,
+    "stale": false,
+    "title": "The invalid input's color fails contrast on white",
+    "category": "general",
+    "severity": "medium",
+    "confidence": 0.87,
+    "file": "src/components/Input/Input.tsx",
+    "line": 4,
+    "explanation": "An invalid input sets its text to `color.danger`, #ff6b6b, which is 2.8:1 on white. The error state becomes the hardest one to read.",
+    "reasoningSummary": "Computed the WCAG ratio of #ff6b6b on #ffffff: 2.78:1, under the 4.5:1 body-text minimum.",
+    "suggestedFix": "Use a darker danger token for text, for example #c62828 (5.6:1), and keep #ff6b6b for borders and icons.",
+    "evidence": [
+      {
+        "kind": "code_ref",
+        "path": "src/components/Input/Input.tsx",
+        "start": 4,
+        "end": 5,
+        "refSha": "eab709aa02d67bfc67da7aaa3a9e7e6d70283e43",
+        "text": "  const color = invalid ? tokens.color.danger : tokens.color.text;\n  return <input style={{ ...tokens.input, color, borderColor: color }} {...props} />;"
+      },
+      {
+        "kind": "code_ref",
+        "path": "src/tokens/colors.ts",
+        "start": 1,
+        "end": 6,
+        "refSha": "eab709aa02d67bfc67da7aaa3a9e7e6d70283e43",
+        "text": "export const color = {\n  text: \"#1d1d1f\",\n  muted: \"#6e6e73\",\n  danger: \"#ff6b6b\",\n  accent: \"#4247c8\",\n};"
+      }
+    ],
+    "history": [
+      {
+        "runId": "fcde70b61bd57fc9c65daf3ae7b5ea5e",
+        "disposition": "DETECTED",
+        "at": "2026-10-20T13:44:15Z"
+      }
+    ]
+  }
+}
