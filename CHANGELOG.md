@@ -118,10 +118,10 @@ This is the first release.
   - the PR is still open.
 - Command idempotency keys are bound to each run attempt, so a replayed command never has a second effect.
 
-[Unreleased]: https://github.com/diego-arbio-dev/pr-reviewer/compare/v1.4.0...HEAD
-[1.4.0]: https://github.com/diego-arbio-dev/pr-reviewer/compare/v1.3.0...v1.4.0
-[1.3.0]: https://github.com/diego-arbio-dev/pr-reviewer/compare/v1.2.0...v1.3.0
-[1.2.0]: https://github.com/diego-arbio-dev/pr-reviewer/compare/v1.1.0...v1.2.0
-[1.1.0]: https://github.com/diego-arbio-dev/pr-reviewer/compare/v1.0.1...v1.1.0
-[1.0.1]: https://github.com/diego-arbio-dev/pr-reviewer/compare/v1.0.0...v1.0.1
-[1.0.0]: https://github.com/diego-arbio-dev/pr-reviewer/releases/tag/v1.0.0
+[Unreleased]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.3.0...v1.4.0
+[1.3.0]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.2.0...v1.3.0
+[1.2.0]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.1.0...v1.2.0
+[1.1.0]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.0.1...v1.1.0
+[1.0.1]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.0.0...v1.0.1
+[1.0.0]: https://github.com/arbiolabs/pr-reviewer-agent/releases/tag/v1.0.0

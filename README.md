@@ -10,9 +10,9 @@ You can run it four ways:
 - From PR Reviewer Agent, the macOS desktop app in `desktop/`, which shows the same reviews as a queue of decisions and starts and stops the daemon for you.
 
 ```text
-$ node bin/pr-review.mjs review https://github.com/diego-arbio-dev/pr-reviewer/pull/2 --publish --model anthropic/claude-opus-5-5
+$ node bin/pr-review.mjs review https://github.com/owner/repo/pull/2 --publish --model anthropic/claude-opus-5-5
 model: anthropic/claude-opus-5-5 (--model)
-revision d3defce78587d5d2fc4c3febae2da604 (diego-arbio-dev/pr-reviewer#2 @ 7683015c4b62) durable task 7
+revision d3defce78587d5d2fc4c3febae2da604 (owner/repo#2 @ 7683015c4b62) durable task 7
 publication published: review 5586025680
 ## Automated PR review
 
