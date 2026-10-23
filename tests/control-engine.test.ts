@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
@@ -6,9 +6,10 @@ import { type FauxResponseStep, fauxAssistantMessage } from "@earendil-works/pi-
 import { afterEach, beforeEach, expect, it } from "vitest";
 import { type Config, DEFAULT_CONFIG } from "../src/config/config.ts";
 import { COMMANDS_OFF, openSource } from "../src/control/daemon.ts";
-import { EngineSource } from "../src/control/engine.ts";
+import { type EngineOptions, EngineSource } from "../src/control/engine.ts";
 import { startControlServer } from "../src/control/server.ts";
 import type { ControlSource } from "../src/control/source.ts";
+import type { Env } from "../src/github/accounts.ts";
 import { GitHubClient } from "../src/github/client.ts";
 import { GitHubPullSource } from "../src/github/pulls.ts";
 import { AppStore } from "../src/persistence/store.ts";
@@ -40,24 +41,34 @@ const newClient = () => new GitHubClient({ auth: { kind: "token", token: "ghp_te
 type Hosted = { app: App; source: EngineSource; dataDir: string; client: GitHubClient };
 
 /** An App on the fake GitHub, hosted by an EngineSource (not yet served). */
-async function host(options: { config?: Config; responses?: FauxResponseStep[]; dataDir?: string; client?: GitHubClient; github?: (installationId: number) => GitHubClient } = {}): Promise<Hosted> {
+async function host(
+  options: { config?: Config; responses?: FauxResponseStep[]; dataDir?: string; client?: GitHubClient; github?: (installationId: number) => GitHubClient; env?: Env; modelIds?: string[]; model?: EngineOptions["model"] } = {},
+): Promise<Hosted> {
   const config = options.config ?? approvalConfig;
   const client = options.client ?? newClient();
   const pulls = new GitHubPullSource(() => client);
   const dataDir = options.dataDir ?? mkdtempSync(join(tmpdir(), "engine-"));
+  const models = fauxModels(options.responses ?? [readDiff(), submitDefect(fixture)], options.modelIds);
   const app = await openApp({
     dataDir,
     config,
     pulls,
     github: () => client,
-    engine: { skipped: "test" },
-    models: fauxModels(options.responses ?? [readDiff(), submitDefect(fixture)]),
-    model: { provider: "faux", modelId: "reviewer" },
+    engine: async () => ({ skipped: "test" }),
+    models,
     reviewerVersion: "m1+faux/reviewer",
     lockWaitMs: 0,
   });
   // No gh on PATH: journal sequences are pinned, and a detected account would add a row.
-  const source = await EngineSource.host(dataDir, app, { config, pulls, github: options.github ?? (() => client), env: { PATH: "" }, account: "github.com/octo" });
+  const source = await EngineSource.host(dataDir, app, {
+    config,
+    pulls,
+    github: options.github ?? (() => client),
+    env: options.env ?? { PATH: "" },
+    account: "github.com/octo",
+    models,
+    model: options.model ?? { ref: "faux/reviewer", source: "config" },
+  });
   cleanup.push(() => source.close());
   return { app, source, dataDir, client };
 }
@@ -150,7 +161,7 @@ it("is read-only while another pr-review holds the data dir, and grants only acc
     rejected("CAPABILITY_DENIED", `review.start is not available: another pr-review is running on ${holder.dataDir}`),
   );
   // The holder is still the engine: its own welcome grants the commands.
-  expect((await serve(holder.source)).welcome).toMatchObject({ mode: "engine", capabilities: ["account.select", "review.add", "review.start", "review.retry", "review.cancel", "review.publish"] });
+  expect((await serve(holder.source)).welcome).toMatchObject({ mode: "engine", capabilities: ["account.select", "review.add", "review.start", "review.retry", "review.cancel", "review.publish", "settings.set"] });
 }, 30_000);
 
 it("falls back to read-only with the reason when recovery fails, holding no lock and running no task", async () => {
@@ -186,9 +197,8 @@ it("falls back to read-only with the reason when recovery fails, holding no lock
     dataDir,
     config: approvalConfig,
     pulls: new GitHubPullSource(newClient),
-    engine: { skipped: "test" },
+    engine: async () => ({ skipped: "test" }),
     models: fauxModels([]),
-    model: { provider: "faux", modelId: "reviewer" },
     reviewerVersion: "m1+faux/reviewer",
     lockWaitMs: 0,
   });
@@ -213,9 +223,8 @@ it("is read-only by default: no lock, no engine, account.select only; the review
     dataDir,
     config: approvalConfig,
     pulls: new GitHubPullSource(newClient),
-    engine: { skipped: "test" },
+    engine: async () => ({ skipped: "test" }),
     models: fauxModels([]),
-    model: { provider: "faux", modelId: "reviewer" },
     reviewerVersion: "m1+faux/reviewer",
     lockWaitMs: 0,
   });
@@ -224,7 +233,7 @@ it("is read-only by default: no lock, no engine, account.select only; the review
 
   const comment = await host({ config: { ...approvalConfig, review: { ...approvalConfig.review, publish_mode: "comment" } } });
   const served = await serve(comment.source);
-  expect(served.welcome).toMatchObject({ mode: "engine", capabilities: ["account.select", "review.add", "review.start", "review.retry", "review.cancel"] });
+  expect(served.welcome).toMatchObject({ mode: "engine", capabilities: ["account.select", "review.add", "review.start", "review.retry", "review.cancel", "settings.set"] });
   expect(served.welcome).not.toHaveProperty("readOnlyReason");
   served.c.send({ type: "snapshot.get", requestId: "s" });
   await served.c.waitFor((m) => m.type === "snapshot");
@@ -613,7 +622,7 @@ it("produced the M3 server messages, each passing the v1 schema", () => {
 it("review.add tracks a new PR from its URL and starts its review; a replay answers the same run and starts nothing", async () => {
   const h = await host({ config: { ...approvalConfig, review: { ...approvalConfig.review, publish_mode: "dry_run" } } });
   const { c, welcome } = await serve(h.source);
-  expect(welcome).toMatchObject({ capabilities: ["account.select", "review.add", "review.start", "review.retry", "review.cancel"] });
+  expect(welcome).toMatchObject({ capabilities: ["account.select", "review.add", "review.start", "review.retry", "review.cancel", "settings.set"] });
   c.send({ type: "snapshot.get", requestId: "s" });
   const snap = await c.waitFor<Extract<ServerMessage, { type: "snapshot" }>>((m) => m.type === "snapshot");
   expect(snap.prs).toEqual([]);
@@ -660,4 +669,59 @@ it("a read-only daemon refuses review.add", async () => {
   c.send({ type: "snapshot.get", requestId: "s" });
   await c.waitFor((m) => m.type === "snapshot");
   expect(await command(c, { command: "review.add", params: { url: "acme/shop#1" } })).toEqual(rejected("CAPABILITY_DENIED", `review.add is not available: ${COMMANDS_OFF}`));
+}, 30_000);
+
+it("settings.get lists the models and the one in use; settings.set saves a listed one, keeps the other keys, and the next review uses it", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "settings-"));
+  const configPath = join(dir, "pr-review.config.json");
+  writeFileSync(configPath, JSON.stringify({ models: { default: "faux/reviewer" }, review: { publish_mode: "dry_run" } }));
+  const asked: string[] = [];
+  const spy =
+    (step: FauxResponseStep): FauxResponseStep =>
+    (context, options, state, model) => (asked.push(model.id), typeof step === "function" ? step(context, options, state, model) : step);
+  const config = { ...approvalConfig, review: { ...approvalConfig.review, publish_mode: "dry_run" as const }, models: { ...approvalConfig.models, preferred: ["faux/other"] } };
+  const h = await host({ config, env: { PATH: "", PR_REVIEW_CONFIG: configPath }, modelIds: ["reviewer", "other"], responses: [spy(readDiff()), spy(submitDefect(fixture))] });
+  const { c } = await serve(h.source);
+  c.send({ type: "snapshot.get", requestId: "s" });
+  await c.waitFor((m) => m.type === "snapshot");
+  const settings = async () => {
+    const requestId = `get-${++requests}`;
+    c.send({ type: "settings.get", requestId });
+    const { type: _, requestId: __, ...reply } = await c.waitFor<Extract<ServerMessage, { type: "settings" }>>((m) => m.type === "settings" && m.requestId === requestId);
+    return reply;
+  };
+  const option = (id: string, preferred: boolean) => ({ ref: `faux/${id}`, provider: "faux", name: id, contextWindow: expect.any(Number), authSource: expect.any(String), preferred });
+  expect(await settings()).toEqual({ model: { ref: "faux/reviewer", source: "config" }, models: [option("other", true), option("reviewer", false)], configPath });
+
+  expect(await command(c, { command: "settings.set", params: { model: "faux/missing" } })).toEqual(rejected("NOT_FOUND", "model faux/missing is not available; choose one of faux/other, faux/reviewer"));
+  expect(JSON.parse(readFileSync(configPath, "utf8")).models).toEqual({ default: "faux/reviewer" });
+
+  expect(operation(await command(c, { command: "settings.set", params: { model: "faux/other" } }))).toEqual({ type: "command.result", status: "accepted", operationId: "settings.set:faux/other" });
+  expect(JSON.parse(readFileSync(configPath, "utf8"))).toEqual({ models: { default: "faux/other" }, review: { publish_mode: "dry_run" } });
+  expect((await settings()).model).toEqual({ ref: "faux/other", source: "config" });
+
+  await command(c, { command: "review.add", params: { url: "https://github.com/acme/shop/pull/1" } });
+  await c.waitFor((m) => m.type === "event" && m.eventType === "review.completed");
+  const revision = h.app.store.revisionsForPr(h.app.store.pullByName("acme/shop", 1)!.id)[0]!;
+  expect([revision.reviewer_version, asked]).toEqual(["m1+faux/other", ["other", "other"]]);
+}, 30_000);
+
+it("refuses settings.set while the daemon's PR_REVIEW_MODEL outranks the config, and a read-only daemon grants neither settings request", async () => {
+  const h = await host({ model: { ref: "faux/reviewer", source: "PR_REVIEW_MODEL" } });
+  const engine = await serve(h.source);
+  engine.c.send({ type: "snapshot.get", requestId: "s" });
+  await engine.c.waitFor((m) => m.type === "snapshot");
+  expect(await command(engine.c, { command: "settings.set", params: { model: "faux/reviewer" } })).toEqual(
+    rejected("CONFLICT", "the daemon's PR_REVIEW_MODEL (faux/reviewer) overrides the config; remove it and restart the daemon to choose the model here"),
+  );
+
+  const off = await openSource(mkdtempSync(join(tmpdir(), "engine-")), false, {}, () => {});
+  cleanup.push(() => off.close());
+  const { c, welcome } = await serve(off);
+  expect(welcome.capabilities).not.toContain("settings.set");
+  c.send({ type: "snapshot.get", requestId: "s" });
+  await c.waitFor((m) => m.type === "snapshot");
+  expect(await command(c, { command: "settings.set", params: { model: "faux/reviewer" } })).toEqual(rejected("CAPABILITY_DENIED", `settings.set is not available: ${COMMANDS_OFF}`));
+  c.send({ type: "settings.get", requestId: "get" });
+  expect(await c.waitFor((m) => "requestId" in m && m.requestId === "get")).toEqual({ type: "error", requestId: "get", code: "CAPABILITY_DENIED", message: `settings.get is not available: ${COMMANDS_OFF}` });
 }, 30_000);

@@ -1,4 +1,8 @@
-import type { Config } from "../config/config.ts";
+import type { Models } from "@earendil-works/pi-ai";
+import { type Config, configPath, saveConfig } from "../config/config.ts";
+import { type AvailableModel, listAvailableModels, matches } from "../models/select.ts";
+import type { MODEL_SOURCES } from "../protocol/v1.ts";
+import { reviewerVersion } from "../runtime/task.ts";
 import type { Env } from "../github/accounts.ts";
 import { type GitHubClient, GitHubError } from "../github/client.ts";
 import { parsePullRef, parsePullUrl, type PullRef, type PullSource } from "../github/pulls.ts";
@@ -6,8 +10,8 @@ import type { ReviewCommand } from "../protocol/v1.ts";
 import { type App, finishReview, recover, type StartedReview, startPolicy, startReview } from "../runtime/app.ts";
 import { StateConflict } from "../persistence/store.ts";
 import { approve, cancel, livePull, Refused, retry, startFromHead } from "../runtime/commands.ts";
-import { AppDbSource } from "./appdb.ts";
-import { type Accepted, ControlError } from "./source.ts";
+import { AppDbSource, clean } from "./appdb.ts";
+import { type Accepted, ControlError, type Settings } from "./source.ts";
 
 export type EngineOptions = {
   config: Config;
@@ -17,7 +21,13 @@ export type EngineOptions = {
   report?: (error: unknown) => void;
   /** The GitHub account the pull source reads as (`<host>/<login>` or `env/GITHUB_TOKEN`); absent when it reads anonymously. */
   account?: string;
+  /** What `models` offers is what settings.set accepts. */
+  models: Models;
+  /** The model new reviews get, as `chooseModel` picked it when the engine opened. */
+  model: { ref: string; source: ModelSource };
 };
+
+type ModelSource = (typeof MODEL_SOURCES)[number];
 
 const CANCEL_REASON = "cancelled from the TUI";
 
@@ -33,11 +43,13 @@ export class EngineSource extends AppDbSource {
   private readonly app: App;
   private readonly options: EngineOptions;
   private readonly running = new Set<Promise<unknown>>();
+  private model: EngineOptions["model"];
 
   private constructor(dataDir: string, app: App, options: EngineOptions) {
     super(dataDir, app.store, options.env ?? process.env);
     this.app = app;
     this.options = options;
+    this.model = options.model;
   }
 
   /**
@@ -175,6 +187,42 @@ export class EngineSource extends AppDbSource {
       if (error instanceof StateConflict) throw new ControlError("CONFLICT", error.message);
       throw error;
     }
+  }
+
+  private available(): Promise<AvailableModel[]> {
+    return listAvailableModels(this.options.models, this.options.config.models.preferred);
+  }
+
+  async settings(): Promise<Settings> {
+    const { preferred } = this.options.config.models;
+    const models = (await this.available()).map((m) => ({
+      ref: m.ref,
+      provider: m.provider,
+      name: m.name,
+      contextWindow: m.contextWindow,
+      authSource: m.authSource,
+      preferred: preferred.some((p) => matches(p, m.ref)),
+    }));
+    return clean({ model: this.model, models, configPath: configPath(this.options.env ?? process.env) });
+  }
+
+  /**
+   * settings.set: save the model as `models.default` (other config keys kept) and give it to reviews started from now
+   * on. A review in flight keeps the model its revision names. Refused while the daemon's own `--model` or
+   * PR_REVIEW_MODEL outranks the config, since the saved choice would not survive a restart.
+   */
+  async setModel(ref: string): Promise<string> {
+    const { model } = this;
+    const { env } = this.options;
+    if (model.source === "--model" || model.source === "PR_REVIEW_MODEL") {
+      throw new ControlError("CONFLICT", `the daemon's ${model.source} (${model.ref}) overrides the config; remove it and restart the daemon to choose the model here`);
+    }
+    const available = await this.available();
+    if (!available.some((m) => m.ref === ref)) throw new ControlError("NOT_FOUND", `model ${ref} is not available; choose one of ${available.map((m) => m.ref).join(", ")}`);
+    saveConfig({ models: { default: ref } }, configPath(env ?? process.env));
+    this.model = { ref, source: "config" };
+    this.app.reviewerVersion = reviewerVersion(ref);
+    return `settings.set:${ref}`;
   }
 
   /** Suspends the reviews in flight (they resume on the next engine start) and releases the data-dir lock. */

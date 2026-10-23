@@ -394,6 +394,11 @@ pub fn answer(fixtures: &Path, played: &[ServerMessage], req: &ClientMessage) ->
                 })
                 .unwrap_or_else(|| not_found(rid, format!("no diff for {pr_id} at {}", head_sha.short())))
         }
+        ClientMessage::SettingsGet { .. } => fixtures_named(fixtures, "server.settings", rid)
+            .into_iter()
+            .find(|(n, _)| n == "server.settings.json")
+            .map(|(_, v)| v)
+            .unwrap_or_else(|| not_found(rid, "no settings".into())),
         ClientMessage::FindingGet { finding_id, .. } => fixtures_named(fixtures, "server.finding.detail", rid)
             .into_iter()
             .map(|(_, v)| v)

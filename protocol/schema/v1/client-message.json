@@ -170,6 +170,23 @@
       "type": "object",
       "required": [
         "type",
+        "requestId"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "settings.get"
+        },
+        "requestId": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
         "requestId",
         "limit"
       ],
@@ -465,6 +482,50 @@
                 "accountId": {
                   "type": "string",
                   "minLength": 1
+                }
+              },
+              "additionalProperties": false
+            },
+            "idempotencyKey": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "requestId",
+            "command",
+            "params",
+            "idempotencyKey"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "command"
+            },
+            "requestId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "command": {
+              "type": "string",
+              "const": "settings.set"
+            },
+            "params": {
+              "type": "object",
+              "required": [
+                "model"
+              ],
+              "properties": {
+                "model": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 256,
+                  "description": "one of settings.models; saved as models.default in the daemon's config and used for reviews started after it"
                 }
               },
               "additionalProperties": false

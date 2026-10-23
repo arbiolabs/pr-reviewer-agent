@@ -32,7 +32,7 @@ Against a daemon started with `--allow-commands`, press ⌘N, or choose **Review
 
 ### Start and stop the reviewer
 
-When nothing answers on the socket, the offline screen's primary action is **Start reviewer** (⌘R). The **Reviewer** menu, the palette and the Reviewer card in Setup also offer **Stop reviewer** and **Restart reviewer**. The card shows the state, the socket, the mode, how the daemon runs on this machine and where its log is. On a read-only daemon, stop and restart are off with the reason, because that daemon may belong to another process.
+When nothing answers on the socket, the offline screen's primary action is **Start reviewer** (⌘R). The **Reviewer** menu, the palette and the Reviewer card in Settings also offer **Stop reviewer** and **Restart reviewer**. The card shows the state, the socket, the mode, how the daemon runs on this machine and where its log is. On a read-only daemon, stop and restart are off with the reason, because that daemon may belong to another process.
 
 The app starts the daemon in one of two ways:
 
@@ -64,6 +64,13 @@ A LaunchAgent with `KeepAlive` set to `true` is restarted by launchd after any e
 ```
 
 With that setting, Stop is a plain `daemon.stop` and Start is a `launchctl kickstart`.
+
+### Settings
+
+⌘, opens Settings: the daemon's checks, the reviewer, the GitHub accounts, and two sections that change how it reviews.
+
+- **Risk check (Jev)** saves your TypeSafe key in the login keychain, where the daemon reads it for the next review with no restart. The field is masked and the page says only whether a key is saved. Off macOS, set `TYPESAFE_API_KEY` in the daemon's environment instead. [Configuration](../docs/configuration.md#typesafe-key-in-the-macos-keychain) explains how the key is kept.
+- **Agent** lists the models the daemon can review with, grouped by provider and searchable, with the one in use and where each provider's credential comes from. Save makes the choice the daemon's `models.default`. Reviews started from then on use it, and a PR reviewed again with another model gets a new revision.
 
 To play a scripted session with no daemon:
 

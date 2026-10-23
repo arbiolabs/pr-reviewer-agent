@@ -156,7 +156,7 @@ fn entries(m: &Model, r: &Reviewer) -> Vec<Entry> {
         },
         Entry {
             group: "View",
-            title: "Setup and accounts".into(),
+            title: "Settings and accounts".into(),
             key: Some("⌘,"),
             blocked: None,
             run: Run::Act(Action::Goto(Screen::Settings)),
@@ -1239,7 +1239,7 @@ const KEYS: &[(&str, &[(&str, &str)])] = &[
             ("⌘K  /", "command palette"),
             ("⌘N", "review a PR by its URL"),
             ("⌘1  ⌘2", "needs you, done"),
-            ("⌘,", "setup and accounts"),
+            ("⌘,", "settings and accounts"),
             ("⌘⇧O", "open on GitHub"),
             ("⌘R", "refresh"),
             ("⌘W", "close the window"),

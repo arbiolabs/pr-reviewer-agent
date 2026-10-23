@@ -31,8 +31,8 @@ export function submitDefect(fixture: Fixture) {
 export const readDiff = () => fauxAssistantMessage([fauxToolCall("read_diff", { file: DEFECT.file })], { stopReason: "toolUse" });
 
 /** A model collection whose only model, `faux/reviewer`, answers with `responses` in order. */
-export function fauxModels(responses: FauxResponseStep[]) {
-  const faux = fauxProvider({ provider: "faux", models: [{ id: "reviewer", reasoning: true }] });
+export function fauxModels(responses: FauxResponseStep[], ids = ["reviewer"]) {
+  const faux = fauxProvider({ provider: "faux", models: ids.map((id) => ({ id, reasoning: true })) });
   faux.setResponses(responses);
   const models = createModels();
   models.setProvider(faux.provider);
@@ -45,9 +45,8 @@ export async function open(dataDir: string, fixture: Fixture, responses: FauxRes
     dataDir,
     config,
     pulls: fixture.pulls,
-    engine: { skipped: "Jev disabled by --no-jev" },
+    engine: async () => ({ skipped: "Jev disabled by --no-jev" }),
     models,
-    model: { provider: "faux", modelId: "reviewer" },
     reviewerVersion: "m1+faux/reviewer",
     lockWaitMs,
   });

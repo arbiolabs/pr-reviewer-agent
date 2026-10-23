@@ -16,7 +16,7 @@ type JournalRow = { seq: number; prev: number; revision_id: string | null; from_
 type FindingRow = { id: string; pr_id: string; repo_full_name: string; fingerprint: string; status: string; current_severity: string; revision_id: string; evidence_json: string; stale: number };
 
 /** Every string that leaves this source passes here: repository, PR and model text can carry terminal escapes. */
-function clean<T>(value: T): T {
+export function clean<T>(value: T): T {
   if (typeof value === "string") return sanitize(value) as T;
   if (Array.isArray(value)) return value.map(clean) as T;
   if (value !== null && typeof value === "object") return Object.fromEntries(Object.entries(value).map(([k, v]) => [k, clean(v)])) as T;

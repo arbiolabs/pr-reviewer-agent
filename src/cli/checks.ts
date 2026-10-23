@@ -3,6 +3,7 @@ import type { CredentialStore, Models } from "@earendil-works/pi-ai";
 import { configPath, DEFAULT_CONFIG, loadConfig } from "../config/config.ts";
 import { findTui } from "../control/daemon.ts";
 import { type Account, ACCOUNT_KEY, detectGh, type Env, listAccounts, planGithubAuth } from "../github/accounts.ts";
+import { inKeychain, type KeychainItem, keychainItem } from "../jev/key.ts";
 import { PiAuthFileStore } from "../models/credential-store.ts";
 import { buildModels, which } from "../models/detect.ts";
 import { chooseModel, listAvailableModels } from "../models/select.ts";
@@ -25,8 +26,12 @@ export function using(list: Account[]): { ok: boolean; text: string } {
 /** `missing` means reviews cannot run; `warn` means they run with a limitation. */
 export type Check = { id: "git" | "config" | "model" | "github" | "jev" | "tui"; status: "ok" | "warn" | "missing"; detail: string; fix?: string };
 
-/** What a review needs, checked without prompting, fetching a GitHub token, or reading TYPESAFE_API_KEY's value. */
-export async function gatherChecks(deps: { models?: Models; credentials?: CredentialStore }, dataDir: string, env: Env = process.env): Promise<Check[]> {
+/** What a review needs, checked without prompting, fetching a GitHub token, or reading the TypeSafe key's value. */
+export async function gatherChecks(
+  deps: { models?: Models; credentials?: CredentialStore; inKeychain?: (item: KeychainItem) => Promise<boolean> },
+  dataDir: string,
+  env: Env = process.env,
+): Promise<Check[]> {
   const checks: Check[] = [];
   const git = which("git", env.PATH ?? "");
   checks.push(git ? { id: "git", status: "ok", detail: git } : { id: "git", status: "missing", detail: "not on PATH", fix: "install git" });
@@ -58,12 +63,13 @@ export async function gatherChecks(deps: { models?: Models; credentials?: Creden
 
   const keyless = config.jev.allow_keyless_for_private;
   if (env.TYPESAFE_API_KEY) checks.push({ id: "jev", status: "ok", detail: "TypeSafe (TYPESAFE_API_KEY set)" });
+  else if (await (deps.inKeychain ?? inKeychain)(keychainItem(env))) checks.push({ id: "jev", status: "ok", detail: "TypeSafe (key in Keychain)" });
   else
     checks.push({
       id: "jev",
       status: "warn",
       detail: keyless ? "OpenCode Zen free tier for every repository (jev.allow_keyless_for_private)" : "OpenCode Zen free tier for public repositories; private repositories skip Jev",
-      fix: keyless ? "set TYPESAFE_API_KEY to use TypeSafe" : "set TYPESAFE_API_KEY to use TypeSafe; without it, serve and daemon --allow-commands skip Jev for every repository",
+      fix: keyless ? "set TYPESAFE_API_KEY, or save the key in the desktop app's Settings, to use TypeSafe" : "set TYPESAFE_API_KEY, or save the key in the desktop app's Settings, to use TypeSafe; without either, serve and daemon --allow-commands skip Jev for every repository",
     });
 
   const tui = findTui(env.PATH ?? "");

@@ -2,7 +2,7 @@ import { mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { BACKGROUND_CONTEXT } from "@earendil-works/chord/context";
 import type { Models } from "@earendil-works/pi-ai";
-import { createRegistry, defineExtension, Harness, type ModelRef, type TaskId } from "@earendil-works/pi-durable";
+import { createRegistry, defineExtension, Harness, type TaskId } from "@earendil-works/pi-durable";
 import { openNodeSqliteStorage } from "@earendil-works/pi-durable/storage/sqlite/node";
 import lockfile from "proper-lockfile";
 import type { Config } from "../config/config.ts";
@@ -24,16 +24,17 @@ export type AppOptions = {
   pulls: PullSource;
   gitToken?: ((installationId: number) => Promise<string | undefined>) | undefined;
   github?: ((installationId: number) => GitHubClient) | undefined;
-  engine: JevRoute;
+  /** Asked at each triage, so a key saved meanwhile is used. */
+  engine: () => Promise<JevRoute>;
   models: Models;
-  model: ModelRef;
-  /** Part of revision identity: a different reviewer (code or model) is a different review. */
+  /** Part of revision identity (see `reviewerVersion`): a different reviewer, code or model, is a different review. */
   reviewerVersion: string;
   onReport?: (error: unknown) => void;
   /** How long to wait for another process's data-dir lock before giving up; see `lockDataDir`. */
   lockWaitMs?: number;
 };
 
+/** `reviewerVersion` is what new revisions get; the daemon changes it when settings.set picks another model. */
 export type App = { store: AppStore; harness: Harness; task: ReviewTask; reviewerVersion: string; close(): Promise<void> };
 
 const ctx = BACKGROUND_CONTEXT;

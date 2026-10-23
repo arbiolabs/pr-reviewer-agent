@@ -2029,6 +2029,90 @@
       "required": [
         "type",
         "requestId",
+        "model",
+        "models",
+        "configPath"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "settings"
+        },
+        "requestId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "model": {
+          "type": "object",
+          "required": [
+            "ref",
+            "source"
+          ],
+          "properties": {
+            "ref": {
+              "type": "string",
+              "minLength": 1
+            },
+            "source": {
+              "enum": [
+                "--model",
+                "PR_REVIEW_MODEL",
+                "config",
+                "default"
+              ]
+            }
+          }
+        },
+        "models": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "ref",
+              "provider",
+              "name",
+              "contextWindow",
+              "authSource",
+              "preferred"
+            ],
+            "properties": {
+              "ref": {
+                "type": "string",
+                "minLength": 1,
+                "description": "provider/id, what settings.set names"
+              },
+              "provider": {
+                "type": "string"
+              },
+              "name": {
+                "type": "string"
+              },
+              "contextWindow": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "authSource": {
+                "type": "string",
+                "description": "where the provider's credential comes from, as pi-ai reports it; never the credential"
+              },
+              "preferred": {
+                "type": "boolean",
+                "description": "matched by models.preferred in the config; preferred models are listed first"
+              }
+            }
+          }
+        },
+        "configPath": {
+          "type": "string",
+          "description": "the config file settings.set writes"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "requestId",
         "events"
       ],
       "properties": {

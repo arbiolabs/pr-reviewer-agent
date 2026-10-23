@@ -10,7 +10,8 @@ export type AvailableModel = {
   authSource: string;
 };
 
-const matches = (pattern: string, ref: string) => (pattern.endsWith("/*") ? ref.startsWith(pattern.slice(0, -1)) : pattern === ref);
+/** Whether a `models.preferred` pattern (`provider/id`, or `provider/*`) names `ref`. */
+export const matches = (pattern: string, ref: string) => (pattern.endsWith("/*") ? ref.startsWith(pattern.slice(0, -1)) : pattern === ref);
 
 /**
  * Chat models whose provider has auth configured, preferred ones first. Uses pi-ai's `getAvailable` and `checkAuth`,

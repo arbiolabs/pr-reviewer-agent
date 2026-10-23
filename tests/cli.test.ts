@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { createModels, fauxAssistantMessage, fauxProvider, fauxToolCall, type Models } from "@earendil-works/pi-ai";
 import { expect, it, vi } from "vitest";
-import { jevFromEnv, main } from "../src/cli/main.ts";
+import { jevRoute, main } from "../src/cli/main.ts";
 import { DEFAULT_CONFIG } from "../src/config/config.ts";
 import { MockDecisionEngine } from "../src/jev/decision.ts";
 import { AppStore } from "../src/persistence/store.ts";
@@ -121,10 +121,10 @@ it("never sends a private repository to the keyless Jev endpoint, and records th
   store.close();
 }, 60_000);
 
-it("skips Jev for serve and the daemon without a key or allow_keyless_for_private, naming the missing key", () => {
+it("skips Jev for serve and the daemon without a key or allow_keyless_for_private, naming the missing key", async () => {
   vi.stubEnv("TYPESAFE_API_KEY", "");
   try {
-    expect(jevFromEnv(DEFAULT_CONFIG, {})).toEqual({ skipped: "jev_skipped_no_key" });
+    expect(await jevRoute(DEFAULT_CONFIG, {})).toEqual({ skipped: "jev_skipped_no_key" });
   } finally {
     vi.unstubAllEnvs();
   }

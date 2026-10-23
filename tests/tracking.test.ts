@@ -35,7 +35,7 @@ const submitNothing = () => fauxAssistantMessage([fauxToolCall("submit_candidate
 async function open(responses: FauxResponseStep[], cfg = config, dataDir = mkdtempSync(join(tmpdir(), "tracking-"))) {
   const client = new GitHubClient({ auth: { kind: "token", token: "ghp_test" }, baseUrl: fake.url, maxRetries: 2, backoffMs: 1, concurrency: 2, timeoutMs: 5000, sleep: async () => {} });
   const pulls = new GitHubPullSource(() => client);
-  const app = await openApp({ dataDir, config: cfg, pulls, github: () => client, engine: { skipped: "test" }, models: fauxModels(responses), model: { provider: "faux", modelId: "reviewer" }, reviewerVersion: "m1+faux/reviewer" });
+  const app = await openApp({ dataDir, config: cfg, pulls, github: () => client, engine: async () => ({ skipped: "test" }), models: fauxModels(responses), reviewerVersion: "m1+faux/reviewer" });
   apps.push(app);
   app.harness.resume();
   return { app, pulls, dataDir, client };

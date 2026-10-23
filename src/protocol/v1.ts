@@ -167,6 +167,20 @@ export const SetupCheck = Type.Object({
 });
 export type SetupCheck = Static<typeof SetupCheck>;
 
+/** Where the model new reviews get was chosen: the daemon's `--model` flag, its environment, its config file, or the first available. */
+export const MODEL_SOURCES = ["--model", "PR_REVIEW_MODEL", "config", "default"] as const;
+
+/** A model the built-in engine can review with: a reasoning model whose provider has a credential. */
+export const ModelOption = Type.Object({
+  ref: Type.String({ minLength: 1, description: "provider/id, what settings.set names" }),
+  provider: Type.String(),
+  name: Type.String(),
+  contextWindow: Type.Integer({ minimum: 0 }),
+  authSource: Type.String({ description: "where the provider's credential comes from, as pi-ai reports it; never the credential" }),
+  preferred: Type.Boolean({ description: "matched by models.preferred in the config; preferred models are listed first" }),
+});
+export type ModelOption = Static<typeof ModelOption>;
+
 /** One inline comment of the stored review payload, exactly as it will be posted. */
 export const ReviewComment = Type.Object({ path: Type.String(), line: Type.Integer({ minimum: 1 }), side: Type.Literal("RIGHT"), body: Type.String() });
 
@@ -275,12 +289,19 @@ export const Command = Type.Union([
   command("review.retry", { runId: Id }),
   command("review.publish", { runId: Id, previewId: Id, expectedHeadSha: Sha }),
   command("account.select", { accountId: Id }),
+  command("settings.set", {
+    model: Type.String({
+      minLength: 1,
+      maxLength: 256,
+      description: "one of settings.models; saved as models.default in the daemon's config and used for reviews started after it",
+    }),
+  }),
   command("daemon.stop", {
     pauseReviews: Type.Boolean({ description: "stop even while reviews run: they pause and resume on the next engine start; without it a running review makes the stop CONFLICT" }),
   }),
 ]);
 export type Command = Static<typeof Command>;
-export type ReviewCommand = Exclude<Command, { command: "account.select" | "daemon.stop" }>;
+export type ReviewCommand = Exclude<Command, { command: "account.select" | "daemon.stop" | "settings.set" }>;
 
 /** The one key a command may carry: it binds the key to the target, so a replayed key is the same request. */
 export function idempotencyKey(c: Command): string {
@@ -297,6 +318,8 @@ export function idempotencyKey(c: Command): string {
       return `review.publish:${c.params.runId}:${c.params.previewId}`;
     case "account.select":
       return `account.select:${c.params.accountId}`;
+    case "settings.set":
+      return `settings.set:${c.params.model}`;
     case "daemon.stop":
       return "daemon.stop";
   }
@@ -320,6 +343,7 @@ export const ClientMessage = Type.Union([
   }),
   req("finding.get", { findingId: Id }),
   req("publication.get", { runId: Id }),
+  req("settings.get"),
   req("timeline.get", {
     prId: Type.Optional(Id),
     runId: Type.Optional(Id),
@@ -382,6 +406,12 @@ export const ServerMessage = Type.Union([
     reviewId: Type.Optional(Type.Integer({ minimum: 1, description: "the GitHub review, once published" })),
     url: Type.Optional(Type.String()),
   }),
+  // The answer to settings.get, which only a daemon in engine mode gives: the model new reviews get and the choices.
+  reply("settings", {
+    model: Type.Object({ ref: Type.String({ minLength: 1 }), source: oneOf(MODEL_SOURCES) }),
+    models: Type.Array(ModelOption),
+    configPath: Type.String({ description: "the config file settings.set writes" }),
+  }),
   reply("timeline.page", {
     events: Type.Array(Type.Union([KnownEvent, UnknownEvent]), { description: "newest first" }),
     nextBeforeSequence: Type.Optional(Type.Integer({ minimum: 1 })),
@@ -409,4 +439,4 @@ export const ServerMessage = Type.Union([
 export type ServerMessage = Static<typeof ServerMessage>;
 export type PublicationPreview = Omit<Extract<ServerMessage, { type: "publication.preview" }>, "type" | "requestId">;
 
-export const ENTITIES = { pr: Pr, run: Run, finding: Finding, "finding-detail": FindingDetail, evidence: Evidence, "diff-file": DiffFile, account: Account, check: SetupCheck, event: Event } as const;
+export const ENTITIES = { pr: Pr, run: Run, finding: Finding, "finding-detail": FindingDetail, evidence: Evidence, "diff-file": DiffFile, account: Account, check: SetupCheck, "model-option": ModelOption, event: Event } as const;
