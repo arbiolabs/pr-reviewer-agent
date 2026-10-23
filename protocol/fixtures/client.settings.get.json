@@ -1,0 +1,4 @@
+{
+  "type": "settings.get",
+  "requestId": "req-settings"
+}

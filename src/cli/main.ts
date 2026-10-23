@@ -13,7 +13,7 @@ import { type DecisionEngine, JevDecisionEngine, type JevRoute, jevSkipReason } 
 import { typeSafeKey } from "../jev/key.ts";
 import { PiAuthFileStore } from "../models/credential-store.ts";
 import { buildModels, detectModels } from "../models/detect.ts";
-import { type AvailableModel, chooseModel, listAvailableModels } from "../models/select.ts";
+import { type AvailableModel, chooseModel, listAvailableModels, type ModelChoice } from "../models/select.ts";
 import { AppStore, withStore } from "../persistence/store.ts";
 import { reconcileOutbox } from "../publish/publisher.ts";
 import { finishReview, lockDataDir, openApp, startReview } from "../runtime/app.ts";
@@ -211,7 +211,7 @@ async function approve(args: string[], deps: CliDeps, dataDir: string, out: Out,
   }
 }
 
-async function resolveModel(config: Config, deps: CliDeps, flag: string | undefined, isTTY: boolean, err: (t: string) => void): Promise<{ models: Models; ref: string }> {
+async function resolveModel(config: Config, deps: CliDeps, flag: string | undefined, isTTY: boolean, err: (t: string) => void): Promise<{ models: Models; ref: string; source: Extract<ModelChoice, { kind: "chosen" }>["source"] }> {
   const models = deps.models ?? buildModels(deps.credentials ?? new PiAuthFileStore());
   const available = await listAvailableModels(models, config.models.preferred);
   let choice = chooseModel({ flag, env: process.env.PR_REVIEW_MODEL, config: config.models.default }, available, isTTY);
@@ -223,7 +223,7 @@ async function resolveModel(config: Config, deps: CliDeps, flag: string | undefi
   }
   if (choice.kind !== "chosen") throw new Error("no model chosen");
   err(`model: ${choice.ref} (${choice.source})\n`);
-  return { models, ref: choice.ref };
+  return { models, ref: choice.ref, source: choice.source };
 }
 
 /**
@@ -302,7 +302,7 @@ async function openEngine(dataDir: string, deps: CliDeps, err: (t: string) => vo
   const config = loadConfig();
   const github = await withStore(dataDir, (store) => githubFromEnv(config, store));
   const pulls = deps.pulls ?? new GitHubPullSource(github.clientFor);
-  const { models, ref } = await resolveModel(config, deps, undefined, false, err);
+  const { models, ref, source } = await resolveModel(config, deps, undefined, false, err);
   const report = (error: unknown) => err(`note: ${error instanceof Error ? error.message : String(error)}\n`);
   const app = await openApp({
     dataDir,
@@ -315,7 +315,7 @@ async function openEngine(dataDir: string, deps: CliDeps, err: (t: string) => vo
     reviewerVersion: reviewerVersion(ref),
     onReport: report,
   });
-  return EngineSource.host(dataDir, app, { config, pulls, github: github.clientFor, report, ...(github.account ? { account: github.account } : {}) });
+  return EngineSource.host(dataDir, app, { config, pulls, github: github.clientFor, report, models, model: { ref, source }, ...(github.account ? { account: github.account } : {}) });
 }
 
 /** `serve`: webhook receiver, worker and reviews in one process, configured from the environment. */

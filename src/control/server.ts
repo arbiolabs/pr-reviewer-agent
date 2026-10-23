@@ -169,6 +169,11 @@ export async function startControlServer(options: ServerOptions): Promise<Contro
         send(c, { type: "publication.preview", requestId, ...(await source.publication(message.runId)) });
         return;
       }
+      case "settings.get": {
+        if (!source.settings) throw new ControlError("CAPABILITY_DENIED", source.unavailable?.("settings.get") ?? "settings.get is not available in this version");
+        send(c, { type: "settings", requestId, ...(await source.settings()) });
+        return;
+      }
       case "timeline.get":
         send(c, { type: "timeline.page", requestId, ...source.timeline(message) });
         return;
@@ -181,14 +186,21 @@ export async function startControlServer(options: ServerOptions): Promise<Contro
             ? Boolean(source.selectAccount)
             : message.command === "daemon.stop"
               ? canStop
-              : Boolean(source.command) && (source.capabilities?.() ?? []).includes(message.command);
+              : message.command === "settings.set"
+                ? Boolean(source.setModel)
+                : Boolean(source.command) && (source.capabilities?.() ?? []).includes(message.command);
         if (!granted) return reject("CAPABILITY_DENIED", source.unavailable?.(message.command) ?? `${message.command} is not available in this version`);
         if (c.phase !== "streaming") return reject("CONFLICT", `send snapshot.get or resume before ${message.command}`);
         const expectedKey = idempotencyKey(message);
         if (message.idempotencyKey !== expectedKey) return reject("INVALID_REQUEST", `idempotencyKey must be ${expectedKey}`);
         if (message.command === "daemon.stop") return stopDaemon(c, requestId, message.params.pauseReviews, reject);
         try {
-          const accepted = message.command === "account.select" ? { operationId: await source.selectAccount!(message.params.accountId) } : await source.command!(message);
+          const accepted =
+            message.command === "account.select"
+              ? { operationId: await source.selectAccount!(message.params.accountId) }
+              : message.command === "settings.set"
+                ? { operationId: await source.setModel!(message.params.model) }
+                : await source.command!(message);
           send(c, { type: "command.result", requestId, status: "accepted", ...accepted });
         } catch (error) {
           if (error instanceof ControlError) return reject(error.code, error.message, error.prId);
@@ -257,7 +269,7 @@ export async function startControlServer(options: ServerOptions): Promise<Contro
         protocolVersion: PROTOCOL_VERSION,
         serverVersion: SERVER_VERSION,
         sessionId: randomUUID(),
-        capabilities: [...(source.selectAccount ? ["account.select"] : []), ...(source.capabilities?.() ?? []), ...(canStop ? ["daemon.stop"] : [])],
+        capabilities: [...(source.selectAccount ? ["account.select"] : []), ...(source.capabilities?.() ?? []), ...(source.setModel ? ["settings.set"] : []), ...(canStop ? ["daemon.stop"] : [])],
         ...(source.mode ? { mode: source.mode } : {}),
         ...(source.readOnlyReason ? { readOnlyReason: source.readOnlyReason } : {}),
         ...(checks ? { checks } : {}),

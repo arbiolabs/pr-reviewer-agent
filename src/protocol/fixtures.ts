@@ -1453,6 +1453,33 @@ export const fixtures: Record<string, ClientMessage | ServerMessage | Record<str
   "client.command.account-select": selectCommand(work),
   "client.command.daemon.stop": { type: "command", requestId: "req-cmd", command: "daemon.stop", params: { pauseReviews: false }, idempotencyKey: "daemon.stop" },
   "client.publication.get": { type: "publication.get", requestId: "req-pub", runId: run1.id },
+  "client.settings.get": { type: "settings.get", requestId: "req-settings" },
+  "client.command.settings.set": {
+    type: "command",
+    requestId: "req-cmd",
+    command: "settings.set",
+    params: { model: "openai/gpt-5.5" },
+    idempotencyKey: "settings.set:openai/gpt-5.5",
+  },
+  "server.settings": {
+    type: "settings",
+    requestId: "req-settings",
+    model: { ref: "anthropic/claude-opus-5-5", source: "config" },
+    models: [
+      { ref: "anthropic/claude-opus-5-5", provider: "anthropic", name: "Claude Opus 5.5", contextWindow: 1_000_000, authSource: "oauth", preferred: true },
+      { ref: "anthropic/claude-sonnet-5", provider: "anthropic", name: "Claude Sonnet 5", contextWindow: 1_000_000, authSource: "oauth", preferred: false },
+      { ref: "openai/gpt-5.5", provider: "openai", name: "GPT-5.5", contextWindow: 400_000, authSource: "OPENAI_API_KEY", preferred: false },
+      { ref: "openrouter/google/gemini-3-pro", provider: "openrouter", name: "Gemini 3 Pro", contextWindow: 1_048_576, authSource: "OPENROUTER_API_KEY", preferred: false },
+    ],
+    configPath: "/Users/operator/.config/pr-review/pr-review.config.json",
+  },
+  "server.settings.env": {
+    type: "settings",
+    requestId: "req-settings",
+    model: { ref: "openai/gpt-5.5", source: "PR_REVIEW_MODEL" },
+    models: [{ ref: "openai/gpt-5.5", provider: "openai", name: "GPT-5.5", contextWindow: 400_000, authSource: "OPENAI_API_KEY", preferred: false }],
+    configPath: "pr-review.config.json",
+  },
 
   "server.welcome": welcome(108),
   "server.welcome.engine": welcome(108, EPOCH, ["account.select", ...REVIEW_COMMANDS], "engine"),
