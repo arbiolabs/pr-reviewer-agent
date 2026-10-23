@@ -73,6 +73,12 @@ desktop/target/release/pr-review-desktop --playback protocol/playback/showcase.n
 
 The app runs as a plain binary, without an app bundle, so it sets its own Dock and app-switcher icon at launch from `assets/app-icon.png`. That file is the icon on Apple's 1024 px grid, with the artwork about 824 px wide so it sits at the same size as other apps' icons.
 
+### The account footer
+
+The bottom of the sidebar shows the GitHub account the daemon reads and publishes as, with its avatar, and the connection under it: "● Live · socket", plus "Read-only" when the daemon runs no commands. It is the account the post sheet names and the terminal client's Settings lists under "publishes as": the daemon's `GITHUB_TOKEN` or `GH_TOKEN` when set, else the account selected with `account.select`, else the github.com account gh marks active. With none, the footer shows a person glyph and "No GitHub account". Click the footer, or focus it with ⇥ and press ⏎, to open Settings with the GitHub accounts. Its tooltip gives the account id and its scopes.
+
+The avatar of a github.com account is fetched with the system's `curl` from `https://avatars.githubusercontent.com/<login>?s=64` and cached in `~/Library/Caches/pr-review/avatars/<login>.png`. A cached file shows at once, also offline. After a day the app fetches it again in the background and keeps showing the old one until the new one lands. Until there is a file, or when it does not decode, the footer shows the login's first letter in a circle of the same size. Delete the directory to force a fetch. A snapshot never reads the cache or the network and always shows the letter.
+
 ## The snapshot harness
 
 `--snapshot OUT.png` captures the app's own window to a PNG and quits with exit code 0. The capture needs no Screen Recording permission, because the app reads back a window it owns.
@@ -139,7 +145,7 @@ desktop/snap.sh                      # every state, into desktop/snapshots/
 desktop/snap.sh /tmp/snaps diff help # two states, into /tmp/snaps
 ```
 
-The states are listed at the end of `snap.sh`, one per line: a name, the appearance, the capture time, the steps and, optionally, another playback script. `08-disconnected` dials a socket that doesn't exist and captures in real time. `00-connecting`, `11-empty-queue` and `12-readonly` play the sessions in `desktop/playback/` and a read-only rewrite of the showcase that `snap.sh` writes under `target/`. `15-tracking`, `15b-reopened` and `16-discards` play `protocol/playback/tracking.ndjson`, a PR reviewed on three heads, and `17-big-diff` plays `big-diff.ndjson`, a 60-file PR. `18a-add-pr-empty`, `18b-add-pr-valid` and `18c-add-pr-error` show the add-a-PR sheet empty, with a URL it read, and with the daemon's refusal. `19-reviewer-stopped`, `19b-starting` and `19c-stop-confirm` show the board after a stop, the offline screen while a start is on its way, and the sheet that asks before a stop pauses two running reviews.
+The states are listed at the end of `snap.sh`, one per line: a name, the appearance, the capture time, the steps and, optionally, another playback script. `08-disconnected` dials a socket that doesn't exist and captures in real time. `00-connecting`, `11-empty-queue` and `12-readonly` play the sessions in `desktop/playback/` and a read-only rewrite of the showcase that `snap.sh` writes under `target/`. `15-tracking`, `15b-reopened` and `16-discards` play `protocol/playback/tracking.ndjson`, a PR reviewed on three heads, and `17-big-diff` plays `big-diff.ndjson`, a 60-file PR. `18a-add-pr-empty`, `18b-add-pr-valid` and `18c-add-pr-error` show the add-a-PR sheet empty, with a URL it read, and with the daemon's refusal. `19-reviewer-stopped`, `19b-starting` and `19c-stop-confirm` show the board after a stop, the offline screen while a start is on its way, and the sheet that asks before a stop pauses two running reviews. `20-footer-account` shows the account footer with the showcase's account, and `20b-footer-no-account` plays a rewrite of the showcase with every account list emptied, which `snap.sh` writes under `target/`.
 
 ## How the parts connect
 

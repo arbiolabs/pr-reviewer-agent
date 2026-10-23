@@ -7,6 +7,7 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 ### Added
 
 - **Desktop: the app's name and mark in the title bar.** The title bar shows a glyph of the app icon's eye, its pupil in the accent, and "PR Reviewer Agent", set off from the page title by a hairline. Before the first snapshot the page title reads "Connecting" or "Offline" instead of repeating the app's name (#38).
+- **Desktop app: the account in the sidebar.** The sidebar's footer shows the GitHub account the daemon reads and publishes as, by the rule the post sheet and the terminal client's "publishes as" use, with its avatar, and the connection and read-only state under it. With no account it shows a person glyph and "No GitHub account", and an account in error shows its state in the warn color. A click opens Settings, and the tooltip gives the account id and its scopes. The avatar is fetched with the system's `curl` and cached for a day in `~/Library/Caches/pr-review/avatars/`, so it shows offline; until it loads, the login's first letter holds its place. Snapshots never touch the network (#39).
 
 ## [1.3.0] - 2026-10-23
 
