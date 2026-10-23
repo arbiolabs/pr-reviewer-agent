@@ -115,7 +115,9 @@ export function createReviewTools(deps: ToolDeps): Extension {
         replay: "safe",
         execute: async (args, api, context) => {
           const ws = await workspace(api, context);
-          // A search that runs long answers the model instead of holding the review: the timeout stops git, not the run.
+          // The tree fetch is outside the limit: on a resumed review it has not run yet, and cutting it short would leave
+          // the search to fetch blob by blob. A search that runs long answers the model instead of holding the review.
+          await ws.repo.prefetch(context.abortSignal);
           const found = await withTimeout((signal) => ws.repo.grep(args.query, args.scope, undefined, signal), SEARCH_TIMEOUT_MS, context.abortSignal);
           if (found === undefined) {
             deps.store.appendActivity(ws.revision.id, "search_code", `timed out after ${SEARCH_TIMEOUT_MS / 1000}s: ${args.query}`);
