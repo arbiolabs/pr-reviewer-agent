@@ -1,8 +1,12 @@
 # pr-review-desktop
 
-`pr-review-desktop` is a macOS client for pr-review, built on [GPUI](https://www.gpui.rs) through [gpui-kit](https://crates.io/crates/gpui-kit) 0.8.0. The window is a triage inbox: a queue of the decisions waiting on you, each with its detail beside it, a live strip of running reviews, every PR in the sidebar, the diff with findings anchored, a timeline, and a command palette (⌘K). [DESIGN.md](DESIGN.md) describes the design and its tokens.
+PR Reviewer Agent (`pr-review-desktop`) is a macOS client for pr-review, built on [GPUI](https://www.gpui.rs) through [gpui-kit](https://crates.io/crates/gpui-kit) 0.8.0. The window is a triage inbox: a queue of the decisions waiting on you, each with its detail beside it, a live strip of running reviews, every PR in the sidebar, the diff with findings anchored, a timeline, and a command palette (⌘K). [DESIGN.md](DESIGN.md) describes the design and its tokens.
 
 The app links the terminal client in `../tui` as a library and runs its reducer, `update(&mut Model, Msg) -> Vec<Effect>`, and its network task unchanged. The protocol rules, the key guards and the playback all come from there. The terminal client stays as it is.
+
+![The queue, a critical finding beside its cited code, the diff, a review running until it waits for approval, the proof of what will be posted, and Settings.](demo/showcase.gif)
+
+`demo.sh` records this GIF from the showcase playback, with no daemon or network: `desktop/demo.sh` from the repository root.
 
 ## Build and run
 
@@ -26,9 +30,15 @@ desktop/target/release/pr-review-desktop --socket /tmp/prd/s.sock            # t
 
 Keep the socket path short. macOS refuses a socket path longer than 103 bytes, and the daemon refuses a socket directory that is a symlink, such as `/tmp` itself.
 
+### The title bar
+
+The title bar shows the app's mark and name, "PR Reviewer Agent", then the page title. On the right, the reviewer pill always shows the reviewer's state ("Reviewer · Live", "Offline", "Stopped by you", "Starting…") with the one action that changes it: Stop while the daemon answers, Start while it doesn't. A start or stop under way shows a spinner, and an action that can't run is dimmed with the reason in its tooltip. Restart is in the **Reviewer** menu and the palette.
+
 ### Review a new PR
 
 Against a daemon started with `--allow-commands`, press ⌘N, or choose **Review a PR…** in the sidebar, the palette or the empty state. Paste the PR's URL (⌘V), or type `owner/repo#N`. The sheet shows the repository and number it read, and ⏎ asks the daemon to add it. The daemon reads the PR from GitHub with its own account and starts its review; the sheet closes on the new PR. If the daemon refuses, the sheet says why in place: a PR its account can't see, a closed or merged PR, or text that isn't a PR link. A PR the window already tracks opens instead. On a read-only daemon the entries are locked with the reason.
+
+With the reviewer stopped or offline, ⌘N still opens the sheet when the app can start the reviewer: ⏎ starts it, the sheet reads "Starting the reviewer, then adding …", and the PR is sent once the daemon answers. A start that fails says why in the sheet.
 
 ### Start and stop the reviewer
 
@@ -69,7 +79,7 @@ With that setting, Stop is a plain `daemon.stop` and Start is a `launchctl kicks
 
 ### Settings
 
-⌘, opens Settings: the daemon's checks, the reviewer, the GitHub accounts, and two sections that change how it reviews.
+⌘, opens Settings: Appearance (see [Themes](#themes)), the daemon's setup checks, two sections that change how it reviews, the reviewer, and the GitHub accounts.
 
 - **Risk check (Jev)** saves your TypeSafe key in the login keychain, where the daemon reads it for the next review with no restart. The field is masked and the page says only whether a key is saved. Off macOS, set `TYPESAFE_API_KEY` in the daemon's environment instead. [Configuration](../docs/configuration.md#typesafe-key-in-the-macos-keychain) explains how the key is kept.
 - **Agent** lists the models the daemon can review with, grouped by provider and searchable, with the one in use and where each provider's credential comes from. Save makes the choice the daemon's `models.default`. Reviews started from then on use it, and a PR reviewed again with another model gets a new revision.
