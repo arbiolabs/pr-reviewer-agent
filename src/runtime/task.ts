@@ -133,6 +133,7 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
     const pr = store.pullById(revision.pr_id)!;
     const repo = new PinnedRepo(await syncRepo(deps.cacheDir, pr.repo_full_name, pull.cloneUrl, pr.number, await deps.gitToken?.(pr.installation_id)), revision.base_sha, revision.head_sha);
     await repo.assertCommitsPresent();
+    await repo.prefetch();
     const [diff, changedFiles] = [await repo.diff(), await repo.changedFiles()];
     const limitations: string[] = [];
     if (changedFiles.length > config.review.max_changed_files) {

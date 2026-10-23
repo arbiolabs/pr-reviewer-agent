@@ -48,6 +48,16 @@ async function git(dir: string, args: string[], maxBuffer = MAX_OUTPUT_BYTES, en
   return stdout;
 }
 
+/** `git` with `input` on its standard input. */
+async function gitInput(dir: string, args: string[], input: string, env = GIT_ENV, signal?: AbortSignal): Promise<string> {
+  const pending = run("git", ["-C", dir, "-c", "core.quotePath=false", ...args], { env, maxBuffer: MAX_OUTPUT_BYTES, encoding: "utf8", signal });
+  pending.child.stdin?.end(input);
+  return (await pending).stdout;
+}
+
+/** Object ids per `git fetch --stdin`: one round trip each, small enough for any server. */
+const PREFETCH_BATCH = 20_000;
+
 export class UnsafePathError extends Error {}
 
 /** A blob larger than the `maxBytes` its reader allowed: git was stopped at that many bytes, so none of it was read. */
@@ -68,9 +78,8 @@ export function capBytes(text: string, cap = DEFAULT_OUTPUT_CAP): string {
 }
 
 /**
- * Bare, blob-less clone per repository, refreshed with every branch head and the PR's head ref.
- * ponytail: blob:none fetches blobs lazily one round trip at a time, so search_code over a large tree is slow;
- * prefetch the head tree's blobs if that becomes the bottleneck.
+ * Bare, blob-less clone per repository, refreshed with every branch head and the PR's head ref. Collect then fetches the
+ * head tree's missing blobs in one batch (PinnedRepo.prefetch), so the review's reads and searches stay local.
  */
 export async function syncRepo(cacheDir: string, fullName: string, cloneUrl: string, prNumber: number, token?: string): Promise<string> {
   const dir = join(cacheDir, `${fullName}.git`);
@@ -103,6 +112,41 @@ export class PinnedRepo {
     this.dir = dir;
     this.baseSha = baseSha;
     this.headSha = headSha;
+  }
+
+  /** The head tree's blobs are all local. */
+  private prefetched = false;
+
+  /**
+   * Fetches every blob of the head tree the clone lacks, in one batch, and returns how many it fetched. Without it,
+   * git grep on the blob-less clone fetches each missing blob in its own round trip, so a search over a large directory
+   * took half an hour. Once a repository's tree is local, a later PR fetches only the blobs it changed. Best effort: a
+   * failure leaves git to fetch lazily, as before. A git that would ignore GIT_NO_LAZY_FETCH skips it, since listing
+   * what is missing would then fetch it blob by blob.
+   */
+  async prefetch(signal?: AbortSignal): Promise<number> {
+    if (this.prefetched || !(await offlineReadsSupported())) return 0;
+    try {
+      const listed = await git(this.dir, ["ls-tree", "-r", "-z", "--format=%(objecttype) %(objectname)", this.headSha], undefined, OFFLINE_ENV, signal);
+      const blobs = listed.split("\0").flatMap((entry) => (entry.startsWith("blob ") ? [entry.slice(5)] : []));
+      const missing =
+        blobs.length === 0
+          ? []
+          : (await gitInput(this.dir, ["cat-file", "--batch-check=%(objectname)"], `${blobs.join("\n")}\n`, OFFLINE_ENV, signal))
+              .split("\n")
+              .flatMap((line) => (line.endsWith(" missing") ? [line.slice(0, -" missing".length)] : []));
+      for (let i = 0; i < missing.length; i += PREFETCH_BATCH) {
+        const batch = missing.slice(i, i + PREFETCH_BATCH);
+        // The fetch git itself runs for one missing blob, given every id at once.
+        const args = ["-c", "fetch.negotiationAlgorithm=noop", "fetch", "--quiet", "origin", "--no-tags", "--no-write-fetch-head", "--recurse-submodules=no", "--filter=blob:none", "--stdin"];
+        await gitInput(this.dir, args, `${batch.join("\n")}\n`, GIT_ENV, signal);
+      }
+      this.prefetched = true;
+      return missing.length;
+    } catch (error) {
+      if ((error as { name?: string }).name === "AbortError") throw error;
+      return 0;
+    }
   }
 
   async assertCommitsPresent(): Promise<void> {
@@ -146,6 +190,7 @@ export class PinnedRepo {
   async grep(query: string, scope: string | undefined, cap = DEFAULT_OUTPUT_CAP, signal?: AbortSignal): Promise<string> {
     const args = ["grep", "-n", "-I", "-F", "--max-count=50", "-e", query, this.headSha];
     if (scope !== undefined && scope !== "" && scope !== ".") args.push("--", assertSafePath(scope));
+    await this.prefetch(signal);
     try {
       const out = await git(this.dir, args, undefined, undefined, signal);
       return capBytes(out.replaceAll(`${this.headSha}:`, ""), cap);
@@ -162,6 +207,7 @@ export class PinnedRepo {
    * found, or a resolution claim on it would pass.
    */
   async grepPaths(query: string, cap = DEFAULT_OUTPUT_CAP): Promise<string[] | undefined> {
+    await this.prefetch();
     try {
       const out = await git(this.dir, ["grep", "-l", "-z", "-a", "-F", "-e", query, this.headSha]);
       if (Buffer.byteLength(out) > cap) return undefined;
