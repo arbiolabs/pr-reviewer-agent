@@ -40,7 +40,13 @@ A model is available when its provider has a credential. pr-review reads credent
 
 pr-review writes pi's auth file only under pi's own file lock, so a token refresh never logs `pi` out. It does not read the credentials of `claude`, `codex`, or `opencode`. `pr-review models` lists those CLIs as installed with credentials not shared.
 
-The model is part of the reviewer's identity. Reviewing the same commit with another model creates a new revision instead of returning the stored result.
+The model is part of the reviewer's identity. Reviewing the same commit with another model creates a new revision instead of returning the stored result. Each revision is reviewed with the model its identity names, so a review that resumes after a restart keeps its model even when the configured one changed meanwhile.
+
+### Change the model from the desktop app
+
+Settings → Agent in the desktop app lists the models the daemon can review with, grouped by provider, with the one in use and its source. Save sends the protocol's `settings.set`. The daemon checks the model against that list, writes it to `models.default` in its config file (`PR_REVIEW_CONFIG`, or `pr-review.config.json` in its working directory) and keeps the other keys. Reviews started after that use the new model. The daemon does not need a restart, and a review in flight keeps its model.
+
+Only a daemon in engine mode accepts the change. While the daemon's environment sets `PR_REVIEW_MODEL`, the daemon refuses the change, because the environment would win again at the next start.
 
 ## Jev
 
@@ -53,6 +59,20 @@ Jev classifies the risk of a change, and the classification decides how deep the
 - `--no-jev` skips Jev and uses the standard review.
 
 When Jev fails, times out, or is skipped, the review runs at standard depth. Jev can raise the depth. It can never lower it below standard.
+
+### TypeSafe key in the macOS Keychain
+
+A daemon that runs from a LaunchAgent has no `TYPESAFE_API_KEY` in its environment. On macOS, save the key in the desktop app under Settings → Risk check (Jev) instead. pr-review looks for the key each time it triages a review: first `TYPESAFE_API_KEY`, then the Keychain. A saved or removed key applies to the next review without a restart. `pr-review setup` reports `TypeSafe (key in Keychain)` when the key comes from the Keychain. On other platforms, set `TYPESAFE_API_KEY`.
+
+The key is a generic password in the login keychain, with the service `io.github.diego-arbio-dev.pr-review` and the account `TYPESAFE_API_KEY`. `PR_REVIEW_KEYCHAIN_SERVICE` changes the service, for tests. The test suite sets it, so no test reaches the real item.
+
+How the key is kept and why:
+
+- **Every Keychain call goes through `/usr/bin/security`.** A keychain item's access list trusts the program that created it. An item the desktop app wrote through the Security framework would trust only the app's code signature, and the daemon's read through `/usr/bin/security` would show an access prompt, or fail with no one at the screen. Written by `/usr/bin/security`, the item trusts `/usr/bin/security`, which the daemon reads it with, so the read shows no prompt. The trade-off: any process that runs as you can read the item through `/usr/bin/security` without a prompt, as it can read your environment. The login keychain still protects the key at rest and from other users.
+- **The key is never in a command line.** The app runs `security -i` and writes the `add-generic-password -U` command, with the key, to its standard input, so `ps` shows only `/usr/bin/security -i`. `add-generic-password -w` with no value is not used: it reads the password from the terminal when the app has one, and it cuts the password at 128 characters. The daemon runs `security find-generic-password -s <service> -a TYPESAFE_API_KEY -w` and reads the key from standard output.
+- **The key stays out of files and the protocol.** It is never written to a file, a plist, the config, a log, a snapshot or a protocol message, and the app never sends it to the daemon. The field is masked, is cleared after Save, and the page shows only whether a key is saved. The setup check and the app's status come from the item's attributes, not from reading the key.
+- **Save updates in place.** `-U` replaces the password of the existing item, so a second Save does not add a second item. Remove deletes the item.
+- **The key format is restricted.** The app accepts a key without spaces, quotes, backslashes or non-ASCII characters, which `security -i` would read differently.
 
 ## Config file
 

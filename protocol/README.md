@@ -19,6 +19,7 @@ also arrive unsolicited (`snapshot`, `resync.required`, `error`) have an optiona
 | `finding.get` | `findingId` | `finding.detail` |
 | `publication.get` | `runId` | `publication.preview`, or `error NOT_FOUND` for a run with no stored payload |
 | `timeline.get` | `prId?`, `runId?`, `findingId?`, `beforeSequence?`, `limit` (1..500) | `timeline.page` (newest first; pass `nextBeforeSequence` back to page) |
+| `settings.get` | | `settings`, from a daemon in `engine` mode; elsewhere `error CAPABILITY_DENIED` with the reason |
 | `command` | `command`, `params`, `idempotencyKey` | `command.result`. A command the `welcome` did not grant is `rejected` with code `CAPABILITY_DENIED`. |
 
 | Server → client | Fields |
@@ -31,6 +32,7 @@ also arrive unsolicited (`snapshot`, `resync.required`, `error`) have an optiona
 | `finding.detail` | `finding`: a `Finding` plus `explanation`, `reasoningSummary`, `suggestedFix?`, `evidence[]`, `history[]` (each entry a run, the finding state it ended in, and an optional `basis` for why) |
 | `publication.preview` | `runId`, `previewId` (the payload hash the approval must name), `headSha`, `body` (the exact review text, marker included), `comments[]` (`path`, `line`, `side: RIGHT`, `body`), `event: COMMENT`, `status` |
 | `timeline.page` | `events[]` (sequenced events), `nextBeforeSequence?` |
+| `settings` | `model` (`ref`, and `source`: `--model`, `PR_REVIEW_MODEL`, `config` or `default`), `models[]` (`ModelOption`: `ref`, `provider`, `name`, `contextWindow`, `authSource`, `preferred`; preferred first), `configPath` (the file `settings.set` writes) |
 | `command.result` | `status: accepted` with `operationId` (and `prId`, `runId` from `review.add`), or `status: rejected` with `code` and `message` (and `prId` when `review.add` names a tracked PR) |
 | `error` | `code`, `message`, `supported?` |
 
@@ -38,7 +40,7 @@ Error codes: `UNAUTHORIZED`, `CAPABILITY_DENIED`, `INVALID_TRANSITION`, `REVISIO
 `RATE_LIMITED`, `TEMPORARILY_UNAVAILABLE`, `INTERNAL_ERROR`, `PROTOCOL_MISMATCH`, `INVALID_REQUEST`. The server answers
 a line that is not JSON, is over 1 MiB, or fails the client schema with `INVALID_REQUEST`.
 
-Entities are in `schema/v1/{pr,run,finding,finding-detail,evidence,diff-file,account,check,event}.json`. A run is one engine revision
+Entities are in `schema/v1/{pr,run,finding,finding-detail,evidence,diff-file,account,check,model-option,event}.json`. A run is one engine revision
 (`id` is the revision id). `phase` is the engine state: `COLLECT_CONTEXT TRIAGE ANALYZE VERIFY PREPARE_PUBLICATION
 AWAITING_APPROVAL PUBLISH RECONCILE COMPLETED FAILED SUPERSEDED`. `AWAITING_APPROVAL` is a run whose review is stored and
 parked for a human (publish mode `approval`); its `status` is still `RUNNING`. A `Finding.line` of `null` means a file-level finding.
@@ -58,12 +60,13 @@ the recorded `operationId` and does nothing again. A key in any other form is `I
 | `review.publish` | `runId`, `previewId`, `expectedHeadSha` | `review.publish:<runId>:<previewId>` | `review.publish:<runId>` |
 | `account.select` | `accountId` | `account.select:<accountId>` | `account.select:<journal seq>` |
 | `daemon.stop` | `pauseReviews` | `daemon.stop` | `daemon.stop` |
+| `settings.set` | `model` | `settings.set:<model>` | `settings.set:<model>` |
 
 `welcome.capabilities` lists what this daemon grants. A daemon in `read-only` mode (the default, or another pr-review
 holds the data dir, or the engine failed to open; `welcome.readOnlyReason` says which) grants `account.select` only.
 A daemon started with `--allow-commands` or `control.allow_commands` runs in `engine` mode and grants the review
 commands, and `review.publish` only under `review.publish_mode: "approval"`. The `pr-review daemon` process in
-`engine` mode also grants `daemon.stop`; a read-only daemon never does, because its data dir may belong to another
+`engine` mode also grants `daemon.stop` and `settings.set`; a read-only daemon never does, because its data dir may belong to another
 process.
 Every command is checked by the server whatever the client showed:
 
@@ -89,6 +92,12 @@ Every command is checked by the server whatever the client showed:
   it and the daemon shuts down as on SIGTERM. Running reviews pause and resume on the next engine start, the data-dir
   lock is released, the socket is removed and the process exits 0. A client that got `accepted` knows the daemon
   stopped on request; any other end of the connection is a lost connection.
+- `settings.set`: `model` must be one of `settings.models` (`NOT_FOUND`, listing them). While the daemon's own
+  `--model` or `PR_REVIEW_MODEL` outranks the config it is refused with `CONFLICT`, since the choice would not survive
+  a restart. Accepted means the model is saved as `models.default` in the daemon's config file, other keys kept, and
+  every review started afterwards uses it, with no restart. A run in flight keeps its model. The model is part of a
+  run's identity, so a head reviewed again with another model gets a new run instead of the stored result.
+  `settings.get` reports the change.
 
 ## Accounts
 
