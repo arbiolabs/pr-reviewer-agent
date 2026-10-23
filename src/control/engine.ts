@@ -1,13 +1,13 @@
 import type { Config } from "../config/config.ts";
 import type { Env } from "../github/accounts.ts";
-import type { GitHubClient } from "../github/client.ts";
-import type { PullSource } from "../github/pulls.ts";
+import { type GitHubClient, GitHubError } from "../github/client.ts";
+import { parsePullRef, parsePullUrl, type PullRef, type PullSource } from "../github/pulls.ts";
 import type { ReviewCommand } from "../protocol/v1.ts";
-import { type App, finishReview, recover, type StartedReview, startPolicy } from "../runtime/app.ts";
+import { type App, finishReview, recover, type StartedReview, startPolicy, startReview } from "../runtime/app.ts";
 import { StateConflict } from "../persistence/store.ts";
 import { approve, cancel, livePull, Refused, retry, startFromHead } from "../runtime/commands.ts";
 import { AppDbSource } from "./appdb.ts";
-import { ControlError } from "./source.ts";
+import { type Accepted, ControlError } from "./source.ts";
 
 export type EngineOptions = {
   config: Config;
@@ -15,6 +15,8 @@ export type EngineOptions = {
   github: (installationId: number) => GitHubClient;
   env?: Env;
   report?: (error: unknown) => void;
+  /** The GitHub account the pull source reads as (`<host>/<login>` or `env/GITHUB_TOKEN`); absent when it reads anonymously. */
+  account?: string;
 };
 
 const CANCEL_REASON = "cancelled from the TUI";
@@ -65,7 +67,7 @@ export class EngineSource extends AppDbSource {
 
   capabilities(): string[] {
     const publish = this.options.config.review.publish_mode === "approval";
-    return ["review.start", "review.retry", "review.cancel", ...(publish ? ["review.publish"] : [])];
+    return ["review.add", "review.start", "review.retry", "review.cancel", ...(publish ? ["review.publish"] : [])];
   }
 
   override unavailable(command: string): string {
@@ -88,7 +90,37 @@ export class EngineSource extends AppDbSource {
     return n;
   }
 
-  async command(request: ReviewCommand): Promise<string> {
+  async command(request: ReviewCommand): Promise<Accepted> {
+    if (request.command === "review.add") return this.add(request.params.url, request.idempotencyKey);
+    return { operationId: await this.runCommand(request) };
+  }
+
+  /**
+   * review.add: track the PR a URL or `owner/repo#N` names and start its review, as `pr-review review` does under
+   * this daemon's config (`publish_mode` decides whether it parks or posts). A PR already tracked is a CONFLICT that
+   * names it and starts nothing; its key replayed answers the PR and run it added.
+   */
+  private async add(url: string, key: string): Promise<Accepted> {
+    const { app, options } = this;
+    const accepted = (runId: string): Accepted => ({ operationId: `review.add:${runId}`, prId: app.store.revision(runId)!.pr_id, runId });
+    const replay = app.store.commandResult(key);
+    if (replay) return accepted(replay.operationId.slice("review.add:".length));
+    const ref = pullTarget(url);
+    const tracked = app.store.pullByName(`${ref.owner}/${ref.repo}`, ref.number);
+    if (tracked) throw new ControlError("CONFLICT", `${tracked.repo_full_name}#${tracked.number} is already tracked`, tracked.id);
+    const pull = await options.pulls.getPull(ref, { maxSleepMs: 5000 }).catch((error: unknown) => {
+      throw unreadable(error, `${ref.owner}/${ref.repo}#${ref.number}`, options.account);
+    });
+    if (pull.state !== "open") throw new ControlError("CONFLICT", `${pull.fullName}#${pull.number} is ${pull.merged ? "merged" : "closed"}; only open PRs are reviewed`);
+    const publish = options.config.review.publish_mode !== "dry_run";
+    const started = await startReview(app, pull, options.config.review.base_policy_version, { publish });
+    this.follow(started);
+    const result = accepted(started.revision.id);
+    app.store.recordCommand(key, { command: "review.add", operationId: result.operationId, attempt: null });
+    return result;
+  }
+
+  private async runCommand(request: Exclude<ReviewCommand, { command: "review.add" }>): Promise<string> {
     const { app, options } = this;
     const key = request.idempotencyKey;
     const attempt = this.attemptOf(request);
@@ -151,4 +183,27 @@ export class EngineSource extends AppDbSource {
     await this.app.close();
     await Promise.allSettled(this.running);
   }
+}
+
+/** review.add's target: a GitHub pull request URL or `owner/repo#N`. */
+function pullTarget(url: string): PullRef {
+  for (const parse of [parsePullUrl, parsePullRef]) {
+    try {
+      return parse(url);
+    } catch {}
+  }
+  throw new ControlError("INVALID_REQUEST", `${url} is not a GitHub pull request; paste its URL (https://github.com/owner/repo/pull/123) or owner/repo#123`);
+}
+
+/** A PR GitHub would not serve, in words that say what to fix: a definite refusal names the account it read as. */
+function unreadable(error: unknown, name: string, account: string | undefined): unknown {
+  if (!(error instanceof GitHubError)) return error;
+  if (error.class === "retryable") return new ControlError("TEMPORARILY_UNAVAILABLE", `GitHub did not answer for ${name} just now (${error.message}); try again`);
+  if (error.class !== "fatal" || ![401, 403, 404].includes(error.status ?? 0)) return error;
+  return new ControlError(
+    "NOT_FOUND",
+    account
+      ? `cannot read ${name}: it does not exist, or ${account} has no access to it (HTTP ${error.status})`
+      : `cannot read ${name}: it does not exist, or it is private and the daemon has no GitHub token; run gh auth login or set GITHUB_TOKEN, then restart the daemon (HTTP ${error.status})`,
+  );
 }

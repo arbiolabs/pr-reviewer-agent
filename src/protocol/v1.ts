@@ -30,7 +30,7 @@ export const RUN_STATUSES = ["RUNNING", "COMPLETED", "FAILED", "SUPERSEDED"] as 
 /** Engine mode hosts the review engine and may grant the review commands; read-only mode only reads the app DB. */
 export const DAEMON_MODES = ["engine", "read-only"] as const;
 /** The commands a daemon in engine mode can grant (`welcome.capabilities`), besides `account.select`. */
-export const REVIEW_COMMANDS = ["review.start", "review.retry", "review.cancel", "review.publish"] as const;
+export const REVIEW_COMMANDS = ["review.add", "review.start", "review.retry", "review.cancel", "review.publish"] as const;
 export const DIFF_FILE_STATUSES = ["added", "modified", "deleted", "renamed", "binary"] as const;
 export const CHECK_STATUSES = ["ok", "warn", "missing"] as const;
 export const EVIDENCE_KINDS = ["code_ref", "tool_summary", "test_result", "scenario", "link"] as const;
@@ -269,6 +269,7 @@ const command = <C extends string, P extends Record<string, TSchema>>(name: C, p
   );
 
 export const Command = Type.Union([
+  command("review.add", { url: Type.String({ minLength: 1, maxLength: 512, description: "a GitHub pull request URL or owner/repo#N" }) }),
   command("review.start", { prId: Id, expectedHeadSha: Sha }),
   command("review.cancel", { runId: Id }),
   command("review.retry", { runId: Id }),
@@ -281,6 +282,8 @@ export type ReviewCommand = Exclude<Command, { command: "account.select" }>;
 /** The one key a command may carry: it binds the key to the target, so a replayed key is the same request. */
 export function idempotencyKey(c: Command): string {
   switch (c.command) {
+    case "review.add":
+      return `review.add:${c.params.url}`;
     case "review.start":
       return `review.start:${c.params.prId}:${c.params.expectedHeadSha}`;
     case "review.cancel":
@@ -378,8 +381,18 @@ export const ServerMessage = Type.Union([
     events: Type.Array(Type.Union([KnownEvent, UnknownEvent]), { description: "newest first" }),
     nextBeforeSequence: Type.Optional(Type.Integer({ minimum: 1 })),
   }),
-  reply("command.result", { status: Type.Literal("accepted"), operationId: Id }),
-  reply("command.result", { status: Type.Literal("rejected"), code: oneOf(ERROR_CODES), message: Type.String() }),
+  reply("command.result", {
+    status: Type.Literal("accepted"),
+    operationId: Id,
+    prId: Type.Optional(Id),
+    runId: Type.Optional(Type.String({ minLength: 1, description: "with prId, set by review.add: the PR it tracks and the run it started" })),
+  }),
+  reply("command.result", {
+    status: Type.Literal("rejected"),
+    code: oneOf(ERROR_CODES),
+    message: Type.String(),
+    prId: Type.Optional(Type.String({ minLength: 1, description: "set with CONFLICT when review.add names a PR the daemon already tracks" })),
+  }),
   Type.Object({
     type: Type.Literal("error"),
     requestId: OptionalRequestId,

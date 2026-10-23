@@ -1,0 +1,9 @@
+{
+  "type": "command",
+  "requestId": "req-cmd",
+  "command": "review.add",
+  "params": {
+    "url": "https://github.com/acme/shop/pull/184"
+  },
+  "idempotencyKey": "review.add:https://github.com/acme/shop/pull/184"
+}

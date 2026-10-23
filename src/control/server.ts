@@ -167,7 +167,8 @@ export async function startControlServer(options: ServerOptions): Promise<Contro
         send(c, { type: "timeline.page", requestId, ...source.timeline(message) });
         return;
       case "command": {
-        const reject = (code: ErrorCode, text: string) => send(c, { type: "command.result", requestId, status: "rejected", code, message: text });
+        const reject = (code: ErrorCode, text: string, prId?: string) =>
+          send(c, { type: "command.result", requestId, status: "rejected", code, message: text, ...(prId ? { prId } : {}) });
         // The server is the gate, whatever the UI shows: only a capability the welcome granted runs, and only while streaming.
         const granted = message.command === "account.select" ? Boolean(source.selectAccount) : Boolean(source.command) && (source.capabilities?.() ?? []).includes(message.command);
         if (!granted) return reject("CAPABILITY_DENIED", source.unavailable?.(message.command) ?? `${message.command} is not available in this version`);
@@ -175,10 +176,10 @@ export async function startControlServer(options: ServerOptions): Promise<Contro
         const expectedKey = idempotencyKey(message);
         if (message.idempotencyKey !== expectedKey) return reject("INVALID_REQUEST", `idempotencyKey must be ${expectedKey}`);
         try {
-          const operationId = message.command === "account.select" ? await source.selectAccount!(message.params.accountId) : await source.command!(message);
-          send(c, { type: "command.result", requestId, status: "accepted", operationId });
+          const accepted = message.command === "account.select" ? { operationId: await source.selectAccount!(message.params.accountId) } : await source.command!(message);
+          send(c, { type: "command.result", requestId, status: "accepted", ...accepted });
         } catch (error) {
-          if (error instanceof ControlError) return reject(error.code, error.message);
+          if (error instanceof ControlError) return reject(error.code, error.message, error.prId);
           // A command's failure is always its own result, so the client never waits on a bare error for a requestId.
           report(error);
           return reject("INTERNAL_ERROR", error instanceof Error ? error.message : String(error));

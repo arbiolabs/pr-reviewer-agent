@@ -1,1 +1,1 @@
-Only the four reserved command names exist.
+Only the reserved command names exist.

@@ -3215,6 +3215,15 @@
         "operationId": {
           "type": "string",
           "minLength": 1
+        },
+        "prId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "runId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "with prId, set by review.add: the PR it tracks and the run it started"
         }
       }
     },
@@ -3257,6 +3266,11 @@
         },
         "message": {
           "type": "string"
+        },
+        "prId": {
+          "type": "string",
+          "minLength": 1,
+          "description": "set with CONFLICT when review.add names a PR the daemon already tracks"
         }
       }
     },

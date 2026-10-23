@@ -100,9 +100,9 @@ describe("handshake", () => {
   it("rejects every command with CAPABILITY_DENIED", async () => {
     const c = await client(await serve({ source: FixtureSource.load("normal") }));
     await c.hello();
-    const names = ["review.start", "review.cancel", "review.retry", "review.publish"];
+    const names = ["review.add", "review.start", "review.cancel", "review.retry", "review.publish"];
     for (const name of names) c.send(JSON.parse(readFileSync(join(PROTOCOL_DIR, "fixtures", `client.command.${name}.json`), "utf8")));
-    await c.waitFor(() => c.messages.filter((m) => m.type === "command.result").length === 4);
+    await c.waitFor(() => c.messages.filter((m) => m.type === "command.result").length === names.length);
     expect(c.messages.filter((m) => m.type === "command.result")).toEqual(
       names.map((name) => ({ type: "command.result", requestId: "req-cmd", status: "rejected", code: "CAPABILITY_DENIED", message: `${name} is not available from a fixture server` })),
     );

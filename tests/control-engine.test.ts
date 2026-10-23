@@ -57,7 +57,7 @@ async function host(options: { config?: Config; responses?: FauxResponseStep[]; 
     lockWaitMs: 0,
   });
   // No gh on PATH: journal sequences are pinned, and a detected account would add a row.
-  const source = await EngineSource.host(dataDir, app, { config, pulls, github: options.github ?? (() => client), env: { PATH: "" } });
+  const source = await EngineSource.host(dataDir, app, { config, pulls, github: options.github ?? (() => client), env: { PATH: "" }, account: "github.com/octo" });
   cleanup.push(() => source.close());
   return { app, source, dataDir, client };
 }
@@ -150,7 +150,7 @@ it("is read-only while another pr-review holds the data dir, and grants only acc
     rejected("CAPABILITY_DENIED", `review.start is not available: another pr-review is running on ${holder.dataDir}`),
   );
   // The holder is still the engine: its own welcome grants the commands.
-  expect((await serve(holder.source)).welcome).toMatchObject({ mode: "engine", capabilities: ["account.select", "review.start", "review.retry", "review.cancel", "review.publish"] });
+  expect((await serve(holder.source)).welcome).toMatchObject({ mode: "engine", capabilities: ["account.select", "review.add", "review.start", "review.retry", "review.cancel", "review.publish"] });
 }, 30_000);
 
 it("falls back to read-only with the reason when recovery fails, holding no lock and running no task", async () => {
@@ -224,7 +224,7 @@ it("is read-only by default: no lock, no engine, account.select only; the review
 
   const comment = await host({ config: { ...approvalConfig, review: { ...approvalConfig.review, publish_mode: "comment" } } });
   const served = await serve(comment.source);
-  expect(served.welcome).toMatchObject({ mode: "engine", capabilities: ["account.select", "review.start", "review.retry", "review.cancel"] });
+  expect(served.welcome).toMatchObject({ mode: "engine", capabilities: ["account.select", "review.add", "review.start", "review.retry", "review.cancel"] });
   expect(served.welcome).not.toHaveProperty("readOnlyReason");
   served.c.send({ type: "snapshot.get", requestId: "s" });
   await served.c.waitFor((m) => m.type === "snapshot");
@@ -609,3 +609,55 @@ it("starts a head again under the same key once approval mode makes it a new rev
 it("produced the M3 server messages, each passing the v1 schema", () => {
   for (const type of ["publication.preview", "event:review.publication_changed", "event:run.failed", "event:run.superseded", "command.result"]) expect(produced.has(type), type).toBe(true);
 });
+
+it("review.add tracks a new PR from its URL and starts its review; a replay answers the same run and starts nothing", async () => {
+  const h = await host({ config: { ...approvalConfig, review: { ...approvalConfig.review, publish_mode: "dry_run" } } });
+  const { c, welcome } = await serve(h.source);
+  expect(welcome).toMatchObject({ capabilities: ["account.select", "review.add", "review.start", "review.retry", "review.cancel"] });
+  c.send({ type: "snapshot.get", requestId: "s" });
+  const snap = await c.waitFor<Extract<ServerMessage, { type: "snapshot" }>>((m) => m.type === "snapshot");
+  expect(snap.prs).toEqual([]);
+
+  const added = await command(c, { command: "review.add", params: { url: "https://github.com/acme/shop/pull/1" } });
+  const prId = h.app.store.pullByName("acme/shop", 1)!.id;
+  const runId = h.app.store.revisionsForPr(prId)[0]!.id;
+  expect(operation(added)).toEqual({ type: "command.result", status: "accepted", operationId: `review.add:${runId}`, prId, runId });
+  await c.waitFor((m) => m.type === "event" && m.eventType === "review.completed");
+  expect(c.events().map(describeEvent).slice(0, 2)).toEqual(["pr acme/shop#1", "run.started COLLECT_CONTEXT"]);
+  // dry_run: the review completes and never posts.
+  expect([h.app.store.revision(runId)!.state, fake.postAttempts]).toEqual(["COMPLETED", 0]);
+
+  expect(operation(await command(c, { command: "review.add", params: { url: "https://github.com/acme/shop/pull/1" } }))).toEqual(operation(added));
+  expect(h.app.store.revisionsForPr(prId)).toHaveLength(1);
+  expect(await taskStatuses(h.app)).toEqual(["terminal"]);
+}, 30_000);
+
+it("review.add refuses an already tracked PR naming it, an invalid URL, a PR GitHub won't serve, and a closed one", async () => {
+  const h = await host();
+  const { c } = await serve(h.source);
+  const prId = h.app.store.upsertPull(fixture.pull);
+  c.send({ type: "snapshot.get", requestId: "s" });
+  await c.waitFor((m) => m.type === "snapshot");
+
+  expect(await command(c, { command: "review.add", params: { url: "ACME/shop#1" } })).toEqual(
+    expect.objectContaining({ status: "rejected", code: "CONFLICT", message: "acme/shop#1 is already tracked", prId }),
+  );
+  expect(await command(c, { command: "review.add", params: { url: "https://gitlab.com/acme/shop/pull/1" } })).toEqual(
+    rejected("INVALID_REQUEST", "https://gitlab.com/acme/shop/pull/1 is not a GitHub pull request; paste its URL (https://github.com/owner/repo/pull/123) or owner/repo#123"),
+  );
+  expect(await command(c, { command: "review.add", params: { url: "acme/ghost#9" } })).toEqual(
+    rejected("NOT_FOUND", "cannot read acme/ghost#9: it does not exist, or github.com/octo has no access to it (HTTP 404)"),
+  );
+  fake.setPull({ ...fixture.pull, number: 2, state: "closed", merged: true });
+  expect(await command(c, { command: "review.add", params: { url: "acme/shop#2" } })).toEqual(rejected("CONFLICT", "acme/shop#2 is merged; only open PRs are reviewed"));
+  expect([h.app.store.pullByName("acme/shop", 2), await taskStatuses(h.app)]).toEqual([undefined, []]);
+}, 30_000);
+
+it("a read-only daemon refuses review.add", async () => {
+  const off = await openSource(mkdtempSync(join(tmpdir(), "engine-")), false, {}, () => {});
+  cleanup.push(() => off.close());
+  const { c } = await serve(off);
+  c.send({ type: "snapshot.get", requestId: "s" });
+  await c.waitFor((m) => m.type === "snapshot");
+  expect(await command(c, { command: "review.add", params: { url: "acme/shop#1" } })).toEqual(rejected("CAPABILITY_DENIED", `review.add is not available: ${COMMANDS_OFF}`));
+}, 30_000);

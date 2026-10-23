@@ -7,12 +7,18 @@ import type { DiffPage } from "./diff.ts";
 
 export class ControlError extends Error {
   readonly code: ErrorCode;
+  /** The PR a refusal is about, for a client to select: set when review.add names a PR already tracked. */
+  readonly prId: string | undefined;
 
-  constructor(code: ErrorCode, message: string) {
+  constructor(code: ErrorCode, message: string, prId?: string) {
     super(message);
     this.code = code;
+    this.prId = prId;
   }
 }
+
+/** An accepted command: its operation, and for review.add the PR it tracks and the run it started. */
+export type Accepted = { operationId: string; prId?: string; runId?: string };
 
 export type Snapshot = Omit<Extract<ServerMessage, { type: "snapshot" }>, "type" | "requestId">;
 export type DiffRequest = Extract<ClientMessage, { type: "diff.get" }>;
@@ -43,8 +49,8 @@ export interface ControlSource {
   capabilities?(): string[];
   /** Why a review command is not granted, as the CAPABILITY_DENIED message. */
   unavailable?(command: string): string;
-  /** Run a granted review command and return its operation id, or throw ControlError. */
-  command?(request: ReviewCommand): Promise<string>;
+  /** Run a granted review command and return its operation, or throw ControlError. */
+  command?(request: ReviewCommand): Promise<Accepted>;
   /** The stored payload of a run, or throw ControlError NOT_FOUND. */
   publication?(runId: string): Promise<PublicationPreview>;
   close(): void | Promise<void>;
