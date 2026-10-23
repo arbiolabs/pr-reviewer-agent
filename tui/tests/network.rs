@@ -229,3 +229,27 @@ async fn a_socket_path_longer_than_sun_path_is_refused_without_dialing() {
     tokio::time::sleep(Duration::from_millis(400)).await;
     assert!(c.msgs.try_recv().is_err(), "the network task kept going after refusing the path");
 }
+
+#[tokio::test]
+async fn redial_dials_at_once_even_with_reconnect_off() {
+    let dir = socket_dir("redial");
+    let sock = dir.join("reviewer.sock");
+    let (msg_tx, msgs) = mpsc::channel(QUEUE);
+    let (cmds, cmd_rx) = mpsc::channel(QUEUE);
+    let cfg = NetConfig { socket: sock.clone(), heartbeat_timeout: Duration::from_secs(30), reconnect: false };
+    tokio::spawn(net::run(cfg, msg_tx, cmd_rx));
+    let mut c = Client { model: model(), msgs, cmds };
+    c.until("the first dial to fail", |m| matches!(m.link, Link::Disconnected { retry_in_ms: None, .. })).await;
+    let listener = UnixListener::bind(&sock).unwrap();
+    let seen: Seen = Default::default();
+    let server_seen = seen.clone();
+    tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let _w = record(stream, server_seen);
+        std::future::pending::<()>().await;
+    });
+    c.cmds.send(NetCmd::Redial).await.unwrap();
+    c.until("the redial to connect", |m| m.link == Link::Negotiating).await;
+    wait_for(&seen, 1).await;
+    assert_eq!(types(&seen), ["hello"]);
+}

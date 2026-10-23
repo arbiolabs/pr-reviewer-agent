@@ -64,6 +64,24 @@ pub fn parse_args(mut it: impl Iterator<Item = String>) -> Result<Cli, String> {
 struct File {
     connection: ConnectionSection,
     ui: UiSection,
+    desktop: Desktop,
+}
+
+/// `[desktop]`: how pr-review-desktop starts the daemon when nothing answers. The terminal client ignores it.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(deny_unknown_fields, default)]
+pub struct Desktop {
+    /// The command that runs `pr-review`, as a shell would read it, when it is not on PATH:
+    /// `node /path/to/bin/pr-review.mjs`. The app adds `daemon --allow-commands --socket <socket>`.
+    pub daemon_command: Option<String>,
+    /// The LaunchAgent the app starts and stops through launchctl when its plist is in ~/Library/LaunchAgents.
+    pub launch_agent: String,
+}
+
+impl Default for Desktop {
+    fn default() -> Self {
+        Desktop { daemon_command: None, launch_agent: "io.github.diego-arbio-dev.pr-review.daemon".into() }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -128,6 +146,7 @@ pub struct Settings {
     pub config_path: PathBuf,
     /// Mouse capture, which turns the terminal's own drag-to-select into a modifier-drag.
     pub mouse: bool,
+    pub desktop: Desktop,
 }
 
 fn home() -> PathBuf {
@@ -240,6 +259,7 @@ pub fn resolve(args: Args, no_color: bool, detect: impl FnOnce() -> Palette) -> 
         wanted_pr,
         config_path,
         mouse: file.ui.mouse,
+        desktop: file.desktop,
     })
 }
 
@@ -299,6 +319,13 @@ mod tests {
         std::fs::write(&path, "[ui]\nbackground = \"clear\"\n").unwrap();
         let err = resolve(Args { config: Some(path.clone()), ..Args::default() }, false, || Palette::Dark).unwrap_err();
         assert!(err.contains("ui.background"), "{err}");
+
+        assert_eq!(s.desktop, Desktop::default());
+        std::fs::write(&path, "[desktop]\ndaemon_command = \"node /opt/pr review/bin/pr-review.mjs\"\n").unwrap();
+        let desktop =
+            resolve(Args { config: Some(path.clone()), ..Args::default() }, false, || Palette::Dark).unwrap().desktop;
+        assert_eq!(desktop.daemon_command.as_deref(), Some("node /opt/pr review/bin/pr-review.mjs"));
+        assert_eq!(desktop.launch_agent, "io.github.diego-arbio-dev.pr-review.daemon");
 
         std::fs::write(&path, "[ui]\nascci = true\n").unwrap();
         let err = resolve(Args { config: Some(path), ..Args::default() }, false, || Palette::Dark).unwrap_err();
