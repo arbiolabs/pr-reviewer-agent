@@ -38,7 +38,7 @@ pub fn settings(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
 fn preview(p: Colors) -> Div {
     let bar = |w: f32, c: Hsla| div().h(px(3.)).w(relative(w)).rounded(px(2.)).bg(c);
     let dot = |c: Hsla| div().flex_none().size(px(6.)).rounded(radius::PILL).bg(c);
-    div().flex_1().min_w_0().h_full().bg(p.bg).p(px(6.)).child(
+    div().flex_1().min_w_0().overflow_hidden().h_full().bg(p.bg).p(px(6.)).child(
         div()
             .size_full()
             .flex()

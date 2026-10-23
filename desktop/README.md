@@ -47,6 +47,8 @@ Both live in the `[desktop]` section of the config file the app reads (`--config
 daemon_command = "node /path/to/pr-reviewer/bin/pr-review.mjs"
 # The LaunchAgent the app starts and stops through launchctl.
 launch_agent = "io.github.diego-arbio-dev.pr-review.daemon"
+# The theme Settings saves: system, light, dark, solarized-light, solarized-dark or nord.
+theme = "nord"
 ```
 
 The window shows "Starting the reviewer" and dials as soon as the socket appears. After 20 s without a welcome, the start counts as failed, and the window says why and where the log is.
@@ -71,6 +73,12 @@ With that setting, Stop is a plain `daemon.stop` and Start is a `launchctl kicks
 
 - **Risk check (Jev)** saves your TypeSafe key in the login keychain, where the daemon reads it for the next review with no restart. The field is masked and the page says only whether a key is saved. Off macOS, set `TYPESAFE_API_KEY` in the daemon's environment instead. [Configuration](../docs/configuration.md#typesafe-key-in-the-macos-keychain) explains how the key is kept.
 - **Agent** lists the models the daemon can review with, grouped by provider and searchable, with the one in use and where each provider's credential comes from. Save makes the choice the daemon's `models.default`. Reviews started from then on use it, and a PR reviewed again with another model gets a new revision.
+
+### Themes
+
+**Settings** (⌘,) opens on **Appearance**, with a tile for each theme: **System**, which follows macOS between Light and Dark and is the default, **Light**, **Dark**, **Solarized Light**, **Solarized Dark** and **Nord**. **View → Appearance** and the palette (type `theme`) offer the same list. A theme applies at once. The app saves it as `theme` in the `[desktop]` section of its config file, the one `--config` names, else `~/Library/Application Support/pr-review/config.toml`, and opens in it on the next launch. The app changes only that line and leaves the file's other keys and comments as they are. When the file holds `[desktop]` as an inline table it can't edit that way, the app says so in a toast and saves nothing. An unknown `theme` falls back to System with a warning on stderr. The terminal client's own `[ui] theme` is separate.
+
+The Solarized and Nord palettes keep their canonical colors where those pass the app's contrast test, and move the others in lightness only. [DESIGN.md](DESIGN.md#themes) lists each change.
 
 To play a scripted session with no daemon:
 
@@ -102,7 +110,7 @@ pr-review-desktop --playback protocol/playback/showcase.ndjson --snapshot out.pn
 | `--snapshot-after-ms N` | The moment to capture, in milliseconds from launch. The default is 1000. |
 | `--actions STEPS` | Steps to apply before the capture. Needs `--playback`. |
 | `--window WxH` | The window size in points. The default is 1280x800. |
-| `--appearance dark\|light` | The gpui-kit theme mode. The default follows the system. |
+| `--appearance THEME` | The theme: `system`, `light`, `dark`, `solarized-light`, `solarized-dark` or `nord`. It wins over the theme Settings saved. The default is the saved theme, else `system`. |
 
 The window must fit on the screen, because macOS shrinks a larger one and the capture then never matches the requested size. The PNG is the window's content area at the display's scale, so `--window 1280x800` gives a 2560x1600 image on a Retina display. The title bar's chrome above the content area is cropped off; the app's own title bar, with the traffic lights, is in the capture.
 
@@ -152,7 +160,7 @@ desktop/snap.sh                      # every state, into desktop/snapshots/
 desktop/snap.sh /tmp/snaps diff help # two states, into /tmp/snaps
 ```
 
-The states are listed at the end of `snap.sh`, one per line: a name, the appearance, the capture time, the steps and, optionally, another playback script. `08-disconnected` dials a socket that doesn't exist and captures in real time. `00-connecting`, `11-empty-queue` and `12-readonly` play the sessions in `desktop/playback/` and a read-only rewrite of the showcase that `snap.sh` writes under `target/`. `15-tracking`, `15b-reopened` and `16-discards` play `protocol/playback/tracking.ndjson`, a PR reviewed on three heads, and `17-big-diff` plays `big-diff.ndjson`, a 60-file PR. `18a-add-pr-empty`, `18b-add-pr-valid` and `18c-add-pr-error` show the add-a-PR sheet empty, with a URL it read, and with the daemon's refusal. `19-reviewer-stopped`, `19b-starting` and `19c-stop-confirm` show the board after a stop, the offline screen while a start is on its way, and the sheet that asks before a stop pauses two running reviews. `20-footer-account` shows the account footer with the showcase's account, and `20b-footer-no-account` plays a rewrite of the showcase with every account list emptied, which `snap.sh` writes under `target/`.
+The states are listed at the end of `snap.sh`, one per line: a name, the appearance, the capture time, the steps and, optionally, another playback script. `08-disconnected` dials a socket that doesn't exist and captures in real time. `00-connecting`, `11-empty-queue` and `12-readonly` play the sessions in `desktop/playback/` and a read-only rewrite of the showcase that `snap.sh` writes under `target/`. `15-tracking`, `15b-reopened` and `16-discards` play `protocol/playback/tracking.ndjson`, a PR reviewed on three heads, and `17-big-diff` plays `big-diff.ndjson`, a 60-file PR. `18a-add-pr-empty`, `18b-add-pr-valid` and `18c-add-pr-error` show the add-a-PR sheet empty, with a URL it read, and with the daemon's refusal. `19-reviewer-stopped`, `19b-starting` and `19c-stop-confirm` show the board after a stop, the offline screen while a start is on its way, and the sheet that asks before a stop pauses two running reviews. `20-footer-account` shows the account footer with the showcase's account, and `20b-footer-no-account` plays a rewrite of the showcase with every account list emptied, which `snap.sh` writes under `target/`. `21-theme-solarized-light`, `21b-solarized-dark` and `21c-nord` show each classic theme on the overview, and their `-finding` states on a finding. `21d-appearance-settings` shows the theme picker in Settings.
 
 ## How the parts connect
 
