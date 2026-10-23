@@ -6,6 +6,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { beforeAll, describe, expect, it } from "vitest";
 import { parseDiff } from "../src/source/diff.ts";
+import { withTimeout } from "../src/reasoning/tools.ts";
 import { assertSafePath, PinnedRepo, syncRepo } from "../src/source/git.ts";
 import { createFixture, DEFECT, type Fixture } from "./fixture.ts";
 
@@ -53,7 +54,7 @@ describe("pinned repo", () => {
     expect(await repo.grep("requireAdmin", "src/routes", undefined, new AbortController().signal)).toContain("requireAdmin");
   });
 
-  it("fetches a blob-less clone's missing blobs for a search in one batch, not one round trip each", async () => {
+  it("fetches a blob-less clone's head tree in one batch, not one round trip per blob", async () => {
     const origin = mkdtempSync(join(tmpdir(), "origin-"));
     const sh = (dir: string, ...args: string[]) => execFileSync("git", ["-C", dir, "-c", "user.name=F", "-c", "user.email=f@x", ...args], { encoding: "utf8" }).trim();
     sh(origin, "init", "-q");
@@ -77,10 +78,22 @@ describe("pinned repo", () => {
     expect(missing("src")).toBe(40);
     const before = packs();
     const lazy = new PinnedRepo(dir, head, head);
-    expect((await lazy.grep("tel:", "src")).split("\n").filter(Boolean)).toHaveLength(40);
-    expect(missing("src")).toBe(0);
+    expect(await lazy.prefetch()).toBe(41);
+    expect(missing("src") + missing("README.md")).toBe(0);
     expect(packs() - before).toBe(1);
-    expect(missing("README.md")).toBe(1);
+    expect((await lazy.grep("tel:", "src")).split("\n").filter(Boolean)).toHaveLength(40);
+    expect(await new PinnedRepo(dir, head, head).prefetch()).toBe(0);
+    expect(packs() - before).toBe(1);
+  });
+
+  it("answers a slow call with undefined but still rejects when the review stops", async () => {
+    const slow = (signal: AbortSignal) => new Promise<string>((_, reject) => signal.addEventListener("abort", () => reject(Object.assign(new Error("aborted"), { name: "AbortError" }))));
+    expect(await withTimeout(slow, 20)).toBe(undefined);
+    expect(await withTimeout(async () => "found", 1_000)).toBe("found");
+    const stopping = new AbortController();
+    const pending = withTimeout(slow, 1_000, stopping.signal);
+    stopping.abort();
+    await expect(pending).rejects.toMatchObject({ name: "AbortError" });
   });
 
   it("rejects traversal, absolute and NUL paths before running git", async () => {

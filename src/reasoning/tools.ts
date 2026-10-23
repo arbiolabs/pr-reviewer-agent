@@ -24,6 +24,23 @@ export type Workspace = { revision: RevisionRow; snapshot: Snapshot; repo: Pinne
 
 export type ToolDeps = { store: AppStore; workspace(revisionId: string): Promise<Workspace> };
 
+/** How long one search_code may run before it answers "timed out" instead. */
+export const SEARCH_TIMEOUT_MS = 60_000;
+
+/**
+ * `work` under a signal that also aborts after `ms`: its result, or `undefined` when the time ran out first. An abort
+ * of `outer` (the review stopping) still rejects, so a shutdown is never mistaken for a slow call.
+ */
+export async function withTimeout<T>(work: (signal: AbortSignal) => Promise<T>, ms: number, outer?: AbortSignal): Promise<T | undefined> {
+  const timeout = AbortSignal.timeout(ms);
+  try {
+    return await work(outer ? AbortSignal.any([outer, timeout]) : timeout);
+  } catch (error) {
+    if (timeout.aborted && !outer?.aborted) return undefined;
+    throw error;
+  }
+}
+
 const text = (value: string): ToolExecutionResult => ({ output: [{ type: "text", text: value || "(empty)" }] });
 
 const numbered = (source: string) =>
@@ -98,7 +115,12 @@ export function createReviewTools(deps: ToolDeps): Extension {
         replay: "safe",
         execute: async (args, api, context) => {
           const ws = await workspace(api, context);
-          const found = await ws.repo.grep(args.query, args.scope, undefined, context.abortSignal);
+          // A search that runs long answers the model instead of holding the review: the timeout stops git, not the run.
+          const found = await withTimeout((signal) => ws.repo.grep(args.query, args.scope, undefined, signal), SEARCH_TIMEOUT_MS, context.abortSignal);
+          if (found === undefined) {
+            deps.store.appendActivity(ws.revision.id, "search_code", `timed out after ${SEARCH_TIMEOUT_MS / 1000}s: ${args.query}`);
+            return text(`search_code timed out after ${SEARCH_TIMEOUT_MS / 1000} s. Narrow the scope to a smaller directory or file, or search for a more specific string.`);
+          }
           deps.store.markCodeRead(ws.revision.id);
           deps.store.appendActivity(ws.revision.id, "search_code", args.scope ? `${args.query} in ${args.scope}` : args.query);
           return text(found);
