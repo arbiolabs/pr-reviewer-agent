@@ -57,6 +57,11 @@ export type ServerOptions = {
   maxQueue?: number;
   /** The readiness checks each `welcome` carries, recomputed per hello. */
   checks?: () => Promise<SetupCheck[]>;
+  /**
+   * Shuts the daemon down: with it, an engine-mode source grants `daemon.stop`, and an accepted stop calls it once the
+   * reply has gone out. A read-only daemon never grants it, since its data dir may belong to another process.
+   */
+  stop?: () => void;
 };
 
 export type ControlServer = { path: string; close(): Promise<void>; queueDepths(): number[] };
@@ -79,6 +84,7 @@ const report = (error: unknown) => process.stderr.write(`pr-review daemon: ${err
 
 export async function startControlServer(options: ServerOptions): Promise<ControlServer> {
   const { socketPath, source } = options;
+  const canStop = options.stop !== undefined && source.mode === "engine";
   const maxQueue = options.maxQueue ?? 2000;
   const conns = new Set<Conn>();
   // listen() succeeds on a longer path, but the kernel truncates sun_path, so no client could ever connect.
@@ -170,11 +176,17 @@ export async function startControlServer(options: ServerOptions): Promise<Contro
         const reject = (code: ErrorCode, text: string, prId?: string) =>
           send(c, { type: "command.result", requestId, status: "rejected", code, message: text, ...(prId ? { prId } : {}) });
         // The server is the gate, whatever the UI shows: only a capability the welcome granted runs, and only while streaming.
-        const granted = message.command === "account.select" ? Boolean(source.selectAccount) : Boolean(source.command) && (source.capabilities?.() ?? []).includes(message.command);
+        const granted =
+          message.command === "account.select"
+            ? Boolean(source.selectAccount)
+            : message.command === "daemon.stop"
+              ? canStop
+              : Boolean(source.command) && (source.capabilities?.() ?? []).includes(message.command);
         if (!granted) return reject("CAPABILITY_DENIED", source.unavailable?.(message.command) ?? `${message.command} is not available in this version`);
         if (c.phase !== "streaming") return reject("CONFLICT", `send snapshot.get or resume before ${message.command}`);
         const expectedKey = idempotencyKey(message);
         if (message.idempotencyKey !== expectedKey) return reject("INVALID_REQUEST", `idempotencyKey must be ${expectedKey}`);
+        if (message.command === "daemon.stop") return stopDaemon(c, requestId, message.params.pauseReviews, reject);
         try {
           const accepted = message.command === "account.select" ? { operationId: await source.selectAccount!(message.params.accountId) } : await source.command!(message);
           send(c, { type: "command.result", requestId, status: "accepted", ...accepted });
@@ -187,6 +199,27 @@ export async function startControlServer(options: ServerOptions): Promise<Contro
         return pump(c);
       }
     }
+  };
+
+  /**
+   * `daemon.stop`: answer, then stop once the answer is out, so the client can tell a stop it asked for from a lost
+   * connection. A review at work makes it CONFLICT unless `pauseReviews` says to pause it, as SIGTERM would.
+   */
+  const stopDaemon = (c: Conn, requestId: string, pauseReviews: boolean, reject: (code: ErrorCode, text: string) => void) => {
+    const running = source.snapshot().runs.filter((r) => r.status === "RUNNING" && r.phase !== "AWAITING_APPROVAL").length;
+    if (running > 0 && !pauseReviews) {
+      const what = running === 1 ? "1 review is running" : `${running} reviews are running`;
+      return reject("CONFLICT", `${what}; stopping pauses it until the next start (send pauseReviews: true)`);
+    }
+    // `finish` is the reply flushed; `close` covers a client that vanished first.
+    let stopping = false;
+    const stop = () => {
+      if (stopping) return;
+      stopping = true;
+      options.stop!();
+    };
+    c.socket.once("finish", stop).once("close", stop);
+    sendAndClose(c, { type: "command.result", requestId, status: "accepted", operationId: "daemon.stop" });
   };
 
   const handleLine = async (c: Conn, line: string): Promise<void> => {
@@ -224,7 +257,7 @@ export async function startControlServer(options: ServerOptions): Promise<Contro
         protocolVersion: PROTOCOL_VERSION,
         serverVersion: SERVER_VERSION,
         sessionId: randomUUID(),
-        capabilities: [...(source.selectAccount ? ["account.select"] : []), ...(source.capabilities?.() ?? [])],
+        capabilities: [...(source.selectAccount ? ["account.select"] : []), ...(source.capabilities?.() ?? []), ...(canStop ? ["daemon.stop"] : [])],
         ...(source.mode ? { mode: source.mode } : {}),
         ...(source.readOnlyReason ? { readOnlyReason: source.readOnlyReason } : {}),
         ...(checks ? { checks } : {}),

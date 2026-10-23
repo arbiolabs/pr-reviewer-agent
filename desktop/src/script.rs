@@ -47,6 +47,17 @@ pub enum Desk {
     Scrub(usize),
     /// `add-pr` or `add-pr:TEXT`: the sheet that adds a PR, with TEXT in its field.
     AddPr(String),
+    /// `reviewer:STATE`: the reviewer as a start or stop leaves it, since a playback never starts or stops one.
+    Reviewer(Staged),
+}
+
+/// The states `reviewer:` stages: `stopped`, `starting`, `start-failed` and `stop-confirm`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Staged {
+    Stopped,
+    Starting,
+    StartFailed,
+    StopConfirm,
 }
 
 #[rustfmt::skip]
@@ -76,7 +87,7 @@ const SCREENS: &[(&str, Screen)] = &[
 
 /// Comma-separated steps: an action name, `goto:<screen>`, `type:<text>`, `pr:<number>`, `finding:<n>`,
 /// `wait:<ms>`, `add:<url>`, or a desktop step (`tab:done`, `palette:<text>`, `keys`, `confirm-post`, `add-pr[:<url>]`,
-/// `scrub:<n>`).
+/// `scrub:<n>`, `reviewer:<state>`).
 pub fn parse(s: &str) -> Result<Vec<Step>, String> {
     let mut steps = Vec::new();
     for t in s.split(',').map(str::trim).filter(|t| !t.is_empty()) {
@@ -97,6 +108,15 @@ pub fn parse(s: &str) -> Result<Vec<Step>, String> {
                 _ => return Err(format!("{t:?}: tabs are queue and done")),
             },
             Some(("palette", v)) => steps.push(Step::Desk(Desk::Palette(v.into()))),
+            Some(("reviewer", v)) => steps.push(Step::Desk(Desk::Reviewer(match v {
+                "stopped" => Staged::Stopped,
+                "starting" => Staged::Starting,
+                "start-failed" => Staged::StartFailed,
+                "stop-confirm" => Staged::StopConfirm,
+                _ => {
+                    return Err(format!("{t:?}: reviewer states are stopped, starting, start-failed and stop-confirm"));
+                }
+            }))),
             None if t == "palette" => steps.push(Step::Desk(Desk::Palette(String::new()))),
             None if t == "keys" => steps.push(Step::Desk(Desk::Keys)),
             None if t == "confirm-post" => steps.push(Step::Desk(Desk::ConfirmPost)),
@@ -239,7 +259,8 @@ mod tests {
     #[test]
     fn steps_parse_from_names_and_prefixes() {
         assert_eq!(
-            parse("down, goto:diff,wait:300,type:ab,pr:1287,finding:2,start,confirm-post,scrub:12").unwrap(),
+            parse("down, goto:diff,wait:300,type:ab,pr:1287,finding:2,start,confirm-post,scrub:12,reviewer:stopped")
+                .unwrap(),
             [
                 Step::Act(Action::Down),
                 Step::Act(Action::Goto(Screen::Diff)),
@@ -251,6 +272,7 @@ mod tests {
                 Step::Act(Action::Mutation(Mutation::Start)),
                 Step::Desk(Desk::ConfirmPost),
                 Step::Desk(Desk::Scrub(12)),
+                Step::Desk(Desk::Reviewer(Staged::Stopped)),
             ]
         );
         assert_eq!(
@@ -261,6 +283,7 @@ mod tests {
                 Step::Add("acme/web#7".into())
             ]
         );
+        assert!(parse("reviewer:asleep").is_err());
         assert!(parse("sideways").unwrap_err().contains("known: quit, up"));
         assert!(parse("goto:nowhere").is_err());
         assert!(parse("finding:0").is_err());

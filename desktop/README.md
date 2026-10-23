@@ -30,6 +30,41 @@ Keep the socket path short. macOS refuses a socket path longer than 103 bytes, a
 
 Against a daemon started with `--allow-commands`, press ⌘N, or choose **Review a PR…** in the sidebar, the palette or the empty state. Paste the PR's URL (⌘V), or type `owner/repo#N`. The sheet shows the repository and number it read, and ⏎ asks the daemon to add it. The daemon reads the PR from GitHub with its own account and starts its review; the sheet closes on the new PR. If the daemon refuses, the sheet says why in place: a PR its account can't see, a closed or merged PR, or text that isn't a PR link. A PR the window already tracks opens instead. On a read-only daemon the entries are locked with the reason.
 
+### Start and stop the reviewer
+
+When nothing answers on the socket, the offline screen's primary action is **Start reviewer** (⌘R). The **Reviewer** menu, the palette and the Reviewer card in Setup also offer **Stop reviewer** and **Restart reviewer**. The card shows the state, the socket, the mode, how the daemon runs on this machine and where its log is. On a read-only daemon, stop and restart are off with the reason, because that daemon may belong to another process.
+
+The app starts the daemon in one of two ways:
+
+1. **Its LaunchAgent.** If `~/Library/LaunchAgents/<label>.plist` exists and serves the socket this window dials (its `--socket` argument, or the default socket when it has none), the app runs `launchctl kickstart gui/<uid>/<label>` when the job is loaded, and `launchctl bootstrap gui/<uid> <plist>` when it is not. The label is `io.github.diego-arbio-dev.pr-review.daemon` by default.
+2. **A process it spawns.** Otherwise the app runs `pr-review daemon --allow-commands --socket <socket>` in its own process group, so it outlives the app, with stdout and stderr appended to `~/Library/Logs/pr-review/daemon.log`. It runs `daemon_command` from the config file when that is set, else `pr-review` from the app's `PATH`. An app opened from Finder gets a short `PATH`, so set `daemon_command` there. With neither, the start says what to set.
+
+Both live in the `[desktop]` section of the config file the app reads (`--config`, default `~/Library/Application Support/pr-review/config.toml`). The terminal client parses the section and ignores it.
+
+```toml
+[desktop]
+# Shell syntax; the app appends daemon --allow-commands --socket <socket>.
+daemon_command = "node /path/to/pr-reviewer/bin/pr-review.mjs"
+# The LaunchAgent the app starts and stops through launchctl.
+launch_agent = "io.github.diego-arbio-dev.pr-review.daemon"
+```
+
+The window shows "Starting the reviewer" and dials as soon as the socket appears. After 20 s without a welcome, the start counts as failed, and the window says why and where the log is.
+
+Stop sends the protocol's `daemon.stop`. The daemon answers, then shuts down as on SIGTERM: running reviews pause and resume on the next start, the data-dir lock is released, the socket is removed and the process exits 0. While a review runs, the app asks first. The window then reads "Reviewer stopped", which is not the same as offline. Restart is a stop, then a start.
+
+A LaunchAgent with `KeepAlive` set to `true` is restarted by launchd after any exit, a clean one included. The app reads the plist's `KeepAlive` on every ask. When it is `true`, Stop opens a sheet that says so and offers **Stop and keep stopped**, which runs `launchctl bootout gui/<uid>/<label>`. launchd then stops the daemon with SIGTERM and unloads the job, and the next Start bootstraps it again. The recommended setting keeps the job loaded and lets a clean exit stay stopped, while launchd still restarts a crash:
+
+```xml
+<key>KeepAlive</key>
+<dict>
+  <key>SuccessfulExit</key>
+  <false/>
+</dict>
+```
+
+With that setting, Stop is a plain `daemon.stop` and Start is a `launchctl kickstart`.
+
 To play a scripted session with no daemon:
 
 ```bash
@@ -87,6 +122,7 @@ With `--socket`, the capture happens `--snapshot-after-ms` milliseconds after la
 | `scrub:N` | Hold the live log at its Nth event, counted from 1. |
 | `discards` | Open every "Verifier discarded" group on the timeline. |
 | `flagged` | List only the diff's files with findings. |
+| `reviewer:STATE` | Show the reviewer as a start or a stop leaves it: `stopped`, `starting`, `start-failed`, or `stop-confirm` (the sheet that asks before a stop pauses running reviews). The window then dials `/private/tmp/prdc/s.sock`, as `08-disconnected` does. |
 
 The fixture daemon (`node bin/pr-review.mjs daemon --fixture showcase`) answers `finding.get` with the same recorded detail the playback does, so a finding opened against it shows its real explanation, evidence and history. It grants no review command, so the window reads it as read-only.
 
@@ -103,7 +139,7 @@ desktop/snap.sh                      # every state, into desktop/snapshots/
 desktop/snap.sh /tmp/snaps diff help # two states, into /tmp/snaps
 ```
 
-The states are listed at the end of `snap.sh`, one per line: a name, the appearance, the capture time, the steps and, optionally, another playback script. `08-disconnected` dials a socket that doesn't exist and captures in real time. `00-connecting`, `11-empty-queue` and `12-readonly` play the sessions in `desktop/playback/` and a read-only rewrite of the showcase that `snap.sh` writes under `target/`. `15-tracking`, `15b-reopened` and `16-discards` play `protocol/playback/tracking.ndjson`, a PR reviewed on three heads, and `17-big-diff` plays `big-diff.ndjson`, a 60-file PR. `18a-add-pr-empty`, `18b-add-pr-valid` and `18c-add-pr-error` show the add-a-PR sheet empty, with a URL it read, and with the daemon's refusal.
+The states are listed at the end of `snap.sh`, one per line: a name, the appearance, the capture time, the steps and, optionally, another playback script. `08-disconnected` dials a socket that doesn't exist and captures in real time. `00-connecting`, `11-empty-queue` and `12-readonly` play the sessions in `desktop/playback/` and a read-only rewrite of the showcase that `snap.sh` writes under `target/`. `15-tracking`, `15b-reopened` and `16-discards` play `protocol/playback/tracking.ndjson`, a PR reviewed on three heads, and `17-big-diff` plays `big-diff.ndjson`, a 60-file PR. `18a-add-pr-empty`, `18b-add-pr-valid` and `18c-add-pr-error` show the add-a-PR sheet empty, with a URL it read, and with the daemon's refusal. `19-reviewer-stopped`, `19b-starting` and `19c-stop-confirm` show the board after a stop, the offline screen while a start is on its way, and the sheet that asks before a stop pauses two running reviews.
 
 ## How the parts connect
 

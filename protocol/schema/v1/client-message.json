@@ -475,6 +475,48 @@
             }
           },
           "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "requestId",
+            "command",
+            "params",
+            "idempotencyKey"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "command"
+            },
+            "requestId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "command": {
+              "type": "string",
+              "const": "daemon.stop"
+            },
+            "params": {
+              "type": "object",
+              "required": [
+                "pauseReviews"
+              ],
+              "properties": {
+                "pauseReviews": {
+                  "type": "boolean",
+                  "description": "stop even while reviews run: they pause and resume on the next engine start; without it a running review makes the stop CONFLICT"
+                }
+              },
+              "additionalProperties": false
+            },
+            "idempotencyKey": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
         }
       ]
     }

@@ -313,6 +313,7 @@ pub async fn run(script: Script, tx: mpsc::Sender<Msg>, mut rx: mpsc::Receiver<N
                         }
                     }
                 }
+                Some(NetCmd::Redial) => {}
                 Some(NetCmd::Close) | None => return,
             },
         }

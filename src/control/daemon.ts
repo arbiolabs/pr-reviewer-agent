@@ -38,9 +38,9 @@ export async function openSource(dataDir: string, allowCommands: boolean, deps: 
 }
 
 /**
- * `pr-review daemon`: serve the control socket in the foreground until SIGINT or SIGTERM. With commands enabled it
- * hosts the review engine and runs the commands in process; stopping it suspends the reviews in flight, which resume
- * on the next engine start. Quitting a client never touches it.
+ * `pr-review daemon`: serve the control socket in the foreground until SIGINT, SIGTERM or an accepted `daemon.stop`.
+ * With commands enabled it hosts the review engine and runs the commands in process; stopping it suspends the reviews
+ * in flight, which resume on the next engine start. Quitting a client never touches it.
  */
 export async function runDaemon(args: string[], dataDir: string, err: (text: string) => void, deps: DaemonDeps = {}): Promise<number> {
   const { values } = parseArgs({
@@ -55,15 +55,22 @@ export async function runDaemon(args: string[], dataDir: string, err: (text: str
   try {
     // The client asking is the TUI, so whether it is built says nothing; a fixture has no environment to check.
     const checks = values.fixture || !deps.checks ? undefined : async () => (await deps.checks!(dir)).filter((c) => c.id !== "tui");
-    const server = await startControlServer({ socketPath: values.socket ?? defaultSocketPath(), source, heartbeatMs: heartbeat * 1000, checks });
-    const where = values.fixture ? `fixture ${values.fixture}` : `data dir ${dir}, ${source.mode ?? "read-only"} mode`;
-    err(`pr-review daemon: listening on ${server.path} (${where}${source.capabilities?.().length ? ", commands enabled" : ""})\n`);
-    await new Promise((resolve) => {
-      process.once("SIGINT", resolve);
-      process.once("SIGTERM", resolve);
-    });
-    await server.close();
-    return 0;
+    // SIGINT, SIGTERM and an accepted daemon.stop all end here, so each one shuts down the same way.
+    let stop!: () => void;
+    const stopped = new Promise<void>((resolve) => (stop = resolve));
+    process.once("SIGINT", stop);
+    process.once("SIGTERM", stop);
+    try {
+      const server = await startControlServer({ socketPath: values.socket ?? defaultSocketPath(), source, heartbeatMs: heartbeat * 1000, checks, stop });
+      const where = values.fixture ? `fixture ${values.fixture}` : `data dir ${dir}, ${source.mode ?? "read-only"} mode`;
+      err(`pr-review daemon: listening on ${server.path} (${where}${source.capabilities?.().length ? ", commands enabled" : ""})\n`);
+      await stopped;
+      await server.close();
+      return 0;
+    } finally {
+      process.off("SIGINT", stop);
+      process.off("SIGTERM", stop);
+    }
   } finally {
     await source.close();
   }

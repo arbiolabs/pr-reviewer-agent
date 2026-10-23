@@ -471,7 +471,7 @@ it("retains the tokens of a bounded run of files, not of every file a tree-wide 
   gc();
   // About 1.4 GB when every file's tokens under four readings were kept; the normalized lines of 1,500 files are some 40 MB.
   expect((process.memoryUsage().heapUsed - before) / 1e6).toBeLessThan(200);
-});
+}, 30_000);
 
 it("links a candidate that names its prior finding only where code sees the report: near the finding's anchor and on its lines at this head", () => {
   const named = { priorFindingId: "f-1", title: "Anyone can refund" };

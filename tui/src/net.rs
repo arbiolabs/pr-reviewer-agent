@@ -27,6 +27,8 @@ pub const SOCKET_PATH_MAX: usize = if cfg!(target_os = "macos") { 103 } else { 1
 pub enum NetCmd {
     Send(ClientMessage),
     Close,
+    /// Dial now instead of waiting out the backoff, or for good when reconnect is off; ignored while connected.
+    Redial,
 }
 
 #[derive(Clone, Debug)]
@@ -84,7 +86,11 @@ pub async fn run(cfg: NetConfig, tx: mpsc::Sender<Msg>, mut rx: mpsc::Receiver<N
         loop {
             tokio::select! {
                 _ = &mut wait => break,
-                cmd = rx.recv() => if matches!(cmd, None | Some(NetCmd::Close)) { return },
+                cmd = rx.recv() => match cmd {
+                    None | Some(NetCmd::Close) => return,
+                    Some(NetCmd::Redial) => break,
+                    Some(NetCmd::Send(_)) => {}
+                },
             }
         }
     }
@@ -173,6 +179,7 @@ async fn session(stream: UnixStream, cfg: &NetConfig, tx: &mpsc::Sender<Msg>, rx
                     }
                     Ok(())
                 }
+                Some(NetCmd::Redial) => Ok(()),
                 Some(NetCmd::Close) | None => return End::Closed,
             },
             _ = sleep_until(deadline) => {

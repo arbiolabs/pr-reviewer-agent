@@ -42,8 +42,9 @@ export function isMissingObject(error: unknown): boolean {
 /** The most output one git command may produce; past it the command is killed and `ERR_CHILD_PROCESS_STDIO_MAXBUFFER` thrown. */
 const MAX_OUTPUT_BYTES = 64 * 1024 * 1024;
 
-async function git(dir: string, args: string[], maxBuffer = MAX_OUTPUT_BYTES, env = GIT_ENV): Promise<string> {
-  const { stdout } = await run("git", ["-C", dir, "-c", "core.quotePath=false", ...args], { env, maxBuffer, encoding: "utf8" });
+/** `signal` kills git when it aborts: a search the model asked for must not outlive the review that asked. */
+async function git(dir: string, args: string[], maxBuffer = MAX_OUTPUT_BYTES, env = GIT_ENV, signal?: AbortSignal): Promise<string> {
+  const { stdout } = await run("git", ["-C", dir, "-c", "core.quotePath=false", ...args], { env, maxBuffer, encoding: "utf8", signal });
   return stdout;
 }
 
@@ -130,10 +131,10 @@ export class PinnedRepo {
    * `offline` never fetches a blob the clone lacks: git fails with "bad object" instead. A blob over `maxBytes`
    * (MAX_OUTPUT_BYTES by default) throws BlobTooLargeError once that many bytes have arrived, so a huge file costs at most the cap.
    */
-  async show(sha: string, path: string, options: { offline?: boolean; maxBytes?: number } = {}): Promise<string | undefined> {
+  async show(sha: string, path: string, options: { offline?: boolean; maxBytes?: number; signal?: AbortSignal } = {}): Promise<string | undefined> {
     const safe = assertSafePath(path);
     try {
-      return await git(this.dir, ["show", `${sha}:${safe}`], options.maxBytes, options.offline ? OFFLINE_ENV : GIT_ENV);
+      return await git(this.dir, ["show", `${sha}:${safe}`], options.maxBytes, options.offline ? OFFLINE_ENV : GIT_ENV, options.signal);
     } catch (error) {
       const { code, stderr } = error as { code?: unknown; stderr?: unknown };
       if (code === 128 && /does not exist|exists on disk, but not in|invalid object name/.test(String(stderr))) return undefined;
@@ -142,11 +143,11 @@ export class PinnedRepo {
     }
   }
 
-  async grep(query: string, scope: string | undefined, cap = DEFAULT_OUTPUT_CAP): Promise<string> {
+  async grep(query: string, scope: string | undefined, cap = DEFAULT_OUTPUT_CAP, signal?: AbortSignal): Promise<string> {
     const args = ["grep", "-n", "-I", "-F", "--max-count=50", "-e", query, this.headSha];
     if (scope !== undefined && scope !== "" && scope !== ".") args.push("--", assertSafePath(scope));
     try {
-      const out = await git(this.dir, args);
+      const out = await git(this.dir, args, undefined, undefined, signal);
       return capBytes(out.replaceAll(`${this.headSha}:`, ""), cap);
     } catch (error) {
       if ((error as { code?: number }).code === 1) return "";
@@ -171,7 +172,8 @@ export class PinnedRepo {
     }
   }
 
-  log(path: string, limit: number): Promise<string> {
-    return git(this.dir, ["log", `-n${limit}`, "--format=%h %ad %an%n  %s", "--date=short", this.headSha, "--", assertSafePath(path)]);
+  log(path: string, limit: number, signal?: AbortSignal): Promise<string> {
+    const args = ["log", `-n${limit}`, "--format=%h %ad %an%n  %s", "--date=short", this.headSha, "--", assertSafePath(path)];
+    return git(this.dir, args, undefined, undefined, signal);
   }
 }
