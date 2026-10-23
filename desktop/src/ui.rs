@@ -996,10 +996,63 @@ fn titlebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                 format!("{} Click for setup.", crate::setup::read_only_sentence(m)),
             ))
         })
+        .child(reviewer_control(s, t, cx))
         .child(tip(
             focusable("search", search, t, radius::SM, click(cx, |s, cx| s.toggle_palette(cx))),
             "Search PRs and findings, or run a command",
         ))
+}
+
+/// The reviewer's state in a word, and the one action that changes it: Stop while it runs, Start while it doesn't.
+/// A start or stop on its way shows a spinner; an action that can't run now is dimmed with the reason in its tooltip.
+fn reviewer_control(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Stateful<Div> {
+    use crate::reviewer::{Ask, Control};
+    let (hue, word) = link_word(s, t);
+    let busy = matches!(s.reviewer.control, Control::Starting { .. } | Control::Stopping { .. });
+    let ask = if s.model.link.welcomed() { Ask::Stop } else { Ask::Start };
+    let (glyph, name) = match ask {
+        Ask::Stop => (IconName::CircleStop, "Stop reviewer"),
+        _ => (IconName::CirclePlay, "Start reviewer"),
+    };
+    let action = if busy {
+        div()
+            .flex()
+            .flex_none()
+            .items_center()
+            .justify_center()
+            .size(px(24.))
+            .child(crate::setup::spinner(t, s.still, "reviewer-spin"))
+            .id("reviewer-busy")
+    } else {
+        match s.reviewer.block(&s.model, ask) {
+            None => {
+                crate::kit::icon_button(t, "reviewer-toggle", glyph, name, px(24.), on(cx, move |s, cx| s.ask(ask, cx)))
+            }
+            Some(why) => crate::kit::icon_button(
+                t,
+                "reviewer-toggle",
+                glyph,
+                &format!("{name}: {}", crate::kit::sentence(&why)),
+                px(24.),
+                None,
+            ),
+        }
+    };
+    div()
+        .id("reviewer")
+        .flex()
+        .flex_none()
+        .items_center()
+        .gap(space::S2)
+        .h(px(30.))
+        .pl(space::S3)
+        .pr(px(3.))
+        .rounded(radius::SM)
+        .border_1()
+        .border_color(t.border)
+        .child(div().size(px(7.)).flex_none().rounded(radius::PILL).bg(hue))
+        .child(div().text_size(text::SMALL).text_color(t.muted).child(format!("Reviewer · {word}")))
+        .child(action)
 }
 
 #[allow(clippy::too_many_arguments)]
