@@ -6,7 +6,7 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 ### Added
 
-- **MIT license.** The repository is licensed under the MIT license (`LICENSE`) (#TBD).
+- **MIT license.** The repository is licensed under the MIT license (`LICENSE`) (#48).
 
 ## [1.4.0] - 2026-10-23
 
