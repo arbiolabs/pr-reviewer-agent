@@ -51,6 +51,22 @@ cp -R protocol/fixtures desktop/target/readonly/fixtures
 readonly_script=desktop/target/readonly/playback/readonly.ndjson
 sed '1s/"capabilities":\["account.select","review.add","review.start","review.retry","review.cancel","review.publish"\],"mode":"engine"/"capabilities":["account.select"],"mode":"read-only","readOnlyReason":"another pr-review holds the data directory; start this daemon with --allow-commands"/' \
   "$script" > "$readonly_script"
+# No GitHub account: the showcase with every account list emptied, answering from the fixtures as they are.
+rm -rf desktop/target/no-account
+mkdir -p desktop/target/no-account/playback
+cp -R protocol/fixtures desktop/target/no-account/fixtures
+no_account_script=desktop/target/no-account/playback/no-account.ndjson
+python3 -c 'import json, sys
+def empty(x):
+    if isinstance(x, dict):
+        for k, v in x.items():
+            x[k] = [] if k == "accounts" else empty(v)
+    elif isinstance(x, list):
+        x[:] = [empty(v) for v in x]
+    return x
+with open(sys.argv[2], "w") as w:
+    for line in open(sys.argv[1]):
+        w.write(json.dumps(empty(json.loads(line)), separators=(",", ":")) + "\n")' "$script" "$no_account_script"
 
 # One capture, retried up to three times when the app exits without its PNG or never writes it within 60 s.
 capture() {
@@ -125,4 +141,6 @@ for look in dark light; do
   snap 19-reviewer-stopped-$look $look 20000 "wait:19000,reviewer:stopped"
   snap 19b-starting-$look      $look 600   "reviewer:starting" desktop/playback/slow.ndjson
   snap 19c-stop-confirm-$look  $look 10000 "wait:9000,pr:1291,reviewer:stop-confirm"
+  snap 20-footer-account-$look $look 20000 ""
 done
+snap 20b-footer-no-account     dark  20000 "" "$no_account_script"

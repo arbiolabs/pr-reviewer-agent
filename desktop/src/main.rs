@@ -1,5 +1,6 @@
 //! The macOS client: the TUI crate's reducer and network task behind a GPUI window.
 
+mod account;
 mod capture;
 mod cards;
 mod code;
