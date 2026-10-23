@@ -13,6 +13,10 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 - **Choose the review model from a client.** Protocol v1 gains `settings.get`, answered by a daemon in engine mode with the model new reviews get, where it was chosen, the models the built-in engine can review with (ref, name, provider, context window, auth source, preferred) and the config file, and the `settings.set` command, which checks the model against that list, saves it as `models.default` with the other keys kept, and gives it to reviews started afterwards with no restart. A read-only daemon grants neither, and `settings.set` is refused while the daemon's `PR_REVIEW_MODEL` outranks the config. A revision is now reviewed with the model its reviewer identity names, so a review resumed after a restart keeps its model (#41).
 - **Desktop app: Settings.** The Setup page is now Settings. Its Agent section lists the models grouped by provider, searchable, with the one in use and each auth source, and saves a choice through `settings.set`, saying that a PR reviewed again with another model gets a new revision. Its Risk check (Jev) section saves and removes the TypeSafe key in the login keychain through a masked field and shows only whether a key is saved; the key goes to `/usr/bin/security` on standard input, never in a command line. Off macOS the section points to `TYPESAFE_API_KEY` (#41).
 
+### Fixed
+
+- **Desktop: the offline banner's copy is centered.** The icon, title and sentence of the banner shown while the reviewer is stopped or offline line up with its Start reviewer button instead of sitting at the top (#42).
+
 ## [1.3.0] - 2026-10-23
 
 ### Added

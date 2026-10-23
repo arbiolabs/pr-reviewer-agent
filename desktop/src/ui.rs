@@ -1406,7 +1406,7 @@ fn banner(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Option<Div> {
     Some(
         div()
             .flex()
-            .items_start()
+            .items_center()
             .gap(space::S3)
             .min_h(px(36.))
             .px(space::S5)
@@ -1414,7 +1414,7 @@ fn banner(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Option<Div> {
             .bg(hue.alpha(0.10))
             .border_b_1()
             .border_color(hue.alpha(0.30))
-            .child(div().pt(px(2.)).child(icon(glyph, px(14.), hue)))
+            .child(icon(glyph, px(14.), hue))
             .child(
                 div()
                     .flex_none()
