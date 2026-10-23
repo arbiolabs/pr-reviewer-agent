@@ -155,9 +155,14 @@ fn fix_line(t: &Colors, check: &str, fix: &str) -> Div {
 /// The command that starts the daemon this window dials.
 fn daemon_command(m: &pr_review_tui::model::Model) -> String {
     match m.diag.endpoint.strip_prefix("unix:") {
-        Some(path) => format!("pr-review daemon --allow-commands --socket {path}"),
+        Some(path) => format!("pr-review daemon --allow-commands --socket {}", shell_quote(path)),
         None => "pr-review daemon --allow-commands".to_string(),
     }
+}
+
+/// `s` as one shell word: macOS's default socket sits under "Application Support", whose space would split it.
+fn shell_quote(s: &str) -> String {
+    format!("'{}'", s.replace('\'', "'\\''"))
 }
 
 /// No daemon answers: what to run, in a copyable block, and a retry.
@@ -622,4 +627,23 @@ pub fn setup_body(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         .child(card("Checks", list))
         .child(card("Connection", conn))
         .child(card("GitHub accounts", accounts))
+}
+
+#[cfg(test)]
+mod tests {
+    #[test]
+    fn the_daemon_command_quotes_the_socket_path_for_the_shell() {
+        let mut m = pr_review_tui::model::Model::new(
+            "unix:/Users/me/Library/Application Support/pr-review/reviewer.sock",
+            Default::default(),
+            pr_review_tui::model::Screen::Review,
+            None,
+        );
+        assert_eq!(
+            super::daemon_command(&m),
+            "pr-review daemon --allow-commands --socket '/Users/me/Library/Application Support/pr-review/reviewer.sock'"
+        );
+        m.diag.endpoint = "unix:/tmp/it's/s.sock".into();
+        assert_eq!(super::daemon_command(&m), r"pr-review daemon --allow-commands --socket '/tmp/it'\''s/s.sock'");
+    }
 }
