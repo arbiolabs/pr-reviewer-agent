@@ -107,7 +107,7 @@ fn themes(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         .flex_col()
         .gap(space::S3)
         .p(space::S4)
-        .child(div().flex().gap(space::S3).children(Choice::all().enumerate().map(|(i, c)| tile(i, c))))
+        .child(div().flex().flex_wrap().gap(space::S3).children(Choice::all().enumerate().map(|(i, c)| tile(i, c))))
         .child(div().text_size(text::SMALL).text_color(t.muted).child(if s.snapshot {
             "System follows macOS between Light and Dark.".to_string()
         } else {
