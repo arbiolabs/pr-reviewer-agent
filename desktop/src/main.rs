@@ -253,7 +253,7 @@ fn run_app(
                 WindowBackgroundAppearance::Blurred
             },
             titlebar: Some(TitlebarOptions {
-                title: Some("pr-review".into()),
+                title: Some(ui::APP_NAME.into()),
                 appears_transparent: true,
                 traffic_light_position: Some(point(px(18.), px(18.))),
             }),

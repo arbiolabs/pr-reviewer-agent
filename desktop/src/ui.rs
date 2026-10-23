@@ -71,9 +71,12 @@ pub fn bindings() -> Vec<KeyBinding> {
     ]
 }
 
+/// The name the window, the app menu and the title bar show.
+pub const APP_NAME: &str = "PR Reviewer Agent";
+
 pub fn menus() -> Vec<Menu> {
     vec![
-        Menu::new("pr-review").items([MenuItem::action("Quit pr-review", Quit)]),
+        Menu::new(APP_NAME).items([MenuItem::action(format!("Quit {APP_NAME}"), Quit)]),
         Menu::new("File")
             .items([MenuItem::action("Review a PR…", AddPr), MenuItem::action("Close Window", CloseWindow)]),
         Menu::new("View").items([
@@ -819,7 +822,7 @@ fn titlebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
             (Stage::Ready, 0, 0) => ("You're clear".into(), String::new()),
             (Stage::Ready, 0, _) => ("Setup needed".into(), String::new()),
             (Stage::Ready, n, _) => (format!("{} waiting", queue::count(n, "decision")), String::new()),
-            _ => ("pr-review".into(), queue::summary(m)),
+            _ => (APP_NAME.into(), queue::summary(m)),
         },
     };
     let read_only = queue::read_only(m);
