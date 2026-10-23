@@ -145,6 +145,8 @@ node bin/pr-review.mjs daemon --allow-commands   # terminal 1
 node bin/pr-review.mjs tui                       # terminal 2
 ```
 
+While the daemon runs with `--allow-commands`, it holds the data directory, so add a PR from the client: press `a` in the terminal client, or ⌘N in the desktop app, and paste its URL.
+
 To review PRs when webhooks arrive, run `pr-review serve` as a GitHub App. [Running the service](docs/service.md) covers the setup.
 
 ### Set up Jev
@@ -185,7 +187,7 @@ To check what Jev decided, run `node bin/pr-review.mjs inspect --pr owner/repo#1
 | `accounts [--json]` | List your `gh` accounts and show which one pr-review uses. |
 | `accounts use <login>` | Use that `gh` account for GitHub reads and publishing in this data directory. |
 | `approve --revision <id> --preview <hash>` | Publish a review that waits for approval (`publish_mode: "approval"`), exactly the stored payload, once. |
-| `daemon [--socket PATH] [--data DIR] [--fixture NAME] [--allow-commands]` | Serve review state to the terminal client over a Unix socket, read-only by default; with `--allow-commands` it hosts the engine and runs the client's start, retry, cancel, and publish commands. |
+| `daemon [--socket PATH] [--data DIR] [--fixture NAME] [--allow-commands]` | Serve review state to the terminal client over a Unix socket, read-only by default; with `--allow-commands` it hosts the engine and runs the client's add, start, retry, cancel, and publish commands. |
 | `tui [args]` | Start the terminal client, `pr-review-tui`. |
 
 Run every command as `node bin/pr-review.mjs <command>`.
