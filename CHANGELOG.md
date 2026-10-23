@@ -4,6 +4,8 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 ## [Unreleased]
 
+## [1.3.0] - 2026-10-23
+
 ### Added
 
 - **Real-PR eval.** `pnpm eval:snapshot` saves the open PRs of a repository, their inline review comments and reviews, and a full bare clone to a gitignored dataset directory, using GitHub GET requests only. `pnpm eval:real` reviews each saved PR offline in dry run, and refuses to start when the publish mode is not `dry_run` or a review would get `--publish`. `pnpm eval:report` reports overlap with the human comments on the head commit, run-to-run stability, Jev routing, the verifier's discards and cost proxies, and writes a grading sheet whose verdicts give a precision number. See `bench/REAL.md` (#28).
@@ -25,7 +27,6 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 ### Fixed
 
 - **Daemon: a stop no longer waits on the reviewer's git commands.** SIGINT, SIGTERM or `daemon.stop` during a review's `search_code`, `read_file` or `git_history` waited for git to finish, which on a blob-less clone can take minutes while git fetches blobs. Those commands now stop when the review's task is signalled (#36).
-- **Desktop: the offline screen's daemon command pastes whole.** The socket path is now shell-quoted, so the default macOS socket under `Application Support` no longer splits at its space (#34).
 
 ## [1.2.0] - 2026-10-21
 
@@ -94,7 +95,8 @@ This is the first release.
   - the PR is still open.
 - Command idempotency keys are bound to each run attempt, so a replayed command never has a second effect.
 
-[Unreleased]: https://github.com/diego-arbio-dev/pr-reviewer/compare/v1.2.0...HEAD
+[Unreleased]: https://github.com/diego-arbio-dev/pr-reviewer/compare/v1.3.0...HEAD
+[1.3.0]: https://github.com/diego-arbio-dev/pr-reviewer/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/diego-arbio-dev/pr-reviewer/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/diego-arbio-dev/pr-reviewer/compare/v1.0.1...v1.1.0
 [1.0.1]: https://github.com/diego-arbio-dev/pr-reviewer/compare/v1.0.0...v1.0.1
