@@ -15,7 +15,7 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 ### Fixed
 
-- **Desktop: the offline banner's copy is centered.** The icon, title and sentence of the banner shown while the reviewer is stopped or offline line up with its Start reviewer button instead of sitting at the top (#TBD).
+- **Desktop: the offline banner's copy is centered.** The icon, title and sentence of the banner shown while the reviewer is stopped or offline line up with its Start reviewer button instead of sitting at the top (#42).
 
 ## [1.3.0] - 2026-10-23
 
