@@ -118,7 +118,7 @@ fn face(m: &pr_review_tui::model::Model, c: &Card, selected: bool) -> Face {
                 None => "It can look, but not start, retry, cancel or post. Start it with --allow-commands.".into(),
             },
             meta: count.words(),
-            action: "Show setup",
+            action: "Open Settings",
         },
         Card::Approve { pr, findings, .. } => Face {
             glyph: Some(IconName::Send),
@@ -430,11 +430,11 @@ fn clear(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         )
         .child(div().text_size(text::BODY).line_height(text::LINE_BODY).text_color(t.muted).child(body))
         .when(m.domain.prs.is_empty(), |d| {
-            let b = match crate::overlay::add_block(m) {
+            let b = match crate::overlay::add_block(m, &s.reviewer) {
                 Some(_) => crate::kit::locked_button(t, "clear-add", "Review a PR…"),
                 None => button(t, "clear-add", "Review a PR…", Some("⌘N"), Tone::Primary, on(cx, |s, cx| s.add_pr(cx))),
             };
-            d.child(div().flex().pt(space::S1).child(match crate::overlay::add_block(m) {
+            d.child(div().flex().pt(space::S1).child(match crate::overlay::add_block(m, &s.reviewer) {
                 Some(why) => {
                     crate::kit::tip(b, format!("Can't add a PR: {why}. Restart the daemon with --allow-commands."))
                 }

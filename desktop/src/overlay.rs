@@ -14,7 +14,7 @@ use crate::detail::who;
 use crate::kit::{Tone, button, icon, keycap, overline, tip};
 use crate::queue::{self, Card, Stage};
 use crate::reviewer::{Ask, Reviewer};
-use crate::tokens::{Colors, layout, radius, space, text};
+use crate::tokens::{Choice, Colors, layout, radius, space, text};
 use crate::ui::{Overlay, Shell, on};
 
 #[derive(Clone)]
@@ -28,6 +28,7 @@ enum Run {
     Keys,
     AddPr,
     Reviewer(Ask),
+    Theme(Choice),
 }
 
 struct Entry {
@@ -60,11 +61,11 @@ fn mutation(m: &Model, mu: Mutation, title: String, key: &'static str, otherwise
 
 /// Every command, contextual ones first: each card's decision, the selected PR's actions with the reason any
 /// can't run, then going to a PR, then the views.
-fn entries(m: &Model, r: &Reviewer) -> Vec<Entry> {
+fn entries(m: &Model, r: &Reviewer, theme: Choice) -> Vec<Entry> {
     let mut out = Vec::new();
     for (i, c) in queue::cards(m).iter().enumerate() {
         let title = match c {
-            Card::Setup { .. } => "Show setup: reviews can't run yet".to_string(),
+            Card::Setup { .. } => "Open Settings: reviews can't run yet".to_string(),
             Card::Approve { pr, .. } => format!("Review and post #{}", pr.number),
             Card::Posting { pr, .. } => format!("Check the posting on #{}", pr.number),
             Card::Findings { pr, findings } => {
@@ -117,7 +118,7 @@ fn entries(m: &Model, r: &Reviewer) -> Vec<Entry> {
         group: "Review",
         title: "Review a PR by its URL…".into(),
         key: Some("⌘N"),
-        blocked: add_block(m),
+        blocked: add_block(m, r),
         run: Run::AddPr,
     });
     out.push(Entry {
@@ -176,6 +177,13 @@ fn entries(m: &Model, r: &Reviewer) -> Vec<Entry> {
         key: None,
         blocked: r.block(m, ask),
         run: Run::Reviewer(ask),
+    }));
+    out.extend(Choice::all().map(|c| Entry {
+        group: "Appearance",
+        title: format!("Theme: {}", c.name()),
+        key: None,
+        blocked: (c == theme).then(|| "in use".to_string()),
+        run: Run::Theme(c),
     }));
     out
 }
@@ -236,8 +244,8 @@ pub fn matched(query: &str, title: &str) -> Vec<Range<usize>> {
 
 /// The entries `query` matches, best first. Groups stay together: a group sorts by its best entry, and its entries
 /// by their own score, runnable before blocked, then in the order `entries` gives.
-fn matching(m: &Model, r: &Reviewer, query: &str) -> Vec<Entry> {
-    let found: Vec<(u8, usize, Entry)> = entries(m, r)
+fn matching(m: &Model, r: &Reviewer, theme: Choice, query: &str) -> Vec<Entry> {
+    let found: Vec<(u8, usize, Entry)> = entries(m, r, theme)
         .into_iter()
         .enumerate()
         .filter_map(|(i, e)| score(query, &e.title).or_else(|| fuzzy(query, e.group).then_some(3)).map(|sc| (sc, i, e)))
@@ -275,12 +283,17 @@ fn run(s: &mut Shell, r: Run, cx: &mut Context<Shell>) {
         Run::Keys => s.overlay = Some(Overlay::Keys),
         Run::AddPr => s.add_pr(cx),
         Run::Reviewer(ask) => s.ask(ask, cx),
+        Run::Theme(c) => s.set_theme(c, cx),
     }
     cx.notify();
 }
 
 /// Why the add-a-PR sheet can't send now, in the palette's and the buttons' words; `None` when it can.
-pub fn add_block(m: &Model) -> Option<String> {
+/// A stopped reviewer the app can start doesn't block: the sheet starts it and sends the PR once it answers.
+pub fn add_block(m: &Model, r: &Reviewer) -> Option<String> {
+    if crate::reviewer::starts_for_add(m, r) {
+        return None;
+    }
     if queue::read_only(m) {
         return Some(READ_ONLY.into());
     }
@@ -291,11 +304,11 @@ pub fn add_block(m: &Model) -> Option<String> {
 pub fn palette_key(s: &mut Shell, key: &str, typed: Option<&str>, cx: &mut Context<Shell>) -> bool {
     let Some(Overlay::Palette { query, selected }) = &s.overlay else { return false };
     let (mut q, mut sel) = (query.clone(), *selected);
-    let n = matching(&s.model, &s.reviewer, &q).len();
+    let n = matching(&s.model, &s.reviewer, crate::ui::chosen(cx), &q).len();
     match key {
         "escape" => s.overlay = None,
         "enter" => {
-            if let Some(e) = matching(&s.model, &s.reviewer, &q).into_iter().nth(sel)
+            if let Some(e) = matching(&s.model, &s.reviewer, crate::ui::chosen(cx), &q).into_iter().nth(sel)
                 && e.blocked.is_none()
             {
                 run(s, e.run, cx);
@@ -498,6 +511,7 @@ fn glyph(m: &Model, e: &Entry) -> IconName {
         Run::Reviewer(Ask::Start) => IconName::Power,
         Run::Reviewer(Ask::Stop) => IconName::CircleStop,
         Run::Reviewer(Ask::Restart) => IconName::RotateCcw,
+        Run::Theme(_) => IconName::Palette,
     }
 }
 
@@ -508,7 +522,7 @@ const HEADER: f32 = 30.;
 
 fn palette(s: &Shell, t: &Colors, query: &str, selected: usize, cx: &Context<Shell>) -> AnyElement {
     let m = &s.model;
-    let found = matching(m, &s.reviewer, query);
+    let found = matching(m, &s.reviewer, crate::ui::chosen(cx), query);
     let mut list = div().id("palette-list").flex().flex_col().overflow_y_scroll().p(space::S2);
     let mut group = "";
     let (mut tall, mut fits, mut more) = (8., 8., false);
@@ -907,6 +921,8 @@ pub enum AddLine {
         tracked: Option<String>,
     },
     Sending(String),
+    /// Sent while the reviewer was stopped: the app is starting it, and the PR goes once it answers.
+    Starting(String),
     Refused {
         title: &'static str,
         why: String,
@@ -944,8 +960,14 @@ pub fn add_line(m: &Model, url: &str, sent: bool) -> AddLine {
 /// from the title bar as the post sheet does; esc closes it and ⏎ sends.
 fn add_pr(s: &Shell, t: &Colors, url: &str, sent: bool, cx: &Context<Shell>) -> AnyElement {
     let m = &s.model;
-    let line = add_line(m, url, sent);
-    let sending = matches!(line, AddLine::Sending(_));
+    let line = match (&s.queued_add, &s.reviewer.control) {
+        (Some(_), crate::reviewer::Control::StartFailed(why)) if sent => {
+            AddLine::Refused { title: "The reviewer didn't start", why: why.clone() }
+        }
+        (Some(q), _) if sent => AddLine::Starting(PrRef::parse(q).map_or(q.clone(), |r| r.to_string())),
+        _ => add_line(m, url, sent),
+    };
+    let sending = matches!(line, AddLine::Sending(_) | AddLine::Starting(_));
     let ready = matches!(line, AddLine::Valid { .. } | AddLine::Refused { .. } | AddLine::TimedOut) && !sending;
     let (glyph, hue, words): (Option<IconName>, Hsla, String) = match &line {
         AddLine::Empty => (None, t.faint, "Paste a link with ⌘V. owner/repo#123 works too.".into()),
@@ -961,6 +983,7 @@ fn add_pr(s: &Shell, t: &Colors, url: &str, sent: bool, cx: &Context<Shell>) -> 
             (Some(IconName::CircleCheck), t.ok, format!("{repo} · #{number} is already here: {title}. ⏎ opens it."))
         }
         AddLine::Sending(target) => (None, t.running, format!("Asking the daemon to read {target} from GitHub…")),
+        AddLine::Starting(target) => (None, t.running, format!("Starting the reviewer, then adding {target}…")),
         AddLine::Refused { why, .. } => (Some(IconName::CircleX), t.danger, why.clone()),
         AddLine::TimedOut => (Some(IconName::TriangleAlert), t.warn, "No reply in time. ⏎ sends it again.".into()),
     };
@@ -1301,8 +1324,11 @@ mod tests {
         crate::script::play(pr_review_tui::playback::load(&path).unwrap(), &mut m, &steps, 20_000).unwrap();
         m.server.as_mut().unwrap().capabilities.clear();
         let r = crate::reviewer::Reviewer::new(None, Default::default(), "config.toml".into(), true);
-        let rows: Vec<(String, Option<String>)> =
-            super::entries(&m, &r).into_iter().filter(|e| e.group == "Review").map(|e| (e.title, e.blocked)).collect();
+        let rows: Vec<(String, Option<String>)> = super::entries(&m, &r, crate::tokens::Choice::System)
+            .into_iter()
+            .filter(|e| e.group == "Review")
+            .map(|e| (e.title, e.blocked))
+            .collect();
         let locked = Some(super::READ_ONLY.to_string());
         assert_eq!(
             rows,

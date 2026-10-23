@@ -33,15 +33,12 @@ gpui_kit::actions!(
         Palette,
         Refresh,
         OpenGitHub,
-        Setup,
+        Settings,
         Shortcuts,
         Post,
         GoBack,
         NeedsYou,
         DoneList,
-        AppearanceSystem,
-        AppearanceDark,
-        AppearanceLight,
         FocusNext,
         FocusPrev,
         AddPr,
@@ -60,7 +57,7 @@ pub fn bindings() -> Vec<KeyBinding> {
         KeyBinding::new("cmd-k", Palette, None),
         KeyBinding::new("cmd-r", Refresh, None),
         KeyBinding::new("cmd-shift-o", OpenGitHub, None),
-        KeyBinding::new("cmd-,", Setup, None),
+        KeyBinding::new("cmd-,", Settings, None),
         KeyBinding::new("cmd-shift-/", Shortcuts, None),
         KeyBinding::new("cmd-enter", Post, None),
         KeyBinding::new("cmd-[", GoBack, None),
@@ -80,7 +77,13 @@ pub const APP_NAME: &str = "PR Reviewer Agent";
 pub const MARK: &str = "brand/mark.svg";
 pub const MARK_PUPIL: &str = "brand/mark-pupil.svg";
 
-pub fn menus() -> Vec<Menu> {
+/// View → Appearance picks a theme: the menu's data, so the item for the theme in use carries the check.
+#[derive(Clone, PartialEq, Debug, gpui_kit::Action)]
+#[action(namespace = pr_review, no_json)]
+pub struct SetTheme(pub tokens::Choice);
+
+pub fn menus(chosen: tokens::Choice) -> Vec<Menu> {
+    let themes = tokens::Choice::all().map(|c| MenuItem::action(c.name(), SetTheme(c)).checked(c == chosen));
     vec![
         Menu::new(APP_NAME).items([MenuItem::action(format!("Quit {APP_NAME}"), Quit)]),
         Menu::new("File")
@@ -91,13 +94,9 @@ pub fn menus() -> Vec<Menu> {
             MenuItem::action("Back", GoBack),
             MenuItem::separator(),
             MenuItem::action("Command Palette", Palette),
-            MenuItem::action("Settings", Setup),
+            MenuItem::action("Settings", Settings),
             MenuItem::separator(),
-            MenuItem::submenu(Menu::new("Appearance").items([
-                MenuItem::action("Follow System", AppearanceSystem),
-                MenuItem::action("Dark", AppearanceDark),
-                MenuItem::action("Light", AppearanceLight),
-            ])),
+            MenuItem::submenu(Menu::new("Appearance").items(themes)),
         ]),
         Menu::new("Review").items([
             MenuItem::action("Open on GitHub", OpenGitHub),
@@ -200,17 +199,42 @@ pub struct Shell {
     pub sheet_was_open: bool,
     /// The footer's avatar for the publishing account.
     pub avatar: crate::account::Avatar,
+    /// A PR the add sheet sent while the reviewer was stopped: it goes to the daemon once the start brings it up.
+    pub queued_add: Option<String>,
 }
 
-/// A page the reader went into: a finding, the proof, the diff or setup. The live strip steps aside there.
+/// A page the reader went into: a finding, the proof, the diff or Settings. The live strip steps aside there.
 pub fn deep(m: &Model) -> bool {
     front(m).is_some() || matches!(m.ui.screen, Screen::Diff | Screen::Settings)
 }
 
-/// The theme's tokens for the window's current appearance.
+/// The reader's theme choice, a global so every view and the menu bar read the same one.
+struct Chosen(tokens::Choice);
+
+impl Global for Chosen {}
+
+pub fn chosen(cx: &App) -> tokens::Choice {
+    cx.try_global::<Chosen>().map_or(tokens::Choice::System, |c| c.0)
+}
+
+/// The theme the window paints with now: the choice, with System resolved against macOS's appearance.
+pub fn active(cx: &App) -> &'static tokens::Theme {
+    chosen(cx).theme(ThemeMode::from(cx.window_appearance()).is_dark())
+}
+
+/// The active theme's tokens. Every view takes its colors from here.
 pub fn colors(cx: &App) -> Colors {
-    use gpui_kit::component::ActiveTheme;
-    if cx.theme().is_dark() { tokens::dark() } else { tokens::light() }
+    (active(cx).colors)()
+}
+
+/// Makes `choice` the window's look: the views' tokens, gpui-kit's own colors and mode, and the menu's check.
+pub fn apply_theme(choice: tokens::Choice, cx: &mut App) {
+    cx.set_global(Chosen(choice));
+    let theme = active(cx);
+    // `change` loads the kit's own theme for the mode, so the palette goes over it in a second edit.
+    Theme::change(if theme.dark { ThemeMode::Dark } else { ThemeMode::Light }, None, cx);
+    Theme::update(cx, |k| (theme.colors)().paint_kit(&mut k.colors));
+    cx.set_menus(menus(choice));
 }
 
 /// The page-sized panel in front: a finding or the publication, under any sheet.
@@ -248,6 +272,7 @@ impl Shell {
             avatar: Default::default(),
             picker: crate::agent::Picker::default(),
             jev: crate::jev::KeyField::new(),
+            queued_add: None,
         };
         for d in desk {
             match d {
@@ -297,6 +322,19 @@ impl Shell {
 
     pub fn act(&mut self, a: Action, cx: &mut Context<Self>) {
         self.send(Msg::Action(a), cx);
+    }
+
+    /// Switches the theme at once and saves it in the config file's [desktop] section, so the next launch opens
+    /// in it. A snapshot never writes the reader's config.
+    pub fn set_theme(&mut self, choice: tokens::Choice, cx: &mut Context<Self>) {
+        apply_theme(choice, cx);
+        if !self.snapshot
+            && let Err(e) = pr_review_tui::config::set_desktop_theme(&self.reviewer.config_path, choice.id())
+        {
+            let until_ms = self.model.now_ms + crate::reviewer::NOTICE_MS;
+            self.model.notice = Some(pr_review_tui::model::Notice { text: format!("Theme not saved: {e}"), until_ms });
+        }
+        cx.notify();
     }
 
     /// Closes the reducer's panels, so a pick lands on the page and not under a panel.
@@ -419,7 +457,7 @@ impl Shell {
 
     /// ⌘N: the sheet that adds a PR. On a daemon that refuses it the reducer says why, in a toast.
     pub fn add_pr(&mut self, cx: &mut Context<Self>) {
-        if !can_add(&self.model) {
+        if !can_add(&self.model) && !self.starts_for_add() {
             return self.send(Msg::AddPr(String::new()), cx);
         }
         self.overlay = Some(Overlay::AddPr { url: String::new(), sent: false });
@@ -435,6 +473,7 @@ impl Shell {
         edit(url);
         *sent = false;
         self.model.adding = None;
+        self.queued_add = None;
         cx.notify();
     }
 
@@ -448,7 +487,18 @@ impl Shell {
         }
         *sent = true;
         let url = url.clone();
+        if !can_add(&self.model) && self.starts_for_add() {
+            self.queued_add = Some(url);
+            if !matches!(self.reviewer.control, crate::reviewer::Control::Starting { .. }) {
+                self.ask(crate::reviewer::Ask::Start, cx);
+            }
+            return cx.notify();
+        }
         self.send(Msg::AddPr(url), cx);
+    }
+
+    fn starts_for_add(&self) -> bool {
+        crate::reviewer::starts_for_add(&self.model, &self.reviewer)
     }
 
     pub fn close_add(&mut self, cx: &mut Context<Self>) {
@@ -460,6 +510,7 @@ impl Shell {
         {
             self.model.adding = None;
         }
+        self.queued_add = None;
         self.overlay = None;
         cx.notify();
     }
@@ -703,7 +754,7 @@ impl Render for Shell {
         let finding_open = matches!(front(m), Some(Modal::Finding { .. }));
         let body = match m.ui.screen {
             Screen::Diff => diff::view(self, &t, cx).into_any_element(),
-            Screen::Settings => crate::setup::setup(self, &t, cx).into_any_element(),
+            Screen::Settings => crate::setup::settings(self, &t, cx).into_any_element(),
             _ => div()
                 .flex()
                 .flex_1()
@@ -749,7 +800,8 @@ impl Render for Shell {
             .on_action(cx.listener(|s, _: &StopReviewer, _, cx| s.ask(crate::reviewer::Ask::Stop, cx)))
             .on_action(cx.listener(|s, _: &RestartReviewer, _, cx| s.ask(crate::reviewer::Ask::Restart, cx)))
             .on_action(cx.listener(|s, _: &OpenGitHub, _, cx| s.open_github(cx)))
-            .on_action(cx.listener(|s, _: &Setup, _, cx| s.act(Action::Goto(Screen::Settings), cx)))
+            .on_action(cx.listener(|s, _: &Settings, _, cx| s.act(Action::Goto(Screen::Settings), cx)))
+            .on_action(cx.listener(|s, a: &SetTheme, _, cx| s.set_theme(a.0, cx)))
             .on_action(cx.listener(|s, _: &Shortcuts, _, cx| {
                 s.overlay = Some(Overlay::Keys);
                 cx.notify();
@@ -780,15 +832,6 @@ impl Render for Shell {
             .on_action(cx.listener(|s, _: &NeedsYou, _, cx| s.set_tab(false, cx)))
             .on_action(cx.listener(|s, _: &DoneList, _, cx| s.set_tab(true, cx)))
             .on_action(cx.listener(|_, _: &CloseWindow, window, _| window.remove_window()))
-            .on_action(
-                cx.listener(|_, _: &AppearanceSystem, window, cx| Theme::sync_system_appearance(Some(window), cx)),
-            )
-            .on_action(
-                cx.listener(|_, _: &AppearanceDark, window, cx| Theme::change(ThemeMode::Dark, Some(window), cx)),
-            )
-            .on_action(
-                cx.listener(|_, _: &AppearanceLight, window, cx| Theme::change(ThemeMode::Light, Some(window), cx)),
-            )
             .relative()
             .size_full()
             .flex()
@@ -1003,7 +1046,7 @@ fn titlebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                     .child("Read-only")
                     .cursor_pointer()
                     .on_click(cx.listener(|s, _: &ClickEvent, _, cx| s.act(Action::Goto(Screen::Settings), cx))),
-                format!("{} Click for setup.", crate::setup::read_only_sentence(m)),
+                format!("{} Click for Settings.", crate::setup::read_only_sentence(m)),
             ))
         })
         .child(reviewer_control(s, t, cx))
@@ -1071,7 +1114,7 @@ fn nav_item(
     id: &'static str,
     glyph: IconName,
     label: &str,
-    count: usize,
+    count: Option<usize>,
     hue: Hsla,
     active: bool,
     dim: bool,
@@ -1108,11 +1151,12 @@ fn nav_item(
                 .text_color(fg)
                 .child(label.to_string()),
         )
-        .when(count > 0, |d| d.child(count_badge(t, count, hue)));
+        // An empty list still counts: zero in the neutral ink, so the column of counts never has a hole.
+        .children(count.map(|n| count_badge(t, n, if n == 0 { t.muted } else { hue })));
     focusable(id, row, t, radius::SM, f)
 }
 
-/// The pane shows setup: the Setup page, or the home with no PR selected while setup blocks reviews.
+/// The pane shows setup: the Settings page, or the home with no PR selected while setup blocks reviews.
 pub fn setup_shown(s: &Shell) -> bool {
     let m = &s.model;
     m.ui.screen == Screen::Settings
@@ -1149,7 +1193,7 @@ fn sidebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
             "nav-queue",
             IconName::Inbox,
             "Needs you",
-            queue::decisions(&cards),
+            (!dim).then_some(queue::decisions(&cards)),
             t.accent,
             home && !s.shows_done() && !setup_shown(s),
             dim,
@@ -1160,7 +1204,7 @@ fn sidebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
             "nav-done",
             IconName::CircleCheck,
             "Done",
-            done.len(),
+            (!dim).then_some(done.len()),
             t.ok,
             home && s.shows_done(),
             dim,
@@ -1168,16 +1212,16 @@ fn sidebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         ))
         .child(nav_item(
             t,
-            "nav-setup",
+            "nav-settings",
             IconName::Settings,
             "Settings",
-            queue::setup_count(m).blocking,
+            Some(queue::setup_count(m).blocking).filter(|n| *n > 0),
             t.warn,
             setup_shown(s),
             false,
             click(cx, |s, cx| s.act(Action::Goto(Screen::Settings), cx)),
         ))
-        .child(add_row(m, t, dim, cx));
+        .child(add_row(s, t, dim, cx));
     let groups = queue::rows(m);
     if stage == Stage::Ready && !groups.is_empty() {
         // One hierarchy: the repository is the group label, lowercase as GitHub writes it, in the sidebar's one
@@ -1214,8 +1258,9 @@ fn sidebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
 
 /// The sidebar's way to add a PR: a quiet row under the lists with ⌘N beside it, locked with its reason on a daemon
 /// that can't add one.
-fn add_row(m: &Model, t: &Colors, dim: bool, cx: &Context<Shell>) -> Stateful<Div> {
-    let why = crate::overlay::add_block(m).filter(|_| !dim);
+fn add_row(s: &Shell, t: &Colors, dim: bool, cx: &Context<Shell>) -> Stateful<Div> {
+    let dim = dim && !crate::reviewer::starts_for_add(&s.model, &s.reviewer);
+    let why = crate::overlay::add_block(&s.model, &s.reviewer).filter(|_| !dim);
     let off = why.is_some() || dim;
     let fg = if off { t.disabled } else { t.muted };
     let row = div()
@@ -1406,7 +1451,7 @@ fn banner(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Option<Div> {
     Some(
         div()
             .flex()
-            .items_start()
+            .items_center()
             .gap(space::S3)
             .min_h(px(36.))
             .px(space::S5)
@@ -1414,7 +1459,7 @@ fn banner(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Option<Div> {
             .bg(hue.alpha(0.10))
             .border_b_1()
             .border_color(hue.alpha(0.30))
-            .child(div().pt(px(2.)).child(icon(glyph, px(14.), hue)))
+            .child(icon(glyph, px(14.), hue))
             .child(
                 div()
                     .flex_none()

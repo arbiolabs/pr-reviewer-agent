@@ -19,7 +19,7 @@ use crate::ui::{Overlay, Shell};
 
 /// How long a start may take before the app calls it failed.
 pub const START_TIMEOUT_MS: u64 = 20_000;
-const NOTICE_MS: u64 = 4_000;
+pub const NOTICE_MS: u64 = 4_000;
 
 /// How this machine runs the daemon the window dials.
 #[derive(Clone, Debug, PartialEq)]
@@ -77,7 +77,7 @@ pub struct Reviewer {
     pub launcher: Result<Launcher, String>,
     pub control: Control,
     desktop: Desktop,
-    config_path: PathBuf,
+    pub config_path: PathBuf,
     job: Option<Job>,
 }
 
@@ -470,7 +470,17 @@ impl Shell {
         if self.reviewer.control != before {
             cx.notify();
         }
+        // The start a queued add asked for is up: send the PR. A failed start keeps it, for the sheet to explain.
+        if self.queued_add.is_some() && pr_review_tui::update::can_add(&self.model) {
+            let url = self.queued_add.take().unwrap_or_default();
+            self.send(pr_review_tui::update::Msg::AddPr(url), cx);
+        }
     }
+}
+
+/// The reviewer is down and the app is starting it or can: a PR added now waits for it instead of failing.
+pub fn starts_for_add(m: &Model, r: &Reviewer) -> bool {
+    !m.link.accepts_events() && (matches!(r.control, Control::Starting { .. }) || r.block(m, Ask::Start).is_none())
 }
 
 /// A snapshot's reviewer state, staged on the model a playback left: the connection a stop or a failed start ends
@@ -632,6 +642,26 @@ mod tests {
         assert_eq!(why(&m, Ask::Restart).as_deref(), Some("read-only daemon"));
         let playback = Reviewer::new(None, Default::default(), "config.toml".into(), true);
         assert_eq!(playback.block(&m, Ask::Start).as_deref(), Some("this window plays a script"));
+    }
+
+    #[test]
+    fn a_pr_added_while_the_reviewer_is_down_waits_for_a_start_the_app_can_make() {
+        use super::{Reviewer, starts_for_add};
+        use pr_review_tui::model::{Look, Model, Screen};
+        let mut m = Model::new("unix:/s.sock", Look::default(), Screen::Review, None);
+        m.link = Link::Disconnected { reason: Text::new("closed"), retry_in_ms: None };
+        let mut r = Reviewer::new(Some("/s.sock".into()), Default::default(), "config.toml".into(), true);
+        r.launcher = Ok(Launcher::Spawn { command: "pr-review".into() });
+        assert!(starts_for_add(&m, &r), "stopped, and the app can start it");
+        r.launcher = Err("no pr-review on PATH".into());
+        assert!(!starts_for_add(&m, &r), "nothing here can start it");
+        r.control = Control::Starting { since_ms: 0 };
+        assert!(starts_for_add(&m, &r), "a start already on its way");
+        m.link = Link::Live;
+        assert!(!starts_for_add(&m, &r), "live: the add goes straight to the daemon");
+        let playback = Reviewer::new(None, Default::default(), "config.toml".into(), true);
+        m.link = Link::Disconnected { reason: Text::new("closed"), retry_in_ms: None };
+        assert!(!starts_for_add(&m, &playback));
     }
 
     #[test]

@@ -2,11 +2,12 @@
 
 pr-review reviews GitHub pull requests and reports only findings it can back with evidence from the code. It tracks each PR across its commits, so a crash or restart resumes the review instead of starting over. Publishing is designed to post at most one review per commit, even when a write to GitHub times out or the process is killed partway through.
 
-You can run it three ways:
+You can run it four ways:
 
 - As a CLI that reviews one PR and prints the result, or posts it as a `COMMENT` review.
 - As a GitHub App service that reviews PRs when webhooks arrive.
 - From a terminal, `pr-review tui`, which opens on the most severe finding, shows each running review live, and puts every finding beside its code and its diff.
+- From PR Reviewer Agent, the macOS desktop app in `desktop/`, which shows the same reviews as a queue of decisions and starts and stops the daemon for you.
 
 ```text
 $ node bin/pr-review.mjs review https://github.com/diego-arbio-dev/pr-reviewer/pull/2 --publish --model anthropic/claude-opus-5-5
@@ -76,9 +77,15 @@ To keep the diagram readable, two kinds of transition are left out:
 
 The client opens on the worst finding across the tracked PRs, and `w` follows a review while it runs. [The terminal client](docs/tui.md) covers its views, keys, and settings.
 
+## The desktop app
+
+![PR Reviewer Agent opens on its queue of decisions, opens a critical finding beside its cited code, shows the diff with the finding under its line, follows a running review until it waits for approval, shows the proof of exactly what will be posted, and opens Settings.](desktop/demo/showcase.gif)
+
+PR Reviewer Agent (`pr-review-desktop`) is a macOS app on [GPUI](https://www.gpui.rs) that runs the terminal client's core unchanged. It opens on a ranked queue of what waits on you: a review to approve and post, the worst open finding, a failed review to retry, a PR no review has looked at. A finding opens beside its cited code, pinned to its commit, and posting goes through a proof of exactly what will be posted. The title bar shows the reviewer's state with the one action that changes it, Start or Stop, and ⌘N reviews a PR from its URL, starting a stopped reviewer first. The sidebar's footer shows the GitHub account the daemon posts as, with its avatar. Settings (⌘,) picks the theme (System, Light, Dark, Solarized Light, Solarized Dark or Nord), saves the TypeSafe key in the macOS Keychain, and picks the model new reviews use. [The desktop app](desktop/README.md) covers how to build and run it, how it starts the daemon, and its snapshot harness.
+
 ## Get started
 
-You need Node 22.19 or later, pnpm, and git. The terminal client also needs a Rust toolchain.
+You need Node 22.19 or later, pnpm, and git. The terminal client and the desktop app also need a Rust toolchain, and the desktop app needs macOS.
 
 To try the terminal client first, play the recorded showcase session. It needs no daemon, no credentials and no network:
 
@@ -86,7 +93,13 @@ To try the terminal client first, play the recorded showcase session. It needs n
 (cd tui && cargo build --release) && ./tui/target/release/pr-review-tui --playback protocol/playback/showcase.ndjson
 ```
 
-Press `?` for the keys and `q` to quit. To review your own PRs:
+Press `?` for the keys and `q` to quit. The desktop app plays the same session on macOS:
+
+```bash
+(cd desktop && cargo build --release) && ./desktop/target/release/pr-review-desktop --playback protocol/playback/showcase.ndjson
+```
+
+To review your own PRs:
 
 1. Install the dependencies:
 
@@ -156,7 +169,7 @@ Jev classifies the risk of a change during triage. It can raise the review depth
 | Situation | What Jev uses |
 |---|---|
 | Public repository, no key | The free OpenCode Zen tier. Nothing to set up. |
-| `TYPESAFE_API_KEY` set | TypeSafe's API, for every repository, private ones included. |
+| A TypeSafe key, in `TYPESAFE_API_KEY` or the macOS Keychain | TypeSafe's API, for every repository, private ones included. |
 | Private repository, no key | Nothing. Jev is skipped with `jev_skipped_private_repo`, so the PR's diff never reaches the free tier. |
 
 To use Jev on private repositories, get an API key from TypeSafe and export it:
@@ -164,6 +177,8 @@ To use Jev on private repositories, get an API key from TypeSafe and export it:
 ```bash
 export TYPESAFE_API_KEY=...
 ```
+
+A daemon started by a LaunchAgent has no such variable. On macOS, save the key in the desktop app under Settings → Risk check (Jev) instead: it goes to the login keychain, and pr-review reads it at each triage, so a saved or removed key applies to the next review without a restart. `TYPESAFE_API_KEY` wins when both are set. `setup` reports which one it found.
 
 To send private diffs to the free tier instead, set `"jev": { "allow_keyless_for_private": true }` in `pr-review.config.json`.
 
@@ -187,7 +202,7 @@ To check what Jev decided, run `node bin/pr-review.mjs inspect --pr owner/repo#1
 | `accounts [--json]` | List your `gh` accounts and show which one pr-review uses. |
 | `accounts use <login>` | Use that `gh` account for GitHub reads and publishing in this data directory. |
 | `approve --revision <id> --preview <hash>` | Publish a review that waits for approval (`publish_mode: "approval"`), exactly the stored payload, once. |
-| `daemon [--socket PATH] [--data DIR] [--fixture NAME] [--allow-commands]` | Serve review state to the terminal client over a Unix socket, read-only by default; with `--allow-commands` it hosts the engine and runs the client's add, start, retry, cancel, and publish commands. |
+| `daemon [--socket PATH] [--data DIR] [--fixture NAME] [--allow-commands]` | Serve review state to the terminal client over a Unix socket, read-only by default; with `--allow-commands` it hosts the engine and runs the client's add, start, retry, cancel, and publish commands, its model choice, and its stop. |
 | `tui [args]` | Start the terminal client, `pr-review-tui`. |
 
 Run every command as `node bin/pr-review.mjs <command>`.
@@ -198,8 +213,8 @@ Run every command as `node bin/pr-review.mjs <command>`.
 - [Publishing](docs/publishing.md) explains how pr-review avoids posting a review twice, and how to recover an uncertain publication.
 - [Running the service](docs/service.md) covers GitHub App setup, environment variables, endpoints, and deployment.
 - [The terminal client](docs/tui.md) covers the daemon, the client's views, keys, mouse, and background setting, and the account selector.
-- [The desktop client](desktop/README.md) covers the macOS app in `desktop/`, an early GPUI client built on the terminal client's core, and its snapshot harness.
-- [Protocol v1](protocol/README.md) is the reference for the messages between the daemon and the TUI.
+- [The desktop app](desktop/README.md) covers PR Reviewer Agent, the macOS app in `desktop/`: building and running it, starting and stopping the daemon, Settings, and its snapshot harness.
+- [Protocol v1](protocol/README.md) is the reference for the messages between the daemon and its clients.
 - [`docs/SPEC.md`](docs/SPEC.md) and [`docs/TUI_SPEC.md`](docs/TUI_SPEC.md) are the design specifications.
 
 ## Develop
@@ -226,14 +241,14 @@ The TypeScript code lives in `src/`, one directory per part of the system:
 | `src/server` | HTTP endpoints and the service loop |
 | `src/persistence` | The application SQLite store and its audit log |
 | `src/models` | Model and harness detection, and the shared credential store |
-| `src/protocol`, `src/control` | The TUI protocol and the control daemon |
+| `src/protocol`, `src/control` | The client protocol and the control daemon |
 | `src/cli` | The command-line interface |
 
-The Rust terminal client is in `tui/`. Migrations are in `migrations/`. Commits follow [Conventional Commits](https://www.conventionalcommits.org/).
+The Rust terminal client is in `tui/`, and the macOS desktop app, which links it as a library, is in `desktop/`. Migrations are in `migrations/`. Commits follow [Conventional Commits](https://www.conventionalcommits.org/).
 
 ## Limits
 
 - Verification is static. pr-review runs no tests against PR code, and no second model double-checks a finding.
 - A finding is tracked across commits by the code it cites: a later commit's review comments on it once, then lists it as still present, possibly fixed, outdated, or resolved. A finding is resolved only when its cited code changed, compared as code tokens so that comments, blank lines, spacing and semicolons never count, and the model's claim, with head-side evidence, passes the same checks as a finding. A fix outside the cited code stays listed as still present, and code cannot tell a real fix from a rename inside the cited code, so past that line the status rests on the model's claim. A resolved finding stays watched: if a later commit still holds its code, that commit's review reports it again as a new finding with one new inline comment, noting that it looked resolved, so a wrong resolution lasts one push. The watch covers the 50 most recently resolved findings of a PR and reads only the finding's own file. The bot never replies in review threads and never resolves them on GitHub; "looks resolved" in the review body is all it says.
-- The daemon accepts start, retry, cancel, and publish commands only when enabled, which is also when it takes the data directory itself.
+- The daemon accepts commands (add, start, retry, cancel, publish, the model choice and stop) only when enabled with `--allow-commands`, which is also when it takes the data directory itself.
 - The [benchmark](bench/README.md) measures precision and recall on 12 small labeled PRs that we wrote ourselves, matched to findings by line. It shows how a change moves the numbers, but it does not predict precision and recall on real PRs. Eight more cases push later commits and score how findings are tracked across them.

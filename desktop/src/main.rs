@@ -26,7 +26,6 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use gpui_kit::component::{Theme, ThemeMode};
 use gpui_kit::*;
 use pr_review_tui::app::dispatch;
 use pr_review_tui::config::{self, Source};
@@ -38,7 +37,7 @@ use pr_review_tui::update::Msg;
 use tokio::sync::mpsc;
 
 const USAGE: &str = "usage: pr-review-desktop [--socket PATH] [--pr URL] [--playback FILE.ndjson] [--config FILE]
-       [--snapshot OUT.png [--snapshot-after-ms N] [--actions STEPS]] [--window WxH] [--appearance dark|light]
+       [--snapshot OUT.png [--snapshot-after-ms N] [--actions STEPS]] [--window WxH] [--appearance THEME]
 
   --snapshot OUT.png      capture the window to OUT.png, then quit
   --snapshot-after-ms N   when to capture, in milliseconds from launch (default 1000); with --playback the script
@@ -46,7 +45,8 @@ const USAGE: &str = "usage: pr-review-desktop [--socket PATH] [--pr URL] [--play
   --actions STEPS         with --playback and --snapshot: comma-separated steps, such as down,open,goto:diff,wait:300;
                           see desktop/README.md
   --window WxH            window size in points (default 1280x800)
-  --appearance MODE       dark or light (default: the system's)
+  --appearance THEME      system, light, dark, solarized-light, solarized-dark or nord, over the one Settings
+                          saved (default: that one, else system)
 
 The other flags are pr-review-tui's.";
 
@@ -56,7 +56,7 @@ struct Opts {
     after_ms: u64,
     steps: Vec<script::Step>,
     window: (f32, f32),
-    appearance: Option<ThemeMode>,
+    appearance: Option<tokens::Choice>,
 }
 
 enum Cli {
@@ -78,11 +78,11 @@ fn parse_args(mut it: impl Iterator<Item = String>) -> Result<Cli, String> {
             "--actions" => steps = script::parse(&value("--actions")?)?,
             "--window" => window = Some(size_arg(&value("--window")?)?),
             "--appearance" => {
-                appearance = Some(match value("--appearance")?.as_str() {
-                    "dark" => ThemeMode::Dark,
-                    "light" => ThemeMode::Light,
-                    other => return Err(format!("--appearance: {other:?} is not dark or light")),
-                })
+                let v = value("--appearance")?;
+                appearance = Some(tokens::Choice::parse(&v).ok_or_else(|| {
+                    let ids: Vec<&str> = tokens::Choice::all().map(tokens::Choice::id).collect();
+                    format!("--appearance: {v:?} is not one of {}", ids.join(", "))
+                })?)
             }
             "-h" | "--help" => return Ok(Cli::Print(USAGE.into())),
             "-V" | "--version" => return Ok(Cli::Print(format!("pr-review-desktop {}", env!("CARGO_PKG_VERSION")))),
@@ -139,6 +139,15 @@ fn start(opts: Opts) -> Result<(), String> {
         Source::Socket(p) => Some(p.clone()),
         Source::Playback(_) => None,
     };
+    // The flag wins over the theme Settings saved, so a snapshot's look never depends on the machine's config.
+    let saved = settings.desktop.theme.as_deref().and_then(|id| {
+        let choice = tokens::Choice::parse(id);
+        if choice.is_none() {
+            eprintln!("pr-review-desktop: [desktop] theme {id:?} is not a theme; following the system");
+        }
+        choice
+    });
+    let theme = opts.appearance.or(saved).unwrap_or(tokens::Choice::System);
     let reviewer = reviewer::Reviewer::new(socket, settings.desktop, settings.config_path, opts.snapshot.is_some());
     let mut model = Model::new(endpoint, settings.look, settings.start, settings.wanted_pr);
     model.agent.wanted = true;
@@ -150,7 +159,7 @@ fn start(opts: Opts) -> Result<(), String> {
         script::play(playback::load(p)?, &mut model, &opts.steps, opts.after_ms)?;
         let snapshot = opts.snapshot.map(|out| (out, 0));
         let view = View { model, cmds, reviewer, desk: desk(&opts.steps), still: true, snapshot: true };
-        run_app(view, None, snapshot, opts.window, opts.appearance);
+        run_app(view, None, snapshot, opts.window, theme);
         drop(cmd_rx);
         return Ok(());
     }
@@ -174,7 +183,7 @@ fn start(opts: Opts) -> Result<(), String> {
     // `rt` lives until the process exits, since `run_app` returns only after the app quits.
     let view =
         View { model, cmds, reviewer, desk: Vec::new(), still: is_snapshot || reduce_motion(), snapshot: is_snapshot };
-    run_app(view, Some(msgs), snapshot, opts.window, opts.appearance);
+    run_app(view, Some(msgs), snapshot, opts.window, theme);
     drop(rt);
     Ok(())
 }
@@ -257,21 +266,17 @@ fn run_app(
     msgs: Option<mpsc::Receiver<Msg>>,
     snapshot: Option<(PathBuf, u64)>,
     (w, h): (f32, f32),
-    appearance: Option<ThemeMode>,
+    theme: tokens::Choice,
 ) {
     gpui_kit::application().with_assets(Assets).run(move |cx| {
         gpui_kit::init(cx);
         capture::set_app_icon();
-        match appearance {
-            Some(mode) => Theme::change(mode, None, cx),
-            None => Theme::sync_system_appearance(None, cx),
-        }
+        ui::apply_theme(theme, cx);
         cx.on_action(|_: &ui::Quit, cx| cx.quit());
         // A snapshot ignores the keyboard: its window takes focus, and keys typed elsewhere must not land in it.
         if !view.snapshot {
             cx.bind_keys(ui::bindings());
         }
-        cx.set_menus(ui::menus());
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds::centered(None, size(px(w), px(h)), cx))),
             // The sidebar and the title bar let a blur of the desktop through; a snapshot stays opaque, since its
@@ -290,13 +295,15 @@ fn run_app(
             ..Default::default()
         };
         let View { model, cmds, reviewer, desk, still, snapshot: is_snapshot } = view;
-        if !is_snapshot && let Some(c) = system_accent().filter(|c| tokens::ring_holds(*c)) {
-            let _ = kit::RING_COLOR.set(c);
+        if !is_snapshot && let Some(c) = system_accent() {
+            let _ = kit::SYSTEM_ACCENT.set(c);
         }
         let built = gpui_kit::open_window(options, cx, |window, cx| {
             let shell = cx.new(|cx| ui::Shell::new(model, cmds, reviewer, still, is_snapshot, &desk, cx));
             let focus = shell.read(cx).focus.clone();
             window.focus(&focus, cx);
+            // System follows macOS as it switches between light and dark.
+            window.observe_window_appearance(|_, cx| ui::apply_theme(ui::chosen(cx), cx)).detach();
             shell
         });
         let (window, shell) = match built {

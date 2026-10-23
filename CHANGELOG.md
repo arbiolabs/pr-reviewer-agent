@@ -4,14 +4,24 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-10-23
+
 ### Added
 
+- **Desktop: adding a PR starts a stopped reviewer.** With the reviewer stopped or offline and a way to start it, Review a PR… (⌘N, the sidebar, the palette) stays available: the sheet starts the reviewer, says "Starting the reviewer, then adding …", and sends the PR once the daemon answers. A start that fails says why in the sheet (#43).
+- **Desktop: the sidebar's lists always show their count.** Needs you and Done show a count badge even at zero, in the neutral ink, so the counts read as one column (#44).
+- **README and GIFs brought up to date.** The README covers PR Reviewer Agent, the macOS desktop app, with a GIF of it recorded from the showcase playback by the new `desktop/demo.sh`, and the TypeSafe key in the macOS Keychain. The terminal client's GIF is re-recorded, and `desktop/README.md` describes the title bar's reviewer pill (#46).
 - **Desktop: reviewer controls in the title bar.** The title bar always shows the reviewer's state ("Reviewer · Live", "Offline", "Stopped by you", "Starting…") with the one action that changes it: Stop while it runs, Start while it doesn't. A start or stop under way shows a spinner, and an action that can't run is dimmed with the reason in its tooltip. Restart stays in the Reviewer menu and the palette (#40).
 - **Desktop: the app's name and mark in the title bar.** The title bar shows a glyph of the app icon's eye, its pupil in the accent, and "PR Reviewer Agent", set off from the page title by a hairline. Before the first snapshot the page title reads "Connecting" or "Offline" instead of repeating the app's name (#38).
 - **Desktop app: the account in the sidebar.** The sidebar's footer shows the GitHub account the daemon reads and publishes as, by the rule the post sheet and the terminal client's "publishes as" use, with its avatar, and the connection and read-only state under it. With no account it shows a person glyph and "No GitHub account", and an account in error shows its state in the warn color. A click opens Settings, and the tooltip gives the account id and its scopes. The avatar is fetched with the system's `curl` and cached for a day in `~/Library/Caches/pr-review/avatars/`, so it shows offline; until it loads, the login's first letter holds its place. Snapshots never touch the network (#39).
 - **TypeSafe key in the macOS Keychain.** The daemon looks for the Jev key at each triage: `TYPESAFE_API_KEY` first, then a generic password in the login keychain (service `io.github.diego-arbio-dev.pr-review`, account `TYPESAFE_API_KEY`), read through `/usr/bin/security` with the key on standard output. A daemon run from a LaunchAgent, which has no such variable, now uses TypeSafe, and a saved or removed key applies to the next review without a restart. `pr-review setup` reports `TypeSafe (key in Keychain)`. `PR_REVIEW_KEYCHAIN_SERVICE` renames the item for tests. See `docs/configuration.md` (#41).
 - **Choose the review model from a client.** Protocol v1 gains `settings.get`, answered by a daemon in engine mode with the model new reviews get, where it was chosen, the models the built-in engine can review with (ref, name, provider, context window, auth source, preferred) and the config file, and the `settings.set` command, which checks the model against that list, saves it as `models.default` with the other keys kept, and gives it to reviews started afterwards with no restart. A read-only daemon grants neither, and `settings.set` is refused while the daemon's `PR_REVIEW_MODEL` outranks the config. A revision is now reviewed with the model its reviewer identity names, so a review resumed after a restart keeps its model (#41).
 - **Desktop app: Settings.** The Setup page is now Settings. Its Agent section lists the models grouped by provider, searchable, with the one in use and each auth source, and saves a choice through `settings.set`, saying that a PR reviewed again with another model gets a new revision. Its Risk check (Jev) section saves and removes the TypeSafe key in the login keychain through a masked field and shows only whether a key is saved; the key goes to `/usr/bin/security` on standard input, never in a command line. Off macOS the section points to `TYPESAFE_API_KEY` (#41).
+
+### Fixed
+
+- **Desktop: the offline banner's copy is centered.** The icon, title and sentence of the banner shown while the reviewer is stopped or offline line up with its Start reviewer button instead of sitting at the top (#42).
+- **Desktop app: themes.** Settings (⌘,) opens on Appearance, a picker that previews each theme: System (follows macOS, the default), Light, Dark, Solarized Light, Solarized Dark and Nord. The setup checks follow under a Setup checks heading. View → Appearance and the palette's "Theme:" rows offer the same list, and a choice applies at once. The app saves it as `theme` in the config's `[desktop]` section, changing only that line, and restores it on launch. `--appearance` takes any theme id and wins over the saved one. The contrast test covers every theme, and the canonical Solarized and Nord tokens that fail it are moved in lightness only, listed in `desktop/DESIGN.md` (#45).
 
 ## [1.3.0] - 2026-10-23
 
@@ -104,7 +114,8 @@ This is the first release.
   - the PR is still open.
 - Command idempotency keys are bound to each run attempt, so a replayed command never has a second effect.
 
-[Unreleased]: https://github.com/diego-arbio-dev/pr-reviewer/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/diego-arbio-dev/pr-reviewer/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/diego-arbio-dev/pr-reviewer/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/diego-arbio-dev/pr-reviewer/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/diego-arbio-dev/pr-reviewer/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/diego-arbio-dev/pr-reviewer/compare/v1.0.1...v1.1.0
