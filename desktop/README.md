@@ -38,6 +38,8 @@ The title bar shows the app's mark and name, "PR Reviewer Agent", then the page 
 
 Against a daemon started with `--allow-commands`, press ⌘N, or choose **Review a PR…** in the sidebar, the palette or the empty state. Paste the PR's URL (⌘V), or type `owner/repo#N`. The sheet shows the repository and number it read, and ⏎ asks the daemon to add it. The daemon reads the PR from GitHub with its own account and starts its review; the sheet closes on the new PR. If the daemon refuses, the sheet says why in place: a PR its account can't see, a closed or merged PR, or text that isn't a PR link. A PR the window already tracks opens instead. On a read-only daemon the entries are locked with the reason.
 
+With the reviewer stopped or offline, ⌘N still opens the sheet when the app can start the reviewer: ⏎ starts it, the sheet reads "Starting the reviewer, then adding …", and the PR is sent once the daemon answers. A start that fails says why in the sheet.
+
 ### Start and stop the reviewer
 
 When nothing answers on the socket, the offline screen's primary action is **Start reviewer** (⌘R). The **Reviewer** menu, the palette and the Reviewer card in Settings also offer **Stop reviewer** and **Restart reviewer**. The card shows the state, the socket, the mode, how the daemon runs on this machine and where its log is. On a read-only daemon, stop and restart are off with the reason, because that daemon may belong to another process.
@@ -77,7 +79,7 @@ With that setting, Stop is a plain `daemon.stop` and Start is a `launchctl kicks
 
 ### Settings
 
-⌘, opens Settings: the daemon's checks, the reviewer, the GitHub accounts, and two sections that change how it reviews.
+⌘, opens Settings: Appearance (see [Themes](#themes)), the daemon's setup checks, two sections that change how it reviews, the reviewer, and the GitHub accounts.
 
 - **Risk check (Jev)** saves your TypeSafe key in the login keychain, where the daemon reads it for the next review with no restart. The field is masked and the page says only whether a key is saved. Off macOS, set `TYPESAFE_API_KEY` in the daemon's environment instead. [Configuration](../docs/configuration.md#typesafe-key-in-the-macos-keychain) explains how the key is kept.
 - **Agent** lists the models the daemon can review with, grouped by provider and searchable, with the one in use and where each provider's credential comes from. Save makes the choice the daemon's `models.default`. Reviews started from then on use it, and a PR reviewed again with another model gets a new revision.
