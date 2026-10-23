@@ -229,6 +229,23 @@ async fn ticks(tx: mpsc::Sender<Msg>) {
     }
 }
 
+/// The icon catalog plus the app's own mark.
+struct Assets;
+
+impl AssetSource for Assets {
+    fn load(&self, path: &str) -> Result<Option<std::borrow::Cow<'static, [u8]>>> {
+        match path {
+            ui::MARK => Ok(Some(include_bytes!("../assets/mark.svg").as_slice().into())),
+            ui::MARK_PUPIL => Ok(Some(include_bytes!("../assets/mark-pupil.svg").as_slice().into())),
+            _ => gpui_kit::assets::AllAssets.load(path),
+        }
+    }
+
+    fn list(&self, path: &str) -> Result<Vec<SharedString>> {
+        gpui_kit::assets::AllAssets.list(path)
+    }
+}
+
 /// Opens the window and, with `msgs`, feeds the reducer on the main thread; with `snapshot`, captures the window
 /// that many milliseconds after it opens and quits.
 fn run_app(
@@ -238,7 +255,7 @@ fn run_app(
     (w, h): (f32, f32),
     appearance: Option<ThemeMode>,
 ) {
-    gpui_kit::application().with_assets(gpui_kit::assets::AllAssets).run(move |cx| {
+    gpui_kit::application().with_assets(Assets).run(move |cx| {
         gpui_kit::init(cx);
         capture::set_app_icon();
         match appearance {

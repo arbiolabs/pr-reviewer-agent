@@ -4,6 +4,10 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- **Desktop: the app's name and mark in the title bar.** The title bar shows a glyph of the app icon's eye, its pupil in the accent, and "PR Reviewer Agent", set off from the page title by a hairline. Before the first snapshot the page title reads "Connecting" or "Offline" instead of repeating the app's name (#38).
+
 ## [1.3.0] - 2026-10-23
 
 ### Added
