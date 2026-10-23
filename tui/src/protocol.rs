@@ -819,6 +819,8 @@ pub enum Command {
     Retry(RunParams),
     Publish(PublishParams),
     SelectAccount(AccountParams),
+    /// Granted only by a daemon in engine mode; the desktop sends it to stop the reviewer.
+    StopDaemon(StopParams),
 }
 
 impl Command {
@@ -831,6 +833,7 @@ impl Command {
             Command::Retry(_) => "review.retry",
             Command::Publish(_) => "review.publish",
             Command::SelectAccount(_) => "account.select",
+            Command::StopDaemon(_) => "daemon.stop",
         }
     }
 
@@ -843,6 +846,7 @@ impl Command {
             Command::Retry(_) => "retry",
             Command::Publish(_) => "publish",
             Command::SelectAccount(_) => "switch accounts",
+            Command::StopDaemon(_) => "stop the reviewer",
         }
     }
 
@@ -855,6 +859,7 @@ impl Command {
             Command::Retry(p) => format!("review.retry:{}", p.run_id),
             Command::Publish(p) => format!("review.publish:{}:{}", p.run_id, p.preview_id),
             Command::SelectAccount(p) => format!("account.select:{}", p.account_id),
+            Command::StopDaemon(_) => "daemon.stop".into(),
         }
     }
 }
@@ -893,6 +898,14 @@ pub struct AccountParams {
     pub account_id: AccountId,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct StopParams {
+    /// Stop even while reviews run: they pause and resume on the next start. Without it, a running review makes the
+    /// daemon refuse with `CONFLICT`.
+    pub pause_reviews: bool,
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct RawCommand {
@@ -912,6 +925,7 @@ impl TryFrom<RawCommand> for CommandRequest {
             "review.retry" => Command::Retry(from_value(raw.params)?),
             "review.publish" => Command::Publish(from_value(raw.params)?),
             "account.select" => Command::SelectAccount(from_value(raw.params)?),
+            "daemon.stop" => Command::StopDaemon(from_value(raw.params)?),
             other => return Err(format!("unknown command {other}")),
         };
         Ok(CommandRequest { request_id: raw.request_id, idempotency_key: raw.idempotency_key, command })
@@ -928,6 +942,7 @@ impl From<CommandRequest> for RawCommand {
             Command::Retry(p) => ("review.retry", to(serde_json::to_value(p))),
             Command::Publish(p) => ("review.publish", to(serde_json::to_value(p))),
             Command::SelectAccount(p) => ("account.select", to(serde_json::to_value(p))),
+            Command::StopDaemon(p) => ("daemon.stop", to(serde_json::to_value(p))),
         };
         RawCommand { request_id: c.request_id, command: command.into(), params, idempotency_key: c.idempotency_key }
     }

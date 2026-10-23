@@ -275,9 +275,12 @@ export const Command = Type.Union([
   command("review.retry", { runId: Id }),
   command("review.publish", { runId: Id, previewId: Id, expectedHeadSha: Sha }),
   command("account.select", { accountId: Id }),
+  command("daemon.stop", {
+    pauseReviews: Type.Boolean({ description: "stop even while reviews run: they pause and resume on the next engine start; without it a running review makes the stop CONFLICT" }),
+  }),
 ]);
 export type Command = Static<typeof Command>;
-export type ReviewCommand = Exclude<Command, { command: "account.select" }>;
+export type ReviewCommand = Exclude<Command, { command: "account.select" | "daemon.stop" }>;
 
 /** The one key a command may carry: it binds the key to the target, so a replayed key is the same request. */
 export function idempotencyKey(c: Command): string {
@@ -294,6 +297,8 @@ export function idempotencyKey(c: Command): string {
       return `review.publish:${c.params.runId}:${c.params.previewId}`;
     case "account.select":
       return `account.select:${c.params.accountId}`;
+    case "daemon.stop":
+      return "daemon.stop";
   }
 }
 

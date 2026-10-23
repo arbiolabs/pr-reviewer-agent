@@ -1,0 +1,9 @@
+{
+  "type": "command",
+  "requestId": "req-cmd",
+  "command": "daemon.stop",
+  "params": {
+    "pauseReviews": false
+  },
+  "idempotencyKey": "daemon.stop"
+}

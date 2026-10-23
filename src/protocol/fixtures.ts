@@ -1451,6 +1451,7 @@ export const fixtures: Record<string, ClientMessage | ServerMessage | Record<str
   "client.command.review.retry": { type: "command", requestId: "req-cmd", command: "review.retry", params: { runId: run1.id }, idempotencyKey: `review.retry:${run1.id}` },
   "client.command.review.publish": publishCommand,
   "client.command.account-select": selectCommand(work),
+  "client.command.daemon.stop": { type: "command", requestId: "req-cmd", command: "daemon.stop", params: { pauseReviews: false }, idempotencyKey: "daemon.stop" },
   "client.publication.get": { type: "publication.get", requestId: "req-pub", runId: run1.id },
 
   "server.welcome": welcome(108),

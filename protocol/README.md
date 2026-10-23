@@ -57,11 +57,14 @@ the recorded `operationId` and does nothing again. A key in any other form is `I
 | `review.cancel` | `runId` | `review.cancel:<runId>` | `review.cancel:<runId>` |
 | `review.publish` | `runId`, `previewId`, `expectedHeadSha` | `review.publish:<runId>:<previewId>` | `review.publish:<runId>` |
 | `account.select` | `accountId` | `account.select:<accountId>` | `account.select:<journal seq>` |
+| `daemon.stop` | `pauseReviews` | `daemon.stop` | `daemon.stop` |
 
 `welcome.capabilities` lists what this daemon grants. A daemon in `read-only` mode (the default, or another pr-review
 holds the data dir, or the engine failed to open; `welcome.readOnlyReason` says which) grants `account.select` only.
 A daemon started with `--allow-commands` or `control.allow_commands` runs in `engine` mode and grants the review
-commands, and `review.publish` only under `review.publish_mode: "approval"`.
+commands, and `review.publish` only under `review.publish_mode: "approval"`. The `pr-review daemon` process in
+`engine` mode also grants `daemon.stop`; a read-only daemon never does, because its data dir may belong to another
+process.
 Every command is checked by the server whatever the client showed:
 
 - `review.add`: `url` is a GitHub pull request URL or `owner/repo#N` (`INVALID_REQUEST` otherwise). The daemon reads
@@ -81,6 +84,11 @@ Every command is checked by the server whatever the client showed:
   payload's hash (`CONFLICT`), and `expectedHeadSha` must be the run's head and GitHub's open head now
   (`REVISION_STALE`; a moved head or closed PR supersedes the run, with nothing posted). Accepted means the audited
   approval is recorded and the exactly-once publisher owns the rest; `review.publication_changed` says what happened.
+- `daemon.stop`: while a review runs (a `RUNNING` run outside `AWAITING_APPROVAL`) it is refused with `CONFLICT`, naming
+  how many, unless `pauseReviews` is `true`. Accepted is the last message on that connection: the server then closes
+  it and the daemon shuts down as on SIGTERM. Running reviews pause and resume on the next engine start, the data-dir
+  lock is released, the socket is removed and the process exits 0. A client that got `accepted` knows the daemon
+  stopped on request; any other end of the connection is a lost connection.
 
 ## Accounts
 
