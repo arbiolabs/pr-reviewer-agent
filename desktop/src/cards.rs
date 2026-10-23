@@ -386,12 +386,13 @@ fn card(s: &Shell, t: &Colors, c: &Card, i: usize, selected: bool, cx: &Context<
 }
 
 /// The reader is clear: said once, at the head of the done list, only by a window with a live snapshot.
-fn clear(t: &Colors, m: &pr_review_tui::model::Model) -> Div {
+fn clear(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
+    let m = &s.model;
     let reviewed = queue::done(m).len();
     let running = queue::running(m).len();
     let body = match (m.domain.prs.is_empty(), running) {
         (true, _) => {
-            "Tracked PRs show up here as soon as the reviewer picks one up. Start one with pr-review review <url>."
+            "Tracked PRs show up here as soon as the reviewer picks one up. Add one by its GitHub URL with ⌘N."
                 .to_string()
         }
         (false, 0) => format!(
@@ -428,6 +429,18 @@ fn clear(t: &Colors, m: &pr_review_tui::model::Model) -> Div {
                 .child("You're clear"),
         )
         .child(div().text_size(text::BODY).line_height(text::LINE_BODY).text_color(t.muted).child(body))
+        .when(m.domain.prs.is_empty(), |d| {
+            let b = match crate::overlay::add_block(m) {
+                Some(_) => crate::kit::locked_button(t, "clear-add", "Review a PR…"),
+                None => button(t, "clear-add", "Review a PR…", Some("⌘N"), Tone::Primary, on(cx, |s, cx| s.add_pr(cx))),
+            };
+            d.child(div().flex().pt(space::S1).child(match crate::overlay::add_block(m) {
+                Some(why) => {
+                    crate::kit::tip(b, format!("Can't add a PR: {why}. Restart the daemon with --allow-commands."))
+                }
+                None => b,
+            }))
+        })
 }
 
 pub fn done_column(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
@@ -435,7 +448,7 @@ pub fn done_column(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
     let done = queue::done(m);
     let mut col = div();
     if queue::cards(m).is_empty() {
-        col = col.child(clear(t, m));
+        col = col.child(clear(s, t, cx));
     }
     if done.is_empty() {
         return column(

@@ -22,6 +22,8 @@ pub enum Step {
     Finding(usize),
     /// Milliseconds before the next step.
     Wait(u64),
+    /// `add:TEXT`: what ⏎ in the add-a-PR sheet sends the reducer.
+    Add(String),
     /// A step for the desktop's own view state, which the reducer never sees.
     Desk(Desk),
 }
@@ -43,6 +45,8 @@ pub enum Desk {
     Discards,
     /// `scrub:N`: the live log held at its Nth event, counted from 1.
     Scrub(usize),
+    /// `add-pr` or `add-pr:TEXT`: the sheet that adds a PR, with TEXT in its field.
+    AddPr(String),
 }
 
 #[rustfmt::skip]
@@ -71,7 +75,8 @@ const SCREENS: &[(&str, Screen)] = &[
 ];
 
 /// Comma-separated steps: an action name, `goto:<screen>`, `type:<text>`, `pr:<number>`, `finding:<n>`,
-/// `wait:<ms>`, or a desktop step (`tab:done`, `palette:<text>`, `keys`, `confirm-post`, `scrub:<n>`).
+/// `wait:<ms>`, `add:<url>`, or a desktop step (`tab:done`, `palette:<text>`, `keys`, `confirm-post`, `add-pr[:<url>]`,
+/// `scrub:<n>`).
 pub fn parse(s: &str) -> Result<Vec<Step>, String> {
     let mut steps = Vec::new();
     for t in s.split(',').map(str::trim).filter(|t| !t.is_empty()) {
@@ -95,6 +100,9 @@ pub fn parse(s: &str) -> Result<Vec<Step>, String> {
             None if t == "palette" => steps.push(Step::Desk(Desk::Palette(String::new()))),
             None if t == "keys" => steps.push(Step::Desk(Desk::Keys)),
             None if t == "confirm-post" => steps.push(Step::Desk(Desk::ConfirmPost)),
+            None if t == "add-pr" => steps.push(Step::Desk(Desk::AddPr(String::new()))),
+            Some(("add-pr", v)) => steps.push(Step::Desk(Desk::AddPr(v.into()))),
+            Some(("add", v)) => steps.push(Step::Add(v.into())),
             None if t == "discards" => steps.push(Step::Desk(Desk::Discards)),
             None if t == "flagged" => steps.push(Step::Desk(Desk::Flagged)),
             Some(("type", v)) => steps.extend(v.chars().map(|c| Step::Act(Action::InputChar(c)))),
@@ -120,6 +128,7 @@ fn message(m: &Model, step: &Step) -> Result<Option<Msg>, String> {
     Ok(Some(match step {
         Step::Wait(_) | Step::Desk(_) => return Ok(None),
         Step::Act(a) => Msg::Action(*a),
+        Step::Add(text) => Msg::AddPr(text.clone()),
         Step::Pr(n) => match m.domain.prs.values().find(|p| p.number == *n) {
             Some(p) => Msg::Pick(Hit::Pr(p.id.clone())),
             None => return Err(format!("pr:{n}: no such PR at {} ms", m.now_ms)),
@@ -242,6 +251,14 @@ mod tests {
                 Step::Act(Action::Mutation(Mutation::Start)),
                 Step::Desk(Desk::ConfirmPost),
                 Step::Desk(Desk::Scrub(12)),
+            ]
+        );
+        assert_eq!(
+            parse("add-pr,add-pr:acme/web#7,add:acme/web#7").unwrap(),
+            [
+                Step::Desk(Desk::AddPr(String::new())),
+                Step::Desk(Desk::AddPr("acme/web#7".into())),
+                Step::Add("acme/web#7".into())
             ]
         );
         assert!(parse("sideways").unwrap_err().contains("known: quit, up"));
