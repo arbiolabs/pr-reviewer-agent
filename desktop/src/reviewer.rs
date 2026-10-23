@@ -360,6 +360,9 @@ impl Reviewer {
 
 impl Shell {
     pub fn ask(&mut self, ask: Ask, cx: &mut Context<Self>) {
+        if !self.snapshot {
+            self.reviewer.detect();
+        }
         if let Some(why) = self.reviewer.block(&self.model, ask) {
             self.model.notice = Some(Notice {
                 text: format!("Can't {}: {why}", ask.title().to_lowercase()),
