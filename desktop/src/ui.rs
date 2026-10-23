@@ -194,6 +194,8 @@ pub struct Shell {
     pub diff_generated_open: bool,
     /// A sheet was open in the last frame.
     pub sheet_was_open: bool,
+    /// The footer's avatar for the publishing account.
+    pub avatar: crate::account::Avatar,
 }
 
 /// A page the reader went into: a finding, the proof, the diff or setup. The live strip steps aside there.
@@ -239,6 +241,7 @@ impl Shell {
             diff_flagged_only: false,
             diff_generated_open: false,
             sheet_was_open: false,
+            avatar: Default::default(),
         };
         for d in desk {
             match d {
@@ -650,6 +653,7 @@ impl Shell {
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.width = window.viewport_size().width;
+        self.sync_avatar(cx);
         // The PR the sheet sent is selected: the sheet's work is done.
         if matches!(self.overlay, Some(Overlay::AddPr { sent: true, .. })) && self.model.adding.is_none() {
             self.overlay = None;
@@ -1142,7 +1146,7 @@ fn sidebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         .border_r_1()
         .border_color(t.border)
         .child(list)
-        .child(connection(s, t))
+        .child(crate::account::footer(s, t, cx))
 }
 
 /// The sidebar's way to add a PR: a quiet row under the lists with ⌘N beside it, locked with its reason on a daemon
@@ -1267,29 +1271,6 @@ fn pr_row(s: &Shell, t: &Colors, pr: &Pr, state: RowState, on: bool, cx: &Contex
         ),
         full,
     )
-}
-
-fn connection(s: &Shell, t: &Colors) -> Stateful<Div> {
-    let m = &s.model;
-    let (hue, word) = link_word(s, t);
-    let endpoint = match m.diag.endpoint.split_once(':').map_or("", |(k, _)| k) {
-        "unix" => "socket",
-        other => other,
-    }
-    .to_string();
-    let row = div()
-        .id("connection")
-        .flex()
-        .items_center()
-        .gap(space::S2)
-        .h(px(40.))
-        .px(space::S4)
-        .border_t_1()
-        .border_color(t.border)
-        .child(div().size(px(7.)).rounded(radius::PILL).bg(hue))
-        .child(div().text_size(text::SMALL).text_color(t.muted).child(word))
-        .child(div().text_size(text::SMALL).text_color(t.faint).child(endpoint));
-    tip(row, m.diag.endpoint.clone())
 }
 
 /// The connection in a word, with the reviewer's own state when the app started or stopped it.

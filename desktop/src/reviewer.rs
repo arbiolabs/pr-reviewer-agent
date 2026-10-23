@@ -92,7 +92,7 @@ pub fn spawn_log() -> PathBuf {
     home().join("Library/Logs/pr-review/daemon.log")
 }
 
-fn home() -> PathBuf {
+pub fn home() -> PathBuf {
     std::env::var_os("HOME").map_or_else(|| PathBuf::from("."), PathBuf::from)
 }
 
