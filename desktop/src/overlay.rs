@@ -117,7 +117,7 @@ fn entries(m: &Model, r: &Reviewer) -> Vec<Entry> {
         group: "Review",
         title: "Review a PR by its URL…".into(),
         key: Some("⌘N"),
-        blocked: add_block(m),
+        blocked: add_block(m, r),
         run: Run::AddPr,
     });
     out.push(Entry {
@@ -280,7 +280,11 @@ fn run(s: &mut Shell, r: Run, cx: &mut Context<Shell>) {
 }
 
 /// Why the add-a-PR sheet can't send now, in the palette's and the buttons' words; `None` when it can.
-pub fn add_block(m: &Model) -> Option<String> {
+/// A stopped reviewer the app can start doesn't block: the sheet starts it and sends the PR once it answers.
+pub fn add_block(m: &Model, r: &Reviewer) -> Option<String> {
+    if crate::reviewer::starts_for_add(m, r) {
+        return None;
+    }
     if queue::read_only(m) {
         return Some(READ_ONLY.into());
     }
@@ -907,6 +911,8 @@ pub enum AddLine {
         tracked: Option<String>,
     },
     Sending(String),
+    /// Sent while the reviewer was stopped: the app is starting it, and the PR goes once it answers.
+    Starting(String),
     Refused {
         title: &'static str,
         why: String,
@@ -944,8 +950,14 @@ pub fn add_line(m: &Model, url: &str, sent: bool) -> AddLine {
 /// from the title bar as the post sheet does; esc closes it and ⏎ sends.
 fn add_pr(s: &Shell, t: &Colors, url: &str, sent: bool, cx: &Context<Shell>) -> AnyElement {
     let m = &s.model;
-    let line = add_line(m, url, sent);
-    let sending = matches!(line, AddLine::Sending(_));
+    let line = match (&s.queued_add, &s.reviewer.control) {
+        (Some(_), crate::reviewer::Control::StartFailed(why)) if sent => {
+            AddLine::Refused { title: "The reviewer didn't start", why: why.clone() }
+        }
+        (Some(q), _) if sent => AddLine::Starting(PrRef::parse(q).map_or(q.clone(), |r| r.to_string())),
+        _ => add_line(m, url, sent),
+    };
+    let sending = matches!(line, AddLine::Sending(_) | AddLine::Starting(_));
     let ready = matches!(line, AddLine::Valid { .. } | AddLine::Refused { .. } | AddLine::TimedOut) && !sending;
     let (glyph, hue, words): (Option<IconName>, Hsla, String) = match &line {
         AddLine::Empty => (None, t.faint, "Paste a link with ⌘V. owner/repo#123 works too.".into()),
@@ -961,6 +973,7 @@ fn add_pr(s: &Shell, t: &Colors, url: &str, sent: bool, cx: &Context<Shell>) -> 
             (Some(IconName::CircleCheck), t.ok, format!("{repo} · #{number} is already here: {title}. ⏎ opens it."))
         }
         AddLine::Sending(target) => (None, t.running, format!("Asking the daemon to read {target} from GitHub…")),
+        AddLine::Starting(target) => (None, t.running, format!("Starting the reviewer, then adding {target}…")),
         AddLine::Refused { why, .. } => (Some(IconName::CircleX), t.danger, why.clone()),
         AddLine::TimedOut => (Some(IconName::TriangleAlert), t.warn, "No reply in time. ⏎ sends it again.".into()),
     };
