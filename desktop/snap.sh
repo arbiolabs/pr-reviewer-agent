@@ -1,5 +1,6 @@
 #!/bin/sh
-# Renders named states of the showcase (and two small sessions beside it) to PNGs, dark and light.
+# Renders named states of the showcase (and two small sessions beside it) to PNGs, dark and light, and the classic
+# themes on the overview and a finding.
 # usage: desktop/snap.sh [OUT_DIR [STATE...]]   (default OUT_DIR: desktop/snapshots, every state)
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
@@ -118,7 +119,7 @@ for look in dark light; do
   snap 06b-confirm-post-$look  $look 20000 "wait:19000,pr:1291,publish,confirm-post"
   snap 07-palette-$look        $look 20000 "wait:19000,palette:re"
   snap 07b-palette-readonly-$look $look 20000 "wait:19000,pr:1287,palette:start" "$readonly_script"
-  snap 08-setup-$look          $look 1000  "" protocol/playback/setup.ndjson
+  snap 08-settings-$look       $look 1000  "" protocol/playback/setup.ndjson
   case $only in "  " | *" 08-disconnected-$look "*)
     capture "$out/08-disconnected-$look.png" --socket /private/tmp/prdc/s.sock --window 1280x800 \
       --appearance $look --snapshot-after-ms 1500 ;;
@@ -144,3 +145,12 @@ for look in dark light; do
   snap 20-footer-account-$look $look 20000 ""
 done
 snap 20b-footer-no-account     dark  20000 "" "$no_account_script"
+
+# The classic themes, each on the overview and on a finding, and the picker in Settings.
+snap 21-theme-solarized-light         solarized-light 20000 ""
+snap 21-theme-solarized-light-finding solarized-light 20000 "wait:19000,pr:1287,finding:1,finding:1"
+snap 21b-solarized-dark               solarized-dark  20000 ""
+snap 21b-solarized-dark-finding       solarized-dark  20000 "wait:19000,pr:1287,finding:1,finding:1"
+snap 21c-nord                         nord            20000 ""
+snap 21c-nord-finding                 nord            20000 "wait:19000,pr:1287,finding:1,finding:1"
+snap 21d-appearance-settings          nord            20000 "wait:19000,goto:settings"

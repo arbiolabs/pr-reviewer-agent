@@ -1,12 +1,77 @@
-//! Design tokens: color for dark and light, the type scale, the 4-point grid, two radii and motion. Every view reads
-//! its look from here; DESIGN.md explains the choices.
+//! Design tokens: the themes, the type scale, the 4-point grid, two radii and motion. Every view reads its look
+//! from here; DESIGN.md explains the choices.
 
 use std::time::Duration;
 
+use gpui_kit::component::ThemeColor;
 use gpui_kit::{Hsla, Pixels, px, rgb};
 use pr_review_tui::protocol::Severity;
 
-/// One appearance's palette. Every text token meets WCAG AA (4.5:1) on every surface it sits on; `tests` checks it.
+/// A theme is data: the id the config stores, the name the picker shows, whether gpui-kit draws it dark, and its
+/// palette. Adding one is a row in `THEMES`; the picker, the menu, the palette and the contrast test all read it.
+#[derive(Debug)]
+pub struct Theme {
+    pub id: &'static str,
+    pub name: &'static str,
+    pub dark: bool,
+    pub colors: fn() -> Colors,
+}
+
+pub static THEMES: [Theme; 5] = [
+    Theme { id: "light", name: "Light", dark: false, colors: light },
+    Theme { id: "dark", name: "Dark", dark: true, colors: dark },
+    Theme { id: "solarized-light", name: "Solarized Light", dark: false, colors: solarized_light },
+    Theme { id: "solarized-dark", name: "Solarized Dark", dark: true, colors: solarized_dark },
+    Theme { id: "nord", name: "Nord", dark: true, colors: nord },
+];
+
+/// What the reader picked: a theme, or System, which is Light or Dark as macOS is.
+#[derive(Clone, Copy, Debug)]
+pub enum Choice {
+    System,
+    Fixed(&'static Theme),
+}
+
+impl PartialEq for Choice {
+    fn eq(&self, other: &Choice) -> bool {
+        self.id() == other.id()
+    }
+}
+
+impl Choice {
+    /// Every choice in the picker's order: System first, then the themes.
+    pub fn all() -> impl Iterator<Item = Choice> {
+        std::iter::once(Choice::System).chain(THEMES.iter().map(Choice::Fixed))
+    }
+
+    pub fn parse(id: &str) -> Option<Choice> {
+        Choice::all().find(|c| c.id() == id)
+    }
+
+    pub fn id(self) -> &'static str {
+        match self {
+            Choice::System => "system",
+            Choice::Fixed(t) => t.id,
+        }
+    }
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Choice::System => "System",
+            Choice::Fixed(t) => t.name,
+        }
+    }
+
+    /// The theme it paints with, given whether macOS is dark now.
+    pub fn theme(self, system_dark: bool) -> &'static Theme {
+        match self {
+            Choice::Fixed(t) => t,
+            Choice::System => &THEMES[usize::from(system_dark)],
+        }
+    }
+}
+
+/// One theme's palette. Every text token meets WCAG AA (4.5:1) on every surface it sits on; `tests` checks it.
 #[derive(Clone, Copy)]
 pub struct Colors {
     pub bg: Hsla,
@@ -57,6 +122,8 @@ pub struct Colors {
     pub hover: Hsla,
     /// The pressed wash: 8 %.
     pub press: Hsla,
+    /// The keyboard focus ring when the macOS accent can't be used: 3:1 on every surface.
+    pub focus: Hsla,
 }
 
 fn c(hex: u32) -> Hsla {
@@ -111,6 +178,7 @@ pub fn dark() -> Colors {
         sheet_edge: c(0x4A5363),
         hover: ca(0xE9EDF2, 0.04),
         press: ca(0xE9EDF2, 0.08),
+        focus: c(0x8E95FF),
     }
 }
 
@@ -158,6 +226,161 @@ pub fn light() -> Colors {
         sheet_edge: c(0xB9B3A6),
         hover: ca(0x1A1E24, 0.04),
         press: ca(0x1A1E24, 0.08),
+        focus: c(0x4247C8),
+    }
+}
+
+// Solarized (Ethan Schoonover): base03 #002B36, base02 #073642, base01 #586E75, base00 #657B83, base0 #839496,
+// base1 #93A1A1, base2 #EEE8D5, base3 #FDF6E3; yellow #B58900, orange #CB4B16, red #DC322F, magenta #D33682,
+// violet #6C71C4, blue #268BD2, cyan #2AA198, green #859900. A token marked "from X" is X with its Lab lightness
+// moved, hue and chroma kept, until it passes the contrast test; DESIGN.md lists each one.
+
+/// Solarized's dark mode: base03 paper, base02 for the selection, the accents lifted to read on it.
+pub fn solarized_dark() -> Colors {
+    Colors {
+        bg: c(0x002B36),
+        sidebar: c(0x00232D),
+        surface: c(0x042F3A),
+        raised: c(0x022D38),
+        selected: c(0x073642),
+        border: c(0x0B3D4A),
+        border_strong: c(0x1A4F5C),
+        text: c(0xEEE8D5),
+        muted: c(0x9EACAC),  // from base1
+        faint: c(0x9BACAE),  // from base0
+        accent: c(0x73B2F9), // from blue
+        accent_hover: c(0x8CC0FA),
+        accent_press: c(0x5FA2EC),
+        on_accent: c(0x002B36),
+        running: c(0x5ABEB5),  // from cyan
+        ok: c(0xA2B636),       // from green
+        warn: c(0xD0A432),     // from yellow
+        danger: c(0xFE8571),   // from red
+        critical: c(0xFF7FA4), // from magenta
+        high: c(0xFE875A),     // from orange
+        medium: c(0xD0A432),   // from yellow
+        low: c(0xA1A6F9),      // from violet
+        add_bg: ca(0x859900, 0.13),
+        del_bg: ca(0xDC322F, 0.13),
+        add_fg: c(0x90A41B), // from green
+        del_fg: c(0xFF6754), // from red
+        code_bg: c(0x002B36),
+        syn_keyword: c(0x859900),
+        syn_string: c(0x2AA198),
+        syn_number: c(0xF15391),  // from magenta
+        syn_comment: c(0x7B9198), // from base01
+        syn_fn: c(0x3793DA),      // from blue
+        syn_type: c(0xB58900),
+        on_danger: c(0x002B36),
+        disabled: c(0x8B9C9E), // from base0
+        tint: 0.14,
+        scrim: ca(0x00141A, 0.5),
+        shadow: ca(0x000000, 0.6),
+        sheet_edge: c(0x586E75),
+        hover: ca(0xEEE8D5, 0.04),
+        press: ca(0xEEE8D5, 0.08),
+        focus: c(0x268BD2),
+    }
+}
+
+/// Solarized's light mode: base3 paper, base2 for the selection, base02 ink, the accents deepened to read on it.
+pub fn solarized_light() -> Colors {
+    Colors {
+        bg: c(0xFDF6E3),
+        sidebar: c(0xF5EEDA),
+        surface: c(0xFFFCF4),
+        raised: c(0xFEF9EC),
+        selected: c(0xEEE8D5),
+        border: c(0xE6DFCA),
+        border_strong: c(0xD3CBB2),
+        text: c(0x073642),
+        muted: c(0x495F66),  // from base01
+        faint: c(0x495F67),  // from base00
+        accent: c(0x026391), // from blue
+        accent_hover: c(0x02557D),
+        accent_press: c(0x01476A),
+        on_accent: c(0xFDF6E3),
+        running: c(0x026960),  // from cyan
+        ok: c(0x516501),       // from green
+        warn: c(0x745A00),     // from yellow
+        danger: c(0xB8081D),   // from red
+        critical: c(0xB1026A), // from magenta
+        high: c(0xA53801),     // from orange
+        medium: c(0x745A00),   // from yellow
+        low: c(0x5055A8),      // from violet
+        add_bg: ca(0x859900, 0.14),
+        del_bg: ca(0xDC322F, 0.10),
+        add_fg: c(0x5C7001), // from green
+        del_fg: c(0xCA2026), // from red
+        code_bg: c(0xFDF6E3),
+        syn_keyword: c(0x657900), // from green
+        syn_string: c(0x007F76),  // from cyan
+        syn_number: c(0xCD307F),  // from magenta
+        syn_comment: c(0x667474), // from base1
+        syn_fn: c(0x0677B5),      // from blue
+        syn_type: c(0x886E02),    // from yellow
+        on_danger: c(0xFDF6E3),
+        disabled: c(0x566C74), // from base00
+        tint: 0.12,
+        scrim: ca(0x073642, 0.4),
+        shadow: ca(0x073642, 0.16),
+        sheet_edge: c(0x93A1A1),
+        hover: ca(0x073642, 0.04),
+        press: ca(0x073642, 0.08),
+        focus: c(0x268BD2),
+    }
+}
+
+// Nord (Arctic Ice Studio): Polar Night nord0 #2E3440, nord1 #3B4252, nord2 #434C5E, nord3 #4C566A; Snow Storm
+// nord4 #D8DEE9, nord5 #E5E9F0, nord6 #ECEFF4; Frost nord7 #8FBCBB, nord8 #88C0D0, nord9 #81A1C1, nord10 #5E81AC;
+// Aurora nord11 #BF616A, nord12 #D08770, nord13 #EBCB8B, nord14 #A3BE8C, nord15 #B48EAD.
+
+/// Nord: Polar Night surfaces, Snow Storm ink, Frost for the accent and Aurora for meaning. The selection is nord1,
+/// not nord2: on nord2 no red keeps AA without turning pink.
+pub fn nord() -> Colors {
+    Colors {
+        bg: c(0x2E3440),
+        sidebar: c(0x292E39),
+        surface: c(0x353B49),
+        raised: c(0x323845),
+        selected: c(0x3B4252),
+        border: c(0x434C5E),
+        border_strong: c(0x4C566A),
+        text: c(0xECEFF4),
+        muted: c(0xD8DEE9),
+        faint: c(0xB9C1CF),
+        accent: c(0x90C8D8), // from nord8
+        accent_hover: c(0xA3D4E2),
+        accent_press: c(0x82B6C6),
+        on_accent: c(0x2E3440),
+        running: c(0x9BC8C7), // from nord7
+        ok: c(0xADC896),      // from nord14
+        warn: c(0xEBCB8B),
+        danger: c(0xFFA6AF),   // from nord11
+        critical: c(0xFFA5BF), // from nord11, turned toward nord15 so it stays apart from high
+        high: c(0xF6AD96),     // from nord12
+        medium: c(0xEBCB8B),
+        low: c(0xA3C3E3), // from nord9
+        add_bg: ca(0xA3BE8C, 0.13),
+        del_bg: ca(0xBF616A, 0.13),
+        add_fg: c(0xA3BE8C),
+        del_fg: c(0xF1939C), // from nord11
+        code_bg: c(0x2E3440),
+        syn_keyword: c(0x81A1C1),
+        syn_string: c(0xA3BE8C),
+        syn_number: c(0xB690AF),  // from nord15
+        syn_comment: c(0x8F9CB6), // from nord3
+        syn_fn: c(0x88C0D0),
+        syn_type: c(0x8FBCBB),
+        on_danger: c(0x2E3440),
+        disabled: c(0xA5AEBE),
+        tint: 0.10,
+        scrim: ca(0x1E222A, 0.5),
+        shadow: ca(0x000000, 0.5),
+        sheet_edge: c(0x616E88),
+        hover: ca(0xECEFF4, 0.04),
+        press: ca(0xECEFF4, 0.08),
+        focus: c(0x88C0D0),
     }
 }
 
@@ -178,6 +401,46 @@ impl Colors {
     /// A severity's hue washed into the surface: the card's tint and the anchored diff line.
     pub fn severity_wash(&self, s: Severity) -> Hsla {
         self.severity(s).alpha(0.12)
+    }
+
+    /// gpui-kit's own component colors from this palette, so its scrollbars, tooltips and inputs match the page.
+    pub fn paint_kit(&self, k: &mut ThemeColor) {
+        k.background = self.bg;
+        k.foreground = self.text;
+        k.border = self.border;
+        k.input = self.border_strong;
+        k.caret = self.text;
+        k.ring = self.focus;
+        k.selection = self.accent.alpha(0.3);
+        k.accent = self.selected;
+        k.accent_foreground = self.text;
+        k.muted = self.raised;
+        k.muted_foreground = self.muted;
+        k.popover = self.raised;
+        k.popover_foreground = self.text;
+        k.primary = self.accent;
+        k.primary_hover = self.accent_hover;
+        k.primary_active = self.accent_press;
+        k.primary_foreground = self.on_accent;
+        k.secondary = self.surface;
+        k.secondary_foreground = self.text;
+        k.danger = self.danger;
+        k.danger_foreground = self.on_danger;
+        k.success = self.ok;
+        k.warning = self.warn;
+        k.info = self.running;
+        k.link = self.accent;
+        k.list_active = self.selected;
+        k.list_hover = self.hover;
+        k.sidebar = self.sidebar;
+        k.sidebar_foreground = self.text;
+        k.sidebar_border = self.border;
+        k.title_bar = self.sidebar;
+        k.title_bar_border = self.border;
+        k.skeleton = self.raised;
+        k.scrollbar = self.bg.alpha(0.);
+        k.scrollbar_thumb = self.faint.alpha(0.5);
+        k.scrollbar_thumb_hover = self.faint.alpha(0.75);
     }
 }
 
@@ -294,14 +557,14 @@ pub fn contrast(a: Hsla, b: Hsla) -> f64 {
     (x.max(y) + 0.05) / (x.min(y) + 0.05)
 }
 
-/// A focus ring color holds 3:1 against the window in both appearances, as WCAG asks of a focus indicator.
-pub fn ring_holds(c: Hsla) -> bool {
-    contrast(c, dark().bg) >= 3. && contrast(c, light().bg) >= 3.
+/// A focus ring color holds 3:1 against the theme's window, as WCAG asks of a focus indicator.
+pub fn ring_holds(c: Hsla, t: &Colors) -> bool {
+    contrast(c, t.bg) >= 3.
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{Colors, DISABLED_OUTLINE, contrast, dark, light};
+    use super::{Choice, Colors, DISABLED_OUTLINE, THEMES, contrast};
     use gpui_kit::Hsla;
 
     /// `fg` at `alpha` over `bg`, as the screen shows it.
@@ -314,14 +577,65 @@ mod tests {
     #[test]
     fn a_system_accent_rings_focus_only_where_it_holds_three_to_one() {
         let rgb = |r, g, b| gpui_kit::Rgba { r, g, b, a: 1. }.into();
-        assert!(super::ring_holds(rgb(0.0, 0.48, 1.0)), "macOS blue");
-        assert!(!super::ring_holds(rgb(1.0, 0.78, 0.0)), "yellow fades into the light window");
+        let (light, dark) = (super::light(), super::dark());
+        assert!(super::ring_holds(rgb(0.0, 0.48, 1.0), &light), "macOS blue on the light window");
+        assert!(super::ring_holds(rgb(0.0, 0.48, 1.0), &dark), "macOS blue on the dark window");
+        assert!(!super::ring_holds(rgb(1.0, 0.78, 0.0), &light), "yellow fades into the light window");
+    }
+
+    #[test]
+    fn a_choice_reads_back_from_the_id_the_config_stores() {
+        let ids: Vec<&str> = Choice::all().map(Choice::id).collect();
+        assert_eq!(ids, ["system", "light", "dark", "solarized-light", "solarized-dark", "nord"]);
+        for c in Choice::all() {
+            assert_eq!(Choice::parse(c.id()), Some(c));
+        }
+        assert_eq!(Choice::parse("solarized"), None);
+        assert_eq!(Choice::System.theme(true).id, "dark");
+        assert_eq!(Choice::System.theme(false).id, "light");
+    }
+
+    /// CIE L*a*b* of an opaque color, D65.
+    fn lab(c: Hsla) -> [f64; 3] {
+        let c = c.to_rgb();
+        let lin = |v: f32| {
+            let v = v as f64;
+            if v <= 0.04045 { v / 12.92 } else { ((v + 0.055) / 1.055).powf(2.4) }
+        };
+        let (r, g, b) = (lin(c.r), lin(c.g), lin(c.b));
+        let x = (0.4124 * r + 0.3576 * g + 0.1805 * b) / 0.95047;
+        let y = 0.2126 * r + 0.7152 * g + 0.0722 * b;
+        let z = (0.0193 * r + 0.1192 * g + 0.9505 * b) / 1.08883;
+        let f = |t: f64| if t > 0.008856 { t.cbrt() } else { 7.787 * t + 16. / 116. };
+        [116. * f(y) - 16., 500. * (f(x) - f(y)), 200. * (f(y) - f(z))]
+    }
+
+    /// Severity is carried by shape and word too, but its hues must still read apart: every pair at least 20 apart
+    /// in CIE76 ΔE, about where two swatches stop looking like one color with a shade of difference.
+    #[test]
+    fn every_theme_keeps_the_four_severities_apart() {
+        let mut bad = Vec::new();
+        for th in &THEMES {
+            let t = (th.colors)();
+            let sev = [("critical", t.critical), ("high", t.high), ("medium", t.medium), ("low", t.low)];
+            for (i, (an, a)) in sev.iter().enumerate() {
+                for (bn, b) in &sev[i + 1..] {
+                    let (x, y) = (lab(*a), lab(*b));
+                    let de = ((x[0] - y[0]).powi(2) + (x[1] - y[1]).powi(2) + (x[2] - y[2]).powi(2)).sqrt();
+                    if de < 20. {
+                        bad.push(format!("{}: {an} and {bn} are {de:.1} apart", th.id));
+                    }
+                }
+            }
+        }
+        assert!(bad.is_empty(), "{}", bad.join("\n"));
     }
 
     #[test]
     fn every_text_token_meets_aa_on_every_surface() {
         let mut bad: Vec<String> = Vec::new();
-        for (name, t) in [("dark", dark()), ("light", light())] {
+        for th in &THEMES {
+            let (name, t) = (th.id, (th.colors)());
             let Colors { bg, surface, selected, sidebar, raised, code_bg, .. } = t;
             let texts = [
                 ("text", t.text),
@@ -391,6 +705,10 @@ mod tests {
                 let r = contrast(over(t.disabled, DISABLED_OUTLINE, back), back);
                 if r < 3.0 {
                     bad.push(format!("{name}: disabled outline on {sn} is {r:.2}:1"));
+                }
+                let r = contrast(t.focus, back);
+                if r < 3.0 {
+                    bad.push(format!("{name}: focus ring on {sn} is {r:.2}:1"));
                 }
             }
             // A chip or a count badge: its hue as text over its own wash, on the surfaces that carry one.

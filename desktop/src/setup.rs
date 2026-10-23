@@ -1,5 +1,6 @@
-//! Setup and the states around the board: the daemon's checks, mode and accounts; the overview when nothing is
-//! selected; the offline page with the command that starts the daemon; and the skeleton while the link comes up.
+//! Settings and the states around the board: the theme picker, the daemon's checks, mode and accounts; the overview
+//! when nothing is selected; the offline page with the command that starts the daemon; and the skeleton while the
+//! link comes up.
 
 use gpui_kit::assets::IconName;
 use gpui_kit::prelude::FluentBuilder as _;
@@ -9,11 +10,11 @@ use pr_review_tui::model::Link;
 use pr_review_tui::protocol::{CheckStatus, DaemonMode, Finding};
 
 use crate::detail::*;
-use crate::kit::{OnClick, Tone, button, callout, chip, display, icon, icon_button, overline, summary};
+use crate::kit::{OnClick, Tone, button, callout, chip, display, focusable, icon, icon_button, overline, summary};
 use crate::queue;
 use crate::reviewer::{Ask, Control, shell_quote};
-use crate::tokens::{Colors, radius, space, text};
-use crate::ui::{Shell, on};
+use crate::tokens::{Choice, Colors, radius, space, text};
+use crate::ui::{Shell, click, on};
 
 fn check_name(id: &str) -> &str {
     match id {
@@ -26,9 +27,95 @@ fn check_name(id: &str) -> &str {
     }
 }
 
-/// Setup: the daemon's checks, its mode and the GitHub accounts, with the fix for each gap.
-pub fn setup(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
-    div().flex().flex_1().min_h_0().child(page("setup", setup_body(s, t, cx), None, t, false))
+/// Settings: the theme, then the setup checks (the daemon's checks, its mode and the GitHub accounts, with the fix
+/// for each gap).
+pub fn settings(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
+    div().flex().flex_1().min_h_0().child(page("settings", setup_body(s, t, cx), None, t, false))
+}
+
+/// A theme in miniature, in its own colors: its window, a card with two lines of text, its accent and the four
+/// severities.
+fn preview(p: Colors) -> Div {
+    let bar = |w: f32, c: Hsla| div().h(px(3.)).w(relative(w)).rounded(px(2.)).bg(c);
+    let dot = |c: Hsla| div().flex_none().size(px(6.)).rounded(radius::PILL).bg(c);
+    div().flex_1().min_w_0().h_full().bg(p.bg).p(px(6.)).child(
+        div()
+            .size_full()
+            .flex()
+            .flex_col()
+            .gap(px(4.))
+            .p(px(5.))
+            .rounded(px(4.))
+            .bg(p.surface)
+            .border_1()
+            .border_color(p.border_strong)
+            .child(bar(0.8, p.text))
+            .child(bar(0.55, p.muted))
+            .child(
+                div()
+                    .mt_auto()
+                    .flex()
+                    .items_center()
+                    .gap(px(3.))
+                    .child(div().flex_none().h(px(6.)).w(px(12.)).rounded(radius::PILL).bg(p.accent))
+                    .children([p.critical, p.high, p.medium, p.low].map(dot)),
+            ),
+    )
+}
+
+/// The theme picker: a tile per choice, the one in use outlined in the accent with a check beside its name. A
+/// click applies it at once.
+fn themes(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
+    let current = crate::ui::chosen(cx);
+    let tile = |i: usize, choice: Choice| {
+        let on = choice == current;
+        let look = match choice {
+            Choice::System => {
+                div().flex().size_full().child(preview(crate::tokens::light())).child(preview(crate::tokens::dark()))
+            }
+            Choice::Fixed(th) => div().flex().size_full().child(preview((th.colors)())),
+        };
+        let inner = div()
+            .flex()
+            .flex_col()
+            .gap(space::S2)
+            .w(px(100.))
+            .child(
+                div()
+                    .h(px(64.))
+                    .rounded(radius::SM)
+                    .overflow_hidden()
+                    .border_2()
+                    .border_color(if on { t.accent } else { t.border })
+                    .child(look),
+            )
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(4.))
+                    .text_size(text::SMALL)
+                    .text_color(if on { t.text } else { t.muted })
+                    .when(on, |d| d.font_weight(FontWeight::SEMIBOLD))
+                    .child(choice.name())
+                    .when(on, |d| d.child(icon(IconName::Check, px(12.), t.accent))),
+            );
+        focusable(("theme", i), inner, t, radius::SM, click(cx, move |s, cx| s.set_theme(choice, cx)))
+    };
+    div()
+        .flex()
+        .flex_col()
+        .gap(space::S3)
+        .p(space::S4)
+        .child(div().flex().gap(space::S3).children(Choice::all().enumerate().map(|(i, c)| tile(i, c))))
+        .child(div().text_size(text::SMALL).text_color(t.muted).child(if s.snapshot {
+            "System follows macOS between Light and Dark.".to_string()
+        } else {
+            format!(
+                "System follows macOS between Light and Dark. Saved as [desktop] theme in {}.",
+                s.reviewer.config_path.display()
+            )
+        }))
 }
 
 /// Why this daemon can't act, as a sentence for the reader rather than the daemon's own words.
@@ -718,12 +805,14 @@ pub fn setup_body(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         .flex()
         .flex_col()
         .gap(space::S5)
+        .child(card("Appearance", themes(s, t, cx)))
         .child(
             div()
                 .flex()
                 .flex_col()
                 .gap(space::S2)
-                .child(overline(t, "Settings"))
+                .pt(space::S3)
+                .child(overline(t, "Setup checks"))
                 .child(display(t, "What the reviewer needs"))
                 .child(summary(t, "The checks pr-review setup --check runs, as the daemon reports them.")),
         )

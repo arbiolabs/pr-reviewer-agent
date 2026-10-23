@@ -118,7 +118,7 @@ fn face(m: &pr_review_tui::model::Model, c: &Card, selected: bool) -> Face {
                 None => "It can look, but not start, retry, cancel or post. Start it with --allow-commands.".into(),
             },
             meta: count.words(),
-            action: "Show setup",
+            action: "Open Settings",
         },
         Card::Approve { pr, findings, .. } => Face {
             glyph: Some(IconName::Send),

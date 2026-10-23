@@ -19,7 +19,7 @@ use crate::ui::{Overlay, Shell};
 
 /// How long a start may take before the app calls it failed.
 pub const START_TIMEOUT_MS: u64 = 20_000;
-const NOTICE_MS: u64 = 4_000;
+pub const NOTICE_MS: u64 = 4_000;
 
 /// How this machine runs the daemon the window dials.
 #[derive(Clone, Debug, PartialEq)]
@@ -77,7 +77,7 @@ pub struct Reviewer {
     pub launcher: Result<Launcher, String>,
     pub control: Control,
     desktop: Desktop,
-    config_path: PathBuf,
+    pub config_path: PathBuf,
     job: Option<Job>,
 }
 
