@@ -1,8 +1,12 @@
 # pr-review-desktop
 
-`pr-review-desktop` is a macOS client for pr-review, built on [GPUI](https://www.gpui.rs) through [gpui-kit](https://crates.io/crates/gpui-kit) 0.8.0. The window is a triage inbox: a queue of the decisions waiting on you, each with its detail beside it, a live strip of running reviews, every PR in the sidebar, the diff with findings anchored, a timeline, and a command palette (⌘K). [DESIGN.md](DESIGN.md) describes the design and its tokens.
+PR Reviewer Agent (`pr-review-desktop`) is a macOS client for pr-review, built on [GPUI](https://www.gpui.rs) through [gpui-kit](https://crates.io/crates/gpui-kit) 0.8.0. The window is a triage inbox: a queue of the decisions waiting on you, each with its detail beside it, a live strip of running reviews, every PR in the sidebar, the diff with findings anchored, a timeline, and a command palette (⌘K). [DESIGN.md](DESIGN.md) describes the design and its tokens.
 
 The app links the terminal client in `../tui` as a library and runs its reducer, `update(&mut Model, Msg) -> Vec<Effect>`, and its network task unchanged. The protocol rules, the key guards and the playback all come from there. The terminal client stays as it is.
+
+![The queue, a critical finding beside its cited code, the diff, a review running until it waits for approval, the proof of what will be posted, and Settings.](demo/showcase.gif)
+
+`demo.sh` records this GIF from the showcase playback, with no daemon or network: `desktop/demo.sh` from the repository root.
 
 ## Build and run
 
@@ -25,6 +29,10 @@ desktop/target/release/pr-review-desktop --socket /tmp/prd/s.sock            # t
 ```
 
 Keep the socket path short. macOS refuses a socket path longer than 103 bytes, and the daemon refuses a socket directory that is a symlink, such as `/tmp` itself.
+
+### The title bar
+
+The title bar shows the app's mark and name, "PR Reviewer Agent", then the page title. On the right, the reviewer pill always shows the reviewer's state ("Reviewer · Live", "Offline", "Stopped by you", "Starting…") with the one action that changes it: Stop while the daemon answers, Start while it doesn't. A start or stop under way shows a spinner, and an action that can't run is dimmed with the reason in its tooltip. Restart is in the **Reviewer** menu and the palette.
 
 ### Review a new PR
 
