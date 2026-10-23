@@ -76,6 +76,9 @@ pub fn bindings() -> Vec<KeyBinding> {
 
 /// The name the window, the app menu and the title bar show.
 pub const APP_NAME: &str = "PR Reviewer Agent";
+/// The app icon's eye as a glyph, and its pupil, drawn on top in the accent.
+pub const MARK: &str = "brand/mark.svg";
+pub const MARK_PUPIL: &str = "brand/mark-pupil.svg";
 
 pub fn menus() -> Vec<Menu> {
     vec![
@@ -808,7 +811,27 @@ pub fn on(cx: &Context<Shell>, f: impl Fn(&mut Shell, &mut Context<Shell>) + 'st
     Some(click(cx, f))
 }
 
-/// The title bar: the traffic lights, the page title with its one-sentence state, and the ⌘K field.
+/// The app's mark and name, set off from the page title by a hairline.
+fn brand(t: &Colors) -> Div {
+    let mark = div()
+        .relative()
+        .size(px(22.))
+        .flex_none()
+        .child(svg().path(MARK).absolute().size_full().text_color(t.text))
+        .child(svg().path(MARK_PUPIL).absolute().size_full().text_color(t.accent));
+    div()
+        .flex()
+        .flex_none()
+        .items_center()
+        .gap(space::S2)
+        .pr(space::S3)
+        .border_r_1()
+        .border_color(t.border)
+        .child(mark)
+        .child(div().text_size(text::SMALL).font_weight(FontWeight::SEMIBOLD).text_color(t.text).child(APP_NAME))
+}
+
+/// The title bar: the traffic lights, the app's mark and name, the page title with its one-sentence state, and the ⌘K field.
 fn titlebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
     let m = &s.model;
     let pr = m.selected_pr();
@@ -848,7 +871,8 @@ fn titlebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
             (Stage::Ready, 0, 0) => ("You're clear".into(), String::new()),
             (Stage::Ready, 0, _) => ("Setup needed".into(), String::new()),
             (Stage::Ready, n, _) => (format!("{} waiting", queue::count(n, "decision")), String::new()),
-            _ => (APP_NAME.into(), queue::summary(m)),
+            (Stage::Connecting, ..) => ("Connecting".into(), String::new()),
+            _ => ("Offline".into(), queue::summary(m)),
         },
     };
     let read_only = queue::read_only(m);
@@ -882,6 +906,7 @@ fn titlebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         .border_b_1()
         .border_color(t.border)
         .window_control_area(WindowControlArea::Drag)
+        .child(brand(t))
         // Back as a macOS toolbar button: a chevron in a square that lights on hover, its shortcut in the tooltip.
         .when(away, |d| {
             d.child(crate::kit::icon_button(
