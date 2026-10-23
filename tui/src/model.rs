@@ -216,6 +216,8 @@ pub enum InputPurpose {
     JumpTo,
     /// Timeline events whose text contains the buffer.
     TimelineFilter,
+    /// A PR to add: its GitHub URL or `owner/repo#N`; Enter sends `review.add`.
+    AddPr,
     /// Diff lines whose text contains the buffer; `n`/`N` walk them.
     DiffSearch,
 }
@@ -465,6 +467,30 @@ pub struct PrRef {
 }
 
 impl PrRef {
+    /// `https://github.com/owner/repo/pull/184` (a trailing `/files`, query or fragment is fine) or `owner/repo#184`,
+    /// with owner and repo spelled as GitHub allows: letters, digits, `-`, `_` and `.`.
+    pub fn parse(s: &str) -> Option<PrRef> {
+        let s = s.trim();
+        let (owner, repo, number) = match s.split_once('#') {
+            Some((repo, n)) if !repo.contains("://") => {
+                let (owner, repo) = repo.split_once('/')?;
+                (owner, repo, n)
+            }
+            _ => {
+                let path = s.strip_prefix("https://github.com/").or_else(|| s.strip_prefix("http://github.com/"))?;
+                let path = path.split(['?', '#']).next()?;
+                let mut parts = path.split('/');
+                match (parts.next(), parts.next(), parts.next(), parts.next()) {
+                    (Some(owner), Some(repo), Some("pull"), Some(n)) => (owner, repo, n),
+                    _ => return None,
+                }
+            }
+        };
+        let name = |x: &str| !x.is_empty() && x.chars().all(|c| c.is_ascii_alphanumeric() || "-_.".contains(c));
+        let number = number.parse::<u64>().ok().filter(|n| *n > 0 && number.chars().all(|c| c.is_ascii_digit()))?;
+        (name(owner) && name(repo)).then(|| PrRef { repository: format!("{owner}/{repo}"), number })
+    }
+
     pub fn matches(&self, p: &Pr) -> bool {
         p.number == self.number && p.repository.as_str().eq_ignore_ascii_case(&self.repository)
     }
@@ -530,7 +556,31 @@ pub struct Model {
     /// Every command this client sent: a `command.result` for any other request is not this client's to show.
     /// Each command request in flight, with the verb its refusal reads with.
     pub commands_sent: BTreeMap<RequestId, &'static str>,
+    /// The `review.add` in flight, until its PR is selected; a refusal stays until the next one.
+    pub adding: Option<Adding>,
     pub dirty: bool,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct Adding {
+    pub target: PrRef,
+    pub state: AddState,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum AddState {
+    Sending(RequestId),
+    /// The daemon tracks `pr` (it just added it, or `already` had it); selected once the PR is in the cache.
+    Landing {
+        pr: PrId,
+        already: bool,
+    },
+    /// `code` is `None` for an error reply that carried none of `command.result`'s shape.
+    Refused {
+        code: Option<ErrorCode>,
+        message: Text,
+    },
+    TimedOut,
 }
 
 impl Model {
@@ -568,6 +618,7 @@ impl Model {
             snapshot_request: None,
             stale_snapshots: BTreeSet::new(),
             commands_sent: BTreeMap::new(),
+            adding: None,
             dirty: true,
         }
     }

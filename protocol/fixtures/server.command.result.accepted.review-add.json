@@ -1,0 +1,8 @@
+{
+  "type": "command.result",
+  "requestId": "req-cmd",
+  "status": "accepted",
+  "operationId": "review.add:rev-184-a",
+  "prId": "acme/shop#184",
+  "runId": "rev-184-a"
+}

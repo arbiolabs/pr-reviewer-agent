@@ -232,11 +232,15 @@ async function resolveModel(config: Config, deps: CliDeps, flag: string | undefi
  * or `GITHUB_APP_PRIVATE_KEY_FILE`), else one token client resolved by `resolveGithubAuth` (`GITHUB_TOKEN`, the selected
  * gh account, or gh's active account).
  */
-async function githubFromEnv(config: Config, store: { getMeta(key: string): string | undefined }): Promise<{ clientFor: (installationId: number) => GitHubClient; kind: "app" | "token" }> {
+async function githubFromEnv(
+  config: Config,
+  store: { getMeta(key: string): string | undefined },
+): Promise<{ clientFor: (installationId: number) => GitHubClient; kind: "app" | "token"; account?: string }> {
   const appId = process.env.GITHUB_APP_ID;
   if (!appId) {
-    const client = clientFor(config.github, { kind: "token", token: (await resolveGithubAuth(store)).token });
-    return { clientFor: () => client, kind: "token" };
+    const auth = await resolveGithubAuth(store);
+    const client = clientFor(config.github, { kind: "token", token: auth.token });
+    return { clientFor: () => client, kind: "token", ...(auth.account ? { account: auth.account } : {}) };
   }
   const pem = process.env.GITHUB_APP_PRIVATE_KEY?.replaceAll("\\n", "\n") ?? (process.env.GITHUB_APP_PRIVATE_KEY_FILE ? readFileSync(process.env.GITHUB_APP_PRIVATE_KEY_FILE, "utf8") : undefined);
   if (!pem) throw new Error("GITHUB_APP_ID is set but neither GITHUB_APP_PRIVATE_KEY nor GITHUB_APP_PRIVATE_KEY_FILE is");
@@ -309,7 +313,7 @@ async function openEngine(dataDir: string, deps: CliDeps, err: (t: string) => vo
     reviewerVersion: `${REVIEWER_CODE_VERSION}+${ref}`,
     onReport: report,
   });
-  return EngineSource.host(dataDir, app, { config, pulls, github: github.clientFor, report });
+  return EngineSource.host(dataDir, app, { config, pulls, github: github.clientFor, report, ...(github.account ? { account: github.account } : {}) });
 }
 
 /** `serve`: webhook receiver, worker and reviews in one process, configured from the environment. */

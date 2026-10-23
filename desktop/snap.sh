@@ -49,7 +49,7 @@ rm -rf desktop/target/readonly
 mkdir -p desktop/target/readonly/playback
 cp -R protocol/fixtures desktop/target/readonly/fixtures
 readonly_script=desktop/target/readonly/playback/readonly.ndjson
-sed '1s/"capabilities":\["account.select","review.start","review.retry","review.cancel","review.publish"\],"mode":"engine"/"capabilities":["account.select"],"mode":"read-only","readOnlyReason":"another pr-review holds the data directory; start this daemon with --allow-commands"/' \
+sed '1s/"capabilities":\["account.select","review.add","review.start","review.retry","review.cancel","review.publish"\],"mode":"engine"/"capabilities":["account.select"],"mode":"read-only","readOnlyReason":"another pr-review holds the data directory; start this daemon with --allow-commands"/' \
   "$script" > "$readonly_script"
 
 # One capture, retried up to three times when the app exits without its PNG or never writes it within 60 s.
@@ -119,4 +119,7 @@ for look in dark light; do
   snap 16-discards-$look       $look 3000  "wait:2000,pr:1302,open-timeline,discards" protocol/playback/tracking.ndjson
   snap 17-big-diff-$look       $look 3000  "wait:2000,pr:1310,open-diff" protocol/playback/big-diff.ndjson
   snap 17b-big-diff-flagged-$look $look 3000 "wait:2000,pr:1310,open-diff,flagged" protocol/playback/big-diff.ndjson
+  snap 18a-add-pr-empty-$look  $look 20000 "wait:19000,add-pr"
+  snap 18b-add-pr-valid-$look  $look 20000 "wait:19000,add-pr:https://github.com/acme/web/pull/77"
+  snap 18c-add-pr-error-$look  $look 20000 "wait:19000,add:acme/web#77,add-pr:acme/web#77"
 done

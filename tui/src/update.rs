@@ -26,6 +26,8 @@ pub enum Msg {
     /// Milliseconds since the client started.
     Tick(u64),
     Net(NetEvent),
+    /// Adds the PR this URL or `owner/repo#N` names: `review.add`, then the PR selected once it shows up.
+    AddPr(String),
 }
 
 #[derive(Debug)]
@@ -153,6 +155,7 @@ pub fn update(m: &mut Model, msg: Msg) -> Vec<Effect> {
             forget_old_toast(m, before);
         }
         Msg::Net(e) => net(m, e, &mut fx),
+        Msg::AddPr(text) => add_pr(m, &text, &mut fx),
     }
     prefetch(m, &mut fx);
     settle_timeline_cursor(m);
@@ -236,6 +239,10 @@ fn expire_requests(m: &mut Model) {
         } else if let Some(state) = waiting_confirm(m, &id) {
             *state = ConfirmState::TimedOut;
             m.dirty = true;
+        } else if let Some(a) = m.adding.as_mut().filter(|a| a.state == AddState::Sending(id.clone())) {
+            a.state = AddState::TimedOut;
+            let target = a.target.to_string();
+            notice(m, format!("No reply to adding {target} in time; try again"));
         } else if fail_request(m, &id, Text::new(TIMED_OUT)) {
             m.dirty = true;
         }
@@ -305,6 +312,12 @@ fn start_refusal(m: &Model, run: &Run) -> String {
 
 /// Clears the pending marker that waits on `id` and shows `message` there. False when nothing waits on it.
 fn fail_request(m: &mut Model, id: &RequestId, message: Text) -> bool {
+    if let Some(a) = m.adding.as_mut().filter(|a| a.state == AddState::Sending(id.clone())) {
+        let text = format!("Can't add {}: {message}", a.target);
+        a.state = AddState::Refused { code: None, message };
+        notice(m, text);
+        return true;
+    }
     let preview = m.ui.modals.iter_mut().find_map(|x| match x {
         Modal::Publication { preview, .. } if *preview == Preview::Loading(id.clone()) => Some(preview),
         _ => None,
@@ -541,6 +554,9 @@ fn server_message(m: &mut Model, msg: ServerMessage, fx: &mut Vec<Effect>) {
         }
         ServerMessage::CommandResult(r) => {
             let Some(&verb) = m.commands_sent.get(&r.request_id) else { return };
+            if m.adding.as_ref().is_some_and(|a| a.state == AddState::Sending(r.request_id.clone())) {
+                return added(m, r);
+            }
             let now = m.now_ms;
             if let Some(state) = waiting_confirm(m, &r.request_id) {
                 *state = match r.outcome {
@@ -634,6 +650,7 @@ fn apply_snapshot(m: &mut Model, s: Snapshot, fx: &mut Vec<Effect>) {
             .map(|(_, p)| p.id.clone());
     }
     reselect(m);
+    land_added(m);
     if let Some(t) = &m.timeline {
         let (scope, query) = (t.scope, t.query.clone());
         load_timeline(m, scope, query, fx);
@@ -766,6 +783,7 @@ fn apply_body(m: &mut Model, e: &SequencedEvent, fx: &mut Vec<Effect>) {
         fetch_detail(m, &f.id.clone(), fx);
     }
     reselect(m);
+    land_added(m);
 }
 
 /// The selection shows only once accounts.updated or a snapshot reports it: that is what closes a pending
@@ -1372,7 +1390,17 @@ fn act(m: &mut Model, a: Action, fx: &mut Vec<Effect>) {
             _ => {}
         },
         Action::Confirm => send_confirmed(m, fx),
+        Action::AddPr if !can_add(m) => notice(
+            m,
+            format!("Can't add a PR: {}", write_block(m, "review.add").unwrap_or("the daemon does not grant it")),
+        ),
+        Action::AddPr => m.ui.modals.push(Modal::Input {
+            purpose: InputPurpose::AddPr,
+            buffer: String::new(),
+            before: String::new(),
+        }),
         Action::InputSubmit => match m.ui.modals.pop() {
+            Some(Modal::Input { purpose: InputPurpose::AddPr, buffer, .. }) => add_pr(m, &buffer, fx),
             Some(Modal::Input { purpose: InputPurpose::JumpTo, buffer, .. }) => jump_to(m, &buffer, fx),
             Some(Modal::Input { purpose: InputPurpose::DiffSearch, buffer, .. }) => diff_search(m, buffer),
             _ => {}
@@ -1754,6 +1782,82 @@ pub fn can_confirm(m: &Model) -> bool {
     }
 }
 
+/// a: the daemon grants `review.add` and the client is live. A PR is not needed: adding one is how the first arrives.
+pub fn can_add(m: &Model) -> bool {
+    write_block(m, "review.add").is_none()
+}
+
+/// Sends `review.add` for the PR `text` names, unless one is in flight. A PR the client already tracks is selected
+/// without asking the daemon, which would refuse it the same way.
+fn add_pr(m: &mut Model, text: &str, fx: &mut Vec<Effect>) {
+    if let Some(why) = write_block(m, "review.add") {
+        return notice(m, format!("Can't add a PR: {why}"));
+    }
+    if m.adding.as_ref().is_some_and(|a| matches!(a.state, AddState::Sending(_))) {
+        return;
+    }
+    let Some(target) = PrRef::parse(text) else {
+        m.adding = None;
+        return notice(m, "Can't add a PR: paste its GitHub URL or owner/repo#N");
+    };
+    if let Some(p) = m.domain.prs.values().find(|p| target.matches(p)) {
+        m.adding = Some(Adding { target, state: AddState::Landing { pr: p.id.clone(), already: true } });
+        return land_added(m);
+    }
+    let command = Command::Add(AddParams { url: target.to_string() });
+    let (idempotency_key, verb) = (command.idempotency_key(), command.verb());
+    let Some(request_id) =
+        send(m, fx, |request_id| ClientMessage::Command(CommandRequest { request_id, idempotency_key, command }))
+    else {
+        return;
+    };
+    m.commands_sent.insert(request_id.clone(), verb);
+    m.adding = Some(Adding { target, state: AddState::Sending(request_id) });
+}
+
+/// The daemon's answer to `review.add`: the PR it tracks, already or now, is selected once it is in the cache; a
+/// refusal stays on `m.adding` for a client that shows it in place, and shows as a notice.
+fn added(m: &mut Model, r: CommandResult) {
+    let Some(a) = m.adding.as_mut() else { return };
+    a.state = match (r.outcome, r.pr_id) {
+        (CommandOutcome::Accepted { .. }, Some(pr)) => AddState::Landing { pr, already: false },
+        (CommandOutcome::Rejected { code: ErrorCode::Conflict, .. }, Some(pr)) => {
+            AddState::Landing { pr, already: true }
+        }
+        (CommandOutcome::Accepted { .. }, None) => {
+            m.adding = None;
+            return notice(m, "Sent; waiting for the daemon to report the PR");
+        }
+        (CommandOutcome::Rejected { code, message }, _) => {
+            let text = format!("Can't add {}: {message}", a.target);
+            a.state = AddState::Refused { code: Some(code), message };
+            m.diag.error(m.now_ms, format!("{code}: {text}"));
+            return notice(m, text);
+        }
+    };
+    land_added(m);
+}
+
+/// Selects the PR a `review.add` landed on, once the snapshot or an event has brought it.
+fn land_added(m: &mut Model) {
+    let Some(Adding { target, state: AddState::Landing { pr, already } }) = &m.adding else { return };
+    if !m.domain.prs.contains_key(pr) {
+        return;
+    }
+    let text = if *already {
+        format!("Already tracking {target}; showing it")
+    } else {
+        format!("Added {target}; its review is starting")
+    };
+    m.ui.selected_pr = Some(pr.clone());
+    m.ui.pr_filter.clear();
+    m.ui.screen = Screen::Review;
+    m.ui.focus = Pane::Main;
+    m.adding = None;
+    reselect(m);
+    notice(m, text);
+}
+
 /// Why `capability` cannot be sent now, in the words the help page and the notices use; `None` when it can.
 pub fn write_block(m: &Model, capability: &str) -> Option<&'static str> {
     if !m.link.accepts_events() {
@@ -1909,7 +2013,7 @@ fn edit_input(m: &mut Model, f: impl FnOnce(&mut String)) {
                     t.text = buffer.clone();
                 }
             }
-            InputPurpose::JumpTo | InputPurpose::DiffSearch => {}
+            InputPurpose::JumpTo | InputPurpose::DiffSearch | InputPurpose::AddPr => {}
         }
     }
 }

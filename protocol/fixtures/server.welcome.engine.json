@@ -6,6 +6,7 @@
   "sessionId": "session-1",
   "capabilities": [
     "account.select",
+    "review.add",
     "review.start",
     "review.retry",
     "review.cancel",

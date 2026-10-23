@@ -31,7 +31,7 @@ also arrive unsolicited (`snapshot`, `resync.required`, `error`) have an optiona
 | `finding.detail` | `finding`: a `Finding` plus `explanation`, `reasoningSummary`, `suggestedFix?`, `evidence[]`, `history[]` (each entry a run, the finding state it ended in, and an optional `basis` for why) |
 | `publication.preview` | `runId`, `previewId` (the payload hash the approval must name), `headSha`, `body` (the exact review text, marker included), `comments[]` (`path`, `line`, `side: RIGHT`, `body`), `event: COMMENT`, `status` |
 | `timeline.page` | `events[]` (sequenced events), `nextBeforeSequence?` |
-| `command.result` | `status: accepted` with `operationId`, or `status: rejected` with `code` and `message` |
+| `command.result` | `status: accepted` with `operationId` (and `prId`, `runId` from `review.add`), or `status: rejected` with `code` and `message` (and `prId` when `review.add` names a tracked PR) |
 | `error` | `code`, `message`, `supported?` |
 
 Error codes: `UNAUTHORIZED`, `CAPABILITY_DENIED`, `INVALID_TRANSITION`, `REVISION_STALE`, `NOT_FOUND`, `CONFLICT`,
@@ -51,6 +51,7 @@ the recorded `operationId` and does nothing again. A key in any other form is `I
 
 | `command` | `params` | `idempotencyKey` | `operationId` |
 | --- | --- | --- | --- |
+| `review.add` | `url` | `review.add:<url>` | `review.add:<runId>` of the run it started |
 | `review.start` | `prId`, `expectedHeadSha` | `review.start:<prId>:<expectedHeadSha>` | `review.start:<runId>` of the run started or found |
 | `review.retry` | `runId` | `review.retry:<runId>` | `review.retry:<runId>` |
 | `review.cancel` | `runId` | `review.cancel:<runId>` | `review.cancel:<runId>` |
@@ -63,6 +64,12 @@ A daemon started with `--allow-commands` or `control.allow_commands` runs in `en
 commands, and `review.publish` only under `review.publish_mode: "approval"`.
 Every command is checked by the server whatever the client showed:
 
+- `review.add`: `url` is a GitHub pull request URL or `owner/repo#N` (`INVALID_REQUEST` otherwise). The daemon reads
+  the PR from GitHub with its own account (`NOT_FOUND` when GitHub refuses, naming that account, or saying it has no
+  token), the PR must be open (`CONFLICT`), and it must not be tracked already (`CONFLICT` with `prId` set, so the
+  client can select it; nothing starts). Then the PR is tracked and its review starts as `pr-review review` starts one,
+  under the daemon's `publish_mode`. `accepted` carries `prId` and `runId`; `pr.updated` and `run.started` follow, so
+  every client sees the PR appear. A replayed key answers the PR and run it added.
 - `review.start`: the PR must be tracked (`NOT_FOUND`), `expectedHeadSha` must be GitHub's head now (`REVISION_STALE`,
   with the live head in the message), the PR must be open, and the head must not already have a finished or parked
   review (`CONFLICT`). The run then appears through `run.started` and the usual events.

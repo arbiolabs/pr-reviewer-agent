@@ -5,8 +5,8 @@ use gpui_kit::assets::IconName;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use pr_review_tui::keymap::{Action, Mutation};
-use pr_review_tui::model::{ConfirmState, InputPurpose, Modal, Model, Preview, Screen, fuzzy};
-use pr_review_tui::protocol::{Command, PrId};
+use pr_review_tui::model::{AddState, ConfirmState, InputPurpose, Modal, Model, PrRef, Preview, Screen, fuzzy};
+use pr_review_tui::protocol::{Command, ErrorCode, PrId};
 use pr_review_tui::update::{can_confirm, can_mutate, write_block};
 use std::ops::Range;
 
@@ -25,6 +25,7 @@ enum Run {
     GitHub,
     Tab(bool),
     Keys,
+    AddPr,
 }
 
 struct Entry {
@@ -110,6 +111,13 @@ fn entries(m: &Model) -> Vec<Entry> {
         "its latest run has not failed",
     ));
     out.push(mutation(m, Mutation::Cancel, format!("Cancel the review of{n}"), "C", "no review is running on it"));
+    out.push(Entry {
+        group: "Review",
+        title: "Review a PR by its URL…".into(),
+        key: Some("⌘N"),
+        blocked: add_block(m),
+        run: Run::AddPr,
+    });
     out.push(Entry {
         group: "Review",
         title: format!("Open{n} on GitHub"),
@@ -256,8 +264,17 @@ fn run(s: &mut Shell, r: Run, cx: &mut Context<Shell>) {
         Run::GitHub => s.open_github(cx),
         Run::Tab(done) => s.set_tab(done, cx),
         Run::Keys => s.overlay = Some(Overlay::Keys),
+        Run::AddPr => s.add_pr(cx),
     }
     cx.notify();
+}
+
+/// Why the add-a-PR sheet can't send now, in the palette's and the buttons' words; `None` when it can.
+pub fn add_block(m: &Model) -> Option<String> {
+    if queue::read_only(m) {
+        return Some(READ_ONLY.into());
+    }
+    write_block(m, "review.add").map(str::to_string)
 }
 
 /// Keys while the palette is open; true when it took the key.
@@ -345,7 +362,9 @@ pub fn layer(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Vec<AnyElement> {
         && matches!(m.ui.screen, Screen::Inbox | Screen::Review)
         && !matches!(crate::ui::front(m), Some(Modal::Finding { .. }));
     let left = layout::SIDEBAR + if queue_shown { layout::QUEUE } else { px(0.) };
-    if let Some(n) = &m.notice {
+    // The add-a-PR sheet says its own outcome in place; the same words in a toast under it would only repeat them.
+    let adding = matches!(s.overlay, Some(Overlay::AddPr { .. }));
+    if let Some(n) = m.notice.as_ref().filter(|_| !adding) {
         let (glyph, words) = match read_only_notice(m, &n.text) {
             Some(w) => (IconName::Lock, w),
             None => (IconName::Info, n.text.clone()),
@@ -371,6 +390,7 @@ pub fn layer(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Vec<AnyElement> {
         Some(Overlay::Palette { query, selected }) => out.push(palette(s, t, query, *selected, cx)),
         Some(Overlay::Keys) => out.push(keys(t, cx, false)),
         Some(Overlay::ConfirmPost(_)) => out.push(crate::kit::in_sheet(|| confirm_post(s, t, cx))),
+        Some(Overlay::AddPr { url, sent }) => out.push(crate::kit::in_sheet(|| add_pr(s, t, url, *sent, cx))),
         None => {}
     }
     out
@@ -392,6 +412,7 @@ pub fn read_only_notice(m: &Model, text: &str) -> Option<String> {
         "retry" => "retrying",
         "cancel" => "canceling",
         "publish" => "posting",
+        "add a PR" => "adding PRs",
         _ => "commands",
     };
     let fix = if m.server.as_ref().is_some_and(|s| s.missing().next().is_some()) {
@@ -458,6 +479,7 @@ fn glyph(m: &Model, e: &Entry) -> IconName {
         Run::Tab(false) => IconName::Inbox,
         Run::Tab(true) => IconName::CircleCheck,
         Run::Keys => IconName::Keyboard,
+        Run::AddPr => IconName::Plus,
     }
 }
 
@@ -849,12 +871,216 @@ fn confirm_post(s: &Shell, t: &Colors, cx: &Context<Shell>) -> AnyElement {
         .into_any_element()
 }
 
+/// What the add-a-PR sheet says under its field: what the text names, or how the daemon answered it.
+#[derive(Debug, PartialEq)]
+pub enum AddLine {
+    /// Nothing typed yet.
+    Empty,
+    /// Text that names no PR yet.
+    Invalid,
+    /// `repo · #N`, and the title when the window already tracks it.
+    Valid {
+        repo: String,
+        number: u64,
+        tracked: Option<String>,
+    },
+    Sending(String),
+    Refused {
+        title: &'static str,
+        why: String,
+    },
+    TimedOut,
+}
+
+pub fn add_line(m: &Model, url: &str, sent: bool) -> AddLine {
+    let Some(target) = PrRef::parse(url) else {
+        return if url.trim().is_empty() { AddLine::Empty } else { AddLine::Invalid };
+    };
+    match m.adding.as_ref().filter(|a| sent && a.target == target).map(|a| &a.state) {
+        Some(AddState::Sending(_) | AddState::Landing { .. }) => AddLine::Sending(target.to_string()),
+        Some(AddState::TimedOut) => AddLine::TimedOut,
+        Some(AddState::Refused { code, message }) => {
+            let title = match code {
+                Some(ErrorCode::NotFound) => "GitHub won't show this PR to the daemon",
+                Some(ErrorCode::Conflict) => "This PR can't be reviewed",
+                Some(ErrorCode::InvalidRequest) => "That isn't a GitHub pull request",
+                Some(ErrorCode::TemporarilyUnavailable | ErrorCode::RateLimited) => "GitHub didn't answer",
+                Some(ErrorCode::CapabilityDenied) => "This daemon can't add PRs",
+                _ => "The daemon couldn't add it",
+            };
+            AddLine::Refused { title, why: crate::kit::sentence(message.as_str()) }
+        }
+        None => AddLine::Valid {
+            number: target.number,
+            tracked: m.domain.prs.values().find(|p| target.matches(p)).map(|p| p.title.to_string()),
+            repo: target.repository,
+        },
+    }
+}
+
+/// The sheet that adds a PR: one field for its URL, read as it is typed, and the daemon's answer in place. It drops
+/// from the title bar as the post sheet does; esc closes it and ⏎ sends.
+fn add_pr(s: &Shell, t: &Colors, url: &str, sent: bool, cx: &Context<Shell>) -> AnyElement {
+    let m = &s.model;
+    let line = add_line(m, url, sent);
+    let sending = matches!(line, AddLine::Sending(_));
+    let ready = matches!(line, AddLine::Valid { .. } | AddLine::Refused { .. } | AddLine::TimedOut) && !sending;
+    let (glyph, hue, words): (Option<IconName>, Hsla, String) = match &line {
+        AddLine::Empty => (None, t.faint, "Paste a link with ⌘V. owner/repo#123 works too.".into()),
+        AddLine::Invalid => (
+            Some(IconName::CircleAlert),
+            t.warn,
+            "Not a pull request yet: github.com/owner/repo/pull/123 or owner/repo#123.".into(),
+        ),
+        AddLine::Valid { repo, number, tracked: None } => {
+            (Some(IconName::GitPullRequest), t.ok, format!("{repo} · #{number}"))
+        }
+        AddLine::Valid { repo, number, tracked: Some(title) } => {
+            (Some(IconName::CircleCheck), t.ok, format!("{repo} · #{number} is already here: {title}. ⏎ opens it."))
+        }
+        AddLine::Sending(target) => (None, t.running, format!("Asking the daemon to read {target} from GitHub…")),
+        AddLine::Refused { why, .. } => (Some(IconName::CircleX), t.danger, why.clone()),
+        AddLine::TimedOut => (Some(IconName::TriangleAlert), t.warn, "No reply in time. ⏎ sends it again.".into()),
+    };
+    let status = div()
+        .flex()
+        .items_start()
+        .gap(space::S2)
+        .min_h(px(21.))
+        .when(glyph.is_some() || sending, |d| {
+            d.child(div().pt(px(3.)).flex_none().child(match glyph {
+                Some(g) => icon(g, px(14.), hue).into_any_element(),
+                None => crate::setup::spinner(t, s.still, "add-spin"),
+            }))
+        })
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(2.))
+                .flex_1()
+                .min_w_0()
+                .text_size(text::BODY)
+                .line_height(text::LINE_BODY)
+                .children(match &line {
+                    AddLine::Refused { title, .. } => {
+                        Some(div().font_weight(FontWeight::SEMIBOLD).text_color(t.text).child(*title))
+                    }
+                    _ => None,
+                })
+                .child(
+                    div().text_color(if matches!(line, AddLine::Refused { .. }) { t.muted } else { hue }).child(words),
+                ),
+        );
+    let field = div()
+        .flex()
+        .items_center()
+        .gap(space::S2)
+        .h(px(40.))
+        .px(space::S3)
+        .rounded(radius::SM)
+        .bg(t.bg)
+        .border_1()
+        .border_color(match line {
+            AddLine::Invalid => t.warn,
+            AddLine::Refused { .. } => t.danger,
+            _ => t.accent,
+        })
+        .child(icon(IconName::GitPullRequest, px(15.), t.muted))
+        .child(
+            div()
+                .flex()
+                .items_center()
+                .flex_1()
+                .min_w_0()
+                .overflow_hidden()
+                .font_family(text::MONO)
+                .text_size(text::BODY)
+                // The caret sits where typing lands: before the placeholder, after the text.
+                .when(url.is_empty(), |d| {
+                    d.child(caret(t)).child(div().text_color(t.faint).child("https://github.com/owner/repo/pull/123"))
+                })
+                .when(!url.is_empty(), |d| {
+                    d.child(div().truncate().text_color(t.text).child(url.to_string()))
+                        .when(!sending, |d| d.child(caret(t)))
+                }),
+        );
+    scrim(t, "add-scrim", cx, false)
+        .flex()
+        .items_start()
+        .justify_center()
+        .pt(layout::TOOLBAR)
+        .child(
+            drop_sheet(t, layout::SHEET)
+                .id("add-sheet")
+                .occlude()
+                .p(space::S6)
+                .gap(space::S4)
+                .child(
+                    div()
+                        .size(px(36.))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded(radius::PILL)
+                        .bg(t.accent.alpha(0.14))
+                        .child(icon(IconName::Plus, px(18.), t.accent)),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(space::S1)
+                        .child(
+                            div()
+                                .text_size(text::TITLE)
+                                .line_height(px(24.))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .child("Review a PR"),
+                        )
+                        .child(div().text_size(text::BODY).line_height(text::LINE_BODY).text_color(t.muted).child(
+                            // Only a daemon that parks for approval grants review.publish.
+                            if m.may_write("review.publish") {
+                                "The daemon reads it from GitHub with its own account and starts the review. Nothing posts without your approval."
+                            } else {
+                                "The daemon reads it from GitHub with its own account and starts the review."
+                            },
+                        )),
+                )
+                .child(div().flex().flex_col().gap(space::S2).child(field).child(status))
+                .child(
+                    div()
+                        .flex()
+                        .justify_end()
+                        .gap(space::S2)
+                        .pt(space::S2)
+                        .child(button(t, "add-no", "Cancel", Some("esc"), Tone::Secondary, on(cx, |s, cx| s.close_add(cx))))
+                        .child(button(
+                            t,
+                            "add-yes",
+                            if sending { "Adding…" } else { "Review PR" },
+                            Some("⏎"),
+                            Tone::Primary,
+                            ready.then(|| -> crate::kit::OnClick {
+                                Box::new(cx.listener(|s, _: &ClickEvent, _, cx| s.submit_add(cx)))
+                            }),
+                        )),
+                ),
+        )
+        .into_any_element()
+}
+
+fn caret(t: &Colors) -> Div {
+    div().flex_none().w(px(2.)).h(px(18.)).mx(px(1.)).bg(t.accent)
+}
+
 fn input(t: &Colors, purpose: InputPurpose, buffer: &str, cx: &Context<Shell>) -> AnyElement {
     let label = match purpose {
         InputPurpose::JumpTo => "Jump to path:line",
         InputPurpose::DiffSearch => "Search the diff",
         InputPurpose::TimelineFilter => "Filter events",
         InputPurpose::Search => "Filter PRs",
+        InputPurpose::AddPr => "Add a PR",
     };
     scrim(t, "input-scrim", cx, false)
         .flex()
@@ -905,6 +1131,7 @@ const KEYS: &[(&str, &[(&str, &str)])] = &[
         "Anywhere",
         &[
             ("⌘K  /", "command palette"),
+            ("⌘N", "review a PR by its URL"),
             ("⌘1  ⌘2", "needs you, done"),
             ("⌘,", "setup and accounts"),
             ("⌘⇧O", "open on GitHub"),
@@ -976,10 +1203,37 @@ mod tests {
                 ("Review and post the proof of #1287".to_string(), locked.clone()),
                 ("Start a review of #1287 at its head".to_string(), locked.clone()),
                 ("Retry the failed review of #1287".to_string(), locked.clone()),
-                ("Cancel the review of #1287".to_string(), locked),
+                ("Cancel the review of #1287".to_string(), locked.clone()),
+                ("Review a PR by its URL…".to_string(), locked),
                 ("Open #1287 on GitHub".to_string(), None),
             ]
         );
+    }
+
+    #[test]
+    fn the_add_sheet_reads_the_url_as_typed_and_shows_the_daemons_refusal_in_place() {
+        use super::{AddLine, add_line};
+        use pr_review_tui::model::{Look, Model, Screen};
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../protocol/playback/showcase.ndjson");
+        let play = |steps: &str| {
+            let mut m = Model::new("test", Look::default(), Screen::Review, None);
+            let steps = crate::script::parse(steps).unwrap();
+            crate::script::play(pr_review_tui::playback::load(&path).unwrap(), &mut m, &steps, 20_000).unwrap();
+            m
+        };
+        let m = play("wait:19000");
+        assert_eq!(add_line(&m, " ", false), AddLine::Empty);
+        assert_eq!(add_line(&m, "https://github.com/acme", false), AddLine::Invalid);
+        assert_eq!(
+            add_line(&m, "https://github.com/acme/web/pull/77/files", false),
+            AddLine::Valid { repo: "acme/web".into(), number: 77, tracked: None }
+        );
+        assert!(matches!(add_line(&m, "acme/shop#1287", false), AddLine::Valid { tracked: Some(_), .. }));
+        let m = play("wait:19000,add:acme/web#77");
+        let AddLine::Refused { title, why } = add_line(&m, "acme/web#77", true) else { panic!("{:?}", m.adding) };
+        assert_eq!(title, "GitHub won't show this PR to the daemon");
+        assert!(why.starts_with("Cannot read acme/web#77"), "{why}");
+        assert!(matches!(add_line(&m, "acme/web#78", true), AddLine::Valid { .. }), "an edited URL is a new question");
     }
 
     #[test]

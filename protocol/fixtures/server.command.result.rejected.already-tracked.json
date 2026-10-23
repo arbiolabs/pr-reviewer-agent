@@ -1,0 +1,8 @@
+{
+  "type": "command.result",
+  "requestId": "req-cmd",
+  "status": "rejected",
+  "code": "CONFLICT",
+  "message": "acme/shop#184 is already tracked",
+  "prId": "acme/shop#184"
+}

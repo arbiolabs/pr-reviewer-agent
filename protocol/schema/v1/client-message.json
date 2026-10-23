@@ -227,6 +227,50 @@
             },
             "command": {
               "type": "string",
+              "const": "review.add"
+            },
+            "params": {
+              "type": "object",
+              "required": [
+                "url"
+              ],
+              "properties": {
+                "url": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 512,
+                  "description": "a GitHub pull request URL or owner/repo#N"
+                }
+              },
+              "additionalProperties": false
+            },
+            "idempotencyKey": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "requestId",
+            "command",
+            "params",
+            "idempotencyKey"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "command"
+            },
+            "requestId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "command": {
+              "type": "string",
               "const": "review.start"
             },
             "params": {

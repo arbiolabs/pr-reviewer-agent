@@ -85,7 +85,7 @@ When Jev fails, times out, or is skipped, the review runs at standard depth. Jev
 
 ### Control commands
 
-`control.allow_commands` lets `pr-review daemon` accept the review commands (start, retry, cancel, publish) from the terminal client. The default is `false`: the daemon stays read-only, takes no lock on the data directory, runs no review, and grants only the account selector. `pr-review daemon --allow-commands` enables them for one daemon, which then hosts the review engine. The daemon grants `review.publish` only under `publish_mode: "approval"`. See [Take actions](tui.md#take-actions).
+`control.allow_commands` lets `pr-review daemon` accept the review commands (start, retry, cancel, publish) from the terminal client. The default is `false`: the daemon stays read-only, takes no lock on the data directory, runs no review, and grants only the account selector. `pr-review daemon --allow-commands` enables them for one daemon, which then hosts the review engine. The daemon grants `review.publish` only under `publish_mode: "approval"`. With an engine daemon running, add PRs from a client (`a` in the terminal client, ⌘N in the desktop app) rather than with `pr-review review`, which can't take the lock the daemon holds. See [Take actions](tui.md#take-actions).
 
 ## State
 

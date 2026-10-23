@@ -131,6 +131,9 @@ impl Player {
     pub fn answer(&mut self, req: &ClientMessage) -> Vec<ServerMessage> {
         use crate::protocol::{CommandOutcome, CommandResult, Text};
         let ClientMessage::Command(c) = req else { return answer(&self.fixtures, &self.played, req) };
+        if let crate::protocol::Command::Add(p) = &c.command {
+            return vec![ServerMessage::CommandResult(self.add(c.request_id.clone(), &p.url))];
+        }
         let key = c.idempotency_key.clone();
         let opened: Vec<String> = self.gates.iter().filter(|g| opens(g, &key)).cloned().collect();
         let replay = self.started.iter().find(|(k, _)| *k == key).map(|(_, op)| op.clone());
@@ -179,7 +182,46 @@ impl Player {
             self.sent.extend(opened);
             CommandOutcome::Accepted { operation_id: Text::new(&operation) }
         };
-        vec![ServerMessage::CommandResult(CommandResult { request_id: c.request_id.clone(), outcome })]
+        vec![ServerMessage::CommandResult(CommandResult {
+            request_id: c.request_id.clone(),
+            outcome,
+            pr_id: None,
+            run_id: None,
+        })]
+    }
+
+    /// `review.add` as a daemon answers it with no GitHub behind it: a PR the session tracks is refused naming it, and
+    /// any other is one GitHub would not serve.
+    fn add(&self, request_id: crate::protocol::RequestId, url: &str) -> crate::protocol::CommandResult {
+        use crate::protocol::{CommandOutcome, CommandResult, ErrorCode, Text};
+        let target = crate::model::PrRef::parse(url);
+        let tracked = target.as_ref().and_then(|t| {
+            self.played.iter().rev().find_map(|m| match m {
+                ServerMessage::Snapshot(s) => s.prs.iter().find(|p| t.matches(p)).cloned(),
+                ServerMessage::Event(Event::Sequenced(e)) => match &e.body {
+                    EventBody::PrUpdated(p) if t.matches(p) => Some(p.clone()),
+                    _ => None,
+                },
+                _ => None,
+            })
+        });
+        let (code, message, pr_id) = match (&target, tracked) {
+            (Some(t), Some(p)) => (ErrorCode::Conflict, format!("{t} is already tracked"), Some(p.id)),
+            (Some(t), None) => (
+                ErrorCode::NotFound,
+                format!(
+                    "cannot read {t}: it does not exist, or github.com/reviewer-bot has no access to it (HTTP 404)"
+                ),
+                None,
+            ),
+            (None, _) => (ErrorCode::InvalidRequest, format!("{url} is not a GitHub pull request"), None),
+        };
+        CommandResult {
+            request_id,
+            outcome: CommandOutcome::Rejected { code, message: Text::new(&message) },
+            pr_id,
+            run_id: None,
+        }
     }
 
     /// Every run as played so far: the snapshot's, then each run event's newer copy and each phase change.

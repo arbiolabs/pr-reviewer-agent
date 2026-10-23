@@ -447,6 +447,7 @@ fn footer_line(c: &Ctx, width: u16, hints: Vec<crate::offer::Hint>) -> Line<'sta
             InputPurpose::JumpTo => " : jump to path[:line]: ",
             InputPurpose::TimelineFilter => " / filter events: ",
             InputPurpose::DiffSearch => " / search the diff: ",
+            InputPurpose::AddPr => " a add a PR (URL or owner/repo#N): ",
         };
         let field = c.fit(&format!("{buffer}_"), w.saturating_sub(crate::text::width(prompt) + 22));
         return Line::from(vec![

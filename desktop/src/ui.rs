@@ -8,10 +8,10 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use pr_review_tui::app::dispatch;
 use pr_review_tui::keymap::{Action, Mutation};
-use pr_review_tui::model::{ConfirmState, Link, Modal, Model, Screen};
+use pr_review_tui::model::{AddState, ConfirmState, Link, Modal, Model, PrRef, Screen};
 use pr_review_tui::net::NetCmd;
 use pr_review_tui::protocol::{Command, Pr, PrId, Run};
-use pr_review_tui::update::{Msg, can_confirm};
+use pr_review_tui::update::{Msg, can_add, can_confirm};
 use pr_review_tui::view::Hit;
 use std::time::{Duration, Instant};
 use tokio::sync::mpsc;
@@ -43,7 +43,9 @@ gpui_kit::actions!(
         AppearanceDark,
         AppearanceLight,
         FocusNext,
-        FocusPrev
+        FocusPrev,
+        AddPr,
+        Paste
     ]
 );
 
@@ -61,6 +63,8 @@ pub fn bindings() -> Vec<KeyBinding> {
         KeyBinding::new("cmd-[", GoBack, None),
         KeyBinding::new("cmd-1", NeedsYou, None),
         KeyBinding::new("cmd-2", DoneList, None),
+        KeyBinding::new("cmd-n", AddPr, None),
+        KeyBinding::new("cmd-v", Paste, None),
         // Ours, not the kit root's: the window records that the keyboard owns focus, so the ring shows.
         KeyBinding::new("tab", FocusNext, Some("pr-review")),
         KeyBinding::new("shift-tab", FocusPrev, Some("pr-review")),
@@ -70,7 +74,8 @@ pub fn bindings() -> Vec<KeyBinding> {
 pub fn menus() -> Vec<Menu> {
     vec![
         Menu::new("pr-review").items([MenuItem::action("Quit pr-review", Quit)]),
-        Menu::new("File").items([MenuItem::action("Close Window", CloseWindow)]),
+        Menu::new("File")
+            .items([MenuItem::action("Review a PR…", AddPr), MenuItem::action("Close Window", CloseWindow)]),
         Menu::new("View").items([
             MenuItem::action("Needs You", NeedsYou),
             MenuItem::action("Done", DoneList),
@@ -103,6 +108,12 @@ pub enum Overlay {
     Keys,
     /// The sheet that names what a post does before ⌘⏎ sends the reducer's `Confirm`.
     ConfirmPost(Arm),
+    /// The sheet that adds a PR by its URL. `sent` once ⏎ sent it: the reducer's `adding` then says how it went, and
+    /// the sheet closes when the PR it added is selected.
+    AddPr {
+        url: String,
+        sent: bool,
+    },
 }
 
 /// The post sheet's guard against the chord that opened it. ⌘⏎ both opens the sheet and posts from it, so a
@@ -208,6 +219,9 @@ impl Shell {
                 Desk::Palette(q) => s.overlay = Some(Overlay::Palette { query: q.clone(), selected: 0 }),
                 Desk::Keys => s.overlay = Some(Overlay::Keys),
                 Desk::ConfirmPost => s.post(false, cx),
+                Desk::AddPr(url) => {
+                    s.overlay = Some(Overlay::AddPr { url: url.clone(), sent: s.model.adding.is_some() })
+                }
                 Desk::Scrub(n) => s.scrub = Some(n.saturating_sub(1)),
                 Desk::Flagged => s.diff_flagged_only = true,
                 Desk::Discards => {
@@ -365,6 +379,53 @@ impl Shell {
         }
     }
 
+    /// ⌘N: the sheet that adds a PR. On a daemon that refuses it the reducer says why, in a toast.
+    pub fn add_pr(&mut self, cx: &mut Context<Self>) {
+        if !can_add(&self.model) {
+            return self.send(Msg::AddPr(String::new()), cx);
+        }
+        self.overlay = Some(Overlay::AddPr { url: String::new(), sent: false });
+        cx.notify();
+    }
+
+    /// The sheet's field changed: what the daemon said about the last URL no longer applies.
+    fn edit_add(&mut self, edit: impl FnOnce(&mut String), cx: &mut Context<Self>) {
+        let Some(Overlay::AddPr { url, sent }) = &mut self.overlay else { return };
+        if self.model.adding.as_ref().is_some_and(|a| matches!(a.state, AddState::Sending(_))) {
+            return;
+        }
+        edit(url);
+        *sent = false;
+        self.model.adding = None;
+        cx.notify();
+    }
+
+    /// ⏎ in the sheet: sends the PR it names, once it names one.
+    pub fn submit_add(&mut self, cx: &mut Context<Self>) {
+        let Some(Overlay::AddPr { url, sent }) = &mut self.overlay else { return };
+        if PrRef::parse(url).is_none()
+            || self.model.adding.as_ref().is_some_and(|a| matches!(a.state, AddState::Sending(_)))
+        {
+            return;
+        }
+        *sent = true;
+        let url = url.clone();
+        self.send(Msg::AddPr(url), cx);
+    }
+
+    pub fn close_add(&mut self, cx: &mut Context<Self>) {
+        if !self
+            .model
+            .adding
+            .as_ref()
+            .is_some_and(|a| matches!(a.state, AddState::Sending(_) | AddState::Landing { .. }))
+        {
+            self.model.adding = None;
+        }
+        self.overlay = None;
+        cx.notify();
+    }
+
     pub fn toggle_palette(&mut self, cx: &mut Context<Self>) {
         self.overlay = match self.overlay {
             Some(Overlay::Palette { .. }) => None,
@@ -442,6 +503,24 @@ impl Shell {
                 if matches!(key, "escape" | "enter") {
                     self.overlay = None;
                     cx.notify();
+                }
+                return;
+            }
+            Some(Overlay::AddPr { .. }) => {
+                match key {
+                    "escape" => self.close_add(cx),
+                    "enter" => self.submit_add(cx),
+                    "backspace" => self.edit_add(
+                        |u| {
+                            u.pop();
+                        },
+                        cx,
+                    ),
+                    _ => {
+                        if let Some(c) = typed.filter(|c| !c.chars().any(char::is_control)) {
+                            self.edit_add(|u| u.push_str(&c), cx);
+                        }
+                    }
                 }
                 return;
             }
@@ -542,6 +621,10 @@ impl Shell {
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.width = window.viewport_size().width;
+        // The PR the sheet sent is selected: the sheet's work is done.
+        if matches!(self.overlay, Some(Overlay::AddPr { sent: true, .. })) && self.model.adding.is_none() {
+            self.overlay = None;
+        }
         let quiet = matches!(
             self.model.top_modal(),
             Some(Modal::Confirm {
@@ -640,6 +723,13 @@ impl Render for Shell {
                 crate::kit::KEYBOARD.store(true, std::sync::atomic::Ordering::Relaxed);
                 window.focus_prev(cx);
                 cx.notify();
+            }))
+            .on_action(cx.listener(|s, _: &AddPr, _, cx| s.add_pr(cx)))
+            .on_action(cx.listener(|s, _: &Paste, _, cx| {
+                let text = cx.read_from_clipboard().and_then(|item| item.text()).unwrap_or_default();
+                // A URL copied with its line break still names one PR.
+                let text: String = text.chars().filter(|c| !c.is_control()).collect();
+                s.edit_add(|u| u.push_str(text.trim()), cx);
             }))
             .on_action(cx.listener(|s, _: &NeedsYou, _, cx| s.set_tab(false, cx)))
             .on_action(cx.listener(|s, _: &DoneList, _, cx| s.set_tab(true, cx)))
@@ -965,7 +1055,8 @@ fn sidebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
             setup_shown(s),
             false,
             click(cx, |s, cx| s.act(Action::Goto(Screen::Settings), cx)),
-        ));
+        ))
+        .child(add_row(m, t, dim, cx));
     let groups = queue::rows(m);
     if stage == Stage::Ready && !groups.is_empty() {
         // One hierarchy: the repository is the group label, lowercase as GitHub writes it, in the sidebar's one
@@ -998,6 +1089,32 @@ fn sidebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         .border_color(t.border)
         .child(list)
         .child(connection(m, t))
+}
+
+/// The sidebar's way to add a PR: a quiet row under the lists with ⌘N beside it, locked with its reason on a daemon
+/// that can't add one.
+fn add_row(m: &Model, t: &Colors, dim: bool, cx: &Context<Shell>) -> Stateful<Div> {
+    let why = crate::overlay::add_block(m).filter(|_| !dim);
+    let off = why.is_some() || dim;
+    let fg = if off { t.disabled } else { t.muted };
+    let row = div()
+        .id("nav-add-face")
+        .when(dim, |d| d.opacity(0.55))
+        .flex()
+        .items_center()
+        .gap(space::S2)
+        .h(px(32.))
+        .px(space::S2)
+        .rounded(radius::SM)
+        .when(!off, |d| d.hover(move |d| d.bg(t.hover)).active(|d| d.bg(t.press)))
+        .child(icon(if why.is_some() { IconName::Lock } else { IconName::Plus }, px(15.), fg))
+        .child(div().flex_1().text_size(text::BODY).text_color(fg).child("Review a PR…"))
+        .child(keycap(t, "⌘N", None, off));
+    let row = focusable("nav-add", row, t, radius::SM, click(cx, |s, cx| s.add_pr(cx)));
+    match why {
+        Some(why) => tip(row, format!("Can't add a PR: {why}. Restart the daemon with --allow-commands.")),
+        None => tip(row, "Add a PR by its GitHub URL and start its review"),
+    }
 }
 
 /// The reader approved `pr`'s proof and it is on its way, while the run still reads as parked.

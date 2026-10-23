@@ -169,22 +169,7 @@ pub fn state_dir() -> PathBuf {
 
 /// `https://github.com/owner/repo/pull/184` or `owner/repo#184`.
 pub fn parse_pr(s: &str) -> Result<PrRef, String> {
-    let bad = || format!("--pr {s}: expected https://github.com/owner/repo/pull/N or owner/repo#N");
-    let (repo, number) = if let Some((repo, n)) = s.split_once('#') {
-        (repo.to_string(), n.to_string())
-    } else {
-        let path = s.split("://").nth(1).ok_or_else(bad)?;
-        let parts: Vec<&str> = path.trim_end_matches('/').split('/').collect();
-        match parts[..] {
-            [_host, owner, repo, "pull", n, ..] => (format!("{owner}/{repo}"), n.to_string()),
-            _ => return Err(bad()),
-        }
-    };
-    let number: u64 = number.parse().map_err(|_| bad())?;
-    if repo.split('/').count() != 2 || repo.split('/').any(str::is_empty) {
-        return Err(bad());
-    }
-    Ok(PrRef { repository: repo, number })
+    PrRef::parse(s).ok_or_else(|| format!("--pr {s}: expected https://github.com/owner/repo/pull/N or owner/repo#N"))
 }
 
 fn screen(name: &str) -> Result<Screen, String> {

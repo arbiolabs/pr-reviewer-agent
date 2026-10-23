@@ -26,6 +26,10 @@ desktop/target/release/pr-review-desktop --socket /tmp/prd/s.sock            # t
 
 Keep the socket path short. macOS refuses a socket path longer than 103 bytes, and the daemon refuses a socket directory that is a symlink, such as `/tmp` itself.
 
+### Review a new PR
+
+Against a daemon started with `--allow-commands`, press ⌘N, or choose **Review a PR…** in the sidebar, the palette or the empty state. Paste the PR's URL (⌘V), or type `owner/repo#N`. The sheet shows the repository and number it read, and ⏎ asks the daemon to add it. The daemon reads the PR from GitHub with its own account and starts its review; the sheet closes on the new PR. If the daemon refuses, the sheet says why in place: a PR its account can't see, a closed or merged PR, or text that isn't a PR link. A PR the window already tracks opens instead. On a read-only daemon the entries are locked with the reason.
+
 To play a scripted session with no daemon:
 
 ```bash
@@ -78,6 +82,8 @@ With `--socket`, the capture happens `--snapshot-after-ms` milliseconds after la
 | `palette:TEXT` | Open the command palette with TEXT typed. |
 | `keys` | Open the shortcut sheet. |
 | `confirm-post` | Open the sheet that asks before posting the proof in front. |
+| `add-pr`, `add-pr:TEXT` | Open the sheet that adds a PR, with TEXT in its field. |
+| `add:TEXT` | Send what ⏎ in that sheet sends for TEXT. The playback refuses a PR it doesn't track as GitHub would. |
 | `scrub:N` | Hold the live log at its Nth event, counted from 1. |
 | `discards` | Open every "Verifier discarded" group on the timeline. |
 | `flagged` | List only the diff's files with findings. |
@@ -97,7 +103,7 @@ desktop/snap.sh                      # every state, into desktop/snapshots/
 desktop/snap.sh /tmp/snaps diff help # two states, into /tmp/snaps
 ```
 
-The states are listed at the end of `snap.sh`, one per line: a name, the appearance, the capture time, the steps and, optionally, another playback script. `08-disconnected` dials a socket that doesn't exist and captures in real time. `00-connecting`, `11-empty-queue` and `12-readonly` play the sessions in `desktop/playback/` and a read-only rewrite of the showcase that `snap.sh` writes under `target/`. `15-tracking`, `15b-reopened` and `16-discards` play `protocol/playback/tracking.ndjson`, a PR reviewed on three heads, and `17-big-diff` plays `big-diff.ndjson`, a 60-file PR.
+The states are listed at the end of `snap.sh`, one per line: a name, the appearance, the capture time, the steps and, optionally, another playback script. `08-disconnected` dials a socket that doesn't exist and captures in real time. `00-connecting`, `11-empty-queue` and `12-readonly` play the sessions in `desktop/playback/` and a read-only rewrite of the showcase that `snap.sh` writes under `target/`. `15-tracking`, `15b-reopened` and `16-discards` play `protocol/playback/tracking.ndjson`, a PR reviewed on three heads, and `17-big-diff` plays `big-diff.ndjson`, a 60-file PR. `18a-add-pr-empty`, `18b-add-pr-valid` and `18c-add-pr-error` show the add-a-PR sheet empty, with a URL it read, and with the daemon's refusal.
 
 ## How the parts connect
 
