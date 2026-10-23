@@ -1,7 +1,7 @@
 #!/bin/sh
 # Records desktop/demo/showcase.gif: a tour of the showcase playback, one --snapshot capture per frame, with no daemon
 # and no network. Each frame is played in virtual time, so the same build gives the same GIF.
-# usage: desktop/demo.sh [APPEARANCE]   (default: dark)   Needs macOS and ffmpeg.
+# usage: desktop/demo.sh [THEME]   (any --appearance theme; default: dark)   Needs macOS and ffmpeg.
 set -eu
 here=$(cd "$(dirname "$0")" && pwd)
 look=${1:-dark}
