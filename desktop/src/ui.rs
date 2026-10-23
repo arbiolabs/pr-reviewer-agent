@@ -1087,7 +1087,7 @@ fn nav_item(
     id: &'static str,
     glyph: IconName,
     label: &str,
-    count: usize,
+    count: Option<usize>,
     hue: Hsla,
     active: bool,
     dim: bool,
@@ -1124,7 +1124,8 @@ fn nav_item(
                 .text_color(fg)
                 .child(label.to_string()),
         )
-        .when(count > 0, |d| d.child(count_badge(t, count, hue)));
+        // An empty list still counts: zero in the neutral ink, so the column of counts never has a hole.
+        .children(count.map(|n| count_badge(t, n, if n == 0 { t.muted } else { hue })));
     focusable(id, row, t, radius::SM, f)
 }
 
@@ -1165,7 +1166,7 @@ fn sidebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
             "nav-queue",
             IconName::Inbox,
             "Needs you",
-            queue::decisions(&cards),
+            (!dim).then_some(queue::decisions(&cards)),
             t.accent,
             home && !s.shows_done() && !setup_shown(s),
             dim,
@@ -1176,7 +1177,7 @@ fn sidebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
             "nav-done",
             IconName::CircleCheck,
             "Done",
-            done.len(),
+            (!dim).then_some(done.len()),
             t.ok,
             home && s.shows_done(),
             dim,
@@ -1187,7 +1188,7 @@ fn sidebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
             "nav-setup",
             IconName::Settings,
             "Settings",
-            queue::setup_count(m).blocking,
+            Some(queue::setup_count(m).blocking).filter(|n| *n > 0),
             t.warn,
             setup_shown(s),
             false,
