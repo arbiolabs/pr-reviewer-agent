@@ -163,7 +163,6 @@ impl Launcher {
         }
     }
 
-    /// Where its output goes, if anywhere the app knows.
     pub fn log(&self) -> Option<PathBuf> {
         match self {
             Launcher::LaunchAgent { log, .. } => log.clone(),
@@ -301,7 +300,6 @@ impl Reviewer {
         }
     }
 
-    /// Runs the start, or says why it did not.
     fn start(&mut self, now_ms: u64) {
         self.detect();
         let (Some(socket), Ok(launcher)) = (&self.socket, &self.launcher) else {

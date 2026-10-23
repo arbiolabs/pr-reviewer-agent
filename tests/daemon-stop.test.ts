@@ -68,7 +68,7 @@ function stop(c: TestClient, pauseReviews: boolean): Promise<Result> {
 it("stops on daemon.stop: replies first, then closes, removes the socket, frees the data dir and exits 0", async () => {
   const fixture = createFixture();
   const d = await daemon(fixture, []);
-  expect(d.welcome.capabilities).toEqual(["account.select", "review.start", "review.retry", "review.cancel", "daemon.stop"]);
+  expect(d.welcome.capabilities).toEqual(["account.select", "review.add", "review.start", "review.retry", "review.cancel", "daemon.stop"]);
   expect(await stop(d.c, false)).toEqual({ type: "command.result", requestId: expect.any(String), status: "accepted", operationId: "daemon.stop" });
   await d.c.closed;
   expect(await d.exit).toBe(0);
