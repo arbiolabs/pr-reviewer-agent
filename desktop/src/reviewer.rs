@@ -480,8 +480,7 @@ impl Shell {
 
 /// The reviewer is down and the app is starting it or can: a PR added now waits for it instead of failing.
 pub fn starts_for_add(m: &Model, r: &Reviewer) -> bool {
-    !m.link.accepts_events()
-        && (matches!(r.control, Control::Starting { .. }) || r.block(m, Ask::Start).is_none())
+    !m.link.accepts_events() && (matches!(r.control, Control::Starting { .. }) || r.block(m, Ask::Start).is_none())
 }
 
 /// A snapshot's reviewer state, staged on the model a playback left: the connection a stop or a failed start ends
