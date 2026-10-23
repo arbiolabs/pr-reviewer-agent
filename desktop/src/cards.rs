@@ -268,7 +268,7 @@ fn card(s: &Shell, t: &Colors, c: &Card, i: usize, selected: bool, cx: &Context<
     let refused =
         command.filter(|_| queue::read_only(&s.model)).map(|mu| crate::detail::why_not(&s.model, mu, f.action));
     let hue = hue_of(t, c);
-    let place = c.pr().map(|p| format!("{} #{}", p.repository, p.number)).unwrap_or_default();
+    let place = c.pr().map(|p| (p.repository.to_string(), format!("#{}", p.number)));
     // Weight follows the tier, so the order reads without color: a decision now stands off the column on a stronger
     // edge and a deeper shadow, the middle tiers sit on it, and "when you have a minute" lies flat in the column's ink.
     let lift = |alpha: f32, y: f32, blur: f32| BoxShadow {
@@ -315,17 +315,30 @@ fn card(s: &Shell, t: &Colors, c: &Card, i: usize, selected: bool, cx: &Context<
                 .flex()
                 .items_center()
                 .gap(px(6.))
+                .min_w_0()
                 .children(f.glyph.map(|g| icon(g, px(12.), hue)))
                 .children(f.mark.map(|mk| div().text_size(px(10.)).text_color(hue).child(mk)))
                 .child(
                     div()
+                        .flex_none()
                         .text_size(text::CAPTION)
                         .font_weight(FontWeight::BOLD)
                         .text_color(hue)
                         .child(f.kicker.to_uppercase()),
                 )
-                .child(div().flex_1())
-                .child(div().text_size(text::CAPTION).text_color(t.faint).child(place)),
+                // A long repository name gives way before the kicker or the PR number does: it truncates, #N stays.
+                .children(place.map(|(repo, number)| {
+                    div()
+                        .flex()
+                        .flex_1()
+                        .min_w_0()
+                        .justify_end()
+                        .gap(px(4.))
+                        .text_size(text::CAPTION)
+                        .text_color(t.faint)
+                        .child(div().min_w_0().truncate().child(repo))
+                        .child(div().flex_none().child(number))
+                })),
         )
         .when(!docked, |d| {
             d.child(
