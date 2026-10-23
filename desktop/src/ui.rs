@@ -200,6 +200,8 @@ pub struct Shell {
     pub sheet_was_open: bool,
     /// The footer's avatar for the publishing account.
     pub avatar: crate::account::Avatar,
+    /// A PR the add sheet sent while the reviewer was stopped: it goes to the daemon once the start brings it up.
+    pub queued_add: Option<String>,
 }
 
 /// A page the reader went into: a finding, the proof, the diff or setup. The live strip steps aside there.
@@ -248,6 +250,7 @@ impl Shell {
             avatar: Default::default(),
             picker: crate::agent::Picker::default(),
             jev: crate::jev::KeyField::new(),
+            queued_add: None,
         };
         for d in desk {
             match d {
@@ -419,7 +422,7 @@ impl Shell {
 
     /// ⌘N: the sheet that adds a PR. On a daemon that refuses it the reducer says why, in a toast.
     pub fn add_pr(&mut self, cx: &mut Context<Self>) {
-        if !can_add(&self.model) {
+        if !can_add(&self.model) && !self.starts_for_add() {
             return self.send(Msg::AddPr(String::new()), cx);
         }
         self.overlay = Some(Overlay::AddPr { url: String::new(), sent: false });
@@ -435,6 +438,7 @@ impl Shell {
         edit(url);
         *sent = false;
         self.model.adding = None;
+        self.queued_add = None;
         cx.notify();
     }
 
@@ -448,7 +452,18 @@ impl Shell {
         }
         *sent = true;
         let url = url.clone();
+        if !can_add(&self.model) && self.starts_for_add() {
+            self.queued_add = Some(url);
+            if !matches!(self.reviewer.control, crate::reviewer::Control::Starting { .. }) {
+                self.ask(crate::reviewer::Ask::Start, cx);
+            }
+            return cx.notify();
+        }
         self.send(Msg::AddPr(url), cx);
+    }
+
+    fn starts_for_add(&self) -> bool {
+        crate::reviewer::starts_for_add(&self.model, &self.reviewer)
     }
 
     pub fn close_add(&mut self, cx: &mut Context<Self>) {
@@ -460,6 +475,7 @@ impl Shell {
         {
             self.model.adding = None;
         }
+        self.queued_add = None;
         self.overlay = None;
         cx.notify();
     }
@@ -1177,7 +1193,7 @@ fn sidebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
             false,
             click(cx, |s, cx| s.act(Action::Goto(Screen::Settings), cx)),
         ))
-        .child(add_row(m, t, dim, cx));
+        .child(add_row(s, t, dim, cx));
     let groups = queue::rows(m);
     if stage == Stage::Ready && !groups.is_empty() {
         // One hierarchy: the repository is the group label, lowercase as GitHub writes it, in the sidebar's one
@@ -1214,8 +1230,9 @@ fn sidebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
 
 /// The sidebar's way to add a PR: a quiet row under the lists with ⌘N beside it, locked with its reason on a daemon
 /// that can't add one.
-fn add_row(m: &Model, t: &Colors, dim: bool, cx: &Context<Shell>) -> Stateful<Div> {
-    let why = crate::overlay::add_block(m).filter(|_| !dim);
+fn add_row(s: &Shell, t: &Colors, dim: bool, cx: &Context<Shell>) -> Stateful<Div> {
+    let dim = dim && !crate::reviewer::starts_for_add(&s.model, &s.reviewer);
+    let why = crate::overlay::add_block(&s.model, &s.reviewer).filter(|_| !dim);
     let off = why.is_some() || dim;
     let fg = if off { t.disabled } else { t.muted };
     let row = div()
