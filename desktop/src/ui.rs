@@ -1099,6 +1099,7 @@ fn add_row(m: &Model, t: &Colors, dim: bool, cx: &Context<Shell>) -> Stateful<Di
     let fg = if off { t.disabled } else { t.muted };
     let row = div()
         .id("nav-add-face")
+        .when(dim, |d| d.opacity(0.55))
         .flex()
         .items_center()
         .gap(space::S2)
