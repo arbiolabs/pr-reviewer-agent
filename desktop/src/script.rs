@@ -45,6 +45,8 @@ pub enum Desk {
     Discards,
     /// `scrub:N`: the live log held at its Nth event, counted from 1.
     Scrub(usize),
+    /// `span:NAME`: the live waterfall's span of that name (`turn 4`, `analyze`) opened in its detail.
+    Span(String),
     /// `add-pr` or `add-pr:TEXT`: the sheet that adds a PR, with TEXT in its field.
     AddPr(String),
     /// `reviewer:STATE`: the reviewer as a start or stop leaves it, since a playback never starts or stops one.
@@ -87,7 +89,7 @@ const SCREENS: &[(&str, Screen)] = &[
 
 /// Comma-separated steps: an action name, `goto:<screen>`, `type:<text>`, `pr:<number>`, `finding:<n>`,
 /// `wait:<ms>`, `add:<url>`, or a desktop step (`tab:done`, `palette:<text>`, `keys`, `confirm-post`, `add-pr[:<url>]`,
-/// `scrub:<n>`, `reviewer:<state>`).
+/// `scrub:<n>`, `span:<name>`, `reviewer:<state>`).
 pub fn parse(s: &str) -> Result<Vec<Step>, String> {
     let mut steps = Vec::new();
     for t in s.split(',').map(str::trim).filter(|t| !t.is_empty()) {
@@ -103,6 +105,7 @@ pub fn parse(s: &str) -> Result<Vec<Step>, String> {
                 0 => return Err(format!("{t:?}: events count from 1")),
                 n => steps.push(Step::Desk(Desk::Scrub(n as usize))),
             },
+            Some(("span", v)) => steps.push(Step::Desk(Desk::Span(v.into()))),
             Some(("tab", v)) => match v {
                 "done" | "queue" => steps.push(Step::Desk(Desk::Done(v == "done"))),
                 _ => return Err(format!("{t:?}: tabs are queue and done")),

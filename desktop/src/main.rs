@@ -19,6 +19,7 @@ mod setup;
 mod timeline;
 mod tokens;
 mod ui;
+mod waterfall;
 
 use std::path::PathBuf;
 use std::process::ExitCode;

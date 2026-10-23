@@ -531,6 +531,8 @@ fn pr_page(s: &Shell, t: &Colors, pr: &Pr, run: Option<&Run>, cx: &Context<Shell
                 .children(stale.iter().map(|f| finding_row(s, t, f, cx))),
         );
     }
+    // How the latest run went, when this client saw it run.
+    body = body.children(run.and_then(|r| crate::waterfall::waterfall(s, t, r, cx)));
     page("detail-pr", body, Some(bar_view(s, t, pr_actions(s, pr, run, cx), cx)), t, false)
 }
 
