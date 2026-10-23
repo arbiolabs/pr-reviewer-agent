@@ -10,7 +10,7 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 ### Fixed
 
-- **search_code no longer crawls on a large repository.** The reviewer's repository clone is blob-less, and `git grep` fetched each file it had not read yet in its own round trip, so one search over a large directory could take half an hour while the review sat in Analyze. A search now lists the head tree's missing blobs under its scope and fetches them in one batch first; later searches in the same scope fetch nothing. A git older than 2.45 keeps the old behaviour (#50).
+- **Reviews no longer crawl on a large repository.** The reviewer's clone is blob-less, so `git grep` fetched each file it had not read yet in its own round trip: one `search_code` over a large directory ran for over 45 minutes while the review sat in Analyze. Collect now fetches the head tree's missing blobs in one batch (14,228 blobs in about 20 s on a large monorepo, then only what a later PR changed), after which the same search takes milliseconds. A `search_code` that still runs past 60 s answers the model with "timed out, narrow the scope" instead of holding the review. A git older than 2.45 skips the batch and fetches lazily as before (#50).
 
 ## [1.4.0] - 2026-10-23
 
