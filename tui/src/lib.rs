@@ -15,3 +15,4 @@ pub mod text;
 pub mod theme;
 pub mod update;
 pub mod view;
+pub mod waterfall;

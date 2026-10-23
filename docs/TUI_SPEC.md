@@ -148,6 +148,7 @@ flowchart TB
 - Finding list: severity, status, file/line, fingerprint, confidence and evidence availability.
 - Detail panel: exact evidence, tests, reasoning *summary*, linked GitHub comment and previous revision status.
 - Activity feed: tool started/completed, phase changed, candidate created, finding disposition changed, verification check passed/failed; redact secrets.
+- While a run is live: its phase with the time it has run, and "last activity Ns ago" once it goes quiet for 10 s. When the daemon sends `tool.activity` spans, the feed is a lite waterfall instead: one time axis fit to the width, a row per phase, step, model turn and tool call under its parent, open spans growing to a `┊` now line (`:` with `--ascii`).
 - Cost/tokens/elapsed time only when actual metrics are supplied; never synthesize estimates or fake precise progress percentages.
 - CTA capabilities derived from server: start, cancel, retry, reinvestigate, preview/publish.
 

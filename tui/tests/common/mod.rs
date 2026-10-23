@@ -167,6 +167,7 @@ pub fn states(look: Look) -> Vec<(&'static str, Sim)> {
         ("diff", mid_review(look).select("acme/shop#184").key(KeyCode::Enter).key(KeyCode::Char('d'))),
         ("timeline", mid_review(look).select("acme/shop#184").key(KeyCode::Enter).key(KeyCode::Char('4'))),
         ("parked", parked(look)),
+        ("running", running(look)),
         ("publication", parked(look).key(KeyCode::Char('p'))),
         ("published", {
             let mut s = parked(look).key(KeyCode::Char('p'));
@@ -176,6 +177,11 @@ pub fn states(look: Look) -> Vec<(&'static str, Sim)> {
             s
         }),
     ]
+}
+
+/// showcase.ndjson about 10 s in: acme/shop#1291 is in its fourth model turn, read in Review with its waterfall.
+pub fn running(look: Look) -> Sim {
+    Sim::new(look).play("showcase", 47).select("bb205280d64320002381b7dac2c86343").key(KeyCode::Enter)
 }
 
 /// approval.ndjson up to the run parking: #184 is AWAITING_APPROVAL on an engine daemon, read in Review.

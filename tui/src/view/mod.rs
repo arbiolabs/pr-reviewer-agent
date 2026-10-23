@@ -9,6 +9,7 @@ mod modals;
 mod publish;
 mod rail;
 mod timeline;
+mod waterfall;
 
 use ratatui::Frame;
 use ratatui::layout::{Constraint, Layout, Rect};
