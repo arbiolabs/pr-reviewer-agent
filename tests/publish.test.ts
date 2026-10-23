@@ -54,9 +54,8 @@ async function openPublishing(responses: FauxResponseStep[] = [readDiff(), submi
     config,
     pulls: new GitHubPullSource(() => client),
     github: () => client,
-    engine: { skipped: "Jev disabled by --no-jev" },
+    engine: async () => ({ skipped: "Jev disabled by --no-jev" }),
     models: fauxModels(responses),
-    model: { provider: "faux", modelId: "reviewer" },
     reviewerVersion: "m1+faux/reviewer",
   });
   apps.push(app);

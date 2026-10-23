@@ -50,9 +50,8 @@ async function host(options: { config?: Config; responses?: FauxResponseStep[]; 
     config,
     pulls,
     github: () => client,
-    engine: { skipped: "test" },
+    engine: async () => ({ skipped: "test" }),
     models: fauxModels(options.responses ?? [readDiff(), submitDefect(fixture)]),
-    model: { provider: "faux", modelId: "reviewer" },
     reviewerVersion: "m1+faux/reviewer",
     lockWaitMs: 0,
   });
@@ -186,9 +185,8 @@ it("falls back to read-only with the reason when recovery fails, holding no lock
     dataDir,
     config: approvalConfig,
     pulls: new GitHubPullSource(newClient),
-    engine: { skipped: "test" },
+    engine: async () => ({ skipped: "test" }),
     models: fauxModels([]),
-    model: { provider: "faux", modelId: "reviewer" },
     reviewerVersion: "m1+faux/reviewer",
     lockWaitMs: 0,
   });
@@ -213,9 +211,8 @@ it("is read-only by default: no lock, no engine, account.select only; the review
     dataDir,
     config: approvalConfig,
     pulls: new GitHubPullSource(newClient),
-    engine: { skipped: "test" },
+    engine: async () => ({ skipped: "test" }),
     models: fauxModels([]),
-    model: { provider: "faux", modelId: "reviewer" },
     reviewerVersion: "m1+faux/reviewer",
     lockWaitMs: 0,
   });

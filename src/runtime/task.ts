@@ -24,8 +24,18 @@ import { PinnedRepo, syncRepo } from "../source/git.ts";
 import type { GitHubClient } from "../github/client.ts";
 import { buildPayload, findReview, hasNews, postReview, PUBLISHER_VERSION, type ReviewPayload, recordVerdict } from "../publish/publisher.ts";
 import { parseDiff } from "../source/diff.ts";
+import { splitRef } from "../models/select.ts";
 
 export const REVIEW_TASK_NAME = "pr-review.revision";
+
+export const REVIEWER_CODE_VERSION = "m1";
+
+/** A reviewer identity, part of a revision's: this code's version and the model, as `m1+provider/id`. */
+export const reviewerVersion = (modelRef: string) => `${REVIEWER_CODE_VERSION}+${modelRef}`;
+export const modelRefOf = (version: string) => version.slice(version.indexOf("+") + 1);
+
+/** A revision is reviewed by the model its identity names, whatever model new revisions get now. */
+const reviewerModel = (version: string): ModelRef => splitRef(modelRefOf(version));
 
 /**
  * Resolved findings checked for their code on each later head, most recently resolved first. The check costs a file
@@ -46,14 +56,13 @@ export type ReviewTask = Task<ReviewInput, ReviewCheckpoint, ReviewResult, objec
 export type ReviewTaskDeps = {
   store: AppStore;
   pulls: PullSource;
-  engine: JevRoute;
+  engine: () => Promise<JevRoute>;
   config: Config;
   cacheDir: string;
   /** Sent to git only as a per-command header on clone and fetch, for private repositories. */
   gitToken?: ((installationId: number) => Promise<string | undefined>) | undefined;
   /** The GitHub client for an installation (0 is token auth). Needed only to publish. */
   github?: ((installationId: number) => GitHubClient) | undefined;
-  model: ModelRef;
   tools: Extension;
   workspace(revisionId: string): Promise<Workspace>;
 };
@@ -152,7 +161,7 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
     }
     const snapshot = store.snapshot(revision.id)!;
     const input: TriageInput = { title: snapshot.pr.title, body: snapshot.pr.body, changedFiles: snapshot.changedFiles, diffExcerpt: snapshot.diff };
-    const route = deps.engine;
+    const route = await deps.engine();
     const engine = "skipped" in route ? undefined : route;
     const { outcome, raw }: { outcome: JevOutcome; raw?: unknown } =
       "skipped" in route ? { outcome: { ok: false, error: route.skipped } } : await askJev(route, input, config.review.jev_timeout_ms);
@@ -178,7 +187,7 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
     if (!store.candidateSet(revision.id)) await converse(cp, revision, runtime, context);
     const set = store.candidateSet(revision.id);
     if (!set) throw new Error("the model answered without calling submit_candidates");
-    store.advance(revision.id, "ANALYZE", "CANDIDATES_PERSISTED", `${set.candidates.length} candidate(s) from ${deps.model.provider}/${deps.model.modelId}`);
+    store.advance(revision.id, "ANALYZE", "CANDIDATES_PERSISTED", `${set.candidates.length} candidate(s) from ${modelRefOf(revision.reviewer_version)}`);
     return { phase: "verify", revisionId: revision.id, candidateSetId: set.id };
   };
 
@@ -193,7 +202,7 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
         return undefined;
       }
       const created = await tx.createConversation({ ownership: { kind: "task", taskId: runtime.taskId } });
-      await configure(tx, created.id, { model: deps.model, extensions: [deps.tools] });
+      await configure(tx, created.id, { model: reviewerModel(revision.reviewer_version), extensions: [deps.tools] });
       (await tx.doc(TargetDoc, created.id)).revisionId = revision.id;
       child = created.id;
       return undefined;

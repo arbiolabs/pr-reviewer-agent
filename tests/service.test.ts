@@ -57,9 +57,8 @@ async function serve(dataDir: string) {
     pulls,
     github,
     gitToken: async () => undefined,
-    engine: { skipped: "Jev disabled by --no-jev" },
+    engine: async () => ({ skipped: "Jev disabled by --no-jev" }),
     models: fauxModels([readDiff(), submitDefect(fixture)]),
-    model: { provider: "faux", modelId: "reviewer" },
     reviewerVersion: "m2+faux/reviewer",
   });
   const service = await startService({ app, config, dataDir, pulls, github, webhookSecret: SECRET, adminToken: ADMIN, port: 0, publish: true, tickMs: 20, report: () => {} });

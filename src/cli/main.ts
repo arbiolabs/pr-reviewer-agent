@@ -10,18 +10,19 @@ import { ACCOUNT_KEY, chooseAccount, detectGh, listAccounts, resolveGithubAuth }
 import { clientFor, type GitHubClient } from "../github/client.ts";
 import { GitHubPullSource, parsePullRef, parsePullUrl, type PullSource } from "../github/pulls.ts";
 import { type DecisionEngine, JevDecisionEngine, type JevRoute, jevSkipReason } from "../jev/decision.ts";
+import { typeSafeKey } from "../jev/key.ts";
 import { PiAuthFileStore } from "../models/credential-store.ts";
 import { buildModels, detectModels } from "../models/detect.ts";
-import { type AvailableModel, chooseModel, listAvailableModels, splitRef } from "../models/select.ts";
+import { type AvailableModel, chooseModel, listAvailableModels } from "../models/select.ts";
 import { AppStore, withStore } from "../persistence/store.ts";
 import { reconcileOutbox } from "../publish/publisher.ts";
 import { finishReview, lockDataDir, openApp, startReview } from "../runtime/app.ts";
 import { approve as approvePublication, Refused, resumeApproved } from "../runtime/commands.ts";
+import { reviewerVersion } from "../runtime/task.ts";
 import { startService } from "../server/service.ts";
 import { type Check, gatherChecks, NO_TOKEN, using } from "./checks.ts";
 import { loadReport, renderJson, renderMarkdown } from "./report.ts";
 
-export const REVIEWER_CODE_VERSION = "m1";
 
 /** Seams the tests replace: the GitHub read side, the model collection, and where state lives. */
 export type CliDeps = {
@@ -121,21 +122,20 @@ async function review(args: string[], deps: CliDeps, dataDir: string, out: Out, 
 
   const { models, ref: modelRef } = await resolveModel(config, deps, values.model, deps.isTTY ?? Boolean(process.stdin.isTTY && process.stdout.isTTY), err);
 
-  const keyed = Boolean(process.env.TYPESAFE_API_KEY);
-  const skipped = jevSkipReason({ noJev: values["no-jev"] ?? false, keyed, privateRepo: pull.private, allowKeylessForPrivate: config.jev.allow_keyless_for_private });
+  const key = await typeSafeKey();
+  const skipped = jevSkipReason({ noJev: values["no-jev"] ?? false, keyed: key !== undefined, privateRepo: pull.private, allowKeylessForPrivate: config.jev.allow_keyless_for_private });
   const engine: JevRoute = skipped
     ? { skipped }
-    : (deps.engine ?? new JevDecisionEngine(keyed ? createTypeSafeClient() : createZenClient()));
+    : (deps.engine ?? new JevDecisionEngine(key ? createTypeSafeClient({ apiKey: key.key }) : createZenClient()));
   const app = await openApp({
     dataDir,
     config,
     pulls,
     gitToken: async () => githubToken,
     github: () => github,
-    engine,
+    engine: async () => engine,
     models,
-    model: splitRef(modelRef),
-    reviewerVersion: `${REVIEWER_CODE_VERSION}+${modelRef}`,
+    reviewerVersion: reviewerVersion(modelRef),
     onReport: (error) => err(`note: ${error instanceof Error ? error.message : String(error)}\n`),
   });
   try {
@@ -172,7 +172,7 @@ async function approve(args: string[], deps: CliDeps, dataDir: string, out: Out,
   const github = deps.github ?? clientFor(config.github, { kind: "token", token: auth!.token });
   const pulls = deps.pulls ?? new GitHubPullSource(() => github);
   // The approved attempt only publishes, so the revision's own reviewer identity serves; no model is resolved.
-  const reviewerVersion = await withStore(dataDir, (store) => {
+  const identity = await withStore(dataDir, (store) => {
     const revision = store.revision(values.revision!);
     if (!revision) throw new Error(`no revision ${values.revision}`);
     return revision.reviewer_version;
@@ -183,10 +183,9 @@ async function approve(args: string[], deps: CliDeps, dataDir: string, out: Out,
     pulls,
     gitToken: async () => auth?.token,
     github: () => github,
-    engine: { skipped: "approve does not triage" },
+    engine: async () => ({ skipped: "approve does not triage" }),
     models: deps.models ?? buildModels(deps.credentials ?? new PiAuthFileStore()),
-    model: splitRef(reviewerVersion.slice(reviewerVersion.indexOf("+") + 1)),
-    reviewerVersion,
+    reviewerVersion: identity,
     onReport: (error) => err(`note: ${error instanceof Error ? error.message : String(error)}\n`),
   });
   try {
@@ -285,9 +284,13 @@ async function reconcile(args: string[], deps: CliDeps, dataDir: string, out: Ou
   }
 }
 
-/** One Jev engine serves every repository, so the keyless tier is used only when private diffs may go there. */
-export function jevFromEnv(config: Config, deps: CliDeps): JevRoute {
-  if (process.env.TYPESAFE_API_KEY) return deps.engine ?? new JevDecisionEngine(createTypeSafeClient());
+/**
+ * One Jev engine serves every repository, so the keyless tier is used only when private diffs may go there. The key is
+ * looked up each time (`typeSafeKey`), so a key saved to the Keychain applies to the next review without a restart.
+ */
+export async function jevRoute(config: Config, deps: CliDeps): Promise<JevRoute> {
+  const key = await typeSafeKey();
+  if (key) return deps.engine ?? new JevDecisionEngine(createTypeSafeClient({ apiKey: key.key }));
   return config.jev.allow_keyless_for_private ? (deps.engine ?? new JevDecisionEngine(createZenClient())) : { skipped: "jev_skipped_no_key" };
 }
 
@@ -307,10 +310,9 @@ async function openEngine(dataDir: string, deps: CliDeps, err: (t: string) => vo
     pulls,
     gitToken: (installationId) => github.clientFor(installationId).token(),
     github: github.clientFor,
-    engine: jevFromEnv(config, deps),
+    engine: () => jevRoute(config, deps),
     models,
-    model: splitRef(ref),
-    reviewerVersion: `${REVIEWER_CODE_VERSION}+${ref}`,
+    reviewerVersion: reviewerVersion(ref),
     onReport: report,
   });
   return EngineSource.host(dataDir, app, { config, pulls, github: github.clientFor, report, ...(github.account ? { account: github.account } : {}) });
@@ -331,10 +333,9 @@ async function serve(deps: CliDeps, dataDir: string, err: (t: string) => void): 
     pulls,
     gitToken: (installationId) => github.clientFor(installationId).token(),
     github: github.clientFor,
-    engine: jevFromEnv(config, deps),
+    engine: () => jevRoute(config, deps),
     models,
-    model: splitRef(ref),
-    reviewerVersion: `${REVIEWER_CODE_VERSION}+${ref}`,
+    reviewerVersion: reviewerVersion(ref),
     onReport: report,
   });
   const service = await startService({

@@ -37,7 +37,7 @@ const client = () => new GitHubClient({ auth: { kind: "token", token: "ghp_test"
 async function openApproving(responses: FauxResponseStep[] = [readDiff(), submitDefect(fixture)], dataDir = mkdtempSync(join(tmpdir(), "approval-")), cfg: Config = config) {
   const github = client();
   const pulls = new GitHubPullSource(() => github);
-  const app = await openApp({ dataDir, config: cfg, pulls, github: () => github, engine: { skipped: "test" }, models: fauxModels(responses), model: { provider: "faux", modelId: "reviewer" }, reviewerVersion: "m1+faux/reviewer" });
+  const app = await openApp({ dataDir, config: cfg, pulls, github: () => github, engine: async () => ({ skipped: "test" }), models: fauxModels(responses), reviewerVersion: "m1+faux/reviewer" });
   apps.push(app);
   app.harness.resume();
   return { app, pulls, dataDir };
