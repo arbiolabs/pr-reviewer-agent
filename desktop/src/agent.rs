@@ -125,7 +125,7 @@ pub fn section(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         SaveState::TimedOut => Some((t.danger, "The reviewer did not answer in time. Try again.".into())),
     };
     let body = div()
-        .child(engine_row(t, settings.models.iter().find(|o| o.reference.as_str() == current).map(|o| (o, current))))
+        .child(engine_row(t, settings.models.iter().find(|o| o.reference.as_str() == current)))
         .child(div().px(space::S4).pb(space::S3).text_size(text::SMALL).text_color(t.muted).child(from))
         .children(s.picker.search.as_ref().map(|i| {
             div()
@@ -170,7 +170,7 @@ pub fn section(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
 }
 
 /// The harness that runs reviews, and the model it runs them with now.
-fn engine_row(t: &Colors, current: Option<(&ModelOption, &str)>) -> Div {
+fn engine_row(t: &Colors, current: Option<&ModelOption>) -> Div {
     div()
         .flex()
         .items_center()
@@ -187,11 +187,11 @@ fn engine_row(t: &Colors, current: Option<(&ModelOption, &str)>) -> Div {
                 .flex_1()
                 .min_w_0()
                 .child(div().font_weight(FontWeight::SEMIBOLD).child(match current {
-                    Some((o, _)) => format!("Reviews with {}", o.name),
+                    Some(o) => format!("Reviews with {}", o.name),
                     None => "Built-in review engine".to_string(),
                 }))
-                .children(current.map(|(_, r)| {
-                    div().font_family(text::MONO).text_size(px(11.)).text_color(t.muted).child(r.to_string())
+                .children(current.map(|o| {
+                    div().font_family(text::MONO).text_size(px(11.)).text_color(t.muted).child(o.reference.to_string())
                 })),
         )
 }
