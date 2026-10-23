@@ -1,3 +1,5 @@
+import { existsSync } from "node:fs";
+import { join } from "node:path";
 import type { Context } from "@earendil-works/chord";
 import {
   configure,
@@ -17,7 +19,7 @@ import type { PullSource } from "../github/pulls.ts";
 import { askJev, type JevOutcome, type JevRoute, selectReviewMode, type TriageInput, type TriageResult } from "../jev/decision.ts";
 import type { AppStore, OpenFinding, RevisionRow } from "../persistence/store.ts";
 import { buildReviewRequest } from "../reasoning/request.ts";
-import { TargetDoc, type Workspace } from "../reasoning/tools.ts";
+import { TargetDoc, took, type Workspace } from "../reasoning/tools.ts";
 import { evidenceTexts, type HeadReader, headReader, locate, observe, type ObservedLocation, type PriorFinding, reopen } from "../reasoning/track.ts";
 import { fingerprint, verifyCandidates } from "../reasoning/verify.ts";
 import { PinnedRepo, syncRepo } from "../source/git.ts";
@@ -43,6 +45,9 @@ const reviewerModel = (version: string): ModelRef => splitRef(modelRefOf(version
  * resolved unchecked, which is the only way this bound fails, and it fails toward the status already shown.
  */
 export const MAX_WATCHED = 50;
+
+/** VERIFY journals this many verdict lines, then one that counts the rest; under the store's per-second limit. */
+const VERDICT_LINES = 8;
 
 /**
  * `retry` counts the reopenings (MANUAL_RETRY or APPROVED) before this task: each gets its own durable task. `publish`
@@ -79,8 +84,43 @@ type PhaseBody<P extends ReviewCheckpoint["phase"]> = (
 
 const finished = (revisionId: string, state: ReviewState): Next => ({ status: "terminal", outcome: { status: "completed", result: { revisionId, state } } });
 
+/** The +/- line counts of a unified diff. */
+const lineCounts = (diff: string) => {
+  let [added, removed] = [0, 0];
+  for (const line of diff.split("\n")) {
+    if (line.startsWith("+") && !line.startsWith("+++")) added += 1;
+    else if (line.startsWith("-") && !line.startsWith("---")) removed += 1;
+  }
+  return { added, removed };
+};
+
 export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
   const { store, config } = deps;
+
+  /**
+   * One timed step on the waterfall: a line opens span `id` under `parent`, `work` runs, and a second line closes it
+   * with what `done` says, or with `failed` when `work` throws. Lines carry counts and timings, never content.
+   */
+  async function span<T>(
+    revisionId: string,
+    where: { tool: string; id: string; parent?: string; kind: "phase" | "step" },
+    opening: string,
+    work: () => Promise<T>,
+    done: (value: T, took: string) => string,
+  ): Promise<T> {
+    const open = { id: where.id, ...(where.parent ? { parent: where.parent } : {}), kind: where.kind, startedAt: new Date().toISOString() };
+    store.appendActivity(revisionId, where.tool, opening, open);
+    const close = (summary: string) => store.appendActivity(revisionId, where.tool, summary, { ...open, endedAt: new Date().toISOString() });
+    try {
+      const value = await work();
+      close(done(value, took(open.startedAt)));
+      return value;
+    } catch (error) {
+      close(`${opening}: failed after ${took(open.startedAt)}`);
+      throw error;
+    }
+  }
+  const step = (tool: string, id: string, phase: string) => ({ tool, id: `step:${id}`, parent: `phase:${phase}`, kind: "step" as const });
 
   /**
    * Each phase does its idempotent app-DB write, then commits the next checkpoint. A throw retries the phase from the
@@ -91,7 +131,14 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
       const checkpoint = task.state.checkpoint;
       let next: ReviewCheckpoint | Next;
       try {
-        next = await body(checkpoint, store.revision(checkpoint.revisionId)!, runtime, context, task.input);
+        const name = checkpoint.phase;
+        next = await span(
+          checkpoint.revisionId,
+          { tool: "phase", id: `phase:${name}`, kind: "phase" },
+          checkpoint.attempt ? `${name} started (attempt ${checkpoint.attempt + 1})` : `${name} started`,
+          () => body(checkpoint, store.revision(checkpoint.revisionId)!, runtime, context, task.input),
+          (_, t) => `${name} done in ${t}`,
+        );
       } catch (error) {
         if (runtime.signal.aborted) throw error;
         const message = error instanceof Error ? error.message : String(error);
@@ -125,16 +172,44 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
       store.advance(revision.id, "COLLECT_CONTEXT", "CONTEXT_PERSISTED", "reused the stored context snapshot");
       return { phase: "triage", revisionId: revision.id, contextSnapshotId: existing.id };
     }
-    const pull = await livePull(revision);
+    const pr = store.pullById(revision.pr_id)!;
+    const pull = await span(revision.id, step("github", "pr", "collect"), `fetching PR #${pr.number}`, () => livePull(revision), (p, t) => `PR #${p.number}: head ${p.headSha.slice(0, 7)} (${t})`);
     if (pull.headSha !== revision.head_sha) {
       store.advance(revision.id, "COLLECT_CONTEXT", "NEWER_HEAD", `head moved to ${pull.headSha}`);
       return finished(revision.id, "SUPERSEDED");
     }
-    const pr = store.pullById(revision.pr_id)!;
-    const repo = new PinnedRepo(await syncRepo(deps.cacheDir, pr.repo_full_name, pull.cloneUrl, pr.number, await deps.gitToken?.(pr.installation_id)), revision.base_sha, revision.head_sha);
+    const cloned = existsSync(join(deps.cacheDir, `${pr.repo_full_name}.git`, "HEAD"));
+    const token = await deps.gitToken?.(pr.installation_id);
+    const dir = await span(
+      revision.id,
+      step("git", "sync", "collect"),
+      cloned ? `fetching origin for ${pr.repo_full_name}` : `cloning ${pr.repo_full_name}`,
+      () => syncRepo(deps.cacheDir, pr.repo_full_name, pull.cloneUrl, pr.number, token),
+      (_, t) => `${cloned ? "fetched origin" : `cloned ${pr.repo_full_name}`} in ${t}`,
+    );
+    const repo = new PinnedRepo(dir, revision.base_sha, revision.head_sha);
     await repo.assertCommitsPresent();
-    await repo.prefetch();
-    const [diff, changedFiles] = [await repo.diff(), await repo.changedFiles()];
+    // One batch for the whole head tree, so the review's reads and searches never fetch blob by blob.
+    await span(
+      revision.id,
+      step("git", "prefetch", "collect"),
+      "fetching the head tree's blobs",
+      () => repo.prefetch(),
+      (n, t) => (n === 0 ? `head tree already local (${t})` : `fetched ${n} blob${n === 1 ? "" : "s"} in ${t}`),
+    );
+    const [diff, changedFiles] = await span(
+      revision.id,
+      step("git", "diff", "collect"),
+      `diffing ${revision.base_sha.slice(0, 7)}..${revision.head_sha.slice(0, 7)}`,
+      async () => {
+        await repo.assertCommitsPresent();
+        return [await repo.diff(), await repo.changedFiles()] as const;
+      },
+      ([d, files]) => {
+        const { added, removed } = lineCounts(d);
+        return `diff: ${files.length} file${files.length === 1 ? "" : "s"}, +${added} -${removed}`;
+      },
+    );
     const limitations: string[] = [];
     if (changedFiles.length > config.review.max_changed_files) {
       limitations.push(`${changedFiles.length} changed files exceed max_changed_files ${config.review.max_changed_files}; review is not complete`);
@@ -165,8 +240,16 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
     const route = await deps.engine();
     const engine = "skipped" in route ? undefined : route;
     const { outcome, raw }: { outcome: JevOutcome; raw?: unknown } =
-      "skipped" in route ? { outcome: { ok: false, error: route.skipped } } : await askJev(route, input, config.review.jev_timeout_ms);
+      "skipped" in route
+        ? { outcome: { ok: false, error: route.skipped } }
+        : await span(revision.id, step("jev", "jev", "triage"), `rating the risk with ${route.modelId}`, () => askJev(route, input, config.review.jev_timeout_ms), ({ outcome: o }, t) =>
+            o.ok
+              ? `risk ${o.judgment.riskScore.toFixed(2)}, ${o.judgment.primaryCategory}, deep review ${Math.round(o.judgment.needsDeepReviewProbability * 100)}% (${t})`
+              : `no rating: ${o.error.slice(0, 80)} (${t})`,
+          );
+    if ("skipped" in route) store.appendActivity(revision.id, "jev", `skipped: ${route.skipped}`);
     const { mode, reasons } = selectReviewMode(outcome, snapshot.changedFiles.map((f) => f.path), config);
+    store.appendActivity(revision.id, "route", `${mode}: ${reasons.join("; ")}`);
     const normalized: TriageResult | undefined = outcome.ok ? { ...outcome.judgment, selectedReviewMode: mode } : undefined;
     store.advance(revision.id, "TRIAGE", "ROUTING_PERSISTED", `${mode}: ${reasons.join("; ")}`, () => {
       store.saveDecision({
@@ -252,8 +335,8 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
   const verify: PhaseBody<"verify"> = async (cp, revision) => {
     const set = store.candidateSet(revision.id)!;
     const ws = await deps.workspace(revision.id);
-    const { prior, head } = await priorFindings(revision, ws);
-    const { dispositions, verified, unverified, verdicts } = await verifyCandidates(
+    const { prior, head } = await span(revision.id, step("verify", "locate", "verify"), "locating earlier findings at this head", () => priorFindings(revision, ws), (p, t) => `${p.prior.length} earlier finding(s) located (${t})`);
+    const { dispositions, verified, unverified, verdicts } = await span(revision.id, step("verify", "check", "verify"), `checking ${set.candidates.length} candidate(s)`, () => verifyCandidates(
       set.candidates,
       {
         prId: revision.pr_id,
@@ -267,7 +350,13 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
         prior,
       },
       set.resolutions,
-    );
+    ), (v, t) => `${v.verified.length} kept, ${v.dispositions.length - v.verified.length} discarded (${t})`);
+    // One line per verdict, up to VERDICT_LINES; the titles are the candidates' own, cut short.
+    dispositions.slice(0, VERDICT_LINES).forEach((d, i) => {
+      const title = Array.from(set.candidates[i]?.title ?? d.candidateId).slice(0, 60).join("");
+      store.appendActivity(revision.id, "verify", d.state === "VERIFIED" ? `kept: ${title}` : `discarded: ${title}${d.reason ? ` (${Array.from(d.reason).slice(0, 60).join("")})` : ""}`);
+    });
+    if (dispositions.length > VERDICT_LINES) store.appendActivity(revision.id, "verify", `and ${dispositions.length - VERDICT_LINES} more verdict(s)`);
     const observations = observe(prior, verified, { verdicts, unverified });
     // A reopened finding is new to the store: it gets a row like a verified candidate's, unless the model's re-report already linked to it.
     const reopens = prior.filter((f) => f.reopens);
@@ -286,8 +375,13 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
     const publish = input.publish === true && !(config.review.publish_mode === "silent_no_findings" && !hasNews(findings, inlineFindingIds));
     // Approval mode stores the payload the same way, then parks the revision for a human instead of posting.
     const approval = publish && config.review.publish_mode === "approval";
+    store.appendActivity(
+      revision.id,
+      "prepare",
+      `payload: ${findings.length} finding(s), ${payload.comments.length} inline comment(s), ${payload.body.length}-char summary, ${publish ? (approval ? "parks for approval" : "to post") : "not posted"}`,
+    );
     if (revision.state === "PREPARE_PUBLICATION") {
-      const { headSha } = await livePull(revision);
+      const { headSha } = await span(revision.id, step("github", "head", "prepare"), "checking the PR head", () => livePull(revision), (p, t) => `head ${p.headSha === revision.head_sha ? "unchanged" : `moved to ${p.headSha.slice(0, 7)}`} (${t})`);
       if (headSha !== revision.head_sha) {
         store.advance(revision.id, "PREPARE_PUBLICATION", "NEWER_HEAD", `head moved to ${headSha}`);
         return finished(revision.id, "SUPERSEDED");

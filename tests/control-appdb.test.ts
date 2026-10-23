@@ -7,7 +7,7 @@ import { AppDbSource } from "../src/control/appdb.ts";
 import { startControlServer } from "../src/control/server.ts";
 import { AppStore } from "../src/persistence/store.ts";
 import type { CandidateFinding } from "../src/domain/types.ts";
-import type { ServerMessage } from "../src/protocol/v1.ts";
+import type { ActivitySpan, ServerMessage } from "../src/protocol/v1.ts";
 import { finishReview, startReview } from "../src/runtime/app.ts";
 import { syncRepo } from "../src/source/git.ts";
 import { produced, TestClient } from "./control-client.ts";
@@ -42,7 +42,8 @@ const describeEvent = (e: Ev) => {
     case "review.phase_changed":
       return `phase ${d.from} -> ${d.to}`;
     case "tool.activity":
-      return `tool ${d.tool}: ${d.summary}`;
+      // Timings and commit SHAs vary from run to run; the words around them do not.
+      return `tool ${d.tool}: ${String(d.summary).replace(/\b\d+\.\d+s\b/g, "Ns").replace(/\b[0-9a-f]{7}\b/g, "sha")}`;
     case "finding.updated":
       return `finding ${d.title} @ ${d.file}:${d.line}`;
     case "pr.updated":
@@ -57,14 +58,47 @@ const journalSeqs = (store: AppStore) => (store.db.prepare("SELECT seq FROM audi
 const REVIEW = [
   "pr acme/shop#1",
   "run.started COLLECT_CONTEXT RUNNING",
+  "tool phase: collect started",
+  "tool github: fetching PR #1",
+  "tool github: PR #1: head sha (Ns)",
+  "tool git: cloning acme/shop",
+  "tool git: cloned acme/shop in Ns",
+  "tool git: diffing sha..sha",
+  "tool git: diff: 1 file, +1 -0",
   "phase COLLECT_CONTEXT -> TRIAGE",
+  "tool phase: collect done in Ns",
+  "tool phase: triage started",
+  "tool jev: skipped: Jev disabled by --no-jev",
+  "tool route: standard: Jev failed: Jev disabled by --no-jev; using standard",
   "phase TRIAGE -> ANALYZE",
+  "tool phase: triage done in Ns",
+  "tool phase: analyze started",
+  "tool model: turn 1 started",
+  "tool model: turn 1: Ns, 11 output tokens, called read_diff",
   "tool read_diff: src/routes/orders.ts",
+  "tool model: turn 1: 1 tool result(s) in Ns",
+  "tool model: turn 2 started",
+  "tool model: turn 2: Ns, 143 output tokens, called submit_candidates",
+  "tool submit_candidates: 1 candidate(s), 0 resolution claim(s)",
+  "tool model: turn 2: 1 tool result(s) in Ns",
   "phase ANALYZE -> VERIFY",
+  "tool phase: analyze done in Ns",
+  "tool phase: verify started",
+  "tool verify: locating earlier findings at this head",
+  "tool verify: 0 earlier finding(s) located (Ns)",
+  "tool verify: checking 1 candidate(s)",
+  "tool verify: 1 kept, 0 discarded (Ns)",
+  "tool verify: kept: Order deletion endpoint skips the admin check",
   "finding Order deletion endpoint skips the admin check @ src/routes/orders.ts:5",
   "phase VERIFY -> PREPARE_PUBLICATION",
+  "tool phase: verify done in Ns",
+  "tool phase: prepare started",
+  "tool prepare: payload: 1 finding(s), 1 inline comment(s), 397-char summary, not posted",
+  "tool github: checking the PR head",
+  "tool github: head unchanged (Ns)",
   "phase PREPARE_PUBLICATION -> PUBLISH",
   "review.completed COMPLETED COMPLETED",
+  "tool phase: prepare done in Ns",
 ];
 
 it("streams a real review to a client attached from the start, with no gaps", async () => {
@@ -84,6 +118,28 @@ it("streams a real review to a client attached from the start, with no gaps", as
 
   const events = c.events();
   expect(events.map(describeEvent)).toEqual(REVIEW);
+  // The waterfall: every span that opens closes, each step sits in its phase, and each tool call in the turn that asked.
+  const spans = events.flatMap((e) => (e.eventType === "tool.activity" && (e.data as { span?: ActivitySpan }).span) || []);
+  const closed = new Map(spans.filter((s) => s.endedAt).map((s) => [s.id, s]));
+  expect(spans.filter((s) => !s.endedAt).every((s) => closed.has(s.id))).toBe(true);
+  expect([...closed.values()].map((s) => `${s.kind} ${s.id.replace(/:[0-9a-f]{8}$/, "")} < ${s.parent?.replace(/:[0-9a-f]{8}$/, "") ?? "-"}`)).toEqual([
+    "step step:pr < phase:collect",
+    "step step:sync < phase:collect",
+    "step step:diff < phase:collect",
+    "phase phase:collect < -",
+    "phase phase:triage < -",
+    "tool tool < turn:1",
+    "model turn:1 < phase:analyze",
+    "tool tool < turn:2",
+    "model turn:2 < phase:analyze",
+    "phase phase:analyze < -",
+    "step step:locate < phase:verify",
+    "step step:check < phase:verify",
+    "phase phase:verify < -",
+    "step step:head < phase:prepare",
+    "phase phase:prepare < -",
+  ]);
+  expect(closed.get([...closed.keys()].find((id) => id.startsWith("turn:2"))!)!.outputTokens).toBe(143);
   expect(chained(events, 0)).toBe(true);
   expect(events.map((e) => e.sequence)).toEqual(journalSeqs(app.store));
 
@@ -125,16 +181,16 @@ it("streams a real review to a client attached from the start, with no gaps", as
   // Timeline pages newest first and chains by nextBeforeSequence.
   const pages: Ev[][] = [];
   for (let before: number | undefined, n = 0; n < 10; n++) {
-    c.send({ type: "timeline.get", requestId: `t${n}`, runId: revision.id, limit: 4, ...(before ? { beforeSequence: before } : {}) });
+    c.send({ type: "timeline.get", requestId: `t${n}`, runId: revision.id, limit: 10, ...(before ? { beforeSequence: before } : {}) });
     const page = await c.waitFor<Extract<ServerMessage, { type: "timeline.page" }>>((m) => m.type === "timeline.page" && m.requestId === `t${n}`);
     pages.push(page.events as Ev[]);
     if (page.nextBeforeSequence === undefined) break;
     before = page.nextBeforeSequence;
   }
-  expect(pages.map((p) => p.length)).toEqual([4, 4, 2]);
+  expect(pages.map((p) => p.length)).toEqual([10, 10, 10, 10, 3]);
   expect(pages.flat().map(describeEvent).reverse()).toEqual(REVIEW);
   c.send({ type: "timeline.get", requestId: "tf", findingId: finding!.id, limit: 10 });
-  expect(((await c.waitFor((m) => m.type === "timeline.page" && m.requestId === "tf")) as { events: Ev[] }).events.map(describeEvent)).toEqual([REVIEW[6]]);
+  expect(((await c.waitFor((m) => m.type === "timeline.page" && m.requestId === "tf")) as { events: Ev[] }).events.map(describeEvent)).toEqual(REVIEW.filter((e) => e.startsWith("finding ")));
 
   // Commands change nothing in the engine DB.
   const tables = (app.store.db.prepare("SELECT name FROM sqlite_master WHERE type = 'table'").all() as { name: string }[]).map((t) => t.name);

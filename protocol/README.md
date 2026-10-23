@@ -142,10 +142,37 @@ A sequenced event has `streamEpoch`, `sequence` (the journal's `audit_events.seq
 | `run.started`, `review.completed`, `run.superseded`, `run.failed` | `prId`, `runId` | `Run` | upsert the run |
 | `review.phase_changed` | `prId`, `runId` | `{ from, to, event, detail }` | set that run's `phase` to `to` |
 | `finding.updated` | `prId`, `runId` | `Finding` | upsert the finding |
-| `tool.activity` | `prId`, `runId` | `{ tool, summary }` (summary at most 200 chars) | append to the activity feed |
+| `tool.activity` | `prId`, `runId` | `{ tool, summary, span? }` (summary at most 200 chars) | append to the activity feed; a `span` opens, updates or closes that span of the run's waterfall |
 | `review.publication_changed` | `prId`, `runId` | `{ runId, status, reviewId?, url? }` with `status` one of `awaiting_approval`, `publishing`, `published`, `uncertain`, `failed` | set that run's publication status; a publication is done only on `published`, never on `command.result accepted` |
 | `accounts.updated` | none | `{ accounts }` | replace the account list |
 | anything else | optional | any | nothing, but it still advances `lastApplied` |
+
+### Activity sources and spans
+
+`tool.activity` reports every step of a review, so a running one never looks stuck. `tool` is a short source word:
+
+| `tool` | Phase | `summary`, for example |
+| --- | --- | --- |
+| `phase` | every phase | `analyze started`, `analyze done in 41.2s` |
+| `github` | collect, prepare | `fetching PR #1291`, `PR #1291: head f86859b (0.2s)`, `head unchanged (0.3s)` |
+| `git` | collect | `cloning acme/shop` or `fetching origin for acme/shop`, `fetched origin in 0.2s`, `diff: 3 files, +6 -3` |
+| `jev` | triage | `risk 0.78, security, deep review 84% (0.3s)`, or `skipped: <reason>` |
+| `route` | triage | `deep: <reasons>` |
+| `model` | analyze | `turn 4 started`, `turn 4: 12.3s, 1.2k output tokens, called read_file x2, search_code` (or `answered`), `turn 4: 3 tool result(s) in 0.4s` |
+| a review tool's name | analyze | `read_file src/a.ts @head`, `submit_candidates 3 candidate(s), 0 resolution claim(s)` |
+| `verify` | verify | `checking 3 candidate(s)`, `2 kept, 1 discarded (2.3s)`, `kept: <title>`, `discarded: <title> (<reason>)` |
+| `prepare` | prepare | `payload: 2 finding(s), 2 inline comment(s), 612-char summary, parks for approval` |
+
+Summaries carry counts, timings, paths and queries, never model text, reasoning or file contents. A daemon journals
+at most 10 tool calls and plain lines a second per review and drops the rest; phase, step and model spans always pass.
+
+`span`, when present, is `{ id, parent?, kind, startedAt, endedAt?, outputTokens? }` with `kind` one of `phase`,
+`step`, `model` and `tool`. A line without `endedAt` opens the span `id`, or updates it (its summary and
+`outputTokens`) when it is already open; the line with `endedAt` closes it. A line with both is a span that opened and
+closed at once, as every tool call is. `parent` is the span it ran in: phases have none, a step's is its
+`phase:<name>`, a model turn's is `phase:analyze`, and a tool call's is the turn that asked for it. A client that
+does not know `span` ignores it; one that does draws the run's waterfall from it. A new attempt of a run
+(`run.started`) starts its waterfall again.
 
 `heartbeat` is `{ type: "event", eventType: "heartbeat", streamEpoch, occurredAt }`. It has no sequence, is never
 durable, and never changes state. A missed heartbeat means a stale connection, never a failed run.

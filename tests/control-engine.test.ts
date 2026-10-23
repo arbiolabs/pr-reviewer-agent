@@ -111,6 +111,9 @@ const describeEvent = (e: Ev) => {
       return `${e.eventType} ${d.phase}${d.failureReason ? ` (${d.failureReason})` : ""}`;
   }
 };
+// These tests follow the review's flow; control-appdb.test.ts checks the progress lines between its steps.
+const PROGRESS = new Set(["phase", "github", "git", "jev", "route", "model", "verify", "prepare", "submit_candidates"]);
+const flow = (events: Ev[]) => events.filter((e) => !(e.eventType === "tool.activity" && PROGRESS.has((e.data as { tool: string }).tool)));
 const chained = (events: Ev[], from: number) => events.map((e) => e.prevSequence).every((p, i) => p === (i === 0 ? from : events[i - 1]!.sequence));
 
 let requests = 0;
@@ -262,7 +265,7 @@ it("approves a review end to end over the socket: parked, previewed, published o
   expect(started).toMatchObject({ status: "accepted", operationId: expect.stringMatching(/^review\.start:[0-9a-f]{32}$/) });
   const runId = (started as { operationId: string }).operationId.slice("review.start:".length);
   await c.waitFor((m) => m.type === "event" && m.eventType === "review.publication_changed" && (m.data as { status: string }).status === "awaiting_approval");
-  expect(c.events().map(describeEvent)).toEqual(UP_TO_APPROVAL);
+  expect(flow(c.events()).map(describeEvent)).toEqual(UP_TO_APPROVAL);
   expect(chained(c.events(), snap.sequence)).toBe(true);
   expect(c.events().filter((e) => e.eventType === "pr.updated").map((e) => (e.data as { title: string }).title)).toEqual([fixture.pull.title]);
   expect([h.app.store.revision(runId)!.state, fake.postAttempts]).toEqual(["AWAITING_APPROVAL", 0]);
@@ -303,7 +306,7 @@ it("approves a review end to end over the socket: parked, previewed, published o
   const approved = await command(c, { command: "review.publish", params: { runId, previewId: outbox.payload_hash, expectedHeadSha: fixture.headSha } });
   expect(approved).toMatchObject({ status: "accepted", operationId: `review.publish:${runId}` });
   await c.waitFor((m) => m.type === "event" && m.eventType === "review.completed");
-  expect(c.events().map(describeEvent).slice(UP_TO_APPROVAL.length)).toEqual([
+  expect(flow(c.events()).map(describeEvent).slice(UP_TO_APPROVAL.length)).toEqual([
     "phase AWAITING_APPROVAL -> PUBLISH",
     "publication publishing",
     "publication published review 1000",
@@ -337,8 +340,8 @@ it("approves a review end to end over the socket: parked, previewed, published o
     [runId, "DETECTED"],
     [runId, "PUBLISHED"],
   ]);
-  // The journal follows causality: the publisher's rows, then the run's end.
-  expect(h.app.store.db.prepare("SELECT event, to_state, detail FROM audit_events WHERE revision_id = ? AND seq > ? ORDER BY seq").all(runId, approvalSeq.n)).toEqual([
+  // The journal follows causality: the publisher's rows, then the run's end (its progress lines aside).
+  expect(h.app.store.db.prepare("SELECT event, to_state, detail FROM audit_events WHERE revision_id = ? AND seq > ? AND event != 'TOOL_ACTIVITY' ORDER BY seq").all(runId, approvalSeq.n)).toEqual([
     { event: "APPROVED", to_state: "PUBLISH", detail: expect.stringMatching(/^approved by /) },
     { event: "PUBLICATION_CHANGED", to_state: "PUBLISH", detail: "publishing" },
     { event: "PUBLICATION_CHANGED", to_state: "PUBLISH", detail: "published" },
@@ -407,7 +410,7 @@ it("supersedes a parked review when the head moves before approval, with nothing
     rejected("REVISION_STALE", `the head of acme/shop#1 is now ${"f".repeat(40)}; revision ${runId} is superseded`),
   );
   await c.waitFor((m) => m.type === "event" && m.eventType === "run.superseded");
-  expect(c.events().map(describeEvent).slice(-2)).toEqual(["publication failed", "run.superseded SUPERSEDED"]);
+  expect(flow(c.events()).map(describeEvent).slice(-2)).toEqual(["publication failed", "run.superseded SUPERSEDED"]);
   expect(await command(c, { command: "review.publish", params: { runId, previewId, expectedHeadSha: fixture.headSha } })).toEqual(rejected("INVALID_TRANSITION", "APPROVED is not legal in SUPERSEDED"));
   expect([fake.postAttempts, h.app.store.outboxForRevision(runId)!.status]).toEqual([0, "failed"]);
   // The old head's start replays as recorded; the new head starts a new run.
@@ -586,7 +589,7 @@ it("recovers an approval the daemon was stopped in the middle of, with one POST"
   const snap = await again.c.waitFor<Extract<ServerMessage, { type: "snapshot" }>>((m) => m.type === "snapshot");
   expect(snap.runs.map((r) => [r.id, r.phase])).toEqual([[runId, "PUBLISH"]]);
   await again.c.waitFor((m) => m.type === "event" && m.eventType === "review.completed", 0, 20_000);
-  expect(again.c.events().map(describeEvent)).toEqual(["publication published review 1000", "finding Order deletion endpoint skips the admin check", "review.completed COMPLETED"]);
+  expect(flow(again.c.events()).map(describeEvent)).toEqual(["publication published review 1000", "finding Order deletion endpoint skips the admin check", "review.completed COMPLETED"]);
   expect([fake.postAttempts, fake.reviews.length, second.app.store.outboxForRevision(runId)!.status]).toEqual([1, 1, "published"]);
   // The replayed approval still answers the recorded operation.
   expect(await command(again.c, { command: "review.publish", params: { runId, previewId, expectedHeadSha: fixture.headSha } })).toMatchObject({ status: "accepted", operationId: `review.publish:${runId}` });

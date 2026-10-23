@@ -225,6 +225,22 @@ export const KNOWN_EVENT_TYPES = [
 
 const Phase = oneOf(REVIEW_STATES);
 
+export const SPAN_KINDS = ["phase", "step", "model", "tool"] as const;
+/**
+ * The timed piece of work a `tool.activity` line belongs to, for the waterfall. A span opens with a line that has no
+ * `endedAt` and closes with a later line of the same `id` that has one; a line with both is a span that opened and
+ * closed at once. `parent` is the id of the span it ran inside. Counts and timings only, never model text.
+ */
+export const ActivitySpan = Type.Object({
+  id: Type.String({ minLength: 1, maxLength: 64 }),
+  parent: Type.Optional(Type.String({ minLength: 1, maxLength: 64 })),
+  kind: oneOf(SPAN_KINDS),
+  startedAt: Timestamp,
+  endedAt: Type.Optional(Timestamp),
+  outputTokens: Type.Optional(Type.Integer({ minimum: 0 })),
+});
+export type ActivitySpan = Static<typeof ActivitySpan>;
+
 export const KnownEvent = Type.Union([
   event("pr.updated", Pr, { prId: Id }),
   event("run.started", Run, { prId: Id, runId: Id }),
@@ -234,7 +250,7 @@ export const KnownEvent = Type.Union([
     { prId: Id, runId: Id },
   ),
   event("finding.updated", Finding, { prId: Id, runId: Id }),
-  event("tool.activity", Type.Object({ tool: Type.String(), summary: Type.String({ maxLength: 200 }) }), { prId: Id, runId: Id }),
+  event("tool.activity", Type.Object({ tool: Type.String(), summary: Type.String({ maxLength: 200 }), span: Type.Optional(ActivitySpan) }), { prId: Id, runId: Id }),
   event("review.completed", Run, { prId: Id, runId: Id }),
   event("run.superseded", Run, { prId: Id, runId: Id }),
   event("run.failed", Run, { prId: Id, runId: Id }),

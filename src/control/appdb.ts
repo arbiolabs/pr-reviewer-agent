@@ -12,7 +12,7 @@ import { isMissingObject, offlineReadsSupported, PinnedRepo } from "../source/gi
 import { type DiffPage, pageDiff, parseDiffFiles } from "./diff.ts";
 import { ControlError, type ControlSource, type DiffRequest, type Snapshot, type TimelinePage, type TimelineRequest } from "./source.ts";
 
-type JournalRow = { seq: number; prev: number; revision_id: string | null; from_state: string; event: string; to_state: string; detail: string | null; at: string };
+type JournalRow = { seq: number; prev: number; revision_id: string | null; from_state: string; event: string; to_state: string; detail: string | null; at: string; span_json: string | null };
 type FindingRow = { id: string; pr_id: string; repo_full_name: string; fingerprint: string; status: string; current_severity: string; revision_id: string; evidence_json: string; stale: number };
 
 /** Every string that leaves this source passes here: repository, PR and model text can carry terminal escapes. */
@@ -23,7 +23,7 @@ export function clean<T>(value: T): T {
   return value;
 }
 
-const JOURNAL_SELECT = `SELECT a.seq, a.revision_id, a.from_state, a.event, a.to_state, a.detail, a.at,
+const JOURNAL_SELECT = `SELECT a.seq, a.revision_id, a.from_state, a.event, a.to_state, a.detail, a.at, a.span_json,
   coalesce((SELECT max(b.seq) FROM audit_events b WHERE b.seq < a.seq), 0) AS prev FROM audit_events a`;
 
 // One finding at one observation: the given revision's, or the latest when revision is null.
@@ -402,7 +402,8 @@ export class AppDbSource implements ControlSource {
       case "TOOL_ACTIVITY": {
         const detail = row.detail ?? "";
         const space = detail.indexOf(" ");
-        return { ...ids, eventType: "tool.activity", data: space === -1 ? { tool: detail, summary: "" } : { tool: detail.slice(0, space), summary: detail.slice(space + 1) } };
+        const line = space === -1 ? { tool: detail, summary: "" } : { tool: detail.slice(0, space), summary: detail.slice(space + 1) };
+        return { ...ids, eventType: "tool.activity", data: row.span_json ? { ...line, span: JSON.parse(row.span_json) } : line };
       }
       case "PR_UPDATED":
         return { ...head, eventType: "pr.updated", data: this.pr(this.db.prepare("SELECT * FROM pull_requests WHERE id = ?").get(rev.pr_id) as PullRow, rev) };

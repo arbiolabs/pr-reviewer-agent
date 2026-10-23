@@ -16,7 +16,11 @@ import {
 } from "../domain/machines.ts";
 import { type CandidateFinding, type ChangedFile, type Disposition, type PullInfo, type ResolutionClaim, type ResolutionVerdict, stableId } from "../domain/types.ts";
 import { sanitize } from "../protocol/sanitize.ts";
+import type { ActivitySpan } from "../protocol/v1.ts";
 import type { Observation, ObservedLocation, Reopened } from "../reasoning/track.ts";
+
+/** How many tool calls and plain activity lines one revision journals a second; see `appendActivity`. */
+export const ACTIVITY_PER_SECOND = 10;
 
 const MIGRATIONS_DIR = new URL("../../migrations/", import.meta.url);
 
@@ -143,6 +147,7 @@ export const TRANSITIONS = `event IN (${REVIEW_EVENTS.map((e) => `'${e}'`).join(
 
 export class AppStore {
   readonly db: DatabaseSync;
+  private readonly recentActivity = new Map<string, number[]>();
 
   private constructor(db: DatabaseSync) {
     this.db = db;
@@ -448,12 +453,25 @@ export class AppStore {
     });
   }
 
-  /** Journal one tool call for the control stream: tool name plus its path or query, never file contents. */
-  appendActivity(revisionId: string, tool: string, summary: string): void {
+  /**
+   * Journal one progress line for the control stream: its source word (a tool name, or `github`, `git`, `model`...)
+   * plus a path, query, count or timing, never file contents or model text. `span` places it on the waterfall.
+   * Tool calls and plain lines past ACTIVITY_PER_SECOND a second for one revision are dropped; phase, step and model
+   * spans always pass, so every span that opens also closes.
+   */
+  appendActivity(revisionId: string, tool: string, summary: string, span?: ActivitySpan): void {
+    if (!span || span.kind === "tool") {
+      const t = Date.now();
+      const recent = (this.recentActivity.get(revisionId) ?? []).filter((at) => t - at < 1000);
+      if (recent.length >= ACTIVITY_PER_SECOND) return;
+      this.recentActivity.set(revisionId, [...recent, t]);
+    }
     const detail = Array.from(sanitize(`${tool} ${summary}`).replace(/\s+/g, " ")).slice(0, 200).join("");
     this.db
-      .prepare("INSERT INTO audit_events (revision_id, from_state, event, to_state, detail, at) SELECT id, state, 'TOOL_ACTIVITY', state, ?, ? FROM review_revisions WHERE id = ?")
-      .run(detail, now(), revisionId);
+      .prepare(
+        "INSERT INTO audit_events (revision_id, from_state, event, to_state, detail, at, span_json) SELECT id, state, 'TOOL_ACTIVITY', state, ?, ?, ? FROM review_revisions WHERE id = ?",
+      )
+      .run(detail, now(), span ? JSON.stringify(span) : null, revisionId);
   }
 
   saveSnapshot(snapshot: Omit<Snapshot, "id">): string {
