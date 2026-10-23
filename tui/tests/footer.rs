@@ -24,7 +24,7 @@ const SIZES: [(u16, u16); 3] = [(60, 16), (80, 24), (120, 38)];
 
 /// Keys every footer may leave out: they act the same on every screen, help lists them, and the footer offers them
 /// where it has room. Text entry is left out too: in a search field every printable key types.
-const GLOBAL: [&str; 10] = ["q", "C-c", "?", "r", "A", "1", "2", "3", "4", "5"];
+const GLOBAL: [&str; 11] = ["q", "C-c", "?", "r", "A", "a", "1", "2", "3", "4", "5"];
 
 /// Where room runs out, the first of each pair outlasts the second.
 const OUTLASTS: [(&str, &str); 2] = [("d", "h"), ("q", "h")];

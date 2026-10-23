@@ -855,6 +855,7 @@ fn input(t: &Colors, purpose: InputPurpose, buffer: &str, cx: &Context<Shell>) -
         InputPurpose::DiffSearch => "Search the diff",
         InputPurpose::TimelineFilter => "Filter events",
         InputPurpose::Search => "Filter PRs",
+        InputPurpose::AddPr => "Add a PR",
     };
     scrim(t, "input-scrim", cx, false)
         .flex()

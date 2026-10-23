@@ -495,6 +495,12 @@ pub struct CommandResult {
     pub request_id: RequestId,
     #[serde(flatten)]
     pub outcome: CommandOutcome,
+    /// `review.add`'s PR: the one it tracks now, or with `CONFLICT` the one already tracked.
+    #[serde(default)]
+    pub pr_id: Option<PrId>,
+    /// The run an accepted `review.add` started.
+    #[serde(default)]
+    pub run_id: Option<RunId>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize)]
@@ -807,6 +813,7 @@ pub struct CommandRequest {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum Command {
+    Add(AddParams),
     Start(StartParams),
     Cancel(RunParams),
     Retry(RunParams),
@@ -818,6 +825,7 @@ impl Command {
     /// Also the capability the server must grant before the client sends it.
     pub fn name(&self) -> &'static str {
         match self {
+            Command::Add(_) => "review.add",
             Command::Start(_) => "review.start",
             Command::Cancel(_) => "review.cancel",
             Command::Retry(_) => "review.retry",
@@ -829,6 +837,7 @@ impl Command {
     /// What a refusal says cannot be done: `Can't start: …`.
     pub fn verb(&self) -> &'static str {
         match self {
+            Command::Add(_) => "add a PR",
             Command::Start(_) => "start",
             Command::Cancel(_) => "cancel",
             Command::Retry(_) => "retry",
@@ -840,6 +849,7 @@ impl Command {
     /// Same command, same target, same key: a retried request cannot act twice.
     pub fn idempotency_key(&self) -> String {
         match self {
+            Command::Add(p) => format!("review.add:{}", p.url),
             Command::Start(p) => format!("review.start:{}:{}", p.pr_id, p.expected_head_sha),
             Command::Cancel(p) => format!("review.cancel:{}", p.run_id),
             Command::Retry(p) => format!("review.retry:{}", p.run_id),
@@ -847,6 +857,13 @@ impl Command {
             Command::SelectAccount(p) => format!("account.select:{}", p.account_id),
         }
     }
+}
+
+/// `url` is a GitHub PR URL or `owner/repo#N`; the client sends the `owner/repo#N` it parsed.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AddParams {
+    pub url: String,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -889,6 +906,7 @@ impl TryFrom<RawCommand> for CommandRequest {
     type Error = String;
     fn try_from(raw: RawCommand) -> Result<Self, String> {
         let command = match raw.command.as_str() {
+            "review.add" => Command::Add(from_value(raw.params)?),
             "review.start" => Command::Start(from_value(raw.params)?),
             "review.cancel" => Command::Cancel(from_value(raw.params)?),
             "review.retry" => Command::Retry(from_value(raw.params)?),
@@ -904,6 +922,7 @@ impl From<CommandRequest> for RawCommand {
     fn from(c: CommandRequest) -> Self {
         let to = |v: Result<serde_json::Value, serde_json::Error>| v.unwrap_or_default();
         let (command, params) = match c.command {
+            Command::Add(p) => ("review.add", to(serde_json::to_value(p))),
             Command::Start(p) => ("review.start", to(serde_json::to_value(p))),
             Command::Cancel(p) => ("review.cancel", to(serde_json::to_value(p))),
             Command::Retry(p) => ("review.retry", to(serde_json::to_value(p))),

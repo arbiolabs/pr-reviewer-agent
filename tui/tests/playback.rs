@@ -292,7 +292,8 @@ fn every_command_the_showcase_grants_plays_a_scripted_outcome() {
     drive(&mut p, &mut m, fx);
     let key = |c: char| Msg::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE));
     // The PR each command acts on in the showcase, and the keys that send it.
-    let plays: [(&str, u64, &[char]); 5] = [
+    let plays: [(&str, u64, &[char]); 6] = [
+        ("review.add", 0, &['a', 'c', 'm', 'e', '/', 's', 'h', 'o', 'p', '#', '1', '2', '8', '7', '\n']),
         ("review.publish", 1291, &['p', 'y']),
         ("review.start", 1296, &['s', 'y']),
         ("review.cancel", 338, &['c', 'y']),
@@ -316,6 +317,7 @@ fn every_command_the_showcase_grants_plays_a_scripted_outcome() {
             drive(&mut p, &mut m, fx);
         }
         match cap {
+            "review.add" => assert_eq!(m.selected_pr().map(|p| p.number), Some(1287), "{:?}", m.notice),
             "review.publish" => {
                 let run = m.domain.latest_run(m.ui.selected_pr.as_ref().unwrap()).unwrap().id.clone();
                 assert_eq!(m.domain.publications[&run].status, PublicationStatus::Published, "{cap}");

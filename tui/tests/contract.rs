@@ -156,7 +156,7 @@ fn m3_messages_parse_into_the_client_enums() {
 
     for (name, mode, granted) in [
         ("server.welcome", None, 0),
-        ("server.welcome.engine", Some(DaemonMode::Engine), 5),
+        ("server.welcome.engine", Some(DaemonMode::Engine), 6),
         ("server.welcome.read-only", Some(DaemonMode::ReadOnly), 1),
     ] {
         let ServerMessage::Welcome { mode: m, capabilities, read_only_reason, .. } =
@@ -228,4 +228,22 @@ fn hostile_snapshot_strings_arrive_sanitized() {
         let t = pr.title.as_str();
         assert!(!t.chars().any(|c| c.is_control() && c != '\n' && c != '\t'), "{t:?}");
     }
+}
+
+#[test]
+fn review_add_carries_the_pr_it_tracks_and_the_run_it_started() {
+    let read = |name: &str| fs::read_to_string(protocol_dir().join(format!("fixtures/{name}.json"))).unwrap();
+    let ClientMessage::Command(c) = serde_json::from_str(&read("client.command.review.add")).unwrap() else { panic!() };
+    assert_eq!(c.command, Command::Add(AddParams { url: "https://github.com/acme/shop/pull/184".into() }));
+    assert_eq!(c.idempotency_key, c.command.idempotency_key());
+    let result = |name| match ServerMessage::parse(&read(name)).unwrap() {
+        ServerMessage::CommandResult(r) => r,
+        _ => panic!("{name}"),
+    };
+    let added = result("server.command.result.accepted.review-add");
+    assert_eq!((added.pr_id.unwrap().as_str(), added.run_id.unwrap().as_str()), ("acme/shop#184", "rev-184-a"));
+    let tracked = result("server.command.result.rejected.already-tracked");
+    assert!(matches!(tracked.outcome, CommandOutcome::Rejected { code: ErrorCode::Conflict, .. }));
+    assert_eq!(tracked.pr_id.unwrap().as_str(), "acme/shop#184");
+    assert_eq!(result("server.command.result.accepted").pr_id, None);
 }

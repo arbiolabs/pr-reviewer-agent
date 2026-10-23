@@ -72,6 +72,8 @@ pub enum Action {
     Refresh,
     Help,
     Accounts,
+    /// Asks for a PR's URL and sends `review.add`.
+    AddPr,
     Mutation(Mutation),
     CycleScope,
     CycleCategory,
@@ -140,6 +142,7 @@ const TABLE: &[(Context, KeyCode, KeyModifiers, Action)] = &[
     (C::Review, K::Char('c'), NONE, A::Mutation(Mutation::Cancel)),
     (C::Review, K::Char('p'), NONE, A::Mutation(Mutation::Publish)),
     (C::Screens, K::Char('w'), NONE, A::Watch),
+    (C::Screens, K::Char('a'), NONE, A::AddPr),
     (C::Review, K::Char('J'), SHIFT, A::ScrollDown),
     (C::Review, K::Char('J'), NONE, A::ScrollDown),
     (C::Review, K::Char('K'), SHIFT, A::ScrollUp),
@@ -246,6 +249,7 @@ pub fn help_rows() -> Vec<(Context, String, &'static str, Option<&'static str>)>
             A::OpenDiff => "diff at the finding",
             A::OpenTimeline => "timeline for selection",
             A::Watch => "watch the running review",
+            A::AddPr => "add a PR to review",
             A::ScrollDown | A::ScrollUp => "scroll the explanation",
             A::Refresh => "refresh snapshot",
             A::Accounts => "GitHub accounts (Settings)",
@@ -278,6 +282,7 @@ pub fn help_rows() -> Vec<(Context, String, &'static str, Option<&'static str>)>
         };
         let capability = match action {
             A::Mutation(mu) => Some(mu.capability()),
+            A::AddPr => Some("review.add"),
             _ => None,
         };
         match rows.iter_mut().find(|(c, _, t, _)| c == ctx && *t == text) {
