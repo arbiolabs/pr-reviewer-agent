@@ -44,6 +44,14 @@ describe("pinned repo", () => {
     expect(await repo.grep("(", ":(top)")).toBe("");
   });
 
+  it("stops git when the review that asked is cancelled, so a shutdown never waits on a search", async () => {
+    const stopped = AbortSignal.abort();
+    await expect(repo.grep("requireAdmin", undefined, undefined, stopped)).rejects.toMatchObject({ name: "AbortError" });
+    await expect(repo.show(fixture.headSha, DEFECT.file, { signal: stopped })).rejects.toMatchObject({ name: "AbortError" });
+    await expect(repo.log(DEFECT.file, 5, stopped)).rejects.toMatchObject({ name: "AbortError" });
+    expect(await repo.grep("requireAdmin", "src/routes", undefined, new AbortController().signal)).toContain("requireAdmin");
+  });
+
   it("rejects traversal, absolute and NUL paths before running git", async () => {
     await expect(repo.show(fixture.headSha, "../../etc/passwd")).rejects.toThrow("path traversal rejected: ../../etc/passwd");
     expect(() => assertSafePath("/etc/passwd")).toThrow("absolute path rejected: /etc/passwd");

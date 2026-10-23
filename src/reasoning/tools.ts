@@ -84,7 +84,7 @@ export function createReviewTools(deps: ToolDeps): Extension {
         execute: async (args, api, context) => {
           const ws = await workspace(api, context);
           const sha = args.ref === "base" ? ws.repo.baseSha : ws.repo.headSha;
-          const source = await ws.repo.show(sha, args.path);
+          const source = await ws.repo.show(sha, args.path, { signal: context.abortSignal });
           if (source === undefined) throw new Error(`${args.path} does not exist at ${args.ref} (${sha})`);
           deps.store.markCodeRead(ws.revision.id);
           deps.store.appendActivity(ws.revision.id, "read_file", `${args.path} @${args.ref}`);
@@ -98,7 +98,7 @@ export function createReviewTools(deps: ToolDeps): Extension {
         replay: "safe",
         execute: async (args, api, context) => {
           const ws = await workspace(api, context);
-          const found = await ws.repo.grep(args.query, args.scope);
+          const found = await ws.repo.grep(args.query, args.scope, undefined, context.abortSignal);
           deps.store.markCodeRead(ws.revision.id);
           deps.store.appendActivity(ws.revision.id, "search_code", args.scope ? `${args.query} in ${args.scope}` : args.query);
           return text(found);
@@ -111,7 +111,7 @@ export function createReviewTools(deps: ToolDeps): Extension {
         replay: "safe",
         execute: async (args, api, context) => {
           const ws = await workspace(api, context);
-          const log = await ws.repo.log(args.path, args.limit ?? 10);
+          const log = await ws.repo.log(args.path, args.limit ?? 10, context.abortSignal);
           deps.store.appendActivity(ws.revision.id, "git_history", `${args.path} limit ${args.limit ?? 10}`);
           return text(capBytes(log));
         },
