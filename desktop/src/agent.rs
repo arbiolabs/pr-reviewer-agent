@@ -2,6 +2,7 @@
 
 use gpui_kit::assets::IconName;
 use gpui_kit::component::input::{Input, InputState};
+use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use pr_review_tui::model::SaveState;
@@ -11,6 +12,9 @@ use pr_review_tui::update::Msg;
 use crate::kit::{Tone, button, chip, icon};
 use crate::tokens::{Colors, radius, space, text};
 use crate::ui::Shell;
+
+/// The model list's height: about seven rows under a provider heading, the rest scroll.
+const MODEL_LIST_HEIGHT: Pixels = px(320.);
 
 /// The picker's own state: its search field and the row the reader chose, until Save.
 #[derive(Default)]
@@ -85,9 +89,10 @@ pub fn section(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
     let current = settings.model.reference.as_str();
     let choice = s.picker.choice.as_deref().unwrap_or(current);
     let query = s.picker.search.as_ref().map(|i| i.read(cx).value().to_string()).unwrap_or_default();
-    // The page scrolls the whole list, and the search narrows it: a second scroll area inside the page shrank its rows
-    // to its height instead of scrolling them.
-    let mut list = div().flex().flex_col();
+    // The list scrolls inside a fixed height, so a long one doesn't push Save off the page. The rows sit in one inner
+    // column under a plain (non-flex) scroll area: as flex children of the scroll area itself they shrank to its
+    // height instead of scrolling.
+    let mut list = div().flex().flex_col().pb(space::S2);
     let found = groups(&settings.models, &query);
     if found.is_empty() {
         list = list.child(say(format!("No model matches “{}”.", query.trim())));
@@ -136,7 +141,7 @@ pub fn section(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                 .pt(space::S3)
                 .child(Input::new(i).cleanable(true))
         }))
-        .child(list)
+        .child(div().id("model-list").flex_none().h(MODEL_LIST_HEIGHT).child(list).overflow_y_scrollbar())
         .child(
             div()
                 .flex()
