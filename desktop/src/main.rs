@@ -10,6 +10,7 @@ mod live;
 mod overlay;
 mod publish;
 mod queue;
+mod reviewer;
 mod script;
 mod setup;
 mod timeline;
@@ -131,6 +132,11 @@ fn start(opts: Opts) -> Result<(), String> {
         Source::Socket(p) => format!("unix:{}", p.display()),
         Source::Playback(p) => format!("playback:{}", p.display()),
     };
+    let socket = match &settings.source {
+        Source::Socket(p) => Some(p.clone()),
+        Source::Playback(_) => None,
+    };
+    let reviewer = reviewer::Reviewer::new(socket, settings.desktop, settings.config_path, opts.snapshot.is_some());
     let mut model = Model::new(endpoint, settings.look, settings.start, settings.wanted_pr);
     model.request_timeout_ms = settings.request_timeout.as_millis() as u64;
     let (cmds, cmd_rx) = mpsc::channel::<NetCmd>(QUEUE);
@@ -139,7 +145,7 @@ fn start(opts: Opts) -> Result<(), String> {
     if let (Source::Playback(p), Some(_)) = (&settings.source, &opts.snapshot) {
         script::play(playback::load(p)?, &mut model, &opts.steps, opts.after_ms)?;
         let snapshot = opts.snapshot.map(|out| (out, 0));
-        let view = View { model, cmds, desk: desk(&opts.steps), still: true, snapshot: true };
+        let view = View { model, cmds, reviewer, desk: desk(&opts.steps), still: true, snapshot: true };
         run_app(view, None, snapshot, opts.window, opts.appearance);
         drop(cmd_rx);
         return Ok(());
@@ -162,7 +168,8 @@ fn start(opts: Opts) -> Result<(), String> {
     let snapshot = opts.snapshot.clone().map(|out| (out, opts.after_ms));
     let is_snapshot = opts.snapshot.is_some();
     // `rt` lives until the process exits, since `run_app` returns only after the app quits.
-    let view = View { model, cmds, desk: Vec::new(), still: is_snapshot || reduce_motion(), snapshot: is_snapshot };
+    let view =
+        View { model, cmds, reviewer, desk: Vec::new(), still: is_snapshot || reduce_motion(), snapshot: is_snapshot };
     run_app(view, Some(msgs), snapshot, opts.window, opts.appearance);
     drop(rt);
     Ok(())
@@ -172,6 +179,7 @@ fn start(opts: Opts) -> Result<(), String> {
 struct View {
     model: Model,
     cmds: mpsc::Sender<NetCmd>,
+    reviewer: reviewer::Reviewer,
     desk: Vec<script::Desk>,
     still: bool,
     snapshot: bool,
@@ -260,12 +268,12 @@ fn run_app(
             window_min_size: Some(size(px(960.), px(600.))),
             ..Default::default()
         };
-        let View { model, cmds, desk, still, snapshot: is_snapshot } = view;
+        let View { model, cmds, reviewer, desk, still, snapshot: is_snapshot } = view;
         if !is_snapshot && let Some(c) = system_accent().filter(|c| tokens::ring_holds(*c)) {
             let _ = kit::RING_COLOR.set(c);
         }
         let built = gpui_kit::open_window(options, cx, |window, cx| {
-            let shell = cx.new(|cx| ui::Shell::new(model, cmds, still, is_snapshot, &desk, cx));
+            let shell = cx.new(|cx| ui::Shell::new(model, cmds, reviewer, still, is_snapshot, &desk, cx));
             let focus = shell.read(cx).focus.clone();
             window.focus(&focus, cx);
             shell
@@ -290,6 +298,7 @@ fn run_app(
                 while let Some(msg) = msgs.recv().await {
                     let quit = shell.update(cx, |s, cx| {
                         let quit = dispatch(&mut s.model, msg, &s.cmds);
+                        s.observe_reviewer(cx);
                         if std::mem::take(&mut s.model.dirty) {
                             cx.notify();
                         }

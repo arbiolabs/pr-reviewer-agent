@@ -45,7 +45,10 @@ gpui_kit::actions!(
         FocusNext,
         FocusPrev,
         AddPr,
-        Paste
+        Paste,
+        StartReviewer,
+        StopReviewer,
+        RestartReviewer
     ]
 );
 
@@ -99,6 +102,11 @@ pub fn menus() -> Vec<Menu> {
             MenuItem::separator(),
             MenuItem::action("Refresh from the Daemon", Refresh),
         ]),
+        Menu::new("Reviewer").items([
+            MenuItem::action("Start Reviewer", StartReviewer),
+            MenuItem::action("Stop Reviewer…", StopReviewer),
+            MenuItem::action("Restart Reviewer", RestartReviewer),
+        ]),
         Menu::new("Help").items([MenuItem::action("Keyboard Shortcuts", Shortcuts)]),
     ]
 }
@@ -116,6 +124,12 @@ pub enum Overlay {
     AddPr {
         url: String,
         sent: bool,
+    },
+    /// The sheet that asks before a stop pauses `running` reviews, or before a LaunchAgent that launchd would
+    /// restart is unloaded instead.
+    ConfirmStop {
+        restart: bool,
+        running: usize,
     },
 }
 
@@ -151,6 +165,10 @@ impl Arm {
 pub struct Shell {
     pub model: Model,
     pub cmds: mpsc::Sender<NetCmd>,
+    /// How the daemon starts and stops on this machine, and what the app last asked of it.
+    pub reviewer: crate::reviewer::Reviewer,
+    /// The offline page shows the command that starts the daemon by hand.
+    pub show_command: bool,
     /// The home shows the done list instead of the queue.
     pub done_tab: bool,
     pub overlay: Option<Overlay>,
@@ -195,6 +213,7 @@ impl Shell {
     pub fn new(
         model: Model,
         cmds: mpsc::Sender<NetCmd>,
+        reviewer: crate::reviewer::Reviewer,
         still: bool,
         snapshot: bool,
         desk: &[Desk],
@@ -203,6 +222,8 @@ impl Shell {
         let mut s = Shell {
             model,
             cmds,
+            reviewer,
+            show_command: false,
             done_tab: false,
             overlay: None,
             focus: cx.focus_handle(),
@@ -226,6 +247,7 @@ impl Shell {
                     s.overlay = Some(Overlay::AddPr { url: url.clone(), sent: s.model.adding.is_some() })
                 }
                 Desk::Scrub(n) => s.scrub = Some(n.saturating_sub(1)),
+                Desk::Reviewer(state) => crate::reviewer::stage(&mut s, *state),
                 Desk::Flagged => s.diff_flagged_only = true,
                 Desk::Discards => {
                     s.open_discards =
@@ -378,6 +400,7 @@ impl Shell {
             }
             (None, Some(Modal::Publication { .. })) => self.post(true, cx),
             (None, Some(Modal::Confirm { .. })) => self.act(Action::Confirm, cx),
+            (Some(Overlay::ConfirmStop { .. }), _) => self.confirm_stop(cx),
             _ => {}
         }
     }
@@ -501,8 +524,8 @@ impl Shell {
                 }
                 return;
             }
-            Some(Overlay::ConfirmPost(_)) => {
-                // Cancel is the default: ⏎ and esc both close it. Only ⌘⏎ posts.
+            Some(Overlay::ConfirmPost(_) | Overlay::ConfirmStop { .. }) => {
+                // Cancel is the default: ⏎ and esc both close it. Only ⌘⏎ posts or stops.
                 if matches!(key, "escape" | "enter") {
                     self.overlay = None;
                     cx.notify();
@@ -631,7 +654,7 @@ impl Render for Shell {
         let quiet = matches!(
             self.model.top_modal(),
             Some(Modal::Confirm {
-                command: Command::Start(_) | Command::Retry(_),
+                command: Command::Start(_) | Command::Retry(_) | Command::StopDaemon(_),
                 state: ConfirmState::Requested(_) | ConfirmState::Accepted { .. },
                 ..
             })
@@ -704,7 +727,10 @@ impl Render for Shell {
                 }
             }))
             .on_action(cx.listener(|s, _: &Palette, _, cx| s.toggle_palette(cx)))
-            .on_action(cx.listener(|s, _: &Refresh, _, cx| s.act(Action::Refresh, cx)))
+            .on_action(cx.listener(|s, _: &Refresh, _, cx| s.refresh(cx)))
+            .on_action(cx.listener(|s, _: &StartReviewer, _, cx| s.ask(crate::reviewer::Ask::Start, cx)))
+            .on_action(cx.listener(|s, _: &StopReviewer, _, cx| s.ask(crate::reviewer::Ask::Stop, cx)))
+            .on_action(cx.listener(|s, _: &RestartReviewer, _, cx| s.ask(crate::reviewer::Ask::Restart, cx)))
             .on_action(cx.listener(|s, _: &OpenGitHub, _, cx| s.open_github(cx)))
             .on_action(cx.listener(|s, _: &Setup, _, cx| s.act(Action::Goto(Screen::Settings), cx)))
             .on_action(cx.listener(|s, _: &Shortcuts, _, cx| {
@@ -762,7 +788,7 @@ impl Render for Shell {
                         .flex_1()
                         .min_w_0()
                         .bg(t.bg)
-                        .children(banner(m, &t))
+                        .children(banner(self, &t, cx))
                         .when(stage == Stage::Ready && !deep(m), |d| d.child(strip(self, &t, cx)))
                         .when(stage == Stage::Connecting, |d| d.child(strip_skeleton(&t)))
                         .child(body),
@@ -1091,7 +1117,7 @@ fn sidebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         .border_r_1()
         .border_color(t.border)
         .child(list)
-        .child(connection(m, t))
+        .child(connection(s, t))
 }
 
 /// The sidebar's way to add a PR: a quiet row under the lists with ⌘N beside it, locked with its reason on a daemon
@@ -1218,8 +1244,9 @@ fn pr_row(s: &Shell, t: &Colors, pr: &Pr, state: RowState, on: bool, cx: &Contex
     )
 }
 
-fn connection(m: &Model, t: &Colors) -> Stateful<Div> {
-    let (hue, word) = link_word(m, t);
+fn connection(s: &Shell, t: &Colors) -> Stateful<Div> {
+    let m = &s.model;
+    let (hue, word) = link_word(s, t);
     let endpoint = match m.diag.endpoint.split_once(':').map_or("", |(k, _)| k) {
         "unix" => "socket",
         other => other,
@@ -1240,8 +1267,17 @@ fn connection(m: &Model, t: &Colors) -> Stateful<Div> {
     tip(row, m.diag.endpoint.clone())
 }
 
-pub fn link_word(m: &Model, t: &Colors) -> (Hsla, String) {
-    match &m.link {
+/// The connection in a word, with the reviewer's own state when the app started or stopped it.
+pub fn link_word(s: &Shell, t: &Colors) -> (Hsla, String) {
+    use crate::reviewer::Control;
+    match &s.reviewer.control {
+        Control::Starting { .. } => return (t.warn, "Starting…".into()),
+        Control::Stopping { .. } => return (t.warn, "Stopping…".into()),
+        Control::Stopped if !s.model.link.welcomed() => return (t.muted, "Stopped by you".into()),
+        Control::StartFailed(_) if !s.model.link.welcomed() => return (t.danger, "Didn't start".into()),
+        _ => {}
+    }
+    match &s.model.link {
         Link::Live => (t.ok, "Live".into()),
         Link::Connecting { attempt } => (t.warn, format!("Connecting · try {attempt}")),
         Link::Negotiating | Link::Syncing => (t.warn, "Syncing".into()),
@@ -1253,27 +1289,51 @@ pub fn link_word(m: &Model, t: &Colors) -> (Hsla, String) {
     }
 }
 
-/// With a board on screen but the link down, a banner says what the board is: the last state the daemon sent.
-fn banner(m: &Model, t: &Colors) -> Option<Div> {
+/// With a board on screen but the link down, a banner says what the board is: the last state the daemon sent. It
+/// names a stop the reader asked for apart from a lost connection, and offers the start when one can run.
+fn banner(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Option<Div> {
+    use crate::reviewer::{Ask, Control};
+    let m = &s.model;
     if m.link.accepts_events() || queue::stage(m) != Stage::Ready {
         return None;
     }
-    let (hue, title, detail) = match &m.link {
-        Link::Disconnected { reason, retry_in_ms } => (
+    let (hue, glyph, title, detail) = match (&s.reviewer.control, &m.link) {
+        (Control::Starting { .. }, _) => {
+            (t.warn, IconName::LoaderCircle, "Starting the reviewer".into(), "It connects as soon as it listens".into())
+        }
+        (Control::Stopping { .. }, _) => {
+            (t.warn, IconName::LoaderCircle, "Stopping the reviewer".into(), "Running reviews pause".into())
+        }
+        (Control::Stopped, _) => (
+            t.muted,
+            IconName::CircleStop,
+            "Reviewer stopped".into(),
+            "You stopped it. Reviews that were running resume when it starts again".into(),
+        ),
+        (Control::StartFailed(why), _) => {
+            (t.danger, IconName::CircleX, "The reviewer didn't start".into(), why.clone())
+        }
+        (_, Link::Disconnected { reason, retry_in_ms }) => (
             t.danger,
+            IconName::TriangleAlert,
             match retry_in_ms {
                 Some(ms) => format!("Disconnected. Retrying in {}s", ms.div_ceil(1000)),
                 None => "Disconnected".to_string(),
             },
             reason.to_string(),
         ),
-        Link::Stalled { reason } => (t.danger, "The snapshot never arrived".into(), format!("{reason} (⌘R)")),
-        Link::Incompatible { message, .. } => {
-            (t.danger, "This daemon speaks another protocol".into(), message.to_string())
+        (_, Link::Stalled { reason }) => {
+            (t.danger, IconName::TriangleAlert, "The snapshot never arrived".into(), format!("{reason} (⌘R)"))
         }
-        Link::Unusable { message } => (t.danger, "This endpoint can't work".into(), message.to_string()),
-        _ => (t.warn, "Reconnecting to the reviewer".into(), m.diag.endpoint.clone()),
+        (_, Link::Incompatible { message, .. }) => {
+            (t.danger, IconName::TriangleAlert, "This daemon speaks another protocol".into(), message.to_string())
+        }
+        (_, Link::Unusable { message }) => {
+            (t.danger, IconName::TriangleAlert, "This endpoint can't work".into(), message.to_string())
+        }
+        _ => (t.warn, IconName::TriangleAlert, "Reconnecting to the reviewer".into(), m.diag.endpoint.clone()),
     };
+    let start = s.reviewer.block(m, Ask::Start).is_none() && matches!(m.link, Link::Disconnected { .. });
     Some(
         div()
             .flex()
@@ -1285,7 +1345,7 @@ fn banner(m: &Model, t: &Colors) -> Option<Div> {
             .bg(hue.alpha(0.10))
             .border_b_1()
             .border_color(hue.alpha(0.30))
-            .child(div().pt(px(2.)).child(icon(IconName::TriangleAlert, px(14.), hue)))
+            .child(div().pt(px(2.)).child(icon(glyph, px(14.), hue)))
             .child(
                 div()
                     .flex_none()
@@ -1299,7 +1359,17 @@ fn banner(m: &Model, t: &Colors) -> Option<Div> {
                 div().flex_1().min_w_0().text_size(text::SMALL).line_height(text::LINE_BODY).text_color(t.muted).child(
                     format!("{} What you see is the last state the daemon sent.", crate::kit::sentence(&detail)),
                 ),
-            ),
+            )
+            .when(start, |d| {
+                d.child(button(
+                    t,
+                    "banner-start",
+                    Ask::Start.title(),
+                    Some("⌘R"),
+                    Tone::Secondary,
+                    on(cx, |s, cx| s.ask(Ask::Start, cx)),
+                ))
+            }),
     )
 }
 

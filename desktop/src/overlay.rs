@@ -13,6 +13,7 @@ use std::ops::Range;
 use crate::detail::who;
 use crate::kit::{Tone, button, icon, keycap, overline, tip};
 use crate::queue::{self, Card, Stage};
+use crate::reviewer::{Ask, Reviewer};
 use crate::tokens::{Colors, layout, radius, space, text};
 use crate::ui::{Overlay, Shell, on};
 
@@ -26,6 +27,7 @@ enum Run {
     Tab(bool),
     Keys,
     AddPr,
+    Reviewer(Ask),
 }
 
 struct Entry {
@@ -58,7 +60,7 @@ fn mutation(m: &Model, mu: Mutation, title: String, key: &'static str, otherwise
 
 /// Every command, contextual ones first: each card's decision, the selected PR's actions with the reason any
 /// can't run, then going to a PR, then the views.
-fn entries(m: &Model) -> Vec<Entry> {
+fn entries(m: &Model, r: &Reviewer) -> Vec<Entry> {
     let mut out = Vec::new();
     for (i, c) in queue::cards(m).iter().enumerate() {
         let title = match c {
@@ -168,6 +170,13 @@ fn entries(m: &Model) -> Vec<Entry> {
         },
         Entry { group: "App", title: "Keyboard shortcuts".into(), key: Some("?"), blocked: None, run: Run::Keys },
     ]);
+    out.extend([Ask::Start, Ask::Stop, Ask::Restart].map(|ask| Entry {
+        group: "Reviewer",
+        title: ask.title().into(),
+        key: None,
+        blocked: r.block(m, ask),
+        run: Run::Reviewer(ask),
+    }));
     out
 }
 
@@ -227,8 +236,8 @@ pub fn matched(query: &str, title: &str) -> Vec<Range<usize>> {
 
 /// The entries `query` matches, best first. Groups stay together: a group sorts by its best entry, and its entries
 /// by their own score, runnable before blocked, then in the order `entries` gives.
-fn matching(m: &Model, query: &str) -> Vec<Entry> {
-    let found: Vec<(u8, usize, Entry)> = entries(m)
+fn matching(m: &Model, r: &Reviewer, query: &str) -> Vec<Entry> {
+    let found: Vec<(u8, usize, Entry)> = entries(m, r)
         .into_iter()
         .enumerate()
         .filter_map(|(i, e)| score(query, &e.title).or_else(|| fuzzy(query, e.group).then_some(3)).map(|sc| (sc, i, e)))
@@ -265,6 +274,7 @@ fn run(s: &mut Shell, r: Run, cx: &mut Context<Shell>) {
         Run::Tab(done) => s.set_tab(done, cx),
         Run::Keys => s.overlay = Some(Overlay::Keys),
         Run::AddPr => s.add_pr(cx),
+        Run::Reviewer(ask) => s.ask(ask, cx),
     }
     cx.notify();
 }
@@ -281,11 +291,11 @@ pub fn add_block(m: &Model) -> Option<String> {
 pub fn palette_key(s: &mut Shell, key: &str, typed: Option<&str>, cx: &mut Context<Shell>) -> bool {
     let Some(Overlay::Palette { query, selected }) = &s.overlay else { return false };
     let (mut q, mut sel) = (query.clone(), *selected);
-    let n = matching(&s.model, &q).len();
+    let n = matching(&s.model, &s.reviewer, &q).len();
     match key {
         "escape" => s.overlay = None,
         "enter" => {
-            if let Some(e) = matching(&s.model, &q).into_iter().nth(sel)
+            if let Some(e) = matching(&s.model, &s.reviewer, &q).into_iter().nth(sel)
                 && e.blocked.is_none()
             {
                 run(s, e.run, cx);
@@ -374,9 +384,11 @@ pub fn layer(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Vec<AnyElement> {
     match m.top_modal() {
         Some(Modal::Confirm { prompt, command, state }) => {
             // A start or retry in flight is a quiet status, not a sheet; a refusal or a question needs the reader.
-            let quiet = matches!(command, Command::Start(_) | Command::Retry(_))
+            let quiet = matches!(command, Command::Start(_) | Command::Retry(_) | Command::StopDaemon(_))
                 && matches!(state, ConfirmState::Requested(_) | ConfirmState::Accepted { .. });
-            if quiet {
+            if quiet && matches!(command, Command::StopDaemon(_)) {
+                out.push(toast(t, left, IconName::LoaderCircle, "Stopping the reviewer…".into()));
+            } else if quiet {
                 out.push(toast(t, left, IconName::LoaderCircle, format!("{} Sending…", prompt.trim_end_matches('?'))));
             } else {
                 out.push(crate::kit::in_sheet(|| confirm(s, t, prompt, command, state, cx)));
@@ -391,6 +403,9 @@ pub fn layer(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Vec<AnyElement> {
         Some(Overlay::Keys) => out.push(keys(t, cx, false)),
         Some(Overlay::ConfirmPost(_)) => out.push(crate::kit::in_sheet(|| confirm_post(s, t, cx))),
         Some(Overlay::AddPr { url, sent }) => out.push(crate::kit::in_sheet(|| add_pr(s, t, url, *sent, cx))),
+        Some(Overlay::ConfirmStop { restart, running }) => {
+            out.push(crate::kit::in_sheet(|| confirm_stop(s, t, *restart, *running, cx)))
+        }
         None => {}
     }
     out
@@ -480,6 +495,9 @@ fn glyph(m: &Model, e: &Entry) -> IconName {
         Run::Tab(true) => IconName::CircleCheck,
         Run::Keys => IconName::Keyboard,
         Run::AddPr => IconName::Plus,
+        Run::Reviewer(Ask::Start) => IconName::Power,
+        Run::Reviewer(Ask::Stop) => IconName::CircleStop,
+        Run::Reviewer(Ask::Restart) => IconName::RotateCcw,
     }
 }
 
@@ -490,7 +508,7 @@ const HEADER: f32 = 30.;
 
 fn palette(s: &Shell, t: &Colors, query: &str, selected: usize, cx: &Context<Shell>) -> AnyElement {
     let m = &s.model;
-    let found = matching(m, query);
+    let found = matching(m, &s.reviewer, query);
     let mut list = div().id("palette-list").flex().flex_col().overflow_y_scroll().p(space::S2);
     let mut group = "";
     let (mut tall, mut fits, mut more) = (8., 8., false);
@@ -677,6 +695,7 @@ fn confirm(
         Command::Retry(_) => ("Retry", Tone::Primary, IconName::RotateCw, t.accent),
         Command::Cancel(_) => ("Cancel review", Tone::Destructive, IconName::CircleX, t.danger),
         Command::SelectAccount(_) => ("Use account", Tone::Primary, IconName::User, t.accent),
+        Command::StopDaemon(_) => ("Stop reviewer", Tone::Destructive, IconName::CircleStop, t.danger),
         _ => ("Confirm", Tone::Primary, IconName::Check, t.accent),
     };
     let status = match state {
@@ -724,6 +743,9 @@ fn confirm(
                         }
                         Command::Start(_) | Command::Retry(_) => {
                             "The reviewer reads the diff with read-only tools. Nothing posts without your approval."
+                        }
+                        Command::StopDaemon(_) => {
+                            "The reviewer shuts down cleanly. Running reviews pause and resume on the next start."
                         }
                         _ => "The daemon uses this account for GitHub reads and for posting.",
                     },
@@ -1074,6 +1096,90 @@ fn caret(t: &Colors) -> Div {
     div().flex_none().w(px(2.)).h(px(18.)).mx(px(1.)).bg(t.accent)
 }
 
+/// A stop asks first when it pauses running reviews, or when launchd would start the daemon again at once: then it
+/// unloads the LaunchAgent instead, so the reviewer stays stopped. Keep running is the default, on esc and on ⏎.
+fn confirm_stop(s: &Shell, t: &Colors, restart: bool, running: usize, cx: &Context<Shell>) -> AnyElement {
+    let relaunches = s.reviewer.launcher.as_ref().is_ok_and(crate::reviewer::Launcher::relaunches);
+    let (title, verb) = match (restart, relaunches) {
+        (true, _) => ("Restart the reviewer?", "Restart reviewer"),
+        (false, true) => ("Stop the reviewer and keep it stopped?", "Stop and keep stopped"),
+        (false, false) => ("Stop the reviewer?", "Stop reviewer"),
+    };
+    let mut lines = Vec::new();
+    if running > 0 {
+        lines.push(format!(
+            "{} {} now and {} where {} left off when the reviewer starts again. Nothing is lost.",
+            queue::one(running),
+            if running == 1 { "review is running. It pauses" } else { "reviews are running. They pause" },
+            if running == 1 { "resumes" } else { "resume" },
+            if running == 1 { "it" } else { "they" },
+        ));
+    }
+    if relaunches && !restart {
+        lines.push(
+            "Its LaunchAgent sets KeepAlive to true, so launchd would start it again at once. This unloads the \
+             job with launchctl bootout instead, and Start reviewer loads it again."
+                .into(),
+        );
+    }
+    scrim(t, "stop-scrim", cx, true)
+        .flex()
+        .items_start()
+        .justify_center()
+        .pt(layout::TOOLBAR)
+        .child(
+            drop_sheet(t, layout::SHEET)
+                .id("stop-sheet")
+                .occlude()
+                .on_click(|_, _, cx| cx.stop_propagation())
+                .p(space::S6)
+                .gap(space::S4)
+                .child(
+                    div()
+                        .size(px(36.))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded(radius::PILL)
+                        .bg(t.danger.alpha(0.14))
+                        .child(icon(IconName::CircleStop, px(18.), t.danger)),
+                )
+                .child(div().text_size(text::TITLE).line_height(px(24.)).font_weight(FontWeight::SEMIBOLD).child(title))
+                .children(
+                    lines
+                        .into_iter()
+                        .map(|l| div().text_size(text::BODY).line_height(text::LINE_BODY).text_color(t.muted).child(l)),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .justify_end()
+                        .gap(space::S2)
+                        .pt(space::S2)
+                        .child(button(
+                            t,
+                            "stop-no",
+                            "Keep running",
+                            Some("esc"),
+                            Tone::Secondary,
+                            on(cx, |s, cx| {
+                                s.overlay = None;
+                                cx.notify();
+                            }),
+                        ))
+                        .child(button(
+                            t,
+                            "stop-yes",
+                            verb,
+                            Some("⌘⏎"),
+                            Tone::Destructive,
+                            on(cx, |s, cx| s.confirm_stop(cx)),
+                        )),
+                ),
+        )
+        .into_any_element()
+}
+
 fn input(t: &Colors, purpose: InputPurpose, buffer: &str, cx: &Context<Shell>) -> AnyElement {
     let label = match purpose {
         InputPurpose::JumpTo => "Jump to path:line",
@@ -1194,8 +1300,9 @@ mod tests {
         let steps = crate::script::parse("wait:19000,pr:1287").unwrap();
         crate::script::play(pr_review_tui::playback::load(&path).unwrap(), &mut m, &steps, 20_000).unwrap();
         m.server.as_mut().unwrap().capabilities.clear();
+        let r = crate::reviewer::Reviewer::new(None, Default::default(), "config.toml".into(), true);
         let rows: Vec<(String, Option<String>)> =
-            super::entries(&m).into_iter().filter(|e| e.group == "Review").map(|e| (e.title, e.blocked)).collect();
+            super::entries(&m, &r).into_iter().filter(|e| e.group == "Review").map(|e| (e.title, e.blocked)).collect();
         let locked = Some(super::READ_ONLY.to_string());
         assert_eq!(
             rows,

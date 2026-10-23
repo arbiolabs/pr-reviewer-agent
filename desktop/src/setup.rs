@@ -11,6 +11,7 @@ use pr_review_tui::protocol::{CheckStatus, DaemonMode, Finding};
 use crate::detail::*;
 use crate::kit::{OnClick, Tone, button, callout, chip, display, icon, icon_button, overline, summary};
 use crate::queue;
+use crate::reviewer::{Ask, Control, shell_quote};
 use crate::tokens::{Colors, radius, space, text};
 use crate::ui::{Shell, on};
 
@@ -152,7 +153,7 @@ fn fix_line(t: &Colors, check: &str, fix: &str) -> Div {
     row
 }
 
-/// The command that starts the daemon this window dials.
+/// The command that starts the daemon this window dials, as a shell reads it.
 fn daemon_command(m: &pr_review_tui::model::Model) -> String {
     match m.diag.endpoint.strip_prefix("unix:") {
         Some(path) => format!("pr-review daemon --allow-commands --socket {}", shell_quote(path)),
@@ -160,25 +161,77 @@ fn daemon_command(m: &pr_review_tui::model::Model) -> String {
     }
 }
 
-/// `s` as one shell word: macOS's default socket sits under "Application Support", whose space would split it.
-fn shell_quote(s: &str) -> String {
-    format!("'{}'", s.replace('\'', "'\\''"))
+/// A reviewer action as a button: live when it can run, else dashed with the reason in its tooltip.
+fn ask_button(s: &Shell, t: &Colors, ask: Ask, key: Option<&str>, tone: Tone, cx: &Context<Shell>) -> AnyElement {
+    let id = SharedString::from(format!("ask-{}", ask.title().to_lowercase().replace(' ', "-")));
+    match s.reviewer.block(&s.model, ask) {
+        None => button(t, id, ask.title(), key, tone, on(cx, move |s, cx| s.ask(ask, cx))).into_any_element(),
+        Some(why) => {
+            crate::kit::tip(button(t, id, ask.title(), key, tone, None), crate::kit::sentence(&why)).into_any_element()
+        }
+    }
 }
 
-/// No daemon answers: what to run, in a copyable block, and a retry.
+/// No daemon answers: why, and Start reviewer; or how the start or the stop the reader asked for is going. The
+/// command that starts it by hand waits under a disclosure.
 pub fn offline(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
     let m = &s.model;
-    let (title, why, retrying) = match &m.link {
-        Link::Disconnected { reason, retry_in_ms } => {
-            ("Reviewer offline", crate::kit::sentence(reason.as_str()), retry_in_ms.is_some())
+    let socket = s.reviewer.socket.as_ref().map_or(String::new(), |p| p.display().to_string());
+    let (glyph, hue, title, why, retrying) = match (&s.reviewer.control, &m.link) {
+        (Control::Starting { .. }, _) => (
+            IconName::LoaderCircle,
+            t.warn,
+            "Starting the reviewer",
+            format!(
+                "Waiting for it to listen on {socket}. This window connects then, or gives up after {} s.",
+                crate::reviewer::START_TIMEOUT_MS / 1000
+            ),
+            false,
+        ),
+        (Control::Stopping { .. }, _) => (
+            IconName::LoaderCircle,
+            t.warn,
+            "Stopping the reviewer",
+            "Running reviews pause and resume on the next start.".into(),
+            false,
+        ),
+        (Control::Stopped, _) => (
+            IconName::CircleStop,
+            t.muted,
+            "Reviewer stopped",
+            "You stopped it. Reviews that were running resume when it starts again.".into(),
+            false,
+        ),
+        (Control::StartFailed(why), _) => {
+            (IconName::CircleX, t.danger, "The reviewer didn't start", why.clone(), false)
         }
-        Link::Stalled { reason } => ("Not connected", crate::kit::sentence(reason.as_str()), false),
-        Link::Incompatible { message, .. } => ("This daemon speaks another protocol", message.to_string(), false),
-        Link::Unusable { message } => ("This endpoint can't work", message.to_string(), false),
-        _ => ("Not connected", "The reviewer has not answered yet.".to_string(), false),
+        (_, Link::Disconnected { reason, retry_in_ms }) => (
+            IconName::Unplug,
+            t.danger,
+            "Reviewer offline",
+            crate::kit::sentence(reason.as_str()),
+            retry_in_ms.is_some(),
+        ),
+        (_, Link::Stalled { reason }) => {
+            (IconName::Unplug, t.danger, "Not connected", crate::kit::sentence(reason.as_str()), false)
+        }
+        (_, Link::Incompatible { message, .. }) => {
+            (IconName::Unplug, t.danger, "This daemon speaks another protocol", message.to_string(), false)
+        }
+        (_, Link::Unusable { message }) => {
+            (IconName::Unplug, t.danger, "This endpoint can't work", message.to_string(), false)
+        }
+        _ => (IconName::Unplug, t.danger, "Not connected", "The reviewer has not answered yet.".to_string(), false),
     };
+    let starting = matches!(s.reviewer.control, Control::Starting { .. } | Control::Stopping { .. });
     let cmd = daemon_command(m);
     let copy = cmd.clone();
+    let log = s.reviewer.launcher.as_ref().ok().and_then(crate::reviewer::Launcher::log);
+    let failed = matches!(s.reviewer.control, Control::StartFailed(_));
+    let badge =
+        div().size(px(48.)).flex().items_center().justify_center().rounded(radius::PILL).bg(hue.alpha(0.12)).child(
+            if starting { spinner(t, s.still, "offline-spin") } else { icon(glyph, px(22.), hue).into_any_element() },
+        );
     div()
         .flex()
         .flex_col()
@@ -188,16 +241,7 @@ pub fn offline(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         .w_full()
         .max_w(px(640.))
         .pb(px(96.))
-        .child(
-            div()
-                .size(px(48.))
-                .flex()
-                .items_center()
-                .justify_center()
-                .rounded(radius::PILL)
-                .bg(t.danger.alpha(0.12))
-                .child(icon(IconName::Unplug, px(22.), t.danger)),
-        )
+        .child(badge)
         .child(div().flex().flex_col().gap(space::S2).child(display(t, title)).child(summary(t, why)))
         .when(retrying, |d| {
             d.child(
@@ -208,55 +252,26 @@ pub fn offline(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                     .text_size(text::SMALL)
                     .text_color(t.muted)
                     .child(spinner(t, s.still, "retry-spin"))
-                    .child("Retrying on its own. Start the daemon and this window connects."),
+                    .child("Retrying on its own. Start the reviewer and this window connects."),
             )
         })
-        .child(
-            div().flex().flex_col().gap(space::S2).child(overline(t, "The daemon this window dials")).child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(space::S2)
-                    .pl(space::S3)
-                    .pr(space::S1)
-                    .py(space::S1)
-                    .rounded(radius::SM)
-                    .bg(t.code_bg)
-                    .border_1()
-                    .border_color(t.border)
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w_0()
-                            .font_family(text::MONO)
-                            .text_size(text::CODE)
-                            .text_color(t.text)
-                            .child(cmd),
-                    )
-                    .child(icon_button(
-                        t,
-                        "copy-cmd",
-                        IconName::Copy,
-                        "Copy the command",
-                        px(32.),
-                        Some(Box::new(move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
-                            cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()))
-                        }) as OnClick),
-                    )),
-            ),
-        )
         .child(
             div()
                 .flex()
                 .gap(space::S2)
-                .child(button(
-                    t,
-                    "retry-now",
-                    "Retry",
-                    Some("⌘R"),
-                    Tone::Primary,
-                    on(cx, |s, cx| s.act(Action::Refresh, cx)),
-                ))
+                .child(ask_button(s, t, Ask::Start, Some("⌘R"), Tone::Primary, cx))
+                .when_some(log.filter(|_| failed), |d, log| {
+                    d.child(button(
+                        t,
+                        "open-log",
+                        "Open the log",
+                        None,
+                        Tone::Secondary,
+                        on(cx, move |_, _| {
+                            let _ = std::process::Command::new("open").arg(&log).spawn();
+                        }),
+                    ))
+                })
                 .child(button(
                     t,
                     "offline-setup",
@@ -265,6 +280,64 @@ pub fn offline(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                     Tone::Secondary,
                     on(cx, |s, cx| s.act(Action::Goto(pr_review_tui::model::Screen::Settings), cx)),
                 )),
+        )
+        .children(
+            s.reviewer
+                .launcher
+                .as_ref()
+                .err()
+                .map(|e| div().text_size(text::SMALL).line_height(text::LINE_BODY).text_color(t.warn).child(e.clone())),
+        )
+        .child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(space::S2)
+                .child(div().flex().child(button(
+                    t,
+                    "show-command",
+                    if s.show_command { "Hide the command" } else { "Run it yourself" },
+                    None,
+                    Tone::Ghost,
+                    on(cx, |s, cx| {
+                        s.show_command = !s.show_command;
+                        cx.notify();
+                    }),
+                )))
+                .when(s.show_command, |d| {
+                    d.child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(space::S2)
+                            .pl(space::S3)
+                            .pr(space::S1)
+                            .py(space::S1)
+                            .rounded(radius::SM)
+                            .bg(t.code_bg)
+                            .border_1()
+                            .border_color(t.border)
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .font_family(text::MONO)
+                                    .text_size(text::CODE)
+                                    .text_color(t.text)
+                                    .child(cmd),
+                            )
+                            .child(icon_button(
+                                t,
+                                "copy-cmd",
+                                IconName::Copy,
+                                "Copy the command",
+                                px(32.),
+                                Some(Box::new(move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
+                                    cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()))
+                                }) as OnClick),
+                            )),
+                    )
+                }),
         )
 }
 
@@ -404,19 +477,63 @@ pub fn setup_body(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
     };
     let row =
         || div().flex().items_start().gap(space::S3).px(space::S4).py(px(10.)).border_b_1().border_color(t.border);
-    let (hue, word) = crate::ui::link_word(m, t);
+    let (hue, word) = crate::ui::link_word(s, t);
     let server = m.server.as_ref();
     let mode = match server.and_then(|s| s.mode) {
         Some(DaemonMode::Engine) => ("Engine: reviews run here", t.ok),
         Some(DaemonMode::ReadOnly) => ("Read-only: this app can look, not act", t.warn),
         _ => ("Unknown mode", t.muted),
     };
+    let fact = |glyph: IconName, label: &str, value: String| {
+        row().child(icon(glyph, px(15.), t.faint)).child(
+            div()
+                .flex()
+                .flex_col()
+                .gap(px(2.))
+                .flex_1()
+                .min_w_0()
+                .child(div().text_size(text::SMALL).text_color(t.muted).child(label.to_string()))
+                .child(div().font_family(text::MONO).text_size(px(11.)).text_color(t.text).child(value)),
+        )
+    };
+    let runs_as = match &s.reviewer.launcher {
+        Ok(l) => l.words(),
+        Err(e) => e.clone(),
+    };
+    let log = match s.reviewer.launcher.as_ref().map(crate::reviewer::Launcher::log) {
+        Ok(Some(log)) => log.display().to_string(),
+        Ok(None) => "None: its LaunchAgent sets no StandardErrorPath".into(),
+        Err(_) => crate::reviewer::spawn_log().display().to_string(),
+    };
     let mut conn = div()
-        .child(row().child(div().pt(px(5.)).child(div().size(px(8.)).rounded(radius::PILL).bg(hue))).child(
-            div().flex().flex_col().gap(px(2.)).child(div().font_weight(FontWeight::SEMIBOLD).child(word)).child(
-                div().font_family(text::MONO).text_size(px(11.)).text_color(t.muted).child(m.diag.endpoint.clone()),
-            ),
-        ))
+        .child(
+            row()
+                .items_center()
+                .child(div().size(px(8.)).rounded(radius::PILL).bg(hue))
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(2.))
+                        .flex_1()
+                        .child(div().font_weight(FontWeight::SEMIBOLD).child(word))
+                        .child(
+                            div()
+                                .font_family(text::MONO)
+                                .text_size(px(11.))
+                                .text_color(t.muted)
+                                .child(m.diag.endpoint.clone()),
+                        ),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .gap(space::S2)
+                        .child(ask_button(s, t, Ask::Start, None, Tone::Secondary, cx))
+                        .child(ask_button(s, t, Ask::Restart, None, Tone::Secondary, cx))
+                        .child(ask_button(s, t, Ask::Stop, None, Tone::Danger, cx)),
+                ),
+        )
         .child(
             row().child(icon(IconName::Cpu, px(15.), mode.1)).child(
                 div()
@@ -428,7 +545,9 @@ pub fn setup_body(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                         div().text_size(text::SMALL).text_color(t.muted).child(crate::kit::sentence(r.as_str()))
                     })),
             ),
-        );
+        )
+        .child(fact(IconName::Server, "Runs as", runs_as))
+        .child(fact(IconName::FileText, "Log", log));
     if let Some(sv) = server {
         conn = conn.child(
             row().child(icon(IconName::Info, px(15.), t.faint)).child(
@@ -625,7 +744,7 @@ pub fn setup_body(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
             })
         })
         .child(card("Checks", list))
-        .child(card("Connection", conn))
+        .child(card("Reviewer", conn))
         .child(card("GitHub accounts", accounts))
 }
 

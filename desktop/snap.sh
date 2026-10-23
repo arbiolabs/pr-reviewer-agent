@@ -122,4 +122,7 @@ for look in dark light; do
   snap 18a-add-pr-empty-$look  $look 20000 "wait:19000,add-pr"
   snap 18b-add-pr-valid-$look  $look 20000 "wait:19000,add-pr:https://github.com/acme/web/pull/77"
   snap 18c-add-pr-error-$look  $look 20000 "wait:19000,add:acme/web#77,add-pr:acme/web#77"
+  snap 19-reviewer-stopped-$look $look 20000 "wait:19000,reviewer:stopped"
+  snap 19b-starting-$look      $look 600   "reviewer:starting" desktop/playback/slow.ndjson
+  snap 19c-stop-confirm-$look  $look 10000 "wait:9000,pr:1291,reviewer:stop-confirm"
 done
