@@ -39,9 +39,9 @@ const RING: Pixels = px(2.);
 /// one flag.
 pub static KEYBOARD: AtomicBool = AtomicBool::new(false);
 
-/// The ring's color: the macOS accent color in a live window. Unset, the brand accent: a snapshot's pixels must
-/// not depend on the machine's settings.
-pub static RING_COLOR: OnceLock<Hsla> = OnceLock::new();
+/// The macOS accent color in a live window, which rings focus wherever it holds 3:1 on the theme's window. Unset, the
+/// theme's own focus color: a snapshot's pixels must not depend on the machine's settings.
+pub static SYSTEM_ACCENT: OnceLock<Hsla> = OnceLock::new();
 
 thread_local! {
     /// While a sheet is open, only the controls built inside it are tab stops, so ⇥ stays in the sheet. The window
@@ -76,7 +76,7 @@ pub fn focusable(
     radius: Pixels,
     on: OnClick,
 ) -> Stateful<Div> {
-    let ring = RING_COLOR.get().copied().unwrap_or(t.accent);
+    let ring = SYSTEM_ACCENT.get().copied().filter(|c| crate::tokens::ring_holds(*c, t)).unwrap_or(t.focus);
     div()
         .id(id)
         .when(!SHEET_OPEN.get() || IN_SHEET.get(), |d| d.tab_index(0))

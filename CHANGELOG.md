@@ -18,6 +18,7 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 ### Fixed
 
 - **Desktop: the offline banner's copy is centered.** The icon, title and sentence of the banner shown while the reviewer is stopped or offline line up with its Start reviewer button instead of sitting at the top (#42).
+- **Desktop app: themes.** Settings (⌘,) opens on Appearance, a picker that previews each theme: System (follows macOS, the default), Light, Dark, Solarized Light, Solarized Dark and Nord. The setup checks follow under a Setup checks heading. View → Appearance and the palette's "Theme:" rows offer the same list, and a choice applies at once. The app saves it as `theme` in the config's `[desktop]` section, changing only that line, and restores it on launch. `--appearance` takes any theme id and wins over the saved one. The contrast test covers every theme, and the canonical Solarized and Nord tokens that fail it are moved in lightness only, listed in `desktop/DESIGN.md` (#45).
 
 ## [1.3.0] - 2026-10-23
 
