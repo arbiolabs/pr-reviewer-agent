@@ -4,6 +4,8 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 ## [Unreleased]
 
+## [1.4.0] - 2026-10-23
+
 ### Added
 
 - **Desktop: adding a PR starts a stopped reviewer.** With the reviewer stopped or offline and a way to start it, Review a PR… (⌘N, the sidebar, the palette) stays available: the sheet starts the reviewer, says "Starting the reviewer, then adding …", and sends the PR once the daemon answers. A start that fails says why in the sheet (#43).
@@ -112,7 +114,8 @@ This is the first release.
   - the PR is still open.
 - Command idempotency keys are bound to each run attempt, so a replayed command never has a second effect.
 
-[Unreleased]: https://github.com/diego-arbio-dev/pr-reviewer/compare/v1.3.0...HEAD
+[Unreleased]: https://github.com/diego-arbio-dev/pr-reviewer/compare/v1.4.0...HEAD
+[1.4.0]: https://github.com/diego-arbio-dev/pr-reviewer/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/diego-arbio-dev/pr-reviewer/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/diego-arbio-dev/pr-reviewer/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/diego-arbio-dev/pr-reviewer/compare/v1.0.1...v1.1.0
