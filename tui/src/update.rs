@@ -28,6 +28,8 @@ pub enum Msg {
     Net(NetEvent),
     /// Adds the PR this URL or `owner/repo#N` names: `review.add`, then the PR selected once it shows up.
     AddPr(String),
+    /// Makes this `provider/id` the model for reviews started from now on: `settings.set`.
+    SetModel(String),
 }
 
 #[derive(Debug)]
@@ -156,8 +158,10 @@ pub fn update(m: &mut Model, msg: Msg) -> Vec<Effect> {
         }
         Msg::Net(e) => net(m, e, &mut fx),
         Msg::AddPr(text) => add_pr(m, &text, &mut fx),
+        Msg::SetModel(model) => set_model(m, model, &mut fx),
     }
     prefetch(m, &mut fx);
+    prefetch_settings(m, &mut fx);
     settle_timeline_cursor(m);
     if !page_reloading(m) {
         clamp_page(m);
@@ -207,6 +211,38 @@ fn prefetch(m: &mut Model, fx: &mut Vec<Effect>) {
     }
 }
 
+/// Settings shows the daemon's review model, so it is asked for once per connection while Settings is open.
+fn prefetch_settings(m: &mut Model, fx: &mut Vec<Effect>) {
+    let a = &m.agent;
+    if !a.wanted || m.ui.screen != Screen::Settings || a.request.is_some() || a.settings.is_some() || a.error.is_some()
+    {
+        return;
+    }
+    m.agent.request = send(m, fx, |request_id| ClientMessage::SettingsGet { request_id });
+}
+
+/// Save on Settings' model picker: `settings.set`, then the settings asked for again once it is accepted.
+fn set_model(m: &mut Model, model: String, fx: &mut Vec<Effect>) {
+    if matches!(m.agent.save, SaveState::Sending { .. }) {
+        return;
+    }
+    if let Some(why) = write_block(m, "settings.set") {
+        m.agent.save = SaveState::Refused(Text::new(why));
+        return;
+    }
+    let command = Command::SetModel(ModelParams { model: model.clone() });
+    let (idempotency_key, verb) = (command.idempotency_key(), command.verb());
+    let sent =
+        send(m, fx, |request_id| ClientMessage::Command(CommandRequest { request_id, idempotency_key, command }));
+    m.agent.save = match sent {
+        Some(request) => {
+            m.commands_sent.insert(request.clone(), verb);
+            SaveState::Sending { request, model }
+        }
+        None => SaveState::Refused(Text::new(OFFLINE)),
+    };
+}
+
 fn request(m: &mut Model) -> RequestId {
     let id = RequestId::new(&format!("req-{}", m.next_request));
     m.next_request += 1;
@@ -243,6 +279,9 @@ fn expire_requests(m: &mut Model) {
             a.state = AddState::TimedOut;
             let target = a.target.to_string();
             notice(m, format!("No reply to adding {target} in time; try again"));
+        } else if matches!(&m.agent.save, SaveState::Sending { request, .. } if *request == id) {
+            m.agent.save = SaveState::TimedOut;
+            m.dirty = true;
         } else if fail_request(m, &id, Text::new(TIMED_OUT)) {
             m.dirty = true;
         }
@@ -332,6 +371,11 @@ fn fail_request(m: &mut Model, id: &RequestId, message: Text) -> bool {
     } else if let Some(t) = m.timeline.as_mut().filter(|t| t.pending.as_ref() == Some(id)) {
         t.pending = None;
         t.error = Some(message);
+    } else if m.agent.request.as_ref() == Some(id) {
+        m.agent.request = None;
+        m.agent.error = Some(message);
+    } else if matches!(&m.agent.save, SaveState::Sending { request, .. } if request == id) {
+        m.agent.save = SaveState::Refused(message);
     } else {
         return false;
     }
@@ -476,6 +520,8 @@ fn server_message(m: &mut Model, msg: ServerMessage, fx: &mut Vec<Effect>) {
                 }
                 return;
             }
+            // Another connection may be another daemon, with another model.
+            m.agent = AgentSettings { wanted: m.agent.wanted, ..Default::default() };
             m.server = Some(ServerInfo {
                 protocol_version,
                 server_version,
@@ -552,10 +598,30 @@ fn server_message(m: &mut Model, msg: ServerMessage, fx: &mut Vec<Effect>) {
                 }
             }
         }
+        ServerMessage::Settings(s) => {
+            if s.request_id.is_some() && s.request_id == m.agent.request {
+                m.agent.request = None;
+                m.agent.error = None;
+                m.agent.settings = Some(s);
+            }
+        }
         ServerMessage::CommandResult(r) => {
             let Some(&verb) = m.commands_sent.get(&r.request_id) else { return };
             if m.adding.as_ref().is_some_and(|a| a.state == AddState::Sending(r.request_id.clone())) {
                 return added(m, r);
+            }
+            if let SaveState::Sending { request, model } = &m.agent.save
+                && *request == r.request_id
+            {
+                m.agent.save = match r.outcome {
+                    CommandOutcome::Accepted { .. } => SaveState::Saved(model.clone()),
+                    CommandOutcome::Rejected { message, .. } => SaveState::Refused(message),
+                };
+                if matches!(m.agent.save, SaveState::Saved(_)) {
+                    // The model in use changed: ask again, keeping the last answer on screen until the new one comes.
+                    m.agent.request = send(m, fx, |request_id| ClientMessage::SettingsGet { request_id });
+                }
+                return;
             }
             let now = m.now_ms;
             if let Some(state) = waiting_confirm(m, &r.request_id) {

@@ -278,6 +278,37 @@ pub struct SetupCheck {
     pub fix: Option<Text>,
 }
 
+/// The answer to `settings.get`: the model new reviews get, where it was chosen, and the ones `settings.set` accepts.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Settings {
+    pub request_id: Option<RequestId>,
+    pub model: ModelInUse,
+    pub models: Vec<ModelOption>,
+    pub config_path: Text,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct ModelInUse {
+    #[serde(rename = "ref")]
+    pub reference: Text,
+    /// `--model`, `PR_REVIEW_MODEL`, `config` or `default`; open, so a newer daemon may add one.
+    pub source: Text,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ModelOption {
+    #[serde(rename = "ref")]
+    pub reference: Text,
+    pub provider: Text,
+    pub name: Text,
+    pub context_window: u64,
+    /// Where the provider's credential comes from; never the credential.
+    pub auth_source: Text,
+    pub preferred: bool,
+}
+
 /// A run's publication as `review.publication_changed` and `publication.preview` report it. Only `Published` means
 /// the review is on GitHub; `command.result accepted` never does.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
@@ -554,6 +585,8 @@ pub enum ServerMessage {
     PublicationPreview(PublicationPreview),
     #[serde(rename = "command.result")]
     CommandResult(CommandResult),
+    #[serde(rename = "settings")]
+    Settings(Settings),
     #[serde(rename = "error", rename_all = "camelCase")]
     Error { request_id: Option<RequestId>, code: ErrorCode, message: Text, supported: Option<Vec<u32>> },
 }
@@ -782,6 +815,8 @@ pub enum ClientMessage {
     },
     #[serde(rename = "publication.get", rename_all = "camelCase")]
     PublicationGet { request_id: RequestId, run_id: RunId },
+    #[serde(rename = "settings.get", rename_all = "camelCase")]
+    SettingsGet { request_id: RequestId },
     /// Sent only from the confirmation modal, and only for a capability the server granted.
     #[serde(rename = "command")]
     Command(CommandRequest),
@@ -796,7 +831,8 @@ impl ClientMessage {
             | ClientMessage::DiffGet { request_id, .. }
             | ClientMessage::FindingGet { request_id, .. }
             | ClientMessage::TimelineGet { request_id, .. }
-            | ClientMessage::PublicationGet { request_id, .. } => request_id,
+            | ClientMessage::PublicationGet { request_id, .. }
+            | ClientMessage::SettingsGet { request_id } => request_id,
             ClientMessage::Command(c) => &c.request_id,
         }
     }
@@ -821,6 +857,8 @@ pub enum Command {
     SelectAccount(AccountParams),
     /// Granted only by a daemon in engine mode; the desktop sends it to stop the reviewer.
     StopDaemon(StopParams),
+    /// Granted only by a daemon in engine mode; the desktop's Settings sends it to change the review model.
+    SetModel(ModelParams),
 }
 
 impl Command {
@@ -834,6 +872,7 @@ impl Command {
             Command::Publish(_) => "review.publish",
             Command::SelectAccount(_) => "account.select",
             Command::StopDaemon(_) => "daemon.stop",
+            Command::SetModel(_) => "settings.set",
         }
     }
 
@@ -847,6 +886,7 @@ impl Command {
             Command::Publish(_) => "publish",
             Command::SelectAccount(_) => "switch accounts",
             Command::StopDaemon(_) => "stop the reviewer",
+            Command::SetModel(_) => "change the model",
         }
     }
 
@@ -860,6 +900,7 @@ impl Command {
             Command::Publish(p) => format!("review.publish:{}:{}", p.run_id, p.preview_id),
             Command::SelectAccount(p) => format!("account.select:{}", p.account_id),
             Command::StopDaemon(_) => "daemon.stop".into(),
+            Command::SetModel(p) => format!("settings.set:{}", p.model),
         }
     }
 }
@@ -906,6 +947,13 @@ pub struct StopParams {
     pub pause_reviews: bool,
 }
 
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct ModelParams {
+    /// `provider/id`, one of `settings.models`.
+    pub model: String,
+}
+
 #[derive(Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
 struct RawCommand {
@@ -926,6 +974,7 @@ impl TryFrom<RawCommand> for CommandRequest {
             "review.publish" => Command::Publish(from_value(raw.params)?),
             "account.select" => Command::SelectAccount(from_value(raw.params)?),
             "daemon.stop" => Command::StopDaemon(from_value(raw.params)?),
+            "settings.set" => Command::SetModel(from_value(raw.params)?),
             other => return Err(format!("unknown command {other}")),
         };
         Ok(CommandRequest { request_id: raw.request_id, idempotency_key: raw.idempotency_key, command })
@@ -943,6 +992,7 @@ impl From<CommandRequest> for RawCommand {
             Command::Publish(p) => ("review.publish", to(serde_json::to_value(p))),
             Command::SelectAccount(p) => ("account.select", to(serde_json::to_value(p))),
             Command::StopDaemon(p) => ("daemon.stop", to(serde_json::to_value(p))),
+            Command::SetModel(p) => ("settings.set", to(serde_json::to_value(p))),
         };
         RawCommand { request_id: c.request_id, command: command.into(), params, idempotency_key: c.idempotency_key }
     }

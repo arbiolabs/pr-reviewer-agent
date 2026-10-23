@@ -558,7 +558,35 @@ pub struct Model {
     pub commands_sent: BTreeMap<RequestId, &'static str>,
     /// The `review.add` in flight, until its PR is selected; a refusal stays until the next one.
     pub adding: Option<Adding>,
+    /// The daemon's review model, for the desktop's Settings.
+    pub agent: AgentSettings,
     pub dirty: bool,
+}
+
+/// What the daemon said about its review model. `settings` is the last answer; `error` is why there is none (a
+/// read-only daemon refuses settings.get), cleared by the next answer.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct AgentSettings {
+    /// The client shows them (the desktop does; the TUI never asks).
+    pub wanted: bool,
+    pub request: Option<RequestId>,
+    pub settings: Option<Settings>,
+    pub error: Option<Text>,
+    pub save: SaveState,
+}
+
+/// A `settings.set` from Save, until its result.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub enum SaveState {
+    #[default]
+    Idle,
+    Sending {
+        request: RequestId,
+        model: String,
+    },
+    Saved(String),
+    Refused(Text),
+    TimedOut,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -619,6 +647,7 @@ impl Model {
             stale_snapshots: BTreeSet::new(),
             commands_sent: BTreeMap::new(),
             adding: None,
+            agent: AgentSettings::default(),
             dirty: true,
         }
     }
