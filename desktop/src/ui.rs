@@ -91,7 +91,7 @@ pub fn menus() -> Vec<Menu> {
             MenuItem::action("Back", GoBack),
             MenuItem::separator(),
             MenuItem::action("Command Palette", Palette),
-            MenuItem::action("Setup", Setup),
+            MenuItem::action("Settings", Setup),
             MenuItem::separator(),
             MenuItem::submenu(Menu::new("Appearance").items([
                 MenuItem::action("Follow System", AppearanceSystem),
@@ -192,6 +192,10 @@ pub struct Shell {
     pub diff_flagged_only: bool,
     /// The diff's Generated group is open.
     pub diff_generated_open: bool,
+    /// Settings → Agent: the model picker's search and choice.
+    pub picker: crate::agent::Picker,
+    /// Settings → Risk check (Jev): the TypeSafe key field and what the Keychain holds.
+    pub jev: crate::jev::KeyField,
     /// A sheet was open in the last frame.
     pub sheet_was_open: bool,
     /// The footer's avatar for the publishing account.
@@ -242,6 +246,8 @@ impl Shell {
             diff_generated_open: false,
             sheet_was_open: false,
             avatar: Default::default(),
+            picker: crate::agent::Picker::default(),
+            jev: crate::jev::KeyField::new(),
         };
         for d in desk {
             match d {
@@ -509,7 +515,7 @@ impl Shell {
     }
 
     fn on_key(&mut self, ev: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
-        if self.snapshot {
+        if self.snapshot || self.typing(window, cx) {
             return;
         }
         let k = &ev.keystroke;
@@ -654,6 +660,10 @@ impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.width = window.viewport_size().width;
         self.sync_avatar(cx);
+        if self.model.ui.screen == Screen::Settings {
+            self.key_input(window, cx);
+            self.model_search(window, cx);
+        }
         // The PR the sheet sent is selected: the sheet's work is done.
         if matches!(self.overlay, Some(Overlay::AddPr { sent: true, .. })) && self.model.adding.is_none() {
             self.overlay = None;
@@ -865,7 +875,7 @@ fn titlebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         }
         (Screen::Diff, _) => (format!("{number} diff"), pr_title),
         (Screen::Timeline, _) => (format!("{number} timeline"), pr_title),
-        (Screen::Settings, _) => ("Setup".into(), "What the reviewer needs to run".into()),
+        (Screen::Settings, _) => ("Settings".into(), "What the reviewer needs and how it reviews".into()),
         _ if s.done_tab && !queue::cards(m).is_empty() => {
             ("Done".into(), format!("{} with nothing left for you.", queue::count(queue::done(m).len(), "PR")))
         }
@@ -1160,7 +1170,7 @@ fn sidebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
             t,
             "nav-setup",
             IconName::Settings,
-            "Setup",
+            "Settings",
             queue::setup_count(m).blocking,
             t.warn,
             setup_shown(s),

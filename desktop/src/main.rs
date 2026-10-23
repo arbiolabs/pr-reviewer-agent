@@ -1,11 +1,13 @@
 //! The macOS client: the TUI crate's reducer and network task behind a GPUI window.
 
 mod account;
+mod agent;
 mod capture;
 mod cards;
 mod code;
 mod detail;
 mod diff;
+mod jev;
 mod kit;
 mod live;
 mod overlay;
@@ -139,6 +141,7 @@ fn start(opts: Opts) -> Result<(), String> {
     };
     let reviewer = reviewer::Reviewer::new(socket, settings.desktop, settings.config_path, opts.snapshot.is_some());
     let mut model = Model::new(endpoint, settings.look, settings.start, settings.wanted_pr);
+    model.agent.wanted = true;
     model.request_timeout_ms = settings.request_timeout.as_millis() as u64;
     let (cmds, cmd_rx) = mpsc::channel::<NetCmd>(QUEUE);
 

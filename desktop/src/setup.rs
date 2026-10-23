@@ -52,7 +52,7 @@ fn plain(c: &pr_review_tui::protocol::SetupCheck) -> (String, Option<String>) {
             "Jev rates each change's risk so risky PRs get a deeper review. Without a key, every PR gets the \
              standard one."
                 .into(),
-            Some("Set `TYPESAFE_API_KEY` in the daemon's environment to turn it on.".into()),
+            Some(if cfg!(target_os = "macos") { "Save a TypeSafe key under Risk check (Jev) below, or set `TYPESAFE_API_KEY` in the daemon's environment." } else { "Set `TYPESAFE_API_KEY` in the daemon's environment to turn it on." }.into()),
         ),
         _ => (c.detail.to_string(), c.fix.as_ref().map(|f| f.to_string())),
     }
@@ -275,7 +275,7 @@ pub fn offline(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                 .child(button(
                     t,
                     "offline-setup",
-                    "Setup",
+                    "Settings",
                     Some("⌘,"),
                     Tone::Secondary,
                     on(cx, |s, cx| s.act(Action::Goto(pr_review_tui::model::Screen::Settings), cx)),
@@ -723,7 +723,7 @@ pub fn setup_body(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                 .flex()
                 .flex_col()
                 .gap(space::S2)
-                .child(overline(t, "Setup"))
+                .child(overline(t, "Settings"))
                 .child(display(t, "What the reviewer needs"))
                 .child(summary(t, "The checks pr-review setup --check runs, as the daemon reports them.")),
         )
@@ -744,6 +744,8 @@ pub fn setup_body(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
             })
         })
         .child(card("Checks", list))
+        .child(crate::jev::section(s, t, cx))
+        .child(crate::agent::section(s, t, cx))
         .child(card("Reviewer", conn))
         .child(card("GitHub accounts", accounts))
 }
