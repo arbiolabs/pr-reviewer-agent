@@ -63,6 +63,8 @@ const REVIEW = [
   "tool github: PR #1: head sha (Ns)",
   "tool git: cloning acme/shop",
   "tool git: cloned acme/shop in Ns",
+  "tool git: fetching the head tree's blobs",
+  "tool git: head tree already local (Ns)",
   "tool git: diffing sha..sha",
   "tool git: diff: 1 file, +1 -0",
   "phase COLLECT_CONTEXT -> TRIAGE",
@@ -125,6 +127,7 @@ it("streams a real review to a client attached from the start, with no gaps", as
   expect([...closed.values()].map((s) => `${s.kind} ${s.id.replace(/:[0-9a-f]{8}$/, "")} < ${s.parent?.replace(/:[0-9a-f]{8}$/, "") ?? "-"}`)).toEqual([
     "step step:pr < phase:collect",
     "step step:sync < phase:collect",
+    "step step:prefetch < phase:collect",
     "step step:diff < phase:collect",
     "phase phase:collect < -",
     "phase phase:triage < -",
@@ -187,7 +190,7 @@ it("streams a real review to a client attached from the start, with no gaps", as
     if (page.nextBeforeSequence === undefined) break;
     before = page.nextBeforeSequence;
   }
-  expect(pages.map((p) => p.length)).toEqual([10, 10, 10, 10, 3]);
+  expect(pages.map((p) => p.length)).toEqual([10, 10, 10, 10, 5]);
   expect(pages.flat().map(describeEvent).reverse()).toEqual(REVIEW);
   c.send({ type: "timeline.get", requestId: "tf", findingId: finding!.id, limit: 10 });
   expect(((await c.waitFor((m) => m.type === "timeline.page" && m.requestId === "tf")) as { events: Ev[] }).events.map(describeEvent)).toEqual(REVIEW.filter((e) => e.startsWith("finding ")));
