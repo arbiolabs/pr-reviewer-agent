@@ -1,0 +1,49 @@
+---
+source: tests/golden.rs
+expression: ascii_text
+---
+  pr-review | / reviewing #1291 analyze read_file tests/auth/callback.test.ts:1-80  +1 more running                                                     * live
+
+
+  PULL REQUESTS                    6       acme/shop  #1291
+                                           Sign-in: send users back to the page they started from
+  . #345 Partition ledger_entries by~      by priya-r | fdff3cd -> f86859b | claude-opus-5-5 | run d1ed7b3b
+    api c20a27e              x failed
+                                           + Collect - + Triage - + Analyze - . Verify - . Prepare - . Publish                               since 14:30:00
+  . #341 Propagate X-Request-ID into~
+    api 10bb915               + clean      No findings yet
+                                           ----------------------------------------------------------------------------------------------------------------
+  / #338 Drain webhook workers on SI~
+    api           +-+-+-.-.-. : 0.6/s      / Reviewing now                                                                                   #  7.4 calls/s
+
+  . #1296 Gift cards: redeem a balan~      #1291  ========== ========== ====------ ---------- ---------- ----------  analyze   40 calls
+    shop 3799cf3         not reviewed      #338   ========== ========== ====------ ---------- ---------- ----------  analyze    4 calls
+                                             analyze | 5s
+> / #1291 Sign-in: send users back t~
+>   shop          +-+-+-.-.-. # 7.4/s        span                                      |0s         2s          4s         6s          8s         10s
+                                            P+ collect                             1.8s|###########                                          :
+  ! #1287 Orders: self-serve refunds~         S+ fetching PR #1291                180ms|##                                                   :
+    shop 647fb3b      !1 ^1 *1 o1 ->0         S+ fetching origin for acme/shop    240ms| ##                                                  :
+                                              S+ diffing fdff3cd..f86859b         510ms|  ####                                               :
+                                            P+ triage                              1.9s|          ############                               :
+                                              S+ rating the risk with jev-system~ 340ms|          ###                                        :
+                                            P> analyze                             5.6s|                     =================================
+                                              M+ turn 1                    388 tok 1.2s|                     ########                        :
+                                                T+ read_file                      120ms|                      ##                             :
+                                                T+ read_file                      120ms|                         #                           :
+                                                T+ search_code                    120ms|                           ##                        :
+                                              M+ turn 2                    512 tok 1.5s|                            #########                :
+                                                T+ read_file                      120ms|                             ##                      :
+                                                T+ git_history                    120ms|                                  #                  :
+                                                T+ search_code                    120ms|                                   ##                :
+                                              M+ turn 3                    641 tok 1.5s|                                    ##########       :
+                                                T+ read_file                      120ms|                                       ##            :
+                                                T+ search_code                    120ms|                                          ##         :
+                                                T+ git_history                    120ms|                                            ##       :
+                                              M> turn 4                   1.2k tok 1.5s|                                             =========
+                                                T+ read_file                      120ms|                                               ##    :
+                                                T+ search_code                    120ms|                                                 ##  :
+                                                T+ read_file                      120ms|                                                    ## tests/auth/~
+
+
+   s review again  c cancel review  d diff  h pull requests  / search  t timeline  w watch live  ? help  q quit                                       1 2 3 4 5

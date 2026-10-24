@@ -13,8 +13,35 @@ use crate::queue::{self, phase_word};
 use crate::tokens::{Colors, motion, radius, severity_mark, space, text};
 use crate::ui::{Shell, live_dot};
 
-/// How many log rows the page shows at once, newest last.
+/// How many log rows the page shows at once, newest last; fewer when the waterfall is there.
 const SHOWN: usize = 14;
+const SHOWN_UNDER_WATERFALL: usize = 8;
+/// A run this quiet says how long it has been, so a long model turn never reads as stuck.
+const QUIET_MS: u64 = 10_000;
+
+/// `Analyzing · 2m 14s · claude-opus-5-5 · run abc123`, then `last activity 40s ago` once the run goes quiet. The
+/// clock is the shared model's, so it ticks with every frame the page already draws.
+fn pulse_line(s: &Shell, t: &Colors, run: &Run) -> Div {
+    let p = s.model.domain.pulse(run, s.model.now_ms);
+    let elapsed = p.phase_ms.map(|ms| format!(" · {}", pr_review_tui::waterfall::duration(ms / 1000 * 1000)));
+    tabular(div())
+        .flex()
+        .gap(space::S2)
+        .text_size(text::SMALL)
+        .text_color(t.muted)
+        .child(format!(
+            "{}{} · {} · run {}",
+            phase_word(run.phase),
+            elapsed.unwrap_or_default(),
+            run.model,
+            run.id.short()
+        ))
+        .children(
+            p.quiet_ms
+                .filter(|q| *q >= QUIET_MS)
+                .map(|q| div().text_color(t.warn).child(format!("last activity {}s ago", q / 1000))),
+        )
+}
 
 pub fn live(s: &Shell, t: &Colors, pr: &Pr, run: &Run, cx: &Context<Shell>) -> Div {
     let m = &s.model;
@@ -26,7 +53,11 @@ pub fn live(s: &Shell, t: &Colors, pr: &Pr, run: &Run, cx: &Context<Shell>) -> D
         div().text_size(text::CAPTION).font_weight(FontWeight::BOLD).text_color(t.running).child("REVIEWING NOW"),
     );
     let landed: Vec<&Finding> = m.domain.findings.values().filter(|f| f.run_id == run.id).collect();
-    let tools = events.iter().filter(|a| matches!(a.kind, ActivityKind::Tool { .. })).count();
+    // With spans, a tool call is a tool span; progress lines from git, the model or a phase are not calls.
+    let tools = match m.domain.spans.get(&run.id) {
+        Some(v) => v.iter().filter(|x| x.kind == pr_review_tui::waterfall::SpanKind::Tool).count(),
+        None => events.iter().filter(|a| matches!(a.kind, ActivityKind::Tool { .. })).count(),
+    };
     let stat = |value: String, label: String| {
         div()
             .flex()
@@ -141,7 +172,10 @@ pub fn live(s: &Shell, t: &Colors, pr: &Pr, run: &Run, cx: &Context<Shell>) -> D
                 .into_any_element(),
         });
 
-    let lo = (head + 1).saturating_sub(SHOWN);
+    // With the waterfall above it, the log keeps only its newest lines.
+    let waterfall = crate::waterfall::waterfall(s, t, run, cx);
+    let shown = if waterfall.is_some() { SHOWN_UNDER_WATERFALL } else { SHOWN };
+    let lo = (head + 1).saturating_sub(shown);
     let log = div().flex().flex_col().children(events.iter().enumerate().take(head + 1).skip(lo).map(|(i, a)| {
         let current = i == head;
         let fresh = held.is_none() && m.now_ms.saturating_sub(a.recv_ms) < motion::ARRIVAL_MS;
@@ -227,13 +261,9 @@ pub fn live(s: &Shell, t: &Colors, pr: &Pr, run: &Run, cx: &Context<Shell>) -> D
                 .border_color(t.border)
                 .bg(t.surface)
                 .child(progress(t, queue::marks(m, run), t.running, Gauge::Full))
-                .child(div().text_size(text::SMALL).text_color(t.muted).child(format!(
-                    "{} · {} · run {}",
-                    phase_word(run.phase),
-                    run.model,
-                    run.id.short()
-                ))),
+                .child(pulse_line(s, t, run)),
         )
+        .children(waterfall)
         .child(stats)
         .child(div().flex().flex_col().gap(space::S2).child(following).child(track).child(legend).child(log))
         .child(section(

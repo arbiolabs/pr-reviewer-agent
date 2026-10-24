@@ -1,6 +1,6 @@
 // Source of protocol/fixtures and protocol/playback. Edit here, then run `pnpm protocol:emit`.
 import { sha256, stableId } from "../domain/types.ts";
-import { type Account, type ClientMessage, type DiffFile, type Evidence, type Finding, type FindingDetail, type Pr, type PublicationChange, REVIEW_COMMANDS, type Run, type ServerMessage, type SetupCheck } from "./v1.ts";
+import { type Account, type ActivitySpan, type ClientMessage, type DiffFile, type Evidence, type Finding, type FindingDetail, type Pr, type PublicationChange, REVIEW_COMMANDS, type Run, type ServerMessage, type SetupCheck } from "./v1.ts";
 
 const EPOCH = "epoch-1";
 const T0 = Date.parse("2026-10-20T13:00:00Z");
@@ -68,8 +68,8 @@ const ev = <E extends Sequenced["eventType"]>(
 
 const phase = (s: Seq, r: Run, from: Run["phase"], to: Run["phase"], event: string) =>
   ev(s, "review.phase_changed", { from, to, event, detail: null }, { prId: r.prId, runId: r.id });
-const activity = (s: Seq, r: Run, tool: string, summary: string) =>
-  ev(s, "tool.activity", { tool, summary }, { prId: r.prId, runId: r.id });
+const activity = (s: Seq, r: Run, tool: string, summary: string, span?: ActivitySpan) =>
+  ev(s, "tool.activity", span ? { tool, summary, span } : { tool, summary }, { prId: r.prId, runId: r.id });
 const findingUpdated = (s: Seq, f: Finding) => ev(s, "finding.updated", f, { prId: f.prId, runId: f.runId });
 const runEvent = (s: Seq, type: "run.started" | "review.completed" | "run.superseded" | "run.failed", r: Run) =>
   ev(s, type, r, { prId: r.prId, runId: r.id });
@@ -831,6 +831,37 @@ const signInActivity = (tool: string, summary: string) => (s: Seq) => activity(s
 const drainActivity = (tool: string, summary: string) => (s: Seq) => activity(s, drainRun, tool, summary);
 // A step with `after` waits until the client sends a command that gate names; playback accepts it (protocol/README.md).
 type ShowStep = [delayMs: number, make: ((s: Seq) => ServerMessage) | "heartbeat", after?: string];
+
+// The waterfall's spans, as the engine journals them: a line opens a span, later lines of the same id update it, and
+// the one with `endedAt` closes it. A span starts at the clock of the line that opened it.
+type SpanKind = ActivitySpan["kind"];
+const spanStarts = new Map<string, number>();
+const spanLine =
+  (r: Run, tool: string, summary: string, id: string, kind: SpanKind, parent: string | undefined, end: boolean, outputTokens?: number) =>
+  (s: Seq): ServerMessage => {
+    const key = `${r.id}/${id}`;
+    if (!spanStarts.has(key)) spanStarts.set(key, s.t!);
+    const startedAt = at(spanStarts.get(key)!);
+    if (end) spanStarts.delete(key);
+    return activity(s, r, tool, summary, {
+      id,
+      ...(parent ? { parent } : {}),
+      kind,
+      startedAt,
+      ...(end ? { endedAt: at(s.t!) } : {}),
+      ...(outputTokens === undefined ? {} : { outputTokens }),
+    });
+  };
+/** A phase span's two lines: the open as the phase starts, the close once its transition is journaled. */
+const phaseOpen = (r: Run, name: string, attempt = "") => spanLine(r, "phase", `${name} started${attempt}`, `phase:${name}`, "phase", undefined, false);
+const phaseClose = (r: Run, name: string, took: string) => spanLine(r, "phase", `${name} done in ${took}`, `phase:${name}`, "phase", undefined, true);
+/** A tool call that ran in `turn` and took `ms`, closed as it is journaled. */
+const toolCall = (r: Run, turn: string, tool: string, summary: string, ms = 120) => (s: Seq) =>
+  activity(s, r, tool, summary, { id: `tool:${s.seq}`, parent: turn, kind: "tool", startedAt: at(s.t! - ms / 1000), endedAt: at(s.t!) });
+const turnLine = (r: Run, n: number, summary: string, end: boolean, outputTokens?: number) =>
+  spanLine(r, "model", summary, `turn:${n}`, "model", "phase:analyze", end, outputTokens);
+const signInTool = (n: number, tool: string, summary: string) => toolCall(signInRun, `turn:${n}`, tool, summary);
+const signInStep = (tool: string, summary: string, id: string, phase: string, end: boolean) => spanLine(signInRun, tool, summary, `step:${id}`, "step", `phase:${phase}`, end);
 const signInPublication = (status: PublicationChange["status"], reviewId?: number) => (s: Seq) =>
   ev(
     s,
@@ -842,15 +873,29 @@ const SIGNIN_REVIEW_ID = 2209184;
 const ledgerRetry: Run = { ...started(ledgerRun), failureReason: undefined, attempt: 2 };
 /** A run the reader started or retried, from its first tool call to COMPLETED in about 14 s, all behind `gate`. */
 const toTheEnd = (r: Run, gate: string, tool: [string, string], findings: FindingDetail[]): ShowStep[] => {
+  const verifyMs = 400 * findings.length + 2400;
   const steps: ShowStep[] = [
+    [0, phaseOpen(r, "collect")],
     [900, (s) => activity(s, r, ...tool)],
     [1600, (s) => phase(s, r, "COLLECT_CONTEXT", "TRIAGE", "CONTEXT_PERSISTED")],
+    [0, phaseClose(r, "collect", "2.5s")],
+    [0, phaseOpen(r, "triage")],
     [2200, (s) => phase(s, r, "TRIAGE", "ANALYZE", "ROUTING_PERSISTED")],
-    [3500, (s) => phase(s, r, "ANALYZE", "VERIFY", "CANDIDATES_PERSISTED")],
+    [0, phaseClose(r, "triage", "2.2s")],
+    [0, phaseOpen(r, "analyze")],
+    [0, turnLine(r, 1, "turn 1 started", false)],
+    [3400, turnLine(r, 1, "turn 1: 3.4s, 1.6k output tokens, called submit_candidates", false, 1600)],
+    [100, turnLine(r, 1, "turn 1: 1 tool result(s) in 0.1s", true, 1600)],
+    [0, (s) => phase(s, r, "ANALYZE", "VERIFY", "CANDIDATES_PERSISTED")],
+    [0, phaseClose(r, "analyze", "3.5s")],
+    [0, phaseOpen(r, "verify")],
     ...findings.map((d): ShowStep => [400, (s) => findingUpdated(s, { ...findingOf(d), runId: r.id, stale: false })]),
     [2400, (s) => phase(s, r, "VERIFY", "PREPARE_PUBLICATION", "CANDIDATES_DISPOSED")],
+    [0, phaseClose(r, "verify", `${(verifyMs / 1000).toFixed(1)}s`)],
+    [0, phaseOpen(r, "prepare")],
     [1200, (s) => phase(s, r, "PREPARE_PUBLICATION", "PUBLISH", "HEAD_VERIFIED")],
     [900, (s) => phase(s, r, "PUBLISH", "COMPLETED", "NO_PUBLICATION_RECORDED")],
+    [0, phaseClose(r, "prepare", "2.1s")],
   ];
   // The run started 500 ms before these lines, when the reader's command played its run.started.
   const took = (500 + steps.reduce((sum, [delay]) => sum + delay, 0)) / 1000;
@@ -860,46 +905,89 @@ const toTheEnd = (r: Run, gate: string, tool: [string, string], findings: Findin
 };
 const showSteps: ShowStep[] = [
   [600, (s) => runEvent(s, "run.started", signInRun)],
-  [420, signInActivity("read_diff", "3 files changed (+6 -3): src/server/auth/callback.ts, src/server/auth/login.ts, src/client/pages/SignIn.tsx")],
-  [510, signInActivity("git_history", "src/server/auth/: 14 commits in 90 days; last change #1240 \"Move sessions to Redis\" (mkowalski)")],
+  [0, phaseOpen(signInRun, "collect")],
+  [0, signInStep("github", "fetching PR #1291", "pr", "collect", false)],
+  [180, signInStep("github", `PR #1291: head ${signIn.headSha.slice(0, 7)} (0.2s)`, "pr", "collect", true)],
+  [0, signInStep("git", "fetching origin for acme/shop", "sync", "collect", false)],
+  [240, signInStep("git", "fetched origin in 0.2s", "sync", "collect", true)],
+  [0, signInStep("git", `diffing ${signInRun.baseSha.slice(0, 7)}..${signIn.headSha.slice(0, 7)}`, "diff", "collect", false)],
+  [510, signInStep("git", "diff: 3 files, +6 -3", "diff", "collect", true)],
   [900, (s) => phase(s, signInRun, "COLLECT_CONTEXT", "TRIAGE", "CONTEXT_PERSISTED")],
-  [340, signInActivity("read_file", "src/server/auth/callback.ts:1-38")],
-  [290, signInActivity("search_code", "\"returnTo\": 6 matches in 3 files")],
+  [0, phaseClose(signInRun, "collect", "1.8s")],
+  [0, phaseOpen(signInRun, "triage")],
+  [0, signInStep("jev", "rating the risk with jev-systemone", "jev", "triage", false)],
+  [340, signInStep("jev", "risk 0.78, security, deep review 84% (0.3s)", "jev", "triage", true)],
+  [290, (s) => activity(s, signInRun, "route", "deep: sensitive paths src/server/auth/**; risk 0.78 over 0.6")],
   [450, (s) => phase(s, drainRun, "TRIAGE", "ANALYZE", "ROUTING_PERSISTED")],
   [800, (s) => phase(s, signInRun, "TRIAGE", "ANALYZE", "ROUTING_PERSISTED")],
-  [310, signInActivity("read_file", "src/server/auth/login.ts:1-24")],
+  [0, phaseClose(signInRun, "triage", "1.9s")],
+  [0, phaseOpen(signInRun, "analyze")],
+  [0, turnLine(signInRun, 1, "turn 1 started", false)],
+  [190, turnLine(signInRun, 1, "turn 1: 0.2s, 388 output tokens, called read_file x2, search_code", false, 388)],
+  [120, signInTool(1, "read_file", "src/server/auth/login.ts:1-24")],
   [180, drainActivity("read_diff", "1 file changed (+15 -2): internal/webhooks/dispatcher.go")],
-  [260, signInActivity("read_file", "src/client/pages/SignIn.tsx:1-58")],
-  [420, signInActivity("search_code", "\"res.redirect(\": 11 matches in 7 files")],
-  [380, signInActivity("read_file", "src/server/http/safeRedirect.ts:1-24")],
+  [260, signInTool(1, "read_file", "src/client/pages/SignIn.tsx:1-58")],
+  [420, signInTool(1, "search_code", "\"res.redirect(\": 11 matches in 7 files")],
+  [0, turnLine(signInRun, 1, "turn 1: 3 tool result(s) in 1.0s", true, 388)],
+  [0, turnLine(signInRun, 2, "turn 2 started", false)],
+  [220, turnLine(signInRun, 2, "turn 2: 0.2s, 512 output tokens, called read_file, git_history, search_code", false, 512)],
+  [160, signInTool(2, "read_file", "src/server/http/safeRedirect.ts:1-24")],
   [230, drainActivity("read_file", "internal/webhooks/dispatcher.go:1-112")],
-  [550, signInActivity("git_history", "src/server/http/safeRedirect.ts: added in #1102 \"Block open redirects on /logout\" (tnakamura)")],
-  [300, signInActivity("search_code", "\"safeRedirect(\": 2 matches, src/server/routes/logout.ts:14, src/server/routes/account.ts:52")],
-  [470, "heartbeat"],
-  [160, signInActivity("read_file", "src/server/routes/logout.ts:1-30")],
-  [480, signInActivity("search_code", "\"regenerateSession(\": 1 definition (src/server/session.ts:52), 0 callers")],
-  [350, signInActivity("git_history", "src/server/auth/callback.ts: regenerateSession(req) added in #1077 \"Rotate session id on sign-in\"")],
+  [550, signInTool(2, "git_history", "src/server/http/safeRedirect.ts: added in #1102 \"Block open redirects on /logout\" (tnakamura)")],
+  [300, signInTool(2, "search_code", "\"safeRedirect(\": 2 matches, src/server/routes/logout.ts:14, src/server/routes/account.ts:52")],
+  [0, turnLine(signInRun, 2, "turn 2: 3 tool result(s) in 1.2s", true, 512)],
+  [0, turnLine(signInRun, 3, "turn 3 started", false)],
+  [360, turnLine(signInRun, 3, "turn 3: 0.4s, 641 output tokens, called read_file, search_code, git_history", false, 641)],
+  [110, "heartbeat"],
+  [160, signInTool(3, "read_file", "src/server/routes/logout.ts:1-30")],
+  [480, signInTool(3, "search_code", "\"regenerateSession(\": 1 definition (src/server/session.ts:52), 0 callers")],
+  [350, signInTool(3, "git_history", "src/server/auth/callback.ts: regenerateSession(req) added in #1077 \"Rotate session id on sign-in\"")],
+  [0, turnLine(signInRun, 3, "turn 3: 3 tool result(s) in 1.1s", true, 641)],
+  [0, turnLine(signInRun, 4, "turn 4 started", false)],
   [210, drainActivity("search_code", "\"dispatcher.Run(\": 1 match, cmd/worker/main.go:44")],
-  [390, signInActivity("read_file", "src/server/session.ts:40-64")],
-  [270, signInActivity("search_code", "\"req.session.userId =\": 3 matches in auth/callback.ts, auth/dev.ts, tests/helpers/login.ts")],
-  [600, signInActivity("read_file", "tests/auth/callback.test.ts:1-80")],
-  [330, signInActivity("search_code", "\"returnTo\" in tests/: 1 match, callback.test.ts:44 (relative path only)")],
+  [240, turnLine(signInRun, 4, "turn 4: 0.5s, 1.2k output tokens, called read_file x2, search_code x2", false, 1204)],
+  [150, signInTool(4, "read_file", "src/server/session.ts:40-64")],
+  [270, signInTool(4, "search_code", "\"req.session.userId =\": 3 matches in auth/callback.ts, auth/dev.ts, tests/helpers/login.ts")],
+  [600, signInTool(4, "read_file", "tests/auth/callback.test.ts:1-80")],
+  [330, signInTool(4, "search_code", "\"returnTo\" in tests/: 1 match, callback.test.ts:44 (relative path only)")],
+  [0, turnLine(signInRun, 4, "turn 4: 4 tool result(s) in 1.4s", true, 1204)],
+  [0, turnLine(signInRun, 5, "turn 5 started", false)],
   [240, drainActivity("read_file", "cmd/worker/main.go:30-60")],
-  [410, signInActivity("read_file", "src/server/app.ts:1-40")],
-  [450, signInActivity("read_file", "src/server/http/auth.ts:1-46")],
-  [380, signInActivity("search_code", "\"returnTo\" in src/client/: 2 matches, pages/SignIn.tsx:32, components/Header.tsx:18")],
-  [190, signInActivity("search_code", "\"cookieParser(\": src/server/app.ts:22, no signing secret")],
-  [900, (s) => phase(s, signInRun, "ANALYZE", "VERIFY", "CANDIDATES_PERSISTED")],
-  [360, signInActivity("read_file", "src/server/auth/callback.ts:12-22")],
+  [160, turnLine(signInRun, 5, "turn 5: 0.4s, 880 output tokens, called read_file x2, search_code x2", false, 880)],
+  [250, signInTool(5, "read_file", "src/server/app.ts:1-40")],
+  [450, signInTool(5, "read_file", "src/server/http/auth.ts:1-46")],
+  [380, signInTool(5, "search_code", "\"returnTo\" in src/client/: 2 matches, pages/SignIn.tsx:32, components/Header.tsx:18")],
+  [190, signInTool(5, "search_code", "\"cookieParser(\": src/server/app.ts:22, no signing secret")],
+  [0, turnLine(signInRun, 5, "turn 5: 4 tool result(s) in 1.3s", true, 880)],
+  [0, turnLine(signInRun, 6, "turn 6 started", false)],
+  [730, turnLine(signInRun, 6, "turn 6: 0.7s, 2.1k output tokens, called submit_candidates", false, 2114)],
+  [170, signInTool(6, "submit_candidates", "3 candidate(s), 0 resolution claim(s)")],
+  [0, turnLine(signInRun, 6, "turn 6: 1 tool result(s) in 0.2s", true, 2114)],
+  [0, (s) => phase(s, signInRun, "ANALYZE", "VERIFY", "CANDIDATES_PERSISTED")],
+  [0, phaseClose(signInRun, "analyze", "8.5s")],
+  [0, phaseOpen(signInRun, "verify")],
+  [0, signInStep("verify", "locating earlier findings at this head", "locate", "verify", false)],
+  [360, signInStep("verify", "0 earlier finding(s) located (0.4s)", "locate", "verify", true)],
+  [0, signInStep("verify", "checking 3 candidate(s)", "check", "verify", false)],
   [290, signInActivity("read_file", "src/server/auth/login.ts:6-11")],
   [440, signInActivity("search_code", "\"isSafeReturnPath|safeRedirect\" on the sign-in path: 0 matches")],
   [380, (s) => findingUpdated(s, findingOf(openRedirect))],
   [580, signInActivity("git_history", "#1077 review thread: rotation required by the 2025 pen test (finding AC-14)")],
   [620, (s) => findingUpdated(s, findingOf(sessionFixation))],
+  [0, signInStep("verify", "2 kept, 1 discarded (2.3s)", "check", "verify", true)],
+  [0, signInActivity("verify", `kept: ${openRedirect.title}`)],
+  [0, signInActivity("verify", `kept: ${sessionFixation.title}`)],
+  [0, signInActivity("verify", "discarded: Session cookie is not marked Secure (cited line sets secure: true)")],
   [300, (s) => phase(s, drainRun, "ANALYZE", "VERIFY", "CANDIDATES_PERSISTED")],
   [800, (s) => phase(s, signInRun, "VERIFY", "PREPARE_PUBLICATION", "CANDIDATES_DISPOSED")],
+  [0, phaseClose(signInRun, "verify", "3.8s")],
+  [0, phaseOpen(signInRun, "prepare")],
+  [0, signInActivity("prepare", "payload: 2 finding(s), 2 inline comment(s), 612-char summary, parks for approval")],
+  [0, signInStep("github", "checking the PR head", "head", "prepare", false)],
+  [300, signInStep("github", "head unchanged (0.3s)", "head", "prepare", true)],
   // Approval mode: the review is stored and parks until the reader approves the preview.
-  [800, (s) => phase(s, signInRun, "PREPARE_PUBLICATION", "AWAITING_APPROVAL", "APPROVAL_REQUIRED")],
+  [500, (s) => phase(s, signInRun, "PREPARE_PUBLICATION", "AWAITING_APPROVAL", "APPROVAL_REQUIRED")],
+  [0, phaseClose(signInRun, "prepare", "0.8s")],
   [40, signInPublication("awaiting_approval")],
   // #338 ends on its own about 80 s in, unless the reader cancels it first (the GIF does, after the start on #1296);
   // playback drops a run's lines once it has ended.
@@ -1961,9 +2049,9 @@ export const playback: Record<string, { script: PlaybackLine[]; expect: Expect }
     script: showcaseScript(),
     expect: {
       streamEpoch: EPOCH,
-      lastSequence: 116,
+      lastSequence: 185,
       resyncRequested: false,
-      toolActivityCount: 34,
+      toolActivityCount: 103,
       prs: prRows(orders, requestIds, signIn, drain, ledger, giftCards),
       runs: [
         runRow(ordersRun),

@@ -1,7 +1,19 @@
+import { randomUUID } from "node:crypto";
 import { readFileSync } from "node:fs";
 import type { Context } from "@earendil-works/chord";
 import { Type } from "@earendil-works/pi-ai";
-import { defineDoc, defineExtension, defineTool, type Extension, section, type ToolExecutionApi, type ToolExecutionResult } from "@earendil-works/pi-durable";
+import {
+  defineDoc,
+  defineExtension,
+  defineTool,
+  type Extension,
+  GenerationTask,
+  hook,
+  type HookApi,
+  section,
+  type ToolExecutionApi,
+  type ToolExecutionResult,
+} from "@earendil-works/pi-durable";
 import type { CandidateFinding, ResolutionClaim } from "../domain/types.ts";
 import type { AppStore, RevisionRow, Snapshot } from "../persistence/store.ts";
 import type { FileDiff } from "../source/diff.ts";
@@ -50,6 +62,13 @@ const numbered = (source: string) =>
     .map((line, i) => `${String(i + 1).padStart(5)}  ${line}`)
     .join("\n");
 
+
+/** Seconds since `startedAt`, as an activity line says it: `0.4s`, `12.3s`, `2m 14s`. */
+export const took = (startedAt: string) => {
+  const s = Math.max(0, (Date.now() - Date.parse(startedAt)) / 1000);
+  return s < 60 ? `${s.toFixed(1)}s` : `${Math.floor(s / 60)}m ${Math.floor(s % 60)}s`;
+};
+
 export const REVIEW_TOOLS_NAME = "pr-review-tools";
 
 /**
@@ -63,9 +82,72 @@ export function createReviewTools(deps: ToolDeps): Extension {
     return deps.workspace(target.revisionId);
   }
 
+  // The model turn in flight per revision: its tool calls are its children on the waterfall. In memory only: after a
+  // restart the count starts again, and the ids stay distinct.
+  type Turn = { n: number; id: string; startedAt: string; outputTokens?: number; toolsFrom?: string; open: boolean };
+  const turns = new Map<string, Turn>();
+  const revisionOf = async (api: HookApi, context: Context) => (await api.snapshot(TargetDoc, api.conversationId, context))?.revisionId || undefined;
+  const turnLine = (revisionId: string, turn: Turn, summary: string, ended: boolean) => {
+    if (ended) turn.open = false;
+    deps.store.appendActivity(revisionId, "model", summary, {
+      id: turn.id,
+      parent: "phase:analyze",
+      kind: "model",
+      startedAt: turn.startedAt,
+      ...(ended ? { endedAt: new Date().toISOString() } : {}),
+      ...(turn.outputTokens === undefined ? {} : { outputTokens: turn.outputTokens }),
+    });
+  };
+  const log = (ws: Workspace, tool: string, summary: string, startedAt: string) =>
+    deps.store.appendActivity(ws.revision.id, tool, summary, {
+      id: `tool:${randomUUID().slice(0, 8)}`,
+      ...(turns.has(ws.revision.id) ? { parent: turns.get(ws.revision.id)!.id } : {}),
+      kind: "tool",
+      startedAt,
+      endedAt: new Date().toISOString(),
+    });
+
   return defineExtension({
     name: REVIEW_TOOLS_NAME,
     sections: [section("reviewer", () => REVIEWER_PROMPT, { tag: false })],
+    // Each model request opens a turn span. Its answer updates the span with the timing, output tokens and the
+    // tools it called, and the span closes once those tools are done, so they sit inside it. Neither the request
+    // nor the answer's text is read.
+    hooks: [
+      hook(GenerationTask, {
+        beforeRequest: async (_request, api, context) => {
+          const revisionId = await revisionOf(api, context);
+          if (!revisionId) return undefined;
+          const last = turns.get(revisionId);
+          if (last?.open) turnLine(revisionId, last, `turn ${last.n} ended`, true);
+          const n = (last?.n ?? 0) + 1;
+          const turn = { n, id: `turn:${n}:${randomUUID().slice(0, 8)}`, startedAt: new Date().toISOString(), open: true };
+          turns.set(revisionId, turn);
+          turnLine(revisionId, turn, `turn ${n} started`, false);
+          return undefined;
+        },
+        afterResponse: async (message, api, context) => {
+          const revisionId = await revisionOf(api, context);
+          const turn = revisionId ? turns.get(revisionId) : undefined;
+          if (!revisionId || !turn?.open) return;
+          const calls = new Map<string, number>();
+          for (const block of message.content) if (block.type === "toolCall") calls.set(block.name, (calls.get(block.name) ?? 0) + 1);
+          const called = [...calls].map(([name, k]) => (k > 1 ? `${name} x${k}` : name)).join(", ");
+          turn.outputTokens = message.usage?.output ?? 0;
+          const tokens = turn.outputTokens >= 1000 ? `${(turn.outputTokens / 1000).toFixed(1)}k` : String(turn.outputTokens);
+          const stopped = message.stopReason === "error" || message.stopReason === "aborted";
+          const end = stopped ? `stopped: ${message.stopReason}` : called ? `called ${called}` : "answered";
+          turn.toolsFrom = new Date().toISOString();
+          turnLine(revisionId, turn, `turn ${turn.n}: ${took(turn.startedAt)}, ${tokens} output tokens, ${end}`, stopped || !called);
+        },
+        afterTools: async (_assistant, results, api, context) => {
+          const revisionId = await revisionOf(api, context);
+          const turn = revisionId ? turns.get(revisionId) : undefined;
+          if (!revisionId || !turn?.open) return;
+          turnLine(revisionId, turn, `turn ${turn.n}: ${results.length} tool result(s) in ${took(turn.toolsFrom ?? turn.startedAt)}`, true);
+        },
+      }),
+    ],
     tools: [
       defineTool({
         name: "get_changed_files",
@@ -73,9 +155,10 @@ export function createReviewTools(deps: ToolDeps): Extension {
         parameters: Type.Object({}),
         replay: "safe",
         execute: async (_args, api, context) => {
+          const startedAt = new Date().toISOString();
           const ws = await workspace(api, context);
           const lines = ws.snapshot.changedFiles.map((f) => `${f.status} ${f.path}`);
-          deps.store.appendActivity(ws.revision.id, "get_changed_files", `${lines.length} files`);
+          log(ws, "get_changed_files", `${lines.length} files`, startedAt);
           return text([...lines, ...ws.snapshot.limitations.map((l) => `note: ${l}`)].join("\n"));
         },
       }),
@@ -85,11 +168,12 @@ export function createReviewTools(deps: ToolDeps): Extension {
         parameters: Type.Object({ file: Type.String() }),
         replay: "safe",
         execute: async (args, api, context) => {
+          const startedAt = new Date().toISOString();
           const ws = await workspace(api, context);
           const file = ws.files.get(assertSafePath(args.file));
           if (file === undefined) throw new Error(`${args.file} is not a changed file with a head side`);
           deps.store.markCodeRead(ws.revision.id);
-          deps.store.appendActivity(ws.revision.id, "read_diff", file.path);
+          log(ws, "read_diff", file.path, startedAt);
           return text(capBytes(file.text));
         },
       }),
@@ -99,12 +183,13 @@ export function createReviewTools(deps: ToolDeps): Extension {
         parameters: Type.Object({ path: Type.String(), ref: Type.Union([Type.Literal("base"), Type.Literal("head")]) }),
         replay: "safe",
         execute: async (args, api, context) => {
+          const startedAt = new Date().toISOString();
           const ws = await workspace(api, context);
           const sha = args.ref === "base" ? ws.repo.baseSha : ws.repo.headSha;
           const source = await ws.repo.show(sha, args.path, { signal: context.abortSignal });
           if (source === undefined) throw new Error(`${args.path} does not exist at ${args.ref} (${sha})`);
           deps.store.markCodeRead(ws.revision.id);
-          deps.store.appendActivity(ws.revision.id, "read_file", `${args.path} @${args.ref}`);
+          log(ws, "read_file", `${args.path} @${args.ref}`, startedAt);
           return text(capBytes(`${args.path} @ ${sha}\n${numbered(source)}`));
         },
       }),
@@ -114,6 +199,7 @@ export function createReviewTools(deps: ToolDeps): Extension {
         parameters: Type.Object({ query: Type.String({ minLength: 1, maxLength: 200 }), scope: Type.Optional(Type.String()) }),
         replay: "safe",
         execute: async (args, api, context) => {
+          const startedAt = new Date().toISOString();
           const ws = await workspace(api, context);
           // The tree fetch is outside the limit: on a resumed review it has not run yet, and cutting it short would leave
           // the search to fetch blob by blob. A search that runs long answers the model instead of holding the review.
@@ -124,7 +210,7 @@ export function createReviewTools(deps: ToolDeps): Extension {
             return text(`search_code timed out after ${SEARCH_TIMEOUT_MS / 1000} s. Narrow the scope to a smaller directory or file, or search for a more specific string.`);
           }
           deps.store.markCodeRead(ws.revision.id);
-          deps.store.appendActivity(ws.revision.id, "search_code", args.scope ? `${args.query} in ${args.scope}` : args.query);
+          log(ws, "search_code", args.scope ? `${args.query} in ${args.scope}` : args.query, startedAt);
           return text(found);
         },
       }),
@@ -134,10 +220,11 @@ export function createReviewTools(deps: ToolDeps): Extension {
         parameters: Type.Object({ path: Type.String(), limit: Type.Optional(Type.Integer({ minimum: 1, maximum: 20 })) }),
         replay: "safe",
         execute: async (args, api, context) => {
+          const startedAt = new Date().toISOString();
           const ws = await workspace(api, context);
-          const log = await ws.repo.log(args.path, args.limit ?? 10, context.abortSignal);
-          deps.store.appendActivity(ws.revision.id, "git_history", `${args.path} limit ${args.limit ?? 10}`);
-          return text(capBytes(log));
+          const history = await ws.repo.log(args.path, args.limit ?? 10, context.abortSignal);
+          log(ws, "git_history", `${args.path} limit ${args.limit ?? 10}`, startedAt);
+          return text(capBytes(history));
         },
       }),
       defineTool({
@@ -146,9 +233,10 @@ export function createReviewTools(deps: ToolDeps): Extension {
         parameters: Type.Object({}),
         replay: "safe",
         execute: async (_args, api, context) => {
+          const startedAt = new Date().toISOString();
           const ws = await workspace(api, context);
           const findings = deps.store.previousFindings(ws.revision.pr_id, ws.revision.id);
-          deps.store.appendActivity(ws.revision.id, "previous_findings", `${findings.length} found`);
+          log(ws, "previous_findings", `${findings.length} found`, startedAt);
           return text(findings.length === 0 ? "No earlier findings." : JSON.stringify(findings, null, 2));
         },
       }),
@@ -159,6 +247,7 @@ export function createReviewTools(deps: ToolDeps): Extension {
         parameters: SubmitCandidatesSchema,
         replay: "safe",
         execute: async (args, api, context) => {
+          const startedAt = new Date().toISOString();
           const ws = await workspace(api, context);
           // §2 invariant 9: "no findings" is a result only when the code was looked at.
           if (args.candidates.length === 0 && !deps.store.revision(ws.revision.id)?.code_read_at) {
@@ -166,6 +255,7 @@ export function createReviewTools(deps: ToolDeps): Extension {
           }
           const resolutions = (args.resolutions ?? []) as ResolutionClaim[];
           const { stored } = deps.store.saveCandidateSet(ws.revision.id, args.candidates as CandidateFinding[], resolutions);
+          log(ws, "submit_candidates", `${args.candidates.length} candidate(s), ${resolutions.length} resolution claim(s)`, startedAt);
           return {
             ...text(stored ? `Stored ${args.candidates.length} candidate(s) and ${resolutions.length} resolution claim(s) for verification.` : "Candidates were already submitted for this revision; this call changed nothing."),
             control: { terminate: true },

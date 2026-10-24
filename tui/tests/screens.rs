@@ -16,8 +16,8 @@ fn first_line(frame: &str) -> &str {
 
 #[test]
 fn the_status_line_does_not_repeat_the_phase_it_already_names() {
-    // welcome, snapshot, run.started, two tool calls, then #1291 enters TRIAGE.
-    let mut s = showcase(6);
+    // welcome, snapshot, run.started, collect and its three steps opening and closing, then #1291 enters TRIAGE.
+    let mut s = showcase(11);
     let (frame, _) = render(&mut s.m, 120, 38);
     let top = first_line(&frame);
     assert!(top.contains("reviewing #1291 triage"), "{top}");

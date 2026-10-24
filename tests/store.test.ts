@@ -4,7 +4,7 @@ import { join } from "node:path";
 import { DatabaseSync } from "node:sqlite";
 import { expect, it } from "vitest";
 import type { CandidateFinding, PullInfo } from "../src/domain/types.ts";
-import { AppStore } from "../src/persistence/store.ts";
+import { ACTIVITY_PER_SECOND, AppStore } from "../src/persistence/store.ts";
 
 const MIGRATIONS = new URL("../migrations/", import.meta.url);
 
@@ -36,7 +36,7 @@ it("derives the same revision id on reopen and applies migrations once", () => {
   store.close();
   const reopened = AppStore.open(path);
   expect(reopened.ensureRevision(key).id).toBe(first.id);
-  expect(reopened.db.prepare("SELECT name FROM schema_migrations").all()).toEqual([{ name: "001_init.sql" }, { name: "002_code_read.sql" }, { name: "003_publication.sql" }, { name: "004_coordinator.sql" }, { name: "005_webhook_retry.sql" }, { name: "006_meta.sql" }, { name: "050_stream_meta.sql" }, { name: "051_journal_without_revision.sql" }, { name: "052_control_commands.sql" }, { name: "053_control_command_attempt.sql" }, { name: "054_pull_title.sql" }, { name: "055_finding_tracking.sql" }, { name: "056_resolution_claims.sql" }, { name: "057_reopened_findings.sql" }]);
+  expect(reopened.db.prepare("SELECT name FROM schema_migrations").all()).toEqual([{ name: "001_init.sql" }, { name: "002_code_read.sql" }, { name: "003_publication.sql" }, { name: "004_coordinator.sql" }, { name: "005_webhook_retry.sql" }, { name: "006_meta.sql" }, { name: "050_stream_meta.sql" }, { name: "051_journal_without_revision.sql" }, { name: "052_control_commands.sql" }, { name: "053_control_command_attempt.sql" }, { name: "054_pull_title.sql" }, { name: "055_finding_tracking.sql" }, { name: "056_resolution_claims.sql" }, { name: "057_reopened_findings.sql" }, { name: "058_activity_span.sql" }]);
   expect(reopened.revisionsForPr(prId).length).toBe(1);
 });
 
@@ -179,6 +179,18 @@ it("journals tool activity and revision creation without adding to the audit tra
   ]);
   expect(store.auditEvents(rev.id).map((e) => e.seq)).toEqual([3]);
   expect(store.db.prepare("SELECT key, length(value) AS n FROM meta WHERE key = 'stream_epoch'").all()).toEqual([{ key: "stream_epoch", n: 32 }]);
+});
+
+it("drops tool calls and plain lines past the per-second limit, never a phase, step or model span", () => {
+  const { store } = openFresh();
+  const rev = store.ensureRevision({ prId: store.upsertPull(pull), baseSha: pull.baseSha, headSha: pull.headSha, policyVersion: "1", reviewerVersion: "m1" });
+  const startedAt = new Date().toISOString();
+  for (let i = 0; i < ACTIVITY_PER_SECOND + 5; i++) store.appendActivity(rev.id, "read_file", `f${i}.ts`, { id: `tool:${i}`, kind: "tool", startedAt, endedAt: startedAt });
+  store.appendActivity(rev.id, "route", "standard");
+  store.appendActivity(rev.id, "model", "turn 1 started", { id: "turn:1", parent: "phase:analyze", kind: "model", startedAt });
+  const rows = store.db.prepare("SELECT detail, span_json FROM audit_events WHERE event = 'TOOL_ACTIVITY' ORDER BY seq").all() as { detail: string; span_json: string | null }[];
+  expect(rows.map((r) => r.detail)).toEqual([...Array.from({ length: ACTIVITY_PER_SECOND }, (_, i) => `read_file f${i}.ts`), "model turn 1 started"]);
+  expect(JSON.parse(rows.at(-1)!.span_json!)).toEqual({ id: "turn:1", parent: "phase:analyze", kind: "model", startedAt });
 });
 
 const candidate: CandidateFinding = {

@@ -1,0 +1,42 @@
+---
+source: tests/golden.rs
+expression: text
+---
+  pr-review · ⣾ reviewing #1291 analyze read_file tests/auth/callback.test.ts:1-80  +1 more running             ● live
+
+
+  PULL REQUESTS                6    acme/shop  #1291
+                                    Sign-in: send users back to the page they started from
+  · #345 Partition ledger_entrie…   by priya-r · fdff3cd → f86859b · claude-opus-5-5 · run d1ed7b3b
+    api c20a27e          ✗ failed
+                                    ● Collect ● Triage ● Analyze ○ Verify ○ Prepare ○ Publish           since 14:30:00
+  · #341 Propagate X-Request-ID …
+    api 10bb915           ✓ clean   No findings yet
+                                    ──────────────────────────────────────────────────────────────────────────────────
+  ⣾ #338 Drain webhook workers o…
+    api       ●─●─●─○─○─○ ▃ 0.6/s   ⣾ Reviewing now                                  ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁█  7.4 calls/s
+
+  · #1296 Gift cards: redeem a b…   #1291  ━━━━━━━━ ━━━━━━━━ ━━━━──── ──────── ──────── ────────  analyze   40 calls
+    shop 3799cf3     not reviewed   #338   ━━━━━━━━ ━━━━━━━━ ━━━━──── ──────── ──────── ────────  analyze    4 calls
+                                      analyze · 5s
+▌ ⣾ #1291 Sign-in: send users ba…
+▌   shop      ●─●─●─○─○─○ ▇ 7.4/s     span                          │0s                   5s                   10s
+                                     ◆▶ analyze                 5.6s│               ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
+  ◆ #1287 Orders: self-serve ref…      ●✓ turn 1        388 tok 1.2s│               ██████                  ┊
+    shop 647fb3b   ◆1 ▲1 ●1 ○1 →0        ■✓ read_file          120ms│                ██                     ┊
+                                         ■✓ read_file          120ms│                  █                    ┊
+                                         ■✓ search_code        120ms│                    █                  ┊
+                                       ●✓ turn 2        512 tok 1.5s│                    ███████            ┊
+                                         ■✓ read_file          120ms│                     ██                ┊
+                                         ■✓ git_history        120ms│                         █             ┊
+                                         ■✓ search_code        120ms│                          █            ┊
+                                       ●✓ turn 3        641 tok 1.5s│                          ███████      ┊
+                                         ■✓ read_file          120ms│                            ██         ┊
+                                         ■✓ search_code        120ms│                              ██       ┊
+                                         ■✓ git_history        120ms│                                █      ┊
+                                       ●▶ turn 4       1.2k tok 1.5s│                                ▓▓▓▓▓▓▓▓
+                                         ■✓ read_file          120ms│                                   █   ┊
+                                         ■✓ search_code        120ms│                                    █  ┊
+                                         ■✓ read_file          120ms│                                      ██ tests/a…
+
+   s review again  c cancel review  d diff  h pull requests  / search  t timeline  w watch live  ? help  q quit

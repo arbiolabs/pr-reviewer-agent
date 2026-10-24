@@ -1215,3 +1215,22 @@ fn a_pick_selects_like_a_click_and_ignores_a_finding_the_selected_pr_lacks() {
     update(&mut m, Msg::Pick(Hit::Finding(second.clone())));
     assert!(matches!(m.top_modal(), Some(Modal::Finding { id, .. }) if id == &second), "a second pick reads it");
 }
+
+#[test]
+fn activity_spans_build_the_runs_waterfall_and_its_phase_clock() {
+    use pr_review_tui::protocol::RunId;
+    use pr_review_tui::waterfall::{SpanKind, rows};
+    // showcase.ndjson about 10 s in: acme/shop#1291 is in its fourth model turn.
+    let s = Sim::new(pr_review_tui::model::Look::default()).play("showcase", 47);
+    let run = RunId::new("d1ed7b3b7b96a280414a43f18864bd2b");
+    let spans = &s.m.domain.spans[&run];
+    let open: Vec<String> = spans.iter().filter(|x| x.ended_ms.is_none()).map(|x| x.name()).collect();
+    assert_eq!(open, ["analyze", "turn 4"]);
+    let turn4 = spans.iter().find(|x| x.name() == "turn 4").unwrap();
+    assert_eq!((turn4.kind, turn4.output_tokens), (SpanKind::Model, Some(1204)));
+    let tree = rows(spans);
+    let roots: Vec<String> = tree.iter().filter(|r| r.depth == 0).map(|r| spans[r.ix].name()).collect();
+    assert_eq!(roots, ["collect", "triage", "analyze"]);
+    let p = s.m.domain.pulse(&s.m.domain.runs[&run], s.m.now_ms);
+    assert_eq!(p.phase_ms, Some(5_560), "analyze opened at 4.31 s; the newest event is at 9.87 s");
+}

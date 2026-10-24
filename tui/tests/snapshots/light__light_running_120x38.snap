@@ -1,0 +1,105 @@
+---
+source: tests/light.rs
+expression: frame
+---
+  pr-review · ⣾ reviewing #1291 analyze read_file tests/auth/callback.test.ts:1-80  +1 more running             ● live
+
+
+  PULL REQUESTS                6    acme/shop  #1291
+                                    Sign-in: send users back to the page they started from
+  · #345 Partition ledger_entrie…   by priya-r · fdff3cd → f86859b · claude-opus-5-5 · run d1ed7b3b
+    api c20a27e          ✗ failed
+                                    ● Collect ● Triage ● Analyze ○ Verify ○ Prepare ○ Publish           since 14:30:00
+  · #341 Propagate X-Request-ID …
+    api 10bb915           ✓ clean   No findings yet
+                                    ──────────────────────────────────────────────────────────────────────────────────
+  ⣾ #338 Drain webhook workers o…
+    api       ●─●─●─○─○─○ ▃ 0.6/s   ⣾ Reviewing now                                  ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁█  7.4 calls/s
+
+  · #1296 Gift cards: redeem a b…   #1291  ━━━━━━━━ ━━━━━━━━ ━━━━──── ──────── ──────── ────────  analyze   40 calls
+    shop 3799cf3     not reviewed   #338   ━━━━━━━━ ━━━━━━━━ ━━━━──── ──────── ──────── ────────  analyze    4 calls
+                                      analyze · 5s
+▌ ⣾ #1291 Sign-in: send users ba…
+▌   shop      ●─●─●─○─○─○ ▇ 7.4/s     span                          │0s                   5s                   10s
+                                     ◆▶ analyze                 5.6s│               ▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓▓
+  ◆ #1287 Orders: self-serve ref…      ●✓ turn 1        388 tok 1.2s│               ██████                  ┊
+    shop 647fb3b   ◆1 ▲1 ●1 ○1 →0        ■✓ read_file          120ms│                ██                     ┊
+                                         ■✓ read_file          120ms│                  █                    ┊
+                                         ■✓ search_code        120ms│                    █                  ┊
+                                       ●✓ turn 2        512 tok 1.5s│                    ███████            ┊
+                                         ■✓ read_file          120ms│                     ██                ┊
+                                         ■✓ git_history        120ms│                         █             ┊
+                                         ■✓ search_code        120ms│                          █            ┊
+                                       ●✓ turn 3        641 tok 1.5s│                          ███████      ┊
+                                         ■✓ read_file          120ms│                            ██         ┊
+                                         ■✓ search_code        120ms│                              ██       ┊
+                                         ■✓ git_history        120ms│                                █      ┊
+                                       ●▶ turn 4       1.2k tok 1.5s│                                ▓▓▓▓▓▓▓▓
+                                         ■✓ read_file          120ms│                                   █   ┊
+                                         ■✓ search_code        120ms│                                    █  ┊
+                                         ■✓ read_file          120ms│                                      ██ tests/a…
+
+   s review again  c cancel review  d diff  h pull requests  / search  t timeline  w watch live  ? help  q quit
+
+aabbbbbbbbbacadabbbbbbbbbabbbbbadddddddacccccccccaccccccccccccccccccccccccccccccccaaccaccccacccccccaaaaaaaaaaaaaeaeeeeaa
+aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+ffffffffffffffffffffffffffffffffffaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+ffggggfggggggggffffffffffffffffgffaacccccccccaadddddaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+ffffffffffffffffffffffffffffffffffaabbbbbbbbabbbbabbbbbabbbbabbabbbabbbbabbbbabbbbbbbabbbbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+ffgfhhhhfiiiiiiiiifiiiiiiiiiiiiiifaaccacccccccacacccccccacacccccccacacccccccccccccccacacccaccccccccaaaaaaaaaaaaaaaaaaaaa
+ffffgggfgggggggffffffffffjfjjjjjjfaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+ffffffffffffffffffffffffffffffffffaaeabbbbbbbaeabbbbbbadadddddddacaccccccacacccccccacacccccccaaaaaaaaaaacccccaccccccccaa
+ffgfhhhhfiiiiiiiiifiiiiiiiiiiiififaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+ffffgggfgggggggfffffffffffkfkkkkkfaabbabbbbbbbbabbbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+ffffffffffffffffffffffffffffffffffaaccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccaa
+ffhfhhhhfiiiiifiiiiiiifiiiiiiifiifaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+ffffgggfffffffkkkkhggggggfhfgggggfaadabbbbbbbbbabbbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaddddddddddddddddddddaacccacccccccaa
+ffffffffffffffffffffffffffffffffffaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+ffgfhhhhhfiiiifiiiiiifiiiiiififiifaabbbbbaaeeeeeeeeaeeeeeeeeaddddccccaccccccccaccccccccaccccccccaadddddddaaaddadddddaaaa
+ffffggggfgggggggfffffgggfggggggggfaaccccaaaeeeeeeeeaeeeeeeeeaddddccccaccccccccaccccccccaccccccccaacccccccaaaacacccccaaaa
+ffffffffffffffffffffffffffffffffffaaaadddddddababbaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+lmlmlllllmnnnnnnnnmnnnnmnnnnnmnnnmaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+lmmmoooommmmmmpppploooooomlmooooomaaaaccccaaaaaaaaaaaaaaaaaaaaaaaaaacccaaaaaaaaaaaaaaaaaaaccaaaaaaaaaaaaaaaaaaacccaaaaaa
+ffffffffffffffffffffffffffffffffffaaaddabbbbbbbaaaaaaaaaaaaaaaaacccccaaaaaaaaaaaaaaadddddddddddddddddddddddddaaaaaaaaaaa
+ffqfhhhhhfiiiiiiifiiiiiiiiiifiiiifaaaaarrabbbbabaaaaaaaacccacccacccccaaaaaaaaaaaaaaarrrrrraaaaaaaaaaaaaaaaaasaaaaaaaaaaa
+ffffggggfgggggggfffqqfttfuufvvfggfaaaaaaawwabbbbbbbbbaaaaaaaaaaccccccaaaaaaaaaaaaaaaawwaaaaaaaaaaaaaaaaaaaaasaaaaaaaaaaa
+ffffffffffffffffffffffffffffffffffaaaaaaawwabbbbbbbbbaaaaaaaaaaccccccaaaaaaaaaaaaaaaaaawaaaaaaaaaaaaaaaaaaaasaaaaaaaaaaa
+ffffffffffffffffffffffffffffffffffaaaaaaawwabbbbbbbbbbbaaaaaaaaccccccaaaaaaaaaaaaaaaaaaaawaaaaaaaaaaaaaaaaaasaaaaaaaaaaa
+ffffffffffffffffffffffffffffffffffaaaaarrabbbbabaaaaaaaacccacccacccccaaaaaaaaaaaaaaaaaaaarrrrrrraaaaaaaaaaaasaaaaaaaaaaa
+ffffffffffffffffffffffffffffffffffaaaaaaawwabbbbbbbbbaaaaaaaaaaccccccaaaaaaaaaaaaaaaaaaaaawwaaaaaaaaaaaaaaaasaaaaaaaaaaa
+ffffffffffffffffffffffffffffffffffaaaaaaawwabbbbbbbbbbbaaaaaaaaccccccaaaaaaaaaaaaaaaaaaaaaaaaawaaaaaaaaaaaaasaaaaaaaaaaa
+ffffffffffffffffffffffffffffffffffaaaaaaawwabbbbbbbbbbbaaaaaaaaccccccaaaaaaaaaaaaaaaaaaaaaaaaaawaaaaaaaaaaaasaaaaaaaaaaa
+ffffffffffffffffffffffffffffffffffaaaaarrabbbbabaaaaaaaacccacccacccccaaaaaaaaaaaaaaaaaaaaaaaaaarrrrrrraaaaaasaaaaaaaaaaa
+ffffffffffffffffffffffffffffffffffaaaaaaawwabbbbbbbbbaaaaaaaaaaccccccaaaaaaaaaaaaaaaaaaaaaaaaaaaawwaaaaaaaaasaaaaaaaaaaa
+ffffffffffffffffffffffffffffffffffaaaaaaawwabbbbbbbbbbbaaaaaaaaccccccaaaaaaaaaaaaaaaaaaaaaaaaaaaaaawwaaaaaaasaaaaaaaaaaa
+ffffffffffffffffffffffffffffffffffaaaaaaawwabbbbbbbbbbbaaaaaaaaccccccaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaawaaaaaasaaaaaaaaaaa
+ffffffffffffffffffffffffffffffffffaaaaarrabbbbabaaaaaaaccccacccacccccaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaarrrrrrrraaaaaaaaaaa
+ffffffffffffffffffffffffffffffffffaaaaaaawwabbbbbbbbbaaaaaaaaaaccccccaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaawaaasaaaaaaaaaaa
+ffffffffffffffffffffffffffffffffffaaaaaaawwabbbbbbbbbbbaaaaaaaaccccccaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaawaasaaaaaaaaaaa
+ffffffffffffffffffffffffffffffffffaaaaaaawwabbbbbbbbbaaaaaaaaaaccccccaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaawwaccccccccaa
+ffffffffffffffffffffffffffffffffffaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+aaacaccccccacccccaacaccccccaccccccaacaccccaacaccccaccccccccaacaccccccaacaccccccccaacacccccaccccaacaccccaacaccccaaaaaaaaa
+
+a - on base
+b text on base
+c muted on base
+d accent on base
+e ok on base
+f - on surface
+g muted on surface
+h accent on surface
+i text on surface
+j fail on surface
+k ok on surface
+l accent on select
+m - on select
+n text on select
+o muted on select
+p ok on select
+q crit on surface
+r keyword on base
+s warn on base
+t high on surface
+u med on surface
+v low on surface
+w type on base

@@ -1,0 +1,20 @@
+---
+source: tests/golden.rs
+expression: text
+---
+  pr-review · ⣾ reviewing #1291 analyze   +1 more   ● live
+
+  acme/shop  #1291
+  Sign-in: send users back to the page they started from
+  by priya-r · fdff3cd → f86859b · claude-opus-5-5 · run …
+  ● ● ● Analyze ○ ○ ○                       since 14:30:00
+
+  No findings yet
+  ────────────────────────────────────────────────────────
+  ⣾ Reviewing now              ▁▁▁▁▁▁▁▁▁▁▁▁▁█  7.4 calls/s
+
+  #1291  ━━━ ━━━ ━━─ ─── ─── ───  analyze   40 calls
+  #338   ━━━ ━━━ ━━─ ─── ─── ───  analyze    4 calls
+    analyze · 5s
+
+   c cancel  d diff  h PRs  / search  ? help  q quit

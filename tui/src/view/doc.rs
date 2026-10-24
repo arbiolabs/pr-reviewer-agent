@@ -478,6 +478,9 @@ fn phase_line(c: &Ctx, run: Option<&Run>, w: usize) -> Line<'static> {
 
 /// The running review: a sparkline of tool calls, a phase bar per live run (this PR first), and this PR's newest
 /// `log` events, newest last with the pulse on it.
+/// How long a running review may go without an event before its pulse line says so.
+const QUIET_MS: u64 = 10_000;
+
 fn live(c: &Ctx, pr: &Pr, w: usize, log: usize, lines: &mut Vec<Line<'static>>) {
     use super::live::{per_sec, phase_bar, rate, sparkline};
     let g = c.t.g();
@@ -509,7 +512,28 @@ fn live(c: &Ctx, pr: &Pr, w: usize, log: usize, lines: &mut Vec<Line<'static>>) 
         s.push(c.span(tail, if this { Role::Accent } else { Role::Muted }));
         lines.push(Line::from(s));
     }
+    // So a long phase never reads as stuck: how long it has run, and how long since anything happened.
+    let run = c.m.domain.latest_run(&pr.id).filter(|r| r.active());
+    let pulse = run.map(|r| (r, c.m.domain.pulse(r, c.m.now_ms)));
+    if let Some((r, p)) = pulse
+        && let Some(ms) = p.phase_ms
+    {
+        let mut s = vec![
+            c.span(format!("  {}", phase_label(r.phase)), Role::Accent),
+            c.span(format!(" {} {}", g.sep, crate::waterfall::duration(ms / 1000 * 1000)), Role::Normal),
+        ];
+        if let Some(q) = p.quiet_ms.filter(|q| *q >= QUIET_MS) {
+            s.push(c.span(format!(" {} last activity {}s ago", g.sep, q / 1000), Role::Pending));
+        }
+        lines.push(Line::from(s));
+    }
     lines.push(Line::raw(""));
+    let spans = run.and_then(|r| c.m.domain.spans.get(&r.id)).filter(|v| !v.is_empty());
+    if let (Some(spans), Some(now)) = (spans, c.m.domain.journal_now(c.m.now_ms)) {
+        lines.extend(super::waterfall::lines(c, spans, now, w, log.saturating_sub(2).max(3)));
+        lines.push(Line::raw(""));
+        return;
+    }
     let items: Vec<_> = c.m.domain.activity.iter().filter(|a| a.pr_id.as_ref() == Some(&pr.id)).collect();
     let shown = &items[items.len().saturating_sub(log)..];
     for (i, a) in shown.iter().enumerate() {

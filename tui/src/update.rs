@@ -798,12 +798,18 @@ fn apply_batch(m: &mut Model, b: ActivityBatch, fx: &mut Vec<Effect>) {
 fn apply_body(m: &mut Model, e: &SequencedEvent, fx: &mut Vec<Effect>) {
     let seq = e.sequence.get();
     let d = &mut m.domain;
+    if let Some(at) = crate::waterfall::epoch_ms(e.occurred_at.as_str()) {
+        d.clock = Some((at, m.now_ms));
+    }
     let kind = match &e.body {
         EventBody::PrUpdated(pr) => {
             d.prs.insert(pr.id.clone(), pr.clone());
             None
         }
         EventBody::Run(change, run) => {
+            if *change == RunChange::Started {
+                d.spans.remove(&run.id);
+            }
             d.runs.insert(run.id.clone(), run.clone());
             Some(ActivityKind::Run { change: *change, status: run.status })
         }
@@ -820,6 +826,25 @@ fn apply_body(m: &mut Model, e: &SequencedEvent, fx: &mut Vec<Effect>) {
         }
         EventBody::ToolActivity(a) => {
             d.tool_activity_count += 1;
+            if let (Some(run), Some(sp)) = (&e.run_id, &a.span)
+                && let (Some(kind), Some(started_ms)) = (
+                    crate::waterfall::SpanKind::parse(sp.kind.as_str()),
+                    crate::waterfall::epoch_ms(sp.started_at.as_str()),
+                )
+            {
+                let span = crate::waterfall::Span {
+                    id: sp.id.clone(),
+                    parent: sp.parent.clone(),
+                    kind,
+                    tool: a.tool.clone(),
+                    opened: a.summary.clone(),
+                    summary: a.summary.clone(),
+                    started_ms,
+                    ended_ms: sp.ended_at.as_ref().and_then(|t| crate::waterfall::epoch_ms(t.as_str())),
+                    output_tokens: sp.output_tokens,
+                };
+                crate::waterfall::upsert(d.spans.entry(run.clone()).or_default(), span);
+            }
             Some(ActivityKind::Tool { tool: a.tool.clone(), summary: a.summary.clone() })
         }
         EventBody::AccountsUpdated(accounts) => {

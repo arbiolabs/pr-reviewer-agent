@@ -17,6 +17,7 @@ expression: text
 ▌   shop      ●─○─○─○─○─○ ▁ 0.0/s   ⣾ Reviewing now                                  ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁  0.0 calls/s
 
                                     #184   ━━━━──── ──────── ──────── ──────── ──────── ────────  collect    3 calls
+                                      collect · 0s
 
                                         13:00:12  run         started
                                         13:00:13  finding     ▲ HIGH Finding f-1
@@ -33,7 +34,6 @@ expression: text
                                     ┃    40 │ if (slot.free && !slot.held) {
                                     ┃
                                     ┃ Enter  5 evidence items · the fix · the diff    d diff at this line
-
 
 
 

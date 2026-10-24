@@ -7,6 +7,7 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 ### Added
 
 - **MIT license.** The repository is licensed under the MIT license (`LICENSE`) (#48).
+- **Live progress and a lite waterfall for a running review.** The engine reports every step of every phase through `tool.activity`: fetching the PR, cloning or fetching the repository and the diff's size in collect, the Jev rating or why it was skipped and the route in triage, each model turn as it goes out and returns (its time, output tokens and the tools it called, from pi-durable's generation hooks), each verdict in verify, and the payload's counts in prepare. Lines carry counts and timings only, never model text or file contents, and tool calls past 10 a second per review are dropped. `tool.activity` gains an optional `span` (`id`, `parent`, `kind`, `startedAt`, `endedAt`, `outputTokens`), stored in the journal by migration 058, so phases, steps, model turns and tool calls form a tree with timings; clients that don't know it ignore it. Both clients build the same waterfall from the shared model: the desktop app shows it on the running review, with a now line, folded turns and the clicked span's detail, and on the PR page after the run; the terminal client draws it in Review in place of the activity log. Both show the phase's elapsed time and "last activity Ns ago" when a review goes quiet. The waterfall is adapted from agents-trace-waterfall (#51).
 
 ### Fixed
 

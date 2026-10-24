@@ -151,6 +151,7 @@ With `--socket`, the capture happens `--snapshot-after-ms` milliseconds after la
 | `add-pr`, `add-pr:TEXT` | Open the sheet that adds a PR, with TEXT in its field. |
 | `add:TEXT` | Send what ⏎ in that sheet sends for TEXT. The playback refuses a PR it doesn't track as GitHub would. |
 | `scrub:N` | Hold the live log at its Nth event, counted from 1. |
+| `span:NAME` | Open the waterfall span of that name (`turn 4`, `analyze`) in its detail. |
 | `discards` | Open every "Verifier discarded" group on the timeline. |
 | `flagged` | List only the diff's files with findings. |
 | `reviewer:STATE` | Show the reviewer as a start or a stop leaves it: `stopped`, `starting`, `start-failed`, or `stop-confirm` (the sheet that asks before a stop pauses running reviews). The window then dials `/private/tmp/prdc/s.sock`, as `08-disconnected` does. |

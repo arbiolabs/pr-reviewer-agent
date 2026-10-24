@@ -654,6 +654,29 @@ pub struct PhaseChange {
 pub struct ToolActivity {
     pub tool: Text,
     pub summary: Text,
+    /// The waterfall span the line belongs to; absent from daemons that predate it, and dropped when malformed.
+    #[serde(default, deserialize_with = "lenient")]
+    pub span: Option<ActivitySpan>,
+}
+
+/// protocol `ActivitySpan`: a line with no `endedAt` opens or updates the span `id`, one with it closes the span.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ActivitySpan {
+    pub id: Text,
+    #[serde(default)]
+    pub parent: Option<Text>,
+    pub kind: Text,
+    pub started_at: Text,
+    #[serde(default)]
+    pub ended_at: Option<Text>,
+    #[serde(default)]
+    pub output_tokens: Option<u64>,
+}
+
+/// An optional field that reads as absent when it does not parse, so a bad span never costs the line it came with.
+fn lenient<'de, D: Deserializer<'de>, T: serde::de::DeserializeOwned>(d: D) -> Result<Option<T>, D::Error> {
+    Ok(serde_json::Value::deserialize(d).ok().and_then(|v| serde_json::from_value(v).ok()))
 }
 
 #[derive(Deserialize)]
@@ -727,7 +750,7 @@ impl TryFrom<RawEvent> for SequencedEvent {
             "tool.activity" => {
                 let a: ToolActivity = from_value(data("tool.activity")?)?;
                 let summary: String = a.summary.as_str().chars().take(MAX_ACTIVITY_SUMMARY_CHARS).collect();
-                EventBody::ToolActivity(ToolActivity { tool: a.tool, summary: Text(summary) })
+                EventBody::ToolActivity(ToolActivity { tool: a.tool, summary: Text(summary), span: a.span })
             }
             "accounts.updated" => {
                 let a: RawAccounts = from_value(data("accounts.updated")?)?;

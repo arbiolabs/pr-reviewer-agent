@@ -1,0 +1,28 @@
+---
+source: tests/golden.rs
+expression: text
+---
+  pr-review · ⣾ reviewing #1291 analyze read_file  +1 more              ● live
+
+
+  acme/shop  #1291
+  Sign-in: send users back to the page they started from
+  by priya-r · fdff3cd → f86859b · claude-opus-5-5 · run d1ed7b3b
+  ● Collect ● Triage ● Analyze ○ Verify ○ Prepare ○ Publish     since 14:30:00
+
+  No findings yet
+  ────────────────────────────────────────────────────────────────────────────
+  ⣾ Reviewing now                             ▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁▁█  7.4 calls/s
+
+  #1291  ━━━━━━━ ━━━━━━━ ━━━━─── ─────── ─────── ───────  analyze   40 calls
+  #338   ━━━━━━━ ━━━━━━━ ━━━━─── ─────── ─────── ───────  analyze    4 calls
+    analyze · 5s
+
+    span                        │0s                 5s                 10s
+       ■✓ git_history      120ms│                             ██     ┊
+     ●▶ turn 4     1.2k tok 1.5s│                              ▓▓▓▓▓▓▓
+       ■✓ read_file        120ms│                                █   ┊
+       ■✓ search_code      120ms│                                 █  ┊
+       ■✓ read_file        120ms│                                   ██ tests/…
+
+   c cancel  d diff  h PRs  / search  t timeline  w watch  ? help  q quit

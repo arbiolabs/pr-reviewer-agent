@@ -115,6 +115,7 @@ for look in dark light; do
   snap 04-diff-$look           $look 20000 "wait:19000,pr:1287,finding:1,open-diff"
   snap 05-running-$look        $look 10000 "wait:9000,pr:1291"
   snap 05b-replay-$look        $look 10000 "wait:9000,pr:1291,scrub:12"
+  snap 05c-waterfall-$look     $look 10000 "wait:9000,pr:1291,span:turn 4"
   snap 06-approval-$look       $look 20000 "wait:19000,pr:1291,publish"
   snap 06b-confirm-post-$look  $look 20000 "wait:19000,pr:1291,publish,confirm-post"
   snap 07-palette-$look        $look 20000 "wait:19000,palette:re"

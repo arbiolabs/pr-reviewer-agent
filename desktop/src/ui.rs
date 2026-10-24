@@ -181,6 +181,8 @@ pub struct Shell {
     pub snapshot: bool,
     /// The live log held at an event, counted from 0, or `None` to follow the run.
     pub scrub: Option<usize>,
+    /// The waterfall span whose detail shows, by id (or by name, from a script), or `None`.
+    pub span: Option<String>,
     /// The window's width, as the last frame laid it out: a page's action bar fits itself to it.
     pub width: Pixels,
     /// The action bar's More menu is open.
@@ -263,6 +265,7 @@ impl Shell {
             still,
             snapshot,
             scrub: None,
+            span: None,
             width: px(1280.),
             more_open: false,
             open_discards: Vec::new(),
@@ -284,6 +287,7 @@ impl Shell {
                     s.overlay = Some(Overlay::AddPr { url: url.clone(), sent: s.model.adding.is_some() })
                 }
                 Desk::Scrub(n) => s.scrub = Some(n.saturating_sub(1)),
+                Desk::Span(name) => s.span = Some(name.clone()),
                 Desk::Reviewer(state) => crate::reviewer::stage(&mut s, *state),
                 Desk::Flagged => s.diff_flagged_only = true,
                 Desk::Discards => {
@@ -358,6 +362,7 @@ impl Shell {
         self.close_modals(cx);
         self.home(cx);
         self.scrub = None;
+        self.span = None;
         self.send(Msg::Pick(Hit::Pr(pr)), cx);
     }
 

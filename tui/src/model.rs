@@ -3,6 +3,7 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use crate::protocol::*;
+use crate::waterfall::{Span, SpanKind};
 
 pub const ACTIVITY_CAP: usize = 2_000;
 /// How long an accepted command may show nothing before the panel says so.
@@ -157,6 +158,19 @@ pub struct DomainCache {
     pub publications: BTreeMap<RunId, PublicationChanged>,
     pub activity: VecDeque<Activity>,
     pub tool_activity_count: u64,
+    /// Each run's waterfall spans, in arrival order. Snapshots carry none, so they keep these; a run's next attempt
+    /// starts its own.
+    pub spans: BTreeMap<RunId, Vec<Span>>,
+    /// The newest event's journal time and the client clock when it arrived: open spans grow from it.
+    pub clock: Option<(i64, u64)>,
+}
+
+/// How a running review is doing, so it never reads as stuck: how long its phase has run, and how long its PR has
+/// been quiet, in milliseconds. Either is `None` before this client has seen it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Pulse {
+    pub phase_ms: Option<i64>,
+    pub quiet_ms: Option<u64>,
 }
 
 impl DomainCache {
@@ -165,6 +179,29 @@ impl DomainCache {
             self.activity.pop_front();
         }
         self.activity.push_back(a);
+    }
+
+    /// The journal's time now: the newest event's, plus what the client clock says has passed since it arrived.
+    pub fn journal_now(&self, now_ms: u64) -> Option<i64> {
+        self.clock.map(|(at, recv)| at + now_ms.saturating_sub(recv) as i64)
+    }
+
+    /// The run's open phase span when the daemon sends spans; otherwise the phase change this client saw arrive.
+    pub fn pulse(&self, run: &Run, now_ms: u64) -> Pulse {
+        let mine = || self.activity.iter().rev().filter(|a| a.pr_id.as_ref() == Some(&run.pr_id));
+        let open = self
+            .spans
+            .get(&run.id)
+            .and_then(|v| v.iter().rev().find(|s| s.kind == SpanKind::Phase && s.ended_ms.is_none()));
+        let phase_ms = match (open, self.journal_now(now_ms)) {
+            (Some(s), Some(now)) => Some((now - s.started_ms).max(0)),
+            _ => mine()
+                .find(|a| {
+                    matches!(a.kind, ActivityKind::Phase { .. } | ActivityKind::Run { change: RunChange::Started, .. })
+                })
+                .map(|a| now_ms.saturating_sub(a.recv_ms) as i64),
+        };
+        Pulse { phase_ms, quiet_ms: mine().next().map(|a| now_ms.saturating_sub(a.recv_ms)) }
     }
 
     pub fn latest_run(&self, pr: &PrId) -> Option<&Run> {
