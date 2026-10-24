@@ -33,6 +33,7 @@ export const REVIEW_EVENTS = [
   "PR_NOT_OPEN",
   "TERMINAL_ERROR",
   "MANUAL_RETRY",
+  "REVIEW_AGAIN",
 ] as const;
 export type ReviewEvent = (typeof REVIEW_EVENTS)[number];
 
@@ -40,7 +41,8 @@ export type ReviewEvent = (typeof REVIEW_EVENTS)[number];
 // NEWER_HEAD and PR_NOT_OPEN unless the outbox is still pending, and any TERMINAL_ERROR moves a `sending` outbox to
 // needs_reconciliation (§2 invariants 6 and 10). FAILED + REVIEW_RECONCILED is a later reconcile finding the review.
 // AWAITING_APPROVAL (publish_mode approval) holds the stored payload until a human approves; nothing is sent there, so
-// a new head or a cancel abandons the outbox.
+// a new head or a cancel abandons the outbox. REVIEW_AGAIN (§4.1 override) sets an idle revision aside for a fresh
+// revision of the same head; the store refuses it while the outbox may have reached GitHub.
 export const REVIEW_MACHINE: Table<ReviewState, ReviewEvent> = {
   COLLECT_CONTEXT: { CONTEXT_PERSISTED: "TRIAGE", NEWER_HEAD: "SUPERSEDED", PR_NOT_OPEN: "SUPERSEDED", TERMINAL_ERROR: "FAILED" },
   TRIAGE: { ROUTING_PERSISTED: "ANALYZE", NEWER_HEAD: "SUPERSEDED", PR_NOT_OPEN: "SUPERSEDED", TERMINAL_ERROR: "FAILED" },
@@ -53,7 +55,7 @@ export const REVIEW_MACHINE: Table<ReviewState, ReviewEvent> = {
     PR_NOT_OPEN: "SUPERSEDED",
     TERMINAL_ERROR: "FAILED",
   },
-  AWAITING_APPROVAL: { APPROVED: "PUBLISH", NEWER_HEAD: "SUPERSEDED", PR_NOT_OPEN: "SUPERSEDED", CANCELLED: "FAILED" },
+  AWAITING_APPROVAL: { APPROVED: "PUBLISH", NEWER_HEAD: "SUPERSEDED", PR_NOT_OPEN: "SUPERSEDED", CANCELLED: "FAILED", REVIEW_AGAIN: "SUPERSEDED" },
   PUBLISH: {
     REVIEW_RECONCILED: "COMPLETED",
     NO_PUBLICATION_RECORDED: "COMPLETED",
@@ -63,9 +65,10 @@ export const REVIEW_MACHINE: Table<ReviewState, ReviewEvent> = {
     TERMINAL_ERROR: "FAILED",
   },
   RECONCILE: { REVIEW_RECONCILED: "COMPLETED", CONFIRMED_NOT_POSTED: "PUBLISH", TERMINAL_ERROR: "FAILED" },
-  COMPLETED: {},
-  // §4.1 manual override: only an explicit retry leaves FAILED for new work. COMPLETED and SUPERSEDED stay final.
-  FAILED: { MANUAL_RETRY: "COLLECT_CONTEXT", REVIEW_RECONCILED: "COMPLETED" },
+  // §4.1 manual overrides: only an explicit retry leaves FAILED for new work; a review again sets the result aside for a
+  // new revision. SUPERSEDED stays final.
+  COMPLETED: { REVIEW_AGAIN: "SUPERSEDED" },
+  FAILED: { MANUAL_RETRY: "COLLECT_CONTEXT", REVIEW_RECONCILED: "COMPLETED", REVIEW_AGAIN: "SUPERSEDED" },
   SUPERSEDED: {},
 };
 

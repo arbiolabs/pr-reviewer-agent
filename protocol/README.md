@@ -55,6 +55,7 @@ the recorded `operationId` and does nothing again. A key in any other form is `I
 | --- | --- | --- | --- |
 | `review.add` | `url` | `review.add:<url>` | `review.add:<runId>` of the run it started |
 | `review.start` | `prId`, `expectedHeadSha` | `review.start:<prId>:<expectedHeadSha>` | `review.start:<runId>` of the run started or found |
+| `review.again` | `prId`, `expectedHeadSha` | `review.again:<prId>:<expectedHeadSha>` | `review.again:<runId>` of the new run |
 | `review.retry` | `runId` | `review.retry:<runId>` | `review.retry:<runId>` |
 | `review.cancel` | `runId` | `review.cancel:<runId>` | `review.cancel:<runId>` |
 | `review.publish` | `runId`, `previewId`, `expectedHeadSha` | `review.publish:<runId>:<previewId>` | `review.publish:<runId>` |
@@ -78,7 +79,18 @@ Every command is checked by the server whatever the client showed:
   every client sees the PR appear. A replayed key answers the PR and run it added.
 - `review.start`: the PR must be tracked (`NOT_FOUND`), `expectedHeadSha` must be GitHub's head now (`REVISION_STALE`,
   with the live head in the message), the PR must be open, and the head must not already have a finished or parked
-  review (`CONFLICT`). The run then appears through `run.started` and the usual events.
+  review (`CONFLICT`; `review.again` redoes one). The run then appears through `run.started` and the usual events.
+- `review.again`: review the head from scratch, as a new run that reuses nothing of the earlier ones (context,
+  routing, candidates) and uses the daemon's current model. The PR must be tracked (`NOT_FOUND`), `expectedHeadSha`
+  must be GitHub's open head now (`REVISION_STALE`, `CONFLICT` when closed), and that head must have a review that
+  has ended or is parked: `COMPLETED`, `FAILED` (cancelled included), `SUPERSEDED` or `AWAITING_APPROVAL`. It is
+  refused with `CONFLICT` while any run of the PR is running (`PUBLISH` and `RECONCILE` included), when the head has
+  no run yet (send `review.start`), and while a publication of that head may have reached GitHub (its outbox is
+  sending or needs reconciliation). In one transaction every earlier run of that head that has not been superseded
+  ends with `run.superseded` (a parked payload is abandoned; nothing had been sent), and the new run starts with
+  `run.started`. Findings are tracked across the runs as across heads: one found again is the same finding. The key
+  is bound to the head's review-again generation, as a retry's is to its attempt: it replays while the run it opened
+  is in flight, and once that run has ended the same key reviews the head again.
 - `review.retry`: only from `FAILED` (`INVALID_TRANSITION` elsewhere), through the audited manual retry.
 - `review.cancel`: refused with `CONFLICT` in `PUBLISH` and `RECONCILE`, where a GitHub write may be in flight;
   `INVALID_TRANSITION` for a finished run. A parked run fails at once; a running one has its task aborted. Either way

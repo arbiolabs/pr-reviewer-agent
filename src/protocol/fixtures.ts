@@ -1528,6 +1528,13 @@ export const fixtures: Record<string, ClientMessage | ServerMessage | Record<str
     params: { prId: pr1.id, expectedHeadSha: pr1.headSha },
     idempotencyKey: `review.start:${pr1.id}:${pr1.headSha}`,
   },
+  "client.command.review.again": {
+    type: "command",
+    requestId: "req-cmd",
+    command: "review.again",
+    params: { prId: pr1.id, expectedHeadSha: pr1.headSha },
+    idempotencyKey: `review.again:${pr1.id}:${pr1.headSha}`,
+  },
   "client.command.review.add": {
     type: "command",
     requestId: "req-cmd",

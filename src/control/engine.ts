@@ -7,9 +7,9 @@ import type { Env } from "../github/accounts.ts";
 import { type GitHubClient, GitHubError } from "../github/client.ts";
 import { parsePullRef, parsePullUrl, type PullRef, type PullSource } from "../github/pulls.ts";
 import type { ReviewCommand } from "../protocol/v1.ts";
-import { type App, finishReview, recover, type StartedReview, startPolicy, startReview } from "../runtime/app.ts";
+import { type App, finishReview, generationOf, recover, type StartedReview, startPolicy, startReview } from "../runtime/app.ts";
 import { StateConflict } from "../persistence/store.ts";
-import { approve, cancel, livePull, Refused, retry, startFromHead } from "../runtime/commands.ts";
+import { againTarget, approve, cancel, livePull, Refused, retry, reviewAgain, startFromHead } from "../runtime/commands.ts";
 import { AppDbSource, clean } from "./appdb.ts";
 import { type Accepted, ControlError, type Settings } from "./source.ts";
 
@@ -79,7 +79,7 @@ export class EngineSource extends AppDbSource {
 
   capabilities(): string[] {
     const publish = this.options.config.review.publish_mode === "approval";
-    return ["review.add", "review.start", "review.retry", "review.cancel", ...(publish ? ["review.publish"] : [])];
+    return ["review.add", "review.start", "review.again", "review.retry", "review.cancel", ...(publish ? ["review.publish"] : [])];
   }
 
   override unavailable(command: string): string {
@@ -90,9 +90,14 @@ export class EngineSource extends AppDbSource {
    * The run attempt a command's key is bound to, counted in reopenings: a cancel ends the current attempt, a retry or
    * an approval opens the next one, and a start names a head rather than an attempt. A key recorded under another
    * attempt is a new request, so the same retry acts again once the attempt it opened has failed, and the same cancel
-   * or approval acts on an attempt opened since.
+   * or approval acts on an attempt opened since. A review again is bound the same way to the head's review-again
+   * generation: the one it would open now, or while that one runs, the current one.
    */
   private attemptOf(request: ReviewCommand): number | null {
+    if (request.command === "review.again") {
+      const { generation, refusal } = againTarget(this.app, request.params.prId, request.params.expectedHeadSha);
+      return refusal ? generation - 1 : generation;
+    }
     if (!("runId" in request.params)) return null;
     const revision = this.app.store.revision(request.params.runId);
     if (!revision) return null;
@@ -152,7 +157,7 @@ export class EngineSource extends AppDbSource {
         request.command !== "review.start" ||
         (recorded?.head_sha === request.params.expectedHeadSha &&
           recorded.base_sha === base &&
-          recorded.policy_version === startPolicy(options.config.review.base_policy_version, publish) &&
+          recorded.policy_version === startPolicy(options.config.review.base_policy_version, publish, generationOf(recorded)) &&
           recorded.reviewer_version === app.reviewerVersion);
       if (replay && replay.attempt === attempt && replays) return replay.operationId;
       switch (request.command) {
@@ -162,6 +167,12 @@ export class EngineSource extends AppDbSource {
           const operationId = `review.start:${started.revision.id}`;
           record(operationId)();
           return operationId;
+        }
+        case "review.again": {
+          const again = { basePolicyVersion: options.config.review.base_policy_version, publish, source: "tui via daemon" };
+          const started = await reviewAgain(app, options.pulls, request.params, again, (r) => record(`review.again:${r.id}`)());
+          this.follow(started);
+          return `review.again:${started.revision.id}`;
         }
         case "review.retry": {
           const operationId = `review.retry:${request.params.runId}`;

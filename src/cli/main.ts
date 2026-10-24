@@ -17,7 +17,7 @@ import { type AvailableModel, chooseModel, listAvailableModels, type ModelChoice
 import { AppStore, withStore } from "../persistence/store.ts";
 import { reconcileOutbox } from "../publish/publisher.ts";
 import { finishReview, lockDataDir, openApp, startReview } from "../runtime/app.ts";
-import { approve as approvePublication, Refused, resumeApproved } from "../runtime/commands.ts";
+import { approve as approvePublication, Refused, resumeApproved, reviewAgain } from "../runtime/commands.ts";
 import { reviewerVersion } from "../runtime/task.ts";
 import { startService } from "../server/service.ts";
 import { type Check, gatherChecks, NO_TOKEN, using } from "./checks.ts";
@@ -39,7 +39,7 @@ export type CliDeps = {
 
 const USAGE = `usage:
   pr-review setup [--check] [--json]
-  pr-review review <pr-url> [--dry-run | --publish] [--json] [--no-jev] [--model provider/id] [--retry]
+  pr-review review <pr-url> [--dry-run | --publish] [--json] [--no-jev] [--model provider/id] [--retry | --again]
   pr-review reconcile --revision <revision-id>
   pr-review approve --revision <revision-id> --preview <payload-hash>
   pr-review serve
@@ -103,9 +103,9 @@ async function review(args: string[], deps: CliDeps, dataDir: string, out: Out, 
   const { values, positionals } = parseArgs({
     args,
     allowPositionals: true,
-    options: { "dry-run": { type: "boolean" }, publish: { type: "boolean" }, json: { type: "boolean" }, "no-jev": { type: "boolean" }, model: { type: "string" }, retry: { type: "boolean" } },
+    options: { "dry-run": { type: "boolean" }, publish: { type: "boolean" }, json: { type: "boolean" }, "no-jev": { type: "boolean" }, model: { type: "string" }, retry: { type: "boolean" }, again: { type: "boolean" } },
   });
-  if (positionals.length !== 1 || (values.publish && values["dry-run"])) {
+  if (positionals.length !== 1 || (values.publish && values["dry-run"]) || (values.retry && values.again)) {
     err(`${USAGE}\n`);
     return 2;
   }
@@ -140,7 +140,14 @@ async function review(args: string[], deps: CliDeps, dataDir: string, out: Out, 
   });
   try {
     app.harness.resume();
-    const started = await startReview(app, pull, config.review.base_policy_version, { retry: values.retry ?? false, publish: values.publish ?? false });
+    const publish = values.publish ?? false;
+    const prId = app.store.upsertPull(pull);
+    const again = { basePolicyVersion: config.review.base_policy_version, publish, source: "pr-review review --again" };
+    const started = values.again
+      ? await reviewAgain(app, pulls, { prId, expectedHeadSha: pull.headSha }, again).catch((error: unknown) => {
+          throw error instanceof Refused ? new Error(`${error.code}: ${error.message}`) : error;
+        })
+      : await startReview(app, pull, config.review.base_policy_version, { retry: values.retry ?? false, publish });
     err(
       started.taskId === undefined
         ? `revision ${started.revision.id} already ${started.revision.state}; showing the stored result\n`
