@@ -133,7 +133,7 @@ fn footer_row(m: &Model) -> String {
 }
 
 fn hint_rank(keys: &str, label: &str) -> usize {
-    let keys = if keys == "s" && label.contains("again") { "s again" } else { keys };
+    let keys = if keys == "s" && label == "start another" { "s/S" } else { keys };
     pr_review_tui::offer::RANK.iter().position(|k| *k == keys).unwrap()
 }
 

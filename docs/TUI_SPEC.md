@@ -192,6 +192,7 @@ flowchart TB
 | `n` / `N` | Next/previous finding (Diff/Review) |
 | `r` | Refresh authoritative snapshot |
 | `s` | Request start review (where allowed) |
+| `S` | Review the head again from scratch (`review.again`; confirmation: "Review #N again at abc1234? The current result is set aside."). Offered when the PR's latest run is at its head and has ended or is parked, and its publication isn't publishing or uncertain; otherwise it says why |
 | `R` | Request retry (confirmation) |
 | `c` | Request cancellation (confirmation) |
 | `p` | Preview publication (where allowed) |

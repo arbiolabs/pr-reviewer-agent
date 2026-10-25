@@ -1438,11 +1438,14 @@ const tokensRecorded: Recorded[] = [
   ),
 ];
 
+/** What the playbacks grant: the review commands they script an outcome for, which leaves out review.again. */
+const PLAYED_COMMANDS = REVIEW_COMMANDS.filter((c) => c !== "review.again");
+
 /** A script that plays `recorded` in time order from an empty snapshot of `prs`, so every event is in the stream. */
-const replay = (prs: Pr[], recorded: Recorded[]): PlaybackLine[] => {
+const replay =(prs: Pr[], recorded: Recorded[]): PlaybackLine[] => {
   const rows = recorded.map(([t, make], k) => ({ t, k, make })).sort((a, b) => a.t - b.t || a.k - b.k);
   return [
-    { delayMs: 0, message: welcome(0, EPOCH, ["account.select", ...REVIEW_COMMANDS], "engine") },
+    { delayMs: 0, message: welcome(0, EPOCH, ["account.select", ...PLAYED_COMMANDS], "engine") },
     { delayMs: 0, message: snapshot(0, prs, [], [], EPOCH, showAccounts) },
     ...rows.map(({ t, make }, i): PlaybackLine => ({ delayMs: 20, message: make({ seq: i + 1, t }) })),
   ];
@@ -1908,7 +1911,7 @@ const accounts = lines(40, [
 // Approval mode end to end: the run parks, the preview is shown, the approval is accepted, then the publisher's
 // own statuses arrive. The client never shows a publication as done on `accepted`, only on `published`.
 const approval = lines(40, [
-  welcome(10, EPOCH, ["account.select", ...REVIEW_COMMANDS], "engine"),
+  welcome(10, EPOCH, ["account.select", ...PLAYED_COMMANDS], "engine"),
   snapshot(10, [pr1, pr2, pr3], [run1, run2], [f1, f2], EPOCH, [personal, work]),
   phase({ seq: 11 }, run1, "VERIFY", "PREPARE_PUBLICATION", "CANDIDATES_DISPOSED"),
   phase({ seq: 12 }, run1, "PREPARE_PUBLICATION", "AWAITING_APPROVAL", "APPROVAL_REQUIRED"),
@@ -1936,7 +1939,7 @@ const showcaseScript = (): PlaybackLine[] => {
     return { delayMs, ...(after ? { after } : {}), message: make({ seq, t: clock }) };
   });
   return [
-    { delayMs: 0, message: welcome(40, EPOCH, ["account.select", ...REVIEW_COMMANDS], "engine") },
+    { delayMs: 0, message: welcome(40, EPOCH, ["account.select", ...PLAYED_COMMANDS], "engine") },
     {
       delayMs: 0,
       message: snapshot(
