@@ -72,7 +72,7 @@ const NAMES: &[(&str, Action)] = &[
     ("scroll-down", Action::ScrollDown), ("scroll-up", Action::ScrollUp), ("next-finding", Action::NextFinding),
     ("prev-finding", Action::PrevFinding), ("refresh", Action::Refresh), ("help", Action::Help),
     ("accounts", Action::Accounts), ("start", Action::Mutation(Mutation::Start)),
-    ("retry", Action::Mutation(Mutation::Retry)), ("cancel", Action::Mutation(Mutation::Cancel)),
+    ("retry", Action::Mutation(Mutation::Retry)), ("again", Action::Mutation(Mutation::Again)), ("cancel", Action::Mutation(Mutation::Cancel)),
     ("publish", Action::Mutation(Mutation::Publish)), ("cycle-scope", Action::CycleScope),
     ("cycle-category", Action::CycleCategory), ("cycle-phase", Action::CyclePhase),
     ("backspace", Action::InputBackspace), ("submit", Action::InputSubmit), ("cancel-input", Action::InputCancel),

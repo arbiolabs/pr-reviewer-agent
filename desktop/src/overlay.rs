@@ -7,7 +7,7 @@ use gpui_kit::*;
 use pr_review_tui::keymap::{Action, Mutation};
 use pr_review_tui::model::{AddState, ConfirmState, InputPurpose, Modal, Model, PrRef, Preview, Screen, fuzzy};
 use pr_review_tui::protocol::{Command, ErrorCode, PrId};
-use pr_review_tui::update::{can_confirm, can_mutate, write_block};
+use pr_review_tui::update::{again_block, can_confirm, can_mutate, write_block};
 use std::ops::Range;
 
 use crate::detail::who;
@@ -105,6 +105,13 @@ fn entries(m: &Model, r: &Reviewer, theme: Choice) -> Vec<Entry> {
         format!("Start a review of{n} at its head"),
         "S",
         "a review already holds this head",
+    ));
+    out.push(mutation(
+        m,
+        Mutation::Again,
+        format!("Review{n} again from scratch"),
+        "⇧S",
+        &again_block(m).unwrap_or_default(),
     ));
     out.push(mutation(
         m,
@@ -707,6 +714,7 @@ fn confirm(
     let (verb, tone, glyph, hue) = match command {
         Command::Start(_) => ("Start review", Tone::Primary, IconName::Play, t.accent),
         Command::Retry(_) => ("Retry", Tone::Primary, IconName::RotateCw, t.accent),
+        Command::Again(_) => ("Review again", Tone::Primary, IconName::RotateCw, t.accent),
         Command::Cancel(_) => ("Cancel review", Tone::Destructive, IconName::CircleX, t.danger),
         Command::SelectAccount(_) => ("Use account", Tone::Primary, IconName::User, t.accent),
         Command::StopDaemon(_) => ("Stop reviewer", Tone::Destructive, IconName::CircleStop, t.danger),
@@ -757,6 +765,10 @@ fn confirm(
                         }
                         Command::Start(_) | Command::Retry(_) => {
                             "The reviewer reads the diff with read-only tools. Nothing posts without your approval."
+                        }
+                        Command::Again(_) => {
+                            "A new run reviews this head from scratch with the current model. A proof waiting for \
+                             approval is dropped unposted; findings found again stay the same findings."
                         }
                         Command::StopDaemon(_) => {
                             "The reviewer shuts down cleanly. Running reviews pause and resume on the next start."
@@ -1253,6 +1265,7 @@ const KEYS: &[(&str, &[(&str, &str)])] = &[
             ("⌘⏎", "post the proof, or cancel a review, after its sheet"),
             ("S", "start a review (no sheet)"),
             ("⇧R", "retry a failed review (no sheet)"),
+            ("⇧S", "review the PR again from scratch"),
             ("C", "cancel a review (asks first)"),
         ],
     ),
@@ -1335,6 +1348,7 @@ mod tests {
             [
                 ("Review and post the proof of #1287".to_string(), locked.clone()),
                 ("Start a review of #1287 at its head".to_string(), locked.clone()),
+                ("Review #1287 again from scratch".to_string(), locked.clone()),
                 ("Retry the failed review of #1287".to_string(), locked.clone()),
                 ("Cancel the review of #1287".to_string(), locked.clone()),
                 ("Review a PR by its URL…".to_string(), locked),

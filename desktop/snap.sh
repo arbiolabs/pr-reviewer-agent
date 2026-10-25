@@ -68,6 +68,12 @@ def empty(x):
 with open(sys.argv[2], "w") as w:
     for line in open(sys.argv[1]):
         w.write(json.dumps(empty(json.loads(line)), separators=(",", ":")) + "\n")' "$script" "$no_account_script"
+# Review again: the showcase with review.again granted, which the showcase itself doesn't script.
+mkdir -p desktop/target/again/playback
+rm -rf desktop/target/again/fixtures
+cp -R protocol/fixtures desktop/target/again/fixtures
+again_script=desktop/target/again/playback/again.ndjson
+sed '1s/"review.start",/"review.start","review.again",/' "$script" > "$again_script"
 
 # One capture, retried up to three times when the app exits without its PNG or never writes it within 60 s.
 capture() {
@@ -144,6 +150,9 @@ for look in dark light; do
   snap 19b-starting-$look      $look 600   "reviewer:starting" desktop/playback/slow.ndjson
   snap 19c-stop-confirm-$look  $look 10000 "wait:9000,pr:1291,reviewer:stop-confirm"
   snap 20-footer-account-$look $look 20000 ""
+  snap 22-review-again-$look   $look 20000 "wait:19000,pr:1287" "$again_script"
+  snap 22b-again-confirm-$look $look 20000 "wait:19000,pr:1287,again" "$again_script"
+  snap 22c-again-palette-$look $look 10000 "wait:9000,pr:1291,palette:again" "$again_script"
 done
 snap 20b-footer-no-account     dark  20000 "" "$no_account_script"
 

@@ -45,7 +45,8 @@ gpui_kit::actions!(
         Paste,
         StartReviewer,
         StopReviewer,
-        RestartReviewer
+        RestartReviewer,
+        ReviewAgain
     ]
 );
 
@@ -101,6 +102,7 @@ pub fn menus(chosen: tokens::Choice) -> Vec<Menu> {
         Menu::new("Review").items([
             MenuItem::action("Open on GitHub", OpenGitHub),
             MenuItem::action("Post the Preview", Post),
+            MenuItem::action("Review Again…", ReviewAgain),
             MenuItem::separator(),
             MenuItem::action("Refresh from the Daemon", Refresh),
         ]),
@@ -701,6 +703,7 @@ impl Shell {
                     (_, "t") => Action::OpenTimeline,
                     (_, "s") => return self.direct(Mutation::Start, cx),
                     (_, "R") => return self.direct(Mutation::Retry, cx),
+                    (_, "S") => Action::Mutation(Mutation::Again),
                     (_, "c") => Action::Mutation(Mutation::Cancel),
                     (_, "p") => Action::Mutation(Mutation::Publish),
                     _ => return,
@@ -812,6 +815,7 @@ impl Render for Shell {
                 cx.notify();
             }))
             .on_action(cx.listener(|s, _: &Post, _, cx| s.post_key(cx)))
+            .on_action(cx.listener(|s, _: &ReviewAgain, _, cx| s.act(Action::Mutation(Mutation::Again), cx)))
             .on_action(cx.listener(|s, _: &GoBack, _, cx| {
                 if s.overlay.is_none() && s.away() {
                     s.act(Action::Back, cx)
