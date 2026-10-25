@@ -8,6 +8,7 @@
     "account.select",
     "review.add",
     "review.start",
+    "review.again",
     "review.retry",
     "review.cancel",
     "review.publish"

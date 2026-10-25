@@ -28,6 +28,7 @@ pub enum Context {
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Mutation {
     Start,
+    Again,
     Retry,
     Cancel,
     Publish,
@@ -37,6 +38,7 @@ impl Mutation {
     pub fn capability(self) -> &'static str {
         match self {
             Mutation::Start => "review.start",
+            Mutation::Again => "review.again",
             Mutation::Retry => "review.retry",
             Mutation::Cancel => "review.cancel",
             Mutation::Publish => "review.publish",
@@ -135,6 +137,8 @@ const TABLE: &[(Context, KeyCode, KeyModifiers, Action)] = &[
     (C::Screens, K::Char('A'), SHIFT, A::Accounts),
     (C::Screens, K::Char('A'), NONE, A::Accounts),
     (C::Review, K::Char('s'), NONE, A::Mutation(Mutation::Start)),
+    (C::Review, K::Char('S'), SHIFT, A::Mutation(Mutation::Again)),
+    (C::Review, K::Char('S'), NONE, A::Mutation(Mutation::Again)),
     (C::Review, K::Char('R'), SHIFT, A::Mutation(Mutation::Retry)),
     (C::Review, K::Char('R'), NONE, A::Mutation(Mutation::Retry)),
     (C::Diff, K::Char('R'), SHIFT, A::Mutation(Mutation::Retry)),
@@ -254,6 +258,7 @@ pub fn help_rows() -> Vec<(Context, String, &'static str, Option<&'static str>)>
             A::Refresh => "refresh snapshot",
             A::Accounts => "GitHub accounts (Settings)",
             A::Mutation(Mutation::Start) => "start a review",
+            A::Mutation(Mutation::Again) => "review again from scratch",
             A::Mutation(Mutation::Retry) => "retry the run",
             A::Mutation(Mutation::Cancel) => "cancel the run",
             A::Mutation(Mutation::Publish) => "preview and publish",

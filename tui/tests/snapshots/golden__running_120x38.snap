@@ -39,4 +39,4 @@ expression: text
                                          ■✓ search_code        120ms│                                    █  ┊
                                          ■✓ read_file          120ms│                                      ██ tests/a…
 
-   s review again  c cancel review  d diff  h pull requests  / search  t timeline  w watch live  ? help  q quit
+   s start another  c cancel review  d diff  h pull requests  / search  t timeline  w watch live  ? help  q quit

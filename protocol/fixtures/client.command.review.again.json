@@ -1,0 +1,10 @@
+{
+  "type": "command",
+  "requestId": "req-cmd",
+  "command": "review.again",
+  "params": {
+    "prId": "acme/shop#184",
+    "expectedHeadSha": "4444444444444444444444444444444444444444"
+  },
+  "idempotencyKey": "review.again:acme/shop#184:4444444444444444444444444444444444444444"
+}

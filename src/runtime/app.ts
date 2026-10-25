@@ -113,8 +113,15 @@ const PUBLISH_POLICY = "+publish";
 /** Whether a revision was started to publish; recovery recreates its task the same way. */
 export const publishes = (revision: RevisionRow) => revision.policy_version.endsWith(PUBLISH_POLICY);
 
-/** Publishing is part of the policy: a dry run of a head never blocks publishing that head later (§2 invariant 3). */
-export const startPolicy = (basePolicyVersion: string, publish: boolean) => (publish ? `${basePolicyVersion}${PUBLISH_POLICY}` : basePolicyVersion);
+/**
+ * Publishing is part of the policy: a dry run of a head never blocks publishing that head later (§2 invariant 3). So is
+ * a review again (the §4.1 force-review override): generation `n` > 0 is `+again<n>`, a new revision of the same head.
+ */
+export const startPolicy = (basePolicyVersion: string, publish: boolean, generation = 0) =>
+  `${basePolicyVersion}${generation > 0 ? `+again${generation}` : ""}${publish ? PUBLISH_POLICY : ""}`;
+
+/** How many times the head was reviewed again before this revision; 0 for its first review. */
+export const generationOf = (revision: RevisionRow) => Number(/\+again(\d+)/.exec(revision.policy_version)?.[1] ?? 0);
 
 export type StartedReview = { revision: RevisionRow; taskId: TaskId<ReviewResult> | undefined };
 
@@ -131,10 +138,16 @@ export async function startReview(
   options: { retry?: boolean; publish?: boolean; retrySource?: string } = {},
 ): Promise<StartedReview> {
   const prId = app.store.upsertPull(pull);
-  const policyVersion = startPolicy(basePolicyVersion, options.publish ?? false);
-  const revision = app.store.ensureRevision({ prId, baseSha: pull.baseSha, headSha: pull.headSha, policyVersion, reviewerVersion: app.reviewerVersion });
+  const publish = options.publish ?? false;
+  const key = { prId, baseSha: pull.baseSha, headSha: pull.headSha, reviewerVersion: app.reviewerVersion };
+  // The head's latest review again stands for it: a plain start finds that revision, not the one it set aside.
+  const same = app.store
+    .revisionsForPr(prId)
+    .filter((r) => r.base_sha === key.baseSha && r.head_sha === key.headSha && r.reviewer_version === key.reviewerVersion && r.policy_version === startPolicy(basePolicyVersion, publish, generationOf(r)));
+  const generation = Math.max(0, ...same.map(generationOf));
+  const revision = app.store.ensureRevision({ ...key, policyVersion: startPolicy(basePolicyVersion, publish, generation) });
   if (options.retry && TERMINAL_REVIEW_STATES.includes(revision.state)) return retryReview(app, revision, options.retrySource ?? "pr-review review --retry");
-  const taskId = await ensureTask(app, revision, options.publish ?? false);
+  const taskId = await ensureTask(app, revision, publish);
   return { revision: app.store.revision(revision.id)!, taskId };
 }
 

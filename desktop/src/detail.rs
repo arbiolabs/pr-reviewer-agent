@@ -12,7 +12,7 @@ use pr_review_tui::protocol::{
     EvidenceKind, Finding, FindingId, FindingStatus, HistoryEntry, Lifecycle, LineKind, Pr, PublicationStatus, Run,
     RunStatus, Severity,
 };
-use pr_review_tui::update::{Msg, can_mutate, write_block};
+use pr_review_tui::update::{Msg, again_block, can_mutate, write_block};
 use pr_review_tui::view::Hit;
 
 use crate::code::{Inline, Lexer, Tok, clip, inline_markdown, wrap};
@@ -707,11 +707,12 @@ pub fn why_not(m: &Model, mu: Mutation, label: &str) -> String {
     if queue::read_only(m) {
         return format!("Read-only daemon. Restart it with --allow-commands to {}.", label.to_lowercase());
     }
-    let why = write_block(m, mu.capability()).unwrap_or(match mu {
-        Mutation::Start => "a review already holds this head",
-        Mutation::Retry => "its latest run has not failed",
-        Mutation::Cancel => "no review is running on it",
-        Mutation::Publish => "nothing is waiting for approval",
+    let why = write_block(m, mu.capability()).map(String::from).unwrap_or_else(|| match mu {
+        Mutation::Start => "a review already holds this head".into(),
+        Mutation::Again => again_block(m).unwrap_or_default(),
+        Mutation::Retry => "its latest run has not failed".into(),
+        Mutation::Cancel => "no review is running on it".into(),
+        Mutation::Publish => "nothing is waiting for approval".into(),
     });
     format!("Can't {}: {why}", label.to_lowercase())
 }
@@ -750,6 +751,10 @@ fn pr_actions(s: &Shell, pr: &Pr, run: Option<&Run>, cx: &Context<Shell>) -> Bar
         ));
     }
     bar.lead.push(Item::new("a-diff", "Diff", "D", Tone::Secondary, on(cx, |s, cx| s.act(Action::OpenDiff, cx))));
+    // A PR with a run can always be reviewed again, once nothing of it is at work: dimmed with the reason until then.
+    if run.is_some() {
+        bar.lead.push(mutation_item(s, "a-again", "Review again", "⇧S", Tone::Secondary, Mutation::Again, cx));
+    }
     if pr.lifecycle == Lifecycle::Active && run.is_some_and(|r| r.parked()) {
         bar.lead.push(mutation_item(s, "a-cancel", "Cancel", "C", Tone::Ghost, Mutation::Cancel, cx));
     }

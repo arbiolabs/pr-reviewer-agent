@@ -267,6 +267,32 @@ fn cancel_and_retry_name_their_target_and_settle_on_the_run_ending_or_moving() {
 }
 
 #[test]
+fn review_again_asks_with_the_head_and_settles_on_the_new_run_starting() {
+    let head = "4444444444444444444444444444444444444444";
+    let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#184");
+    assert!(commands(&press(&mut m, KeyCode::Char('S'))).is_empty());
+    assert_eq!(m.top_modal(), None);
+    assert_eq!(m.notice.as_ref().unwrap().text, "Can't review #184 again: a review is running on it");
+
+    let failed = run_json("rev-184-a", "acme/shop#184", head, "FAILED", "FAILED");
+    send(&mut m, &event(109, "acme/shop#184", "rev-184-a", "run.failed", &failed));
+    assert!(commands(&press(&mut m, KeyCode::Char('S'))).is_empty(), "it asks first");
+    assert_eq!(prompt(&m), "Review #184 again at 4444444? The current result is set aside.");
+    let fx = press(&mut m, KeyCode::Char('y'));
+    let sent = commands(&fx);
+    assert_eq!(sent[0].idempotency_key, format!("review.again:acme/shop#184:{head}"));
+    assert_eq!(sent[0].command.name(), "review.again");
+    // The old run setting aside is not the new one starting.
+    let aside = run_json("rev-184-a", "acme/shop#184", head, "SUPERSEDED", "SUPERSEDED");
+    send(&mut m, &event(110, "acme/shop#184", "rev-184-a", "run.superseded", &aside));
+    assert!(matches!(m.top_modal(), Some(Modal::Confirm { .. })));
+    let started = run_json("rev-184-b", "acme/shop#184", head, "RUNNING", "COLLECT_CONTEXT");
+    send(&mut m, &event(111, "acme/shop#184", "rev-184-b", "run.started", &started));
+    assert_eq!(m.top_modal(), None);
+    assert_eq!(m.notice.as_ref().unwrap().text, "Reviewing #184 again at 4444444");
+}
+
+#[test]
 fn the_retry_prompt_names_the_attempt_it_opens_when_the_daemon_counts_them() {
     let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#184");
     let failed = run_json("rev-184-a", "acme/shop#184", "4444444444444444444444444444444444444444", "FAILED", "FAILED")

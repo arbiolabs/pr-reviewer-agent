@@ -193,7 +193,7 @@ To check what Jev decided, run `node bin/pr-review.mjs inspect --pr owner/repo#1
 | Command | What it does |
 |---|---|
 | `setup [--check] [--json]` | Check what a review needs and offer to fix it. `--check` never prompts, and exits 1 when a review cannot run. |
-| `review <pr-url> [--dry-run \| --publish] [--json] [--model provider/id] [--no-jev] [--retry]` | Review one PR. Dry run is the default. Rerunning resumes an interrupted review or prints the stored result. |
+| `review <pr-url> [--dry-run \| --publish] [--json] [--model provider/id] [--no-jev] [--retry \| --again]` | Review one PR. Dry run is the default. Rerunning resumes an interrupted review or prints the stored result. `--again` reviews the head from scratch and sets the stored result aside. |
 | `inspect --pr owner/repo#N [--json]` | Show a PR's revisions, transitions, routing, findings, and discards. |
 | `reconcile --revision <id>` | Decide an uncertain publication by listing the PR's reviews. Never posts. |
 | `serve` | Run the webhook receiver, the worker, and the reviews in one process. |

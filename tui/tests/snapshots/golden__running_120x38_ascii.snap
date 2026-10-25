@@ -39,4 +39,4 @@ expression: ascii_text
                                          T+ search_code        120ms|                                    #  :
                                          T+ read_file          120ms|                                      ## tests/a~
 
-   s review again  c cancel review  d diff  h pull requests  / search  t timeline  w watch live  ? help  q quit
+   s start another  c cancel review  d diff  h pull requests  / search  t timeline  w watch live  ? help  q quit

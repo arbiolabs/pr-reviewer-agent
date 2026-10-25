@@ -156,7 +156,7 @@ fn m3_messages_parse_into_the_client_enums() {
 
     for (name, mode, granted) in [
         ("server.welcome", None, 0),
-        ("server.welcome.engine", Some(DaemonMode::Engine), 6),
+        ("server.welcome.engine", Some(DaemonMode::Engine), 7),
         ("server.welcome.read-only", Some(DaemonMode::ReadOnly), 1),
     ] {
         let ServerMessage::Welcome { mode: m, capabilities, read_only_reason, .. } =

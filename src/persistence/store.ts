@@ -298,6 +298,11 @@ export class AppStore {
     }
     if (event === "TERMINAL_ERROR" && outbox.status === "sending") this.advanceOutbox(outbox.id, "UNCERTAIN", "revision failed while the POST was in flight");
     if (event === "MANUAL_RETRY" && outbox.status === "failed") this.advanceOutbox(outbox.id, "MANUAL_RETRY", "manual retry of the revision");
+    // A review again never sets aside a publication that may have reached GitHub; an unsent one is abandoned with it.
+    if (event === "REVIEW_AGAIN") {
+      if (outbox.status === "sending" || outbox.status === "needs_reconciliation") return false;
+      if (outbox.status === "pending") this.advanceOutbox(outbox.id, "ABANDON", "set aside by a review again");
+    }
     return true;
   }
 

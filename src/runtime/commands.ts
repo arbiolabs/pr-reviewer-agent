@@ -3,7 +3,7 @@ import type { TaskId } from "@earendil-works/pi-durable";
 import { IDLE_REVIEW_STATES, TERMINAL_REVIEW_STATES } from "../domain/machines.ts";
 import type { PullSource } from "../github/pulls.ts";
 import type { RevisionRow } from "../persistence/store.ts";
-import { type App, ensureTask, retryReview, type StartedReview, startReview } from "./app.ts";
+import { type App, ensureTask, generationOf, retryReview, type StartedReview, startPolicy, startReview } from "./app.ts";
 
 /**
  * The guarded review commands (TUI_SPEC §3C, §3D), shared by the daemon and the CLI. Each one checks the revision's
@@ -70,6 +70,51 @@ export async function retry(app: App, revisionId: string, retrySource: string, o
   const revision = revisionOf(app, revisionId);
   if (revision.state !== "FAILED") throw new Refused("INVALID_TRANSITION", `MANUAL_RETRY is not legal in ${revision.state}`);
   return retryReview(app, revision, retrySource, onCommit);
+}
+
+/** Why a review again of `prId` at `headSha` is refused now, or the revisions it sets aside and the generation it opens. */
+export function againTarget(app: App, prId: string, headSha: string): { atHead: RevisionRow[]; generation: number; refusal?: string } {
+  const revisions = app.store.revisionsForPr(prId);
+  const atHead = revisions.filter((r) => r.head_sha === headSha);
+  const generation = Math.max(0, ...atHead.map(generationOf)) + 1;
+  const number = `#${app.store.pullById(prId)?.number ?? prId}`;
+  const head = `${number} at ${headSha.slice(0, 7)}`;
+  const running = revisions.find((r) => !IDLE_REVIEW_STATES.includes(r.state));
+  if (running) return { atHead, generation, refusal: `${number} is being reviewed (${running.state}); wait for it or cancel it` };
+  if (atHead.length === 0) return { atHead, generation, refusal: `${head} has no review yet; start it instead` };
+  const settling = atHead.find((r) => ["sending", "needs_reconciliation"].includes(app.store.outboxForRevision(r.id)?.status ?? ""));
+  if (settling) return { atHead, generation, refusal: `${head} has a publication that may have reached GitHub; reconcile revision ${settling.id} first` };
+  return { atHead, generation };
+}
+
+/**
+ * review.again: review the PR's live head from scratch as a new revision, whose policy carries the next review-again
+ * generation (the §4.1 force-review override), so nothing of an earlier attempt is reused. In the transaction that
+ * creates it, every idle revision of that head is set aside (REVIEW_AGAIN, to SUPERSEDED; a parked payload is
+ * abandoned, nothing having been sent). Refused while a review of the PR runs or a publication of that head may have
+ * reached GitHub. `onCommit` runs in that transaction, with the new revision.
+ */
+export async function reviewAgain(
+  app: App,
+  pulls: PullSource,
+  params: { prId: string; expectedHeadSha: string },
+  options: { basePolicyVersion: string; publish: boolean; source: string },
+  onCommit?: (revision: RevisionRow) => void,
+): Promise<StartedReview> {
+  const live = await livePull(app, pulls, params.prId);
+  if (live.headSha !== params.expectedHeadSha) throw new Refused("REVISION_STALE", `the head of ${live.fullName}#${live.number} is now ${live.headSha}`);
+  if (live.state !== "open") throw new Refused("CONFLICT", `${live.fullName}#${live.number} is ${live.merged ? "merged" : "closed"}`);
+  const revision = app.store.tx(() => {
+    const { atHead, generation, refusal } = againTarget(app, params.prId, live.headSha);
+    if (refusal) throw new Refused("CONFLICT", refusal);
+    const detail = `manual override: ${options.source} (review again ${generation})`;
+    for (const r of atHead) if (r.state !== "SUPERSEDED") app.store.advance(r.id, r.state, "REVIEW_AGAIN", detail);
+    const policyVersion = startPolicy(options.basePolicyVersion, options.publish, generation);
+    const created = app.store.ensureRevision({ prId: params.prId, baseSha: live.baseSha, headSha: live.headSha, policyVersion, reviewerVersion: app.reviewerVersion });
+    onCommit?.(created);
+    return created;
+  });
+  return { revision, taskId: await ensureTask(app, revision, options.publish) };
 }
 
 /**

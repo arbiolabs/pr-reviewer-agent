@@ -901,6 +901,9 @@ fn settle_command(m: &mut Model, e: &SequencedEvent) {
         (Command::Start(p), EventBody::Run(RunChange::Started | RunChange::Failed, r)) => {
             r.pr_id == p.pr_id && r.head_sha == p.expected_head_sha
         }
+        (Command::Again(p), EventBody::Run(RunChange::Started, r)) => {
+            r.pr_id == p.pr_id && r.head_sha == p.expected_head_sha
+        }
         (Command::Retry(p), EventBody::Run(_, r)) => r.id == p.run_id,
         (Command::Retry(p), EventBody::PhaseChanged(c)) => c.run_id == p.run_id,
         (Command::Cancel(p), EventBody::Run(RunChange::Failed | RunChange::Superseded, r)) => r.id == p.run_id,
@@ -927,6 +930,9 @@ fn settle_command(m: &mut Model, e: &SequencedEvent) {
         (Command::Retry(p), _) => {
             let attempt = m.domain.runs.get(&p.run_id).and_then(|r| r.attempt);
             format!("Retrying {}{}", number(&p.run_id), attempt.map_or(String::new(), |n| format!(" (attempt {n})")))
+        }
+        (Command::Again(_), EventBody::Run(_, r)) => {
+            format!("Reviewing {} again at {}", number(&r.id), r.head_sha.short())
         }
         (_, EventBody::Run(RunChange::Started, r)) => {
             format!("Started reviewing {} at {}", number(&r.id), r.head_sha.short())
@@ -1856,10 +1862,29 @@ pub fn can_mutate(m: &Model, mu: Mutation) -> bool {
     write_block(m, mu.capability()).is_none()
         && match mu {
             Mutation::Start => parked_head(m, p).is_none(),
+            Mutation::Again => again_block(m).is_none(),
             Mutation::Retry => run.is_some_and(|r| r.status == RunStatus::Failed),
             Mutation::Cancel => run.is_some_and(|r| r.status == RunStatus::Running),
             Mutation::Publish => run.is_some_and(|r| r.phase == Phase::AwaitingApproval),
         }
+}
+
+/// Why S cannot review the selected PR again, beyond the daemon's grant; `None` when it can. The daemon checks the
+/// same: a run of the PR at work, no run at its head, or a publication that may still reach GitHub.
+pub fn again_block(m: &Model) -> Option<String> {
+    let p = m.selected_pr()?;
+    let Some(run) = m.domain.latest_run(&p.id).filter(|r| r.head_sha == p.head_sha) else {
+        return Some("it has no review at its head yet; start it".into());
+    };
+    if run.status == RunStatus::Running && !run.parked() {
+        return Some("a review is running on it".into());
+    }
+    let settling = m
+        .domain
+        .publications
+        .get(&run.id)
+        .is_some_and(|c| matches!(c.status, PublicationStatus::Publishing | PublicationStatus::Uncertain));
+    settling.then(|| "its publication is still settling".into())
 }
 
 /// y: the panel on top asks, and for a preview, it is still the one to publish.
@@ -1967,6 +1992,11 @@ fn mutation(m: &mut Model, mu: Mutation, fx: &mut Vec<Effect>) {
         return;
     }
     let Some(p) = m.selected_pr().cloned() else { return };
+    if mu == Mutation::Again {
+        let prompt = format!("Review #{} again at {}? The current result is set aside.", p.number, p.head_sha.short());
+        confirm(m, prompt, Command::Again(StartParams { pr_id: p.id, expected_head_sha: p.head_sha }));
+        return;
+    }
     let Some(r) = m.domain.latest_run(&p.id).cloned().filter(|_| mu != Mutation::Start) else {
         let prompt = format!("Start a review of #{} at {}?", p.number, p.head_sha.short());
         confirm(m, prompt, Command::Start(StartParams { pr_id: p.id, expected_head_sha: p.head_sha }));
@@ -1991,6 +2021,7 @@ fn mutation(m: &mut Model, mu: Mutation, fx: &mut Vec<Effect>) {
 fn refuse(m: &mut Model, mu: Mutation) {
     let verb = match mu {
         Mutation::Start => "start",
+        Mutation::Again => "review again",
         Mutation::Retry => "retry",
         Mutation::Cancel => "cancel",
         Mutation::Publish => "publish",
@@ -2013,6 +2044,7 @@ fn refuse(m: &mut Model, mu: Mutation) {
     notice(
         m,
         match mu {
+            Mutation::Again => format!("Can't review #{} again: {}", p.number, again_block(m).unwrap_or_default()),
             Mutation::Retry => format!("Can't retry #{}: its latest run has not failed", p.number),
             Mutation::Cancel => format!("Can't cancel #{}: no review is running on it", p.number),
             _ => format!("Nothing to publish on #{}", p.number),

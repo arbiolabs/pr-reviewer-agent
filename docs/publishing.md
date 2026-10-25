@@ -49,6 +49,8 @@ If a revision failed with `cannot_safely_decide`:
 
 `--retry` reopens a failed revision. The audit log records it as `FAILED --MANUAL_RETRY--> COLLECT_CONTEXT`. pr-review refuses `--retry` for a completed or superseded revision.
 
+`--again` reviews the current head from scratch as a new revision, whatever the stored result was: completed, failed, superseded or parked for approval. The earlier revision is recorded as `REVIEW_AGAIN --> SUPERSEDED`, and a parked payload is dropped unsent. pr-review refuses `--again` while a review of the PR runs, and while a publication of that head may have reached GitHub: reconcile it first.
+
 ## Approval mode
 
 With `"review": { "publish_mode": "approval" }`, pr-review prepares the review but does not post it. The run stops in the state `AWAITING_APPROVAL` with the payload stored in the outbox, and the CLI prints the approve command:

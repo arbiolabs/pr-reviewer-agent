@@ -10,7 +10,7 @@ use crate::update as u;
 pub struct Hint {
     pub keys: &'static str,
     pub label: &'static str,
-    /// Its place in `RANK`: by its keys, or for a start on a reviewed head, `s again`.
+    /// Its place in `RANK`, by its keys.
     rank: usize,
 }
 
@@ -23,11 +23,12 @@ impl Hint {
 /// Most important first. Where the footer runs out of room the last of these goes first: the keys that leave or
 /// explain a view and the page's main action, then quit, then the other actions on what it shows, then the ones
 /// that move elsewhere or narrow it. A parked run's p is its one action.
-/// A start on an unreviewed PR is the page's one action; on a reviewed head the daemon most likely refuses it, so it
-/// is `s again` and goes early.
-pub const RANK: [&str; 27] = [
-    "?", "Esc", "n/Esc", "y", "Enter", "Enter/l", "j/k", "p", "s", "q", "R", "c", "d", "n/N", "h", "/", ":", "J/K",
-    "m", "o", "t", "w", "f", "v", "P", "s again", "r",
+/// A start on an unreviewed PR is the page's one action. On a reviewed head the daemon most likely refuses a start,
+/// so s shares its hint with S, which reviews the head again, as `s/S` and goes early. S alone (a parked run, which
+/// no start reaches) ranks with the run's other actions.
+pub const RANK: [&str; 28] = [
+    "?", "Esc", "n/Esc", "y", "Enter", "Enter/l", "j/k", "p", "s", "q", "R", "S", "c", "d", "n/N", "h", "/", ":",
+    "J/K", "m", "o", "t", "w", "f", "v", "P", "s/S", "r",
 ];
 
 fn rank(keys: &str) -> usize {
@@ -102,7 +103,13 @@ pub fn offered(m: &Model) -> Vec<Hint> {
             offer(turns && u::can_turn(m), "n/N", if search { "match" } else { "finding" });
             if page {
                 offer(u::can_mutate(m, Mutation::Publish), "p", "preview & publish");
-                offer(u::can_mutate(m, Mutation::Start), "s", if reviewed { "review again" } else { "start review" });
+                match (u::can_mutate(m, Mutation::Start), u::can_mutate(m, Mutation::Again)) {
+                    (true, true) => offer(true, "s/S", "start / review again"),
+                    (start, again) => {
+                        offer(start, "s", if reviewed { "start another" } else { "start review" });
+                        offer(again, "S", "review again");
+                    }
+                }
             }
             // A failed run's Diff has nothing to show, and says R retries it.
             offer((page || screen == Screen::Diff) && u::can_mutate(m, Mutation::Retry), "R", "retry");
@@ -132,20 +139,23 @@ pub fn offered(m: &Model) -> Vec<Hint> {
             offer(true, "q", "quit");
         }
     }
-    if let Some(again) = out.iter_mut().find(|h| h.keys == "s" && reviewed) {
-        again.rank = rank("s again");
+    // A start on a PR with a run most likely finds that run or is refused, so it goes as early as s/S.
+    if let Some(start) = out.iter_mut().find(|h| h.keys == "s" && reviewed) {
+        start.rank = rank("s/S");
     }
     out
 }
 
 /// The shorter label a hint takes when the footer is too narrow for every hint at full length.
-const SHORT: [(&str, &str); 13] = [
+const SHORT: [(&str, &str); 15] = [
     ("pull request", "PR"),
     ("pull requests", "PRs"),
     ("preview & publish", "publish"),
     ("select account", "select"),
     ("start review", "start"),
+    ("start another", "start"),
     ("review again", "again"),
+    ("start / review again", "redo"),
     ("cancel review", "cancel"),
     ("watch live", "watch"),
     ("diff at anchor", "diff"),

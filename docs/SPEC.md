@@ -40,7 +40,7 @@ Three kinds of intelligence remain separate:
 
 1. **PR identity:** `(installation_id, repository_id, pr_number)`; never key by mutable branch name alone.
 2. **Revision identity:** `(pr_id, base_sha, head_sha, policy_version, reviewer_version)`; attempts are associated with this immutable key.
-3. **One publishable review per revision/policy combination** (subject to a deliberate manual force-review override).
+3. **One publishable review per revision/policy combination** (subject to a deliberate manual force-review override: a review again, §4.1).
 4. **Explicit application state is authoritative.** Conversation history is contextual evidence, not the database of findings.
 5. **Never publish stale inline comments:** reread PR head SHA immediately before publication; if it has changed, mark the run superseded and reschedule.
 6. **GitHub writes use an outbox and reconciliation.** A durable checkpoint alone cannot provide exactly-once delivery to an external API.
@@ -108,6 +108,13 @@ Coordinator rules:
 - A new head may supersede active runs, but cleanup must not delete their durable audit records.
 - Comments should trigger review only if directed at the bot or tied to a tracked finding; ignore bot-authored comments and prevent reply loops.
 - Manual override is authorized, audited and never bypasses safety guards.
+- **Review again** is the force-review override. It reviews a PR's current head from scratch as a new revision whose
+  policy version carries a review-again generation (`1+again1+publish`), so the revision key stays immutable and its
+  id deterministic. Nothing of the earlier attempt is reused: context, routing, candidates and publication are all
+  new. It is allowed only while every revision of the PR is idle (`COMPLETED`, `FAILED`, `SUPERSEDED` or
+  `AWAITING_APPROVAL`), and never while an outbox of that head is `sending` or `needs_reconciliation`. In the same
+  transaction each earlier revision of that head moves `REVIEW_AGAIN → SUPERSEDED`; a parked outbox is abandoned,
+  since nothing was sent. Findings are tracked into the new revision as into a new head.
 
 ### 4.2 Per-revision review task machine
 
@@ -136,7 +143,7 @@ stateDiagram-v2
   VERIFY --> SUPERSEDED: newer head
 ```
 
-`FAILED` and `SUPERSEDED` are terminal for that immutable revision attempt. Transient error handling uses bounded retry/backoff within individual phases, without switching to `FAILED` on the first recoverable error. A no-findings review proceeds to completion via a summary or recorded silent result according to configured publication policy.
+`FAILED` and `SUPERSEDED` are terminal for that immutable revision attempt. The §4.1 overrides are the only edges out of an ended revision: `FAILED → COLLECT_CONTEXT` (manual retry), and `COMPLETED | FAILED | AWAITING_APPROVAL → SUPERSEDED` (review again). Transient error handling uses bounded retry/backoff within individual phases, without switching to `FAILED` on the first recoverable error. A no-findings review proceeds to completion via a summary or recorded silent result according to configured publication policy.
 
 ### 4.3 Candidate-finding submachine
 
@@ -456,6 +463,7 @@ CLI:
 ```bash
 pr-review review https://github.com/owner/repo/pull/123 --dry-run
 pr-review review https://github.com/owner/repo/pull/123 --publish
+pr-review review https://github.com/owner/repo/pull/123 --again
 pr-review inspect --pr owner/repo#123
 pr-review replay --revision <revision-id> --dry-run
 pr-review reconcile --revision <revision-id>

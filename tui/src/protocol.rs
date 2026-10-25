@@ -874,6 +874,8 @@ pub struct CommandRequest {
 pub enum Command {
     Add(AddParams),
     Start(StartParams),
+    /// Reviews the PR's head from scratch as a new run; the run it replaces reports `run.superseded`.
+    Again(StartParams),
     Cancel(RunParams),
     Retry(RunParams),
     Publish(PublishParams),
@@ -890,6 +892,7 @@ impl Command {
         match self {
             Command::Add(_) => "review.add",
             Command::Start(_) => "review.start",
+            Command::Again(_) => "review.again",
             Command::Cancel(_) => "review.cancel",
             Command::Retry(_) => "review.retry",
             Command::Publish(_) => "review.publish",
@@ -904,6 +907,7 @@ impl Command {
         match self {
             Command::Add(_) => "add a PR",
             Command::Start(_) => "start",
+            Command::Again(_) => "review again",
             Command::Cancel(_) => "cancel",
             Command::Retry(_) => "retry",
             Command::Publish(_) => "publish",
@@ -918,6 +922,7 @@ impl Command {
         match self {
             Command::Add(p) => format!("review.add:{}", p.url),
             Command::Start(p) => format!("review.start:{}:{}", p.pr_id, p.expected_head_sha),
+            Command::Again(p) => format!("review.again:{}:{}", p.pr_id, p.expected_head_sha),
             Command::Cancel(p) => format!("review.cancel:{}", p.run_id),
             Command::Retry(p) => format!("review.retry:{}", p.run_id),
             Command::Publish(p) => format!("review.publish:{}:{}", p.run_id, p.preview_id),
@@ -992,6 +997,7 @@ impl TryFrom<RawCommand> for CommandRequest {
         let command = match raw.command.as_str() {
             "review.add" => Command::Add(from_value(raw.params)?),
             "review.start" => Command::Start(from_value(raw.params)?),
+            "review.again" => Command::Again(from_value(raw.params)?),
             "review.cancel" => Command::Cancel(from_value(raw.params)?),
             "review.retry" => Command::Retry(from_value(raw.params)?),
             "review.publish" => Command::Publish(from_value(raw.params)?),
@@ -1010,6 +1016,7 @@ impl From<CommandRequest> for RawCommand {
         let (command, params) = match c.command {
             Command::Add(p) => ("review.add", to(serde_json::to_value(p))),
             Command::Start(p) => ("review.start", to(serde_json::to_value(p))),
+            Command::Again(p) => ("review.again", to(serde_json::to_value(p))),
             Command::Cancel(p) => ("review.cancel", to(serde_json::to_value(p))),
             Command::Retry(p) => ("review.retry", to(serde_json::to_value(p))),
             Command::Publish(p) => ("review.publish", to(serde_json::to_value(p))),
