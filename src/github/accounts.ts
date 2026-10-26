@@ -29,6 +29,13 @@ function envToken(env: Env): { name: (typeof ENV_TOKENS)[number]; token: string 
   return undefined;
 }
 
+/**
+ * How long one gh call may take. `gh auth status` checks each token against GitHub: about 0.5 s in a shell, but 2.5 to
+ * 3.5 s for a LaunchAgent at launchd's background priority, and more while the daemon is starting up. Past the limit
+ * gh's account list comes back empty and the selected account reads as unusable, which leaves the daemon read-only.
+ */
+const GH_TIMEOUT_MS = 30_000;
+
 /** gh reads GH_TOKEN and GITHUB_TOKEN before its stored accounts; strip both so gh lists and hands out only those. */
 const ghEnv = (env: Env): Env => ({ ...env, GITHUB_TOKEN: undefined, GH_TOKEN: undefined });
 
@@ -41,7 +48,7 @@ export async function detectGh(env: Env = process.env): Promise<GhDetection> {
   if (path === undefined) return { installed: false };
   let stdout: string;
   try {
-    ({ stdout } = await run(path, ["auth", "status", "--json", "hosts"], { env: ghEnv(env), timeout: 5000 }));
+    ({ stdout } = await run(path, ["auth", "status", "--json", "hosts"], { env: ghEnv(env), timeout: GH_TIMEOUT_MS }));
   } catch (error) {
     stdout = String((error as { stdout?: unknown }).stdout ?? "");
   }
@@ -114,7 +121,7 @@ export async function resolveGithubAuth(store: { getMeta(key: string): string | 
   const plan = planGithubAuth(listAccounts(detection, store.getMeta(ACCOUNT_KEY), env));
   if (plan.source === "none" || plan.source === "env" || !detection.installed) return { token: undefined, source: "none" };
   const { host, login, id } = plan.account;
-  const { stdout } = await run(detection.path, ["auth", "token", "--hostname", host, "--user", login], { env: ghEnv(env), timeout: 5000 });
+  const { stdout } = await run(detection.path, ["auth", "token", "--hostname", host, "--user", login], { env: ghEnv(env), timeout: GH_TIMEOUT_MS });
   const token = stdout.trim();
   if (!token) throw new Error(`gh returned no token for ${id}; run \`gh auth login --hostname ${host}\``);
   return { token, source: plan.source, account: id };
