@@ -564,6 +564,11 @@ pub fn setup_body(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
     };
     let row =
         || div().flex().items_start().gap(space::S3).px(space::S4).py(px(10.)).border_b_1().border_color(t.border);
+    // Every row's mark sits in one slot, as wide as an icon and as tall as the row's first line, so the dot and the
+    // icons share a column and each centres on the line beside it.
+    let lead = |mark: AnyElement| {
+        div().flex().flex_none().items_center().justify_center().w(px(16.)).h(text::LINE_BODY).child(mark)
+    };
     let (hue, word) = crate::ui::link_word(s, t);
     let server = m.server.as_ref();
     let mode = match server.and_then(|s| s.mode) {
@@ -572,15 +577,21 @@ pub fn setup_body(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         _ => ("Unknown mode", t.muted),
     };
     let fact = |glyph: IconName, label: &str, value: String| {
-        row().child(icon(glyph, px(15.), t.faint)).child(
+        row().child(lead(icon(glyph, px(15.), t.faint).into_any_element())).child(
             div()
                 .flex()
                 .flex_col()
                 .gap(px(2.))
                 .flex_1()
                 .min_w_0()
-                .child(div().text_size(text::SMALL).text_color(t.muted).child(label.to_string()))
-                .child(div().font_family(text::MONO).text_size(px(11.)).text_color(t.text).child(value)),
+                .child(
+                    div()
+                        .text_size(text::SMALL)
+                        .line_height(text::LINE_BODY)
+                        .text_color(t.muted)
+                        .child(label.to_string()),
+                )
+                .child(div().font_family(text::MONO).text_size(px(11.)).text_color(t.text).truncate().child(value)),
         )
     };
     let runs_as = match &s.reviewer.launcher {
@@ -595,26 +606,32 @@ pub fn setup_body(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
     let mut conn = div()
         .child(
             row()
-                .items_center()
-                .child(div().size(px(8.)).rounded(radius::PILL).bg(hue))
+                .child(lead(div().size(px(8.)).rounded(radius::PILL).bg(hue).into_any_element()))
                 .child(
                     div()
                         .flex()
                         .flex_col()
                         .gap(px(2.))
                         .flex_1()
-                        .child(div().font_weight(FontWeight::SEMIBOLD).child(word))
-                        .child(
+                        .min_w_0()
+                        .child(div().font_weight(FontWeight::SEMIBOLD).line_height(text::LINE_BODY).child(word))
+                        // The default socket sits under Application Support, long enough to push the buttons out of the
+                        // card; the path gives way and its tooltip keeps it whole.
+                        .child(crate::kit::tip(
                             div()
+                                .id("reviewer-endpoint")
                                 .font_family(text::MONO)
                                 .text_size(px(11.))
                                 .text_color(t.muted)
+                                .truncate()
                                 .child(m.diag.endpoint.clone()),
-                        ),
+                            m.diag.endpoint.clone(),
+                        )),
                 )
                 .child(
                     div()
                         .flex()
+                        .flex_none()
                         .gap(space::S2)
                         .child(ask_button(s, t, Ask::Start, None, Tone::Secondary, cx))
                         .child(ask_button(s, t, Ask::Restart, None, Tone::Secondary, cx))
@@ -622,12 +639,12 @@ pub fn setup_body(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                 ),
         )
         .child(
-            row().child(icon(IconName::Cpu, px(15.), mode.1)).child(
+            row().child(lead(icon(IconName::Cpu, px(15.), mode.1).into_any_element())).child(
                 div()
                     .flex()
                     .flex_col()
                     .gap(px(2.))
-                    .child(div().font_weight(FontWeight::SEMIBOLD).child(mode.0))
+                    .child(div().font_weight(FontWeight::SEMIBOLD).line_height(text::LINE_BODY).child(mode.0))
                     .children(server.and_then(|s| s.read_only_reason.as_ref()).map(|r| {
                         div().text_size(text::SMALL).text_color(t.muted).child(crate::kit::sentence(r.as_str()))
                     })),
@@ -637,9 +654,10 @@ pub fn setup_body(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         .child(fact(IconName::FileText, "Log", log));
     if let Some(sv) = server {
         conn = conn.child(
-            row().child(icon(IconName::Info, px(15.), t.faint)).child(
+            row().child(lead(icon(IconName::Info, px(15.), t.faint).into_any_element())).child(
                 div()
                     .text_size(text::SMALL)
+                    .line_height(text::LINE_BODY)
                     .text_color(t.muted)
                     .child(format!("pr-review {} · protocol v{}", sv.server_version, sv.protocol_version)),
             ),
