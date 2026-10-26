@@ -2,6 +2,12 @@
 
 Agent skills that load for anyone working on this repository in Claude Code.
 
+## Written for this repository
+
+| Skill | Use it for |
+|---|---|
+| `verify` | Driving the real app the way a user does and capturing proof: a scratch daemon and the desktop app under `/private/tmp/<name>`, never the operator's install. Its helpers are in `verify/scripts/`, and its feature map is in `verify/features/`. Generated with pstack's `create-verification-skill`. Keep it current with `/maintain-verification-skill`. |
+
 ## Vendored from mattpocock/skills
 
 Copied unchanged from [mattpocock/skills](https://github.com/mattpocock/skills) at commit `5beb35b`, under the MIT license in [LICENSE-mattpocock-skills](LICENSE-mattpocock-skills). Only the `agents/openai.yaml` files were dropped.
