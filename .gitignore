@@ -7,3 +7,4 @@ tui/target/
 .claude/worktrees/
 desktop/target/
 desktop/snapshots/
+.verify-evidence/
