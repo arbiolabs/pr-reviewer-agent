@@ -194,16 +194,23 @@ export type ModelOption = Static<typeof ModelOption>;
 const RepoName = Type.String({ pattern: "^[\\w.-]+/[\\w.-]+$", maxLength: 200, description: "owner/name" });
 const RepoList = Type.Array(RepoName, { maxItems: 200 });
 const IntervalMinutes = Type.Union([Type.Literal(5), Type.Literal(15), Type.Literal(30)]);
+const DailyCap = Type.Integer({ minimum: 0, description: "automatic starts allowed per local day of the daemon; 0 means no cap" });
 
 /** What the daemon's last poll for review requests saw. `error` says why it failed; it is retried with backoff. */
 export const AutoReviewPoll = Type.Object({
   at: Timestamp,
   found: Type.Integer({ minimum: 0, description: "open, non-draft PRs requesting the account's review" }),
   started: Type.Integer({ minimum: 0, description: "reviews it started; at most 5 a poll, the rest wait for the next" }),
-  skipped: Type.Integer({ minimum: 0, description: "found but not started: reviewed at their head, archived, excluded, closed, or past the cap" }),
+  skipped: Type.Integer({ minimum: 0, description: "found but not started: reviewed at their head, archived, excluded, closed, or past a cap" }),
+  startedToday: Type.Integer({ minimum: 0, description: "automatic starts since local midnight, this poll's included" }),
+  capReached: Type.Optional(Type.Boolean({ description: "true when startedToday has reached a nonzero dailyCap: no more start until the next local day" })),
   error: Type.Optional(Type.String()),
 });
 export type AutoReviewPoll = Static<typeof AutoReviewPoll>;
+
+/** A repository the daemon's account can reach, as `repos.list` lists it. */
+export const AccessibleRepo = Type.Object({ fullName: RepoName, private: Type.Boolean(), archived: Type.Boolean(), pushedAt: Type.Optional(Timestamp) });
+export type AccessibleRepo = Static<typeof AccessibleRepo>;
 
 /** A `{{name}}` the review summary's template may use, and what it looks like filled in. */
 export const TemplateVariable = Type.Object({ name: Type.String({ minLength: 1 }), description: Type.String(), sample: Type.String() });
@@ -384,6 +391,7 @@ export const Command = Type.Union([
           intervalMinutes: Type.Optional(IntervalMinutes),
           includeTeamRequests: Type.Optional(Type.Boolean()),
           repos: Type.Optional(Type.Object({ include: Type.Optional(RepoList), exclude: Type.Optional(RepoList) }, { additionalProperties: false })),
+          dailyCap: Type.Optional(DailyCap),
         },
         { additionalProperties: false, description: "saved under review.auto_review; only the fields given change" },
       ),
@@ -402,12 +410,12 @@ export type AutoReviewParams = NonNullable<Extract<Command, { command: "settings
  * `settings.set:<model>`, then `:template:<hash>` when it sets the template: different texts are different keys.
  * The hash is FNV-1a 64 of the template's UTF-8 bytes in hex, or `default` for a reset; a client computes it too.
  * Then `:auto:<hash>` when it sets autoReview: FNV-1a 64 of its compact JSON with the keys in schema order (enabled,
- * intervalMinutes, includeTeamRequests, repos: include, exclude) and absent ones left out.
+ * intervalMinutes, includeTeamRequests, repos: include, exclude, dailyCap) and absent ones left out.
  */
 export function settingsKey(p: { model?: string; summaryTemplate?: string | null; autoReview?: AutoReviewParams }): string {
   const template = p.summaryTemplate === undefined ? "" : `:template:${p.summaryTemplate ? fnv1a64(p.summaryTemplate) : "default"}`;
   const a = p.autoReview;
-  const canonical = a && { enabled: a.enabled, intervalMinutes: a.intervalMinutes, includeTeamRequests: a.includeTeamRequests, repos: a.repos && { include: a.repos.include, exclude: a.repos.exclude } };
+  const canonical = a && { enabled: a.enabled, intervalMinutes: a.intervalMinutes, includeTeamRequests: a.includeTeamRequests, repos: a.repos && { include: a.repos.include, exclude: a.repos.exclude }, dailyCap: a.dailyCap };
   const auto = canonical === undefined ? "" : `:auto:${fnv1a64(JSON.stringify(canonical))}`;
   return `settings.set:${p.model ?? ""}${template}${auto}`;
 }
@@ -464,6 +472,7 @@ export const ClientMessage = Type.Union([
   req("finding.get", { findingId: Id }),
   req("publication.get", { runId: Id }),
   req("settings.get"),
+  req("repos.list"),
   req("usage.get", {
     by: oneOf(USAGE_BY),
     periods: Type.Optional(Type.Integer({ minimum: 1, maximum: 400, description: "how many buckets up to the current one; 14 days, 12 weeks or 12 months when absent" })),
@@ -551,9 +560,16 @@ export const ServerMessage = Type.Union([
         intervalMinutes: IntervalMinutes,
         includeTeamRequests: Type.Boolean(),
         repos: Type.Object({ include: RepoList, exclude: RepoList }, { description: "an empty include list means every repository" }),
+        dailyCap: DailyCap,
         lastPoll: Type.Optional(AutoReviewPoll),
       }),
     ),
+  }),
+  // The answer to repos.list, which only a daemon in engine mode gives: the repositories its account can reach.
+  reply("repos.list.result", {
+    repos: Type.Array(AccessibleRepo, { maxItems: 1000, description: "most recently pushed first, archived ones left out" }),
+    fetchedAt: Timestamp,
+    error: Type.Optional(Type.String({ description: "why GitHub could not be read; repos is then empty" })),
   }),
   // The answer to usage.get, which every daemon gives: recorded model usage, oldest bucket first, empty ones included.
   reply("usage.report", {
@@ -592,6 +608,7 @@ export const ServerMessage = Type.Union([
   }),
 ]);
 export type ServerMessage = Static<typeof ServerMessage>;
+export type ReposAnswer = Omit<Extract<ServerMessage, { type: "repos.list.result" }>, "type" | "requestId">;
 export type UsageAnswer = Omit<Extract<ServerMessage, { type: "usage.report" }>, "type" | "requestId">;
 export type PublicationPreview = Omit<Extract<ServerMessage, { type: "publication.preview" }>, "type" | "requestId">;
 

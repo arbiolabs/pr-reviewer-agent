@@ -28,11 +28,13 @@
       ],
       "exclude": []
     },
+    "dailyCap": 20,
     "lastPoll": {
       "at": "2026-10-28T09:55:00Z",
       "found": 0,
       "started": 0,
       "skipped": 0,
+      "startedToday": 3,
       "error": "GET /search/issues: HTTP 403; rate limited for 120000 ms, over the 5000 ms cap"
     }
   }

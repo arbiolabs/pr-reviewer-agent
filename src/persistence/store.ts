@@ -505,6 +505,12 @@ export class AppStore {
       .run(detail, now(), span ? JSON.stringify(span) : null, revisionId);
   }
 
+  /** How many activity lines `appendActivity(_, tool, summary)` journaled at or after `since` (an ISO timestamp). */
+  countActivity(tool: string, summary: string, since: string): number {
+    const row = this.db.prepare("SELECT COUNT(*) AS n FROM audit_events WHERE event = 'TOOL_ACTIVITY' AND detail = ? AND at >= ?").get(`${tool} ${summary}`, since) as { n: number };
+    return row.n;
+  }
+
   /** One model response of a review: its tokens and the cost pi-ai priced it at. */
   recordUsage(revisionId: string, model: string, usage: Usage): void {
     const { input, output, cacheRead, cacheWrite, cost } = usage;

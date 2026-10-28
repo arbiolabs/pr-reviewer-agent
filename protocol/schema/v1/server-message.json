@@ -2225,7 +2225,8 @@
             "enabled",
             "intervalMinutes",
             "includeTeamRequests",
-            "repos"
+            "repos",
+            "dailyCap"
           ],
           "properties": {
             "enabled": {
@@ -2280,13 +2281,19 @@
               },
               "description": "an empty include list means every repository"
             },
+            "dailyCap": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "automatic starts allowed per local day of the daemon; 0 means no cap"
+            },
             "lastPoll": {
               "type": "object",
               "required": [
                 "at",
                 "found",
                 "started",
-                "skipped"
+                "skipped",
+                "startedToday"
               ],
               "properties": {
                 "at": {
@@ -2306,7 +2313,16 @@
                 "skipped": {
                   "type": "integer",
                   "minimum": 0,
-                  "description": "found but not started: reviewed at their head, archived, excluded, closed, or past the cap"
+                  "description": "found but not started: reviewed at their head, archived, excluded, closed, or past a cap"
+                },
+                "startedToday": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "description": "automatic starts since local midnight, this poll's included"
+                },
+                "capReached": {
+                  "type": "boolean",
+                  "description": "true when startedToday has reached a nonzero dailyCap: no more start until the next local day"
                 },
                 "error": {
                   "type": "string"
@@ -2314,6 +2330,64 @@
               }
             }
           }
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "requestId",
+        "repos",
+        "fetchedAt"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "repos.list.result"
+        },
+        "requestId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "repos": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "fullName",
+              "private",
+              "archived"
+            ],
+            "properties": {
+              "fullName": {
+                "type": "string",
+                "pattern": "^[\\w.-]+/[\\w.-]+$",
+                "maxLength": 200,
+                "description": "owner/name"
+              },
+              "private": {
+                "type": "boolean"
+              },
+              "archived": {
+                "type": "boolean"
+              },
+              "pushedAt": {
+                "type": "string",
+                "description": "RFC 3339 UTC timestamp"
+              }
+            }
+          },
+          "maxItems": 1000,
+          "description": "most recently pushed first, archived ones left out"
+        },
+        "fetchedAt": {
+          "type": "string",
+          "description": "RFC 3339 UTC timestamp"
+        },
+        "error": {
+          "type": "string",
+          "description": "why GitHub could not be read; repos is then empty"
         }
       }
     },

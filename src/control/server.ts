@@ -174,6 +174,11 @@ export async function startControlServer(options: ServerOptions): Promise<Contro
         send(c, { type: "settings", requestId, ...(await source.settings()) });
         return;
       }
+      case "repos.list": {
+        if (!source.repos) throw new ControlError("CAPABILITY_DENIED", source.unavailable?.("repos.list") ?? "repos.list is not available in this version");
+        send(c, { type: "repos.list.result", requestId, ...(await source.repos()) });
+        return;
+      }
       case "usage.get": {
         if (!source.usage) throw new ControlError("CAPABILITY_DENIED", "usage.get is not available in this version");
         send(c, { type: "usage.report", requestId, ...(await source.usage(message.by, message.periods, message.group)) });

@@ -63,6 +63,7 @@ it("settings.set keys hash autoReview's compact JSON in schema order, whatever o
   expect(settingsKey({ model: "m/x", autoReview: { repos: { exclude: ["a/b"], include: [] }, intervalMinutes: 15 } })).toBe(
     `settings.set:m/x:auto:${fnv1a64('{"intervalMinutes":15,"repos":{"include":[],"exclude":["a/b"]}}')}`,
   );
+  expect(settingsKey({ autoReview: { dailyCap: 0, enabled: false } })).toBe(`settings.set::auto:${fnv1a64('{"enabled":false,"dailyCap":0}')}`);
 });
 
 it("sanitize strips terminal control sequences and keeps text, newlines and tabs", () => {

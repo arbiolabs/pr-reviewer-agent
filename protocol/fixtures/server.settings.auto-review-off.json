@@ -24,6 +24,7 @@
     "repos": {
       "include": [],
       "exclude": []
-    }
+    },
+    "dailyCap": 20
   }
 }

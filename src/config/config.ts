@@ -75,7 +75,7 @@ export const DEFAULT_CONFIG: Config = {
     webhook_max_attempts: 6,
     webhook_backoff_ms: 5000,
     summary_template: "",
-    auto_review: { enabled: false, interval_minutes: 5, include_team_requests: false, repos: { include: [], exclude: [] } },
+    auto_review: { enabled: false, interval_minutes: 5, include_team_requests: false, repos: { include: [], exclude: [] }, daily_cap: 20 },
   },
   github: { max_retries: 3, backoff_ms: 500, concurrency_per_installation: 2, timeout_ms: 15_000, max_rate_limit_sleep_ms: 30_000, bot_login: "" },
   routing: {
@@ -99,6 +99,8 @@ export type AutoReview = {
   include_team_requests: boolean;
   /** `owner/name`, matched exactly but for case; an empty include list means every repository. */
   repos: { include: string[]; exclude: string[] };
+  /** Automatic starts allowed per local day (the daemon's time zone); 0 means no cap. Manual reviews never count. */
+  daily_cap: number;
 };
 
 export const AUTO_REVIEW_INTERVALS = [5, 15, 30] as const;
@@ -106,6 +108,7 @@ export const REPO_NAME = /^[\w.-]+\/[\w.-]+$/;
 
 export function autoReviewProblem(a: AutoReview): string | undefined {
   if (!(AUTO_REVIEW_INTERVALS as readonly number[]).includes(a.interval_minutes)) return `interval_minutes must be 5, 15 or 30, not ${a.interval_minutes}`;
+  if (!Number.isInteger(a.daily_cap) || a.daily_cap < 0) return `daily_cap must be a whole number, 0 for no cap, not ${a.daily_cap}`;
   const bad = [...a.repos.include, ...a.repos.exclude].find((r) => !REPO_NAME.test(r));
   return bad === undefined ? undefined : `repos must list owner/name, not ${JSON.stringify(bad)}`;
 }
