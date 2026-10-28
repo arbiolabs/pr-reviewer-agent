@@ -149,6 +149,36 @@ Review performed with isolated read-only tools. Human review is still required.
 
 pr-review always adds its hidden marker comment after the message, so a template cannot remove it, and an HTML comment in the template is posted as text. A review prepared before a change keeps its message: a review waiting for approval posts the text its proof shows. GitHub's size limit still applies, and a longer body is cut at a line end with a notice.
 
+### Automatic reviews
+
+`review.auto_review` lets the daemon start reviews on its own for the pull requests that request your review. It is off by default.
+
+```json
+{
+	"review": {
+		"publish_mode": "approval",
+		"auto_review": {
+			"enabled": true,
+			"interval_minutes": 15,
+			"include_team_requests": false,
+			"repos": { "include": ["acme/shop"], "exclude": [] }
+		}
+	}
+}
+```
+
+| Key | Default | Effect |
+|---|---|---|
+| `enabled` | `false` | Turns the polling on. |
+| `interval_minutes` | `5` | How often the daemon asks GitHub: `5`, `15` or `30`. |
+| `include_team_requests` | `false` | Also review PRs that request a team you are on, not only you. |
+| `repos.include` | `[]` | Only these repositories, as `owner/name`. Empty means every repository. |
+| `repos.exclude` | `[]` | Never these repositories. Exclude wins over include. Names match without regard to case. |
+
+Only a daemon with commands enabled (`--allow-commands` or `control.allow_commands`) polls, and only with a GitHub account it can read as. `pr-review serve` never polls; its webhooks already start reviews. Each poll searches GitHub as the selected account for open, non-draft PRs that request its review, oldest first, and starts at most 5 of them. The rest wait for the next poll. A PR the daemon does not track yet is added as ⌘N adds one. A tracked PR gets a review only for a head that has no review yet, so a head is never reviewed twice by a poll, and an archived PR is never started or brought back. Each review a poll starts says "started automatically: review requested" in its timeline.
+
+Every automatic review costs model usage like one you start. With `publish_mode: "approval"`, each one waits for your approval before anything is posted. A poll that fails (a rate limit, an expired token, no network) is shown in Settings with its error and retried after a doubling wait, up to an hour. The desktop app changes these settings under Settings → Reviewer → Automatic reviews.
+
 ### Control commands
 
 `control.allow_commands` lets `pr-review daemon` accept the review commands (start, retry, cancel, publish) from the terminal client. The default is `false`: the daemon stays read-only, takes no lock on the data directory, runs no review, and grants only the account selector. `pr-review daemon --allow-commands` enables them for one daemon, which then hosts the review engine. The daemon grants `review.publish` only under `publish_mode: "approval"`. With an engine daemon running, add PRs from a client (`a` in the terminal client, ⌘N in the desktop app) rather than with `pr-review review`, which can't take the lock the daemon holds. See [Take actions](tui.md#take-actions).
