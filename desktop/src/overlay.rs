@@ -210,7 +210,7 @@ fn entries(m: &Model, r: &Reviewer, theme: Choice) -> Vec<Entry> {
                 SettingsTab::Review => "Settings: model, risk check (Jev) and review message",
                 SettingsTab::Reviewer => "Settings: reviewer and setup checks",
                 SettingsTab::Accounts => "Settings: GitHub accounts",
-                SettingsTab::Appearance => "Settings: appearance and themes",
+                SettingsTab::General => "Settings: themes, menu bar and Dock, and updates",
             }
             .into(),
             key: None,
@@ -1391,7 +1391,7 @@ mod tests {
             ("review message", Tab::Review),
             ("setup checks", Tab::Reviewer),
             ("accounts", Tab::Accounts),
-            ("themes", Tab::Appearance),
+            ("themes", Tab::General),
         ] {
             let best = super::matching(&m, &r, crate::tokens::Choice::System, query)
                 .into_iter()
