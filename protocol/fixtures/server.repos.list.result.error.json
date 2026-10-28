@@ -1,0 +1,7 @@
+{
+  "type": "repos.list.result",
+  "requestId": "req-repos",
+  "repos": [],
+  "fetchedAt": "2026-10-28T10:00:00Z",
+  "error": "GET /user/repos: HTTP 403; rate limited for 120000 ms, over the 5000 ms cap"
+}

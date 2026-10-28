@@ -187,6 +187,23 @@
       "type": "object",
       "required": [
         "type",
+        "requestId"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "repos.list"
+        },
+        "requestId": {
+          "type": "string",
+          "minLength": 1
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
         "requestId",
         "by"
       ],
@@ -756,6 +773,11 @@
                         }
                       },
                       "additionalProperties": false
+                    },
+                    "dailyCap": {
+                      "type": "integer",
+                      "minimum": 0,
+                      "description": "automatic starts allowed per local day of the daemon; 0 means no cap"
                     }
                   },
                   "additionalProperties": false,

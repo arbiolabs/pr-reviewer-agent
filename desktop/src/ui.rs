@@ -216,7 +216,7 @@ pub struct Shell {
     pub jev: crate::jev::KeyField,
     /// Settings → Review message: the template editor.
     pub message: crate::message::MessageEditor,
-    /// Settings → Reviewer → Automatic reviews: the repository fields.
+    /// Settings → Reviewer → Automatic reviews: the repository comboboxes.
     pub repos: crate::auto::RepoFields,
     /// The Settings tab in front, for this session.
     pub settings_tab: crate::setup::Tabs,
@@ -333,6 +333,7 @@ impl Shell {
                 Desk::Message(text) => s.message.pending = Some(text.clone()),
                 Desk::MessageSaved => crate::message::stage_saved(&mut s),
                 Desk::Scroll(y) => s.settings_scroll_to = Some(*y as f32),
+                Desk::Repos(field, query) => s.repos.staged = Some((*field, query.clone())),
                 Desk::SettingsTab(tab) => s.settings_tab.open_on(*tab),
                 Desk::Flagged => s.diff_flagged_only = true,
                 Desk::Discards => {

@@ -31,7 +31,7 @@ afterEach(async () => {
   await fake.close();
 });
 
-const on: AutoReview = { enabled: true, interval_minutes: 5, include_team_requests: false, repos: { include: [], exclude: [] } };
+const on: AutoReview = { enabled: true, interval_minutes: 5, include_team_requests: false, repos: { include: [], exclude: [] }, daily_cap: 0 };
 
 function configWith(auto: Partial<AutoReview>): Config {
   return {
@@ -42,7 +42,7 @@ function configWith(auto: Partial<AutoReview>): Config {
 }
 
 /** An engine on the fake GitHub. The poll clock never fires on its own unless `autoReviewMs` says so. */
-async function host(options: { config?: Config; dataDir?: string; account?: string | null; autoReviewMs?: EngineOptions["autoReviewMs"]; env?: Record<string, string> } = {}) {
+async function host(options: { config?: Config; dataDir?: string; account?: string | null; autoReviewMs?: EngineOptions["autoReviewMs"]; env?: Record<string, string>; now?: () => number } = {}) {
   const config = options.config ?? configWith({});
   const client = new GitHubClient({ auth: { kind: "token", token: "ghp_test" }, baseUrl: fake.url, maxRetries: 1, backoffMs: 1, concurrency: 4, timeoutMs: 5000 });
   const pulls = new GitHubPullSource(() => client);
@@ -58,6 +58,7 @@ async function host(options: { config?: Config; dataDir?: string; account?: stri
     models,
     model: { ref: "faux/reviewer", source: "config" },
     autoReviewMs: options.autoReviewMs ?? { first: 3_600_000 },
+    ...(options.now ? { now: options.now } : {}),
   });
   let open = true;
   const stop = async () => {
@@ -220,20 +221,139 @@ it("settings.set saves auto-review, polls at once when it turns on, and refuses 
     c.send({ type: "settings.get", requestId: `get-${++n}` });
     return c.waitFor<Extract<ServerMessage, { type: "settings" }>>((m) => m.type === "settings" && m.requestId === `get-${n}`);
   };
-  expect((await settings()).autoReview).toEqual({ enabled: false, intervalMinutes: 5, includeTeamRequests: false, repos: { include: [], exclude: [] } });
+  expect((await settings()).autoReview).toEqual({ enabled: false, intervalMinutes: 5, includeTeamRequests: false, repos: { include: [], exclude: [] }, dailyCap: 0 });
   expect((await settings()).publishMode).toBe("approval");
 
   expect(await send({ autoReview: { enabled: true, intervalMinutes: 15, repos: { include: ["acme/shop"] } } })).toMatchObject({ type: "command.result", status: "accepted" });
   expect(JSON.parse(readFileSync(configPath, "utf8")).review).toEqual({
     publish_mode: "approval",
-    auto_review: { enabled: true, interval_minutes: 15, include_team_requests: false, repos: { include: ["acme/shop"], exclude: [] } },
+    auto_review: { enabled: true, interval_minutes: 15, include_team_requests: false, repos: { include: ["acme/shop"], exclude: [] }, daily_cap: 0 },
   });
   await until(() => heads(h, "acme/shop", 1).length === 1);
   for (let i = 0; i < 100 && !(await settings()).autoReview?.lastPoll; i++) await new Promise((r) => setTimeout(r, 20));
   expect((await settings()).autoReview).toMatchObject({ enabled: true, intervalMinutes: 15, repos: { include: ["acme/shop"], exclude: [] }, lastPoll: { found: 1, started: 1, skipped: 0 } });
 
   expect(await send({ autoReview: { intervalMinutes: 7 } })).toMatchObject({ type: "error", code: "INVALID_REQUEST" });
+  expect(await send({ autoReview: { dailyCap: -1 } })).toMatchObject({ type: "error", code: "INVALID_REQUEST" });
+  await expect(h.source.setSettings({ autoReview: { dailyCap: 2.5 } })).rejects.toEqual(new ControlError("INVALID_REQUEST", "autoReview: daily_cap must be a whole number, 0 for no cap, not 2.5"));
+  expect(await send({ autoReview: { dailyCap: 50 } })).toMatchObject({ type: "command.result", status: "accepted" });
+  expect(JSON.parse(readFileSync(configPath, "utf8")).review.auto_review.daily_cap).toBe(50);
+  expect((await settings()).autoReview?.dailyCap).toBe(50);
   expect(await send({ autoReview: { repos: { exclude: ["not a repo"] } } })).toMatchObject({ type: "error", code: "INVALID_REQUEST" });
   await expect(h.source.setSettings({ autoReview: { repos: { include: ["bad name"] } } })).rejects.toEqual(new ControlError("INVALID_REQUEST", 'autoReview: repos must list owner/name, not "bad name"'));
   expect(JSON.parse(readFileSync(configPath, "utf8")).review.auto_review.interval_minutes).toBe(15);
+}, 60_000);
+
+const DAY_MS = 86_400_000;
+
+it("stops starting at the daily cap within a poll and across polls the same day, and counts again from the next local midnight", async () => {
+  for (let n = 1; n <= 5; n++) requestPull(n);
+  let now = Date.now();
+  const h = await host({ config: configWith({ daily_cap: 2 }), now: () => now });
+  expect(await h.source.pollRequests()).toMatchObject({ found: 5, started: 2, skipped: 3, startedToday: 2, capReached: true });
+  expect(await h.source.pollRequests()).toMatchObject({ started: 0, startedToday: 2, capReached: true });
+  expect([1, 2, 3, 4, 5].map((n) => heads(h, "acme/shop", n).length)).toEqual([1, 1, 0, 0, 0]);
+
+  now += DAY_MS;
+  expect(await h.source.pollRequests()).toMatchObject({ started: 2, startedToday: 2, capReached: true });
+  now += DAY_MS;
+  const last = await h.source.pollRequests();
+  expect(last).toMatchObject({ started: 1, startedToday: 1 });
+  expect(last.capReached).toBeUndefined();
+}, 60_000);
+
+it("a daily cap of 0 never stops a poll, and the count still shows", async () => {
+  for (let n = 1; n <= 7; n++) requestPull(n);
+  const h = await host({ config: configWith({ daily_cap: 0 }) });
+  expect(await h.source.pollRequests()).toMatchObject({ started: 5, startedToday: 5 });
+  const second = await h.source.pollRequests();
+  expect(second).toMatchObject({ started: 2, startedToday: 7 });
+  expect(second.capReached).toBeUndefined();
+}, 60_000);
+
+it("never counts a review started by hand, and keeps the day's count across a restart", async () => {
+  requestPull(1);
+  requestPull(2);
+  requestPull(3);
+  const manual = { ...fixture.pull, number: 9 };
+  fake.setPull(manual);
+  const h = await host({ config: configWith({ daily_cap: 2 }) });
+  const add: Command = { type: "command", requestId: "r", command: "review.add", params: { url: "acme/shop#9" }, idempotencyKey: "" } as Command;
+  add.idempotencyKey = idempotencyKey(add);
+  await h.source.command(add as Parameters<EngineSource["command"]>[0]);
+  expect(heads(h, "acme/shop", 9)).toEqual([fixture.headSha]);
+  expect(await h.source.pollRequests()).toMatchObject({ started: 2, startedToday: 2, capReached: true });
+
+  await h.stop();
+  requestPull(4);
+  const again = await host({ dataDir: h.dataDir, config: configWith({ daily_cap: 2 }) });
+  expect(await again.source.pollRequests()).toMatchObject({ found: 4, started: 0, startedToday: 2, capReached: true });
+  expect(heads(again, "acme/shop", 3)).toEqual([]);
+}, 60_000);
+
+const repo = (full_name: string, archived = false, isPrivate = true) => ({ full_name, private: isPrivate, archived, pushed_at: "2026-10-28T09:00:00Z" });
+
+it("repos.list reads every page as the account, leaves archived ones out, and caps the read at 1000", async () => {
+  fake.reposPageSize = 2;
+  fake.repos = [repo("acme/shop", false, false), repo("acme/old", true), repo("acme/api"), repo("octo/dots", false, false), repo("northwind/etl")];
+  const h = await host();
+  const answer = await h.source.repos();
+  expect(answer.error).toBeUndefined();
+  expect(answer.repos).toEqual([
+    { fullName: "acme/shop", private: false, archived: false, pushedAt: "2026-10-28T09:00:00Z" },
+    { fullName: "acme/api", private: true, archived: false, pushedAt: "2026-10-28T09:00:00Z" },
+    { fullName: "octo/dots", private: false, archived: false, pushedAt: "2026-10-28T09:00:00Z" },
+    { fullName: "northwind/etl", private: true, archived: false, pushedAt: "2026-10-28T09:00:00Z" },
+  ]);
+  expect(fake.reposReads).toHaveLength(3);
+  expect(new URLSearchParams(fake.reposReads[0]).get("affiliation")).toBe("owner,collaborator,organization_member");
+  expect(new URLSearchParams(fake.reposReads[0]).get("sort")).toBe("pushed");
+
+  fake.reposReads = [];
+  fake.reposPageSize = 100;
+  fake.repos = Array.from({ length: 1500 }, (_, i) => repo(`acme/r${i}`));
+  const many = await host({ dataDir: mkdtempSync(join(tmpdir(), "auto-")) });
+  expect((await many.source.repos()).repos).toHaveLength(1000);
+  expect(fake.reposReads).toHaveLength(10);
+}, 60_000);
+
+it("repos.list answers from memory for ten minutes, then reads again; a failure is its error and is not kept", async () => {
+  fake.repos = [repo("acme/shop")];
+  let now = Date.now();
+  const h = await host({ now: () => now });
+  const [a, b] = await Promise.all([h.source.repos(), h.source.repos()]);
+  expect(a).toBe(b);
+  now += 9 * 60_000;
+  expect(await h.source.repos()).toBe(a);
+  expect(fake.reposReads).toHaveLength(1);
+
+  now += 2 * 60_000;
+  fake.reposStatus = 401;
+  const failed = await h.source.repos();
+  expect(failed).toEqual({ repos: [], fetchedAt: new Date(now).toISOString(), error: "GET /user/repos?per_page=100&affiliation=owner,collaborator,organization_member&sort=pushed: HTTP 401" });
+  fake.reposStatus = 200;
+  expect((await h.source.repos()).repos.map((r) => r.fullName)).toEqual(["acme/shop"]);
+  expect(fake.reposReads).toHaveLength(3);
+
+  const anonymous = await host({ dataDir: mkdtempSync(join(tmpdir(), "auto-")), account: null });
+  expect(await anonymous.source.repos()).toMatchObject({ repos: [], error: expect.stringMatching(/no GitHub account/) });
+}, 60_000);
+
+it("repos.list goes over the socket from an engine daemon and is refused by a read-only one", async () => {
+  fake.repos = [repo("acme/shop")];
+  const h = await host();
+  const readOnly = await openSource(mkdtempSync(join(tmpdir(), "auto-")), false, {}, () => {});
+  cleanup.push(() => readOnly.close());
+  for (const [source, expected] of [
+    [h.source, { type: "repos.list.result", repos: [{ fullName: "acme/shop" }] }],
+    [readOnly, { type: "error", code: "CAPABILITY_DENIED" }],
+  ] as const) {
+    const server = await startControlServer({ socketPath: join(mkdtempSync(join(tmpdir(), "ctl-")), "run", "s.sock"), source, pollMs: 20 });
+    cleanup.push(() => server.close());
+    const c = await TestClient.connect(server.path);
+    cleanup.push(() => c.close());
+    await c.hello();
+    c.send({ type: "repos.list", requestId: "repos" });
+    expect(await c.waitFor((m) => "requestId" in m && m.requestId === "repos")).toMatchObject(expected);
+  }
 }, 60_000);

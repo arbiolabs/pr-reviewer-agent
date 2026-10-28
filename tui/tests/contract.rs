@@ -284,3 +284,25 @@ fn review_add_carries_the_pr_it_tracks_and_the_run_it_started() {
     assert_eq!(tracked.pr_id.unwrap().as_str(), "acme/shop#184");
     assert_eq!(result("server.command.result.accepted").pr_id, None);
 }
+
+#[test]
+fn the_daily_cap_and_the_repository_list_parse() {
+    let read = |name: &str| fs::read_to_string(protocol_dir().join(format!("fixtures/{name}.json"))).unwrap();
+    let ServerMessage::Settings(s) = ServerMessage::parse(&read("server.settings.auto-review-capped")).unwrap() else {
+        panic!()
+    };
+    let a = s.auto_review.unwrap();
+    let p = a.last_poll.unwrap();
+    assert_eq!((a.daily_cap, p.started_today, p.cap_reached), (Some(20), Some(20), true));
+
+    let ServerMessage::ReposList(r) = ServerMessage::parse(&read("server.repos.list.result")).unwrap() else {
+        panic!()
+    };
+    assert_eq!((r.repos.len(), r.error), (30, None));
+    assert_eq!(r.repos[0].full_name.as_str(), "acme/shop");
+    let ServerMessage::ReposList(failed) = ServerMessage::parse(&read("server.repos.list.result.error")).unwrap()
+    else {
+        panic!()
+    };
+    assert!(failed.repos.is_empty() && failed.error.is_some());
+}

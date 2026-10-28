@@ -1,0 +1,187 @@
+{
+  "type": "repos.list.result",
+  "requestId": "req-repos",
+  "repos": [
+    {
+      "fullName": "acme/shop",
+      "private": false,
+      "archived": false,
+      "pushedAt": "2026-10-28T09:48:00.000Z"
+    },
+    {
+      "fullName": "acme/api",
+      "private": true,
+      "archived": false,
+      "pushedAt": "2026-10-28T08:30:00.000Z"
+    },
+    {
+      "fullName": "acme/web",
+      "private": false,
+      "archived": false,
+      "pushedAt": "2026-10-28T07:00:00.000Z"
+    },
+    {
+      "fullName": "octo/dotfiles",
+      "private": false,
+      "archived": false,
+      "pushedAt": "2026-10-28T05:00:00.000Z"
+    },
+    {
+      "fullName": "acme/checkout",
+      "private": true,
+      "archived": false,
+      "pushedAt": "2026-10-28T02:00:00.000Z"
+    },
+    {
+      "fullName": "northwind/billing",
+      "private": true,
+      "archived": false,
+      "pushedAt": "2026-10-27T23:00:00.000Z"
+    },
+    {
+      "fullName": "acme/design-system",
+      "private": false,
+      "archived": false,
+      "pushedAt": "2026-10-27T20:00:00.000Z"
+    },
+    {
+      "fullName": "northwind/ledger",
+      "private": true,
+      "archived": false,
+      "pushedAt": "2026-10-27T14:00:00.000Z"
+    },
+    {
+      "fullName": "acme/infra",
+      "private": true,
+      "archived": false,
+      "pushedAt": "2026-10-27T08:00:00.000Z"
+    },
+    {
+      "fullName": "octo/pr-review-notes",
+      "private": true,
+      "archived": false,
+      "pushedAt": "2026-10-27T04:00:00.000Z"
+    },
+    {
+      "fullName": "northwind/portal",
+      "private": true,
+      "archived": false,
+      "pushedAt": "2026-10-27T00:00:00.000Z"
+    },
+    {
+      "fullName": "acme/mobile-app",
+      "private": true,
+      "archived": false,
+      "pushedAt": "2026-10-26T17:00:00.000Z"
+    },
+    {
+      "fullName": "acme/search",
+      "private": true,
+      "archived": false,
+      "pushedAt": "2026-10-26T09:00:00.000Z"
+    },
+    {
+      "fullName": "northwind/etl",
+      "private": true,
+      "archived": false,
+      "pushedAt": "2026-10-26T03:00:00.000Z"
+    },
+    {
+      "fullName": "acme/docs",
+      "private": false,
+      "archived": false,
+      "pushedAt": "2026-10-25T20:00:00.000Z"
+    },
+    {
+      "fullName": "octo/advent-2025",
+      "private": false,
+      "archived": false,
+      "pushedAt": "2026-10-25T12:00:00.000Z"
+    },
+    {
+      "fullName": "northwind/forecasting",
+      "private": true,
+      "archived": false,
+      "pushedAt": "2026-10-24T23:00:00.000Z"
+    },
+    {
+      "fullName": "acme/payments",
+      "private": true,
+      "archived": false,
+      "pushedAt": "2026-10-24T10:00:00.000Z"
+    },
+    {
+      "fullName": "acme/analytics",
+      "private": true,
+      "archived": false,
+      "pushedAt": "2026-10-23T20:00:00.000Z"
+    },
+    {
+      "fullName": "northwind/sso",
+      "private": true,
+      "archived": false,
+      "pushedAt": "2026-10-23T00:00:00.000Z"
+    },
+    {
+      "fullName": "acme/shop-legacy",
+      "private": true,
+      "archived": false,
+      "pushedAt": "2026-10-21T18:00:00.000Z"
+    },
+    {
+      "fullName": "octo/blog",
+      "private": false,
+      "archived": false,
+      "pushedAt": "2026-10-20T12:00:00.000Z"
+    },
+    {
+      "fullName": "northwind/onboarding",
+      "private": true,
+      "archived": false,
+      "pushedAt": "2026-10-19T06:00:00.000Z"
+    },
+    {
+      "fullName": "acme/terraform-modules",
+      "private": true,
+      "archived": false,
+      "pushedAt": "2026-10-17T14:00:00.000Z"
+    },
+    {
+      "fullName": "acme/status-page",
+      "private": false,
+      "archived": false,
+      "pushedAt": "2026-10-15T22:00:00.000Z"
+    },
+    {
+      "fullName": "northwind/reporting",
+      "private": true,
+      "archived": false,
+      "pushedAt": "2026-10-13T20:00:00.000Z"
+    },
+    {
+      "fullName": "octo/keyboard-firmware",
+      "private": false,
+      "archived": false,
+      "pushedAt": "2026-10-10T22:00:00.000Z"
+    },
+    {
+      "fullName": "acme/data-pipeline",
+      "private": true,
+      "archived": false,
+      "pushedAt": "2026-10-07T14:00:00.000Z"
+    },
+    {
+      "fullName": "northwind/archive-tools",
+      "private": true,
+      "archived": false,
+      "pushedAt": "2026-10-03T00:00:00.000Z"
+    },
+    {
+      "fullName": "acme/hackweek-2024",
+      "private": true,
+      "archived": false,
+      "pushedAt": "2026-09-28T10:00:00.000Z"
+    }
+  ],
+  "fetchedAt": "2026-10-28T10:00:00Z"
+}

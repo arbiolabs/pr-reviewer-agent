@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { PROTOCOL_DIR } from "../protocol/emit.ts";
 import { fixtures, type PlaybackLine } from "../protocol/fixtures.ts";
 import type { UsageBy, UsageGroupBy } from "../domain/usage.ts";
-import type { ClientMessage, Command, ErrorCode, Finding, FindingDetail, PublicationPreview, ReviewCommand, SequencedEvent, ServerMessage, UsageAnswer } from "../protocol/v1.ts";
+import type { ClientMessage, Command, ErrorCode, Finding, FindingDetail, PublicationPreview, ReposAnswer, ReviewCommand, SequencedEvent, ServerMessage, UsageAnswer } from "../protocol/v1.ts";
 import type { DiffPage } from "./diff.ts";
 
 export class ControlError extends Error {
@@ -60,6 +60,8 @@ export interface ControlSource {
   settings?(): Promise<Settings>;
   /** settings.set: save the model for reviews started from now on and the summary template for bodies prepared from now on; return the operation, or throw ControlError. */
   setSettings?(params: SettingsParams): Promise<string>;
+  /** repos.list: the repositories the account can reach. Present only on a source that can set automatic reviews. */
+  repos?(): Promise<ReposAnswer>;
   /** The stored payload of a run, or throw ControlError NOT_FOUND. */
   publication?(runId: string): Promise<PublicationPreview>;
   /** usage.get: recorded model usage by day, week or month, split by `group`. A read, so read-only sources answer it too. */

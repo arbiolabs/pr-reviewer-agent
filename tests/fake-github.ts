@@ -37,6 +37,11 @@ export class FakeGitHub {
   searchQueries: string[] = [];
   /** Answer this many searches with a primary rate limit and `Retry-After: 120`. */
   rateLimitedSearches = 0;
+  /** What `/user/repos` lists, in order, `reposPageSize` a page; `reposStatus` other than 200 fails every read. */
+  repos: { full_name: string; private: boolean; archived: boolean; pushed_at: string | null }[] = [];
+  reposPageSize = 100;
+  reposStatus = 200;
+  reposReads: string[] = [];
   private nextId = 1000;
 
   constructor() {
@@ -95,6 +100,15 @@ export class FakeGitHub {
           return { number: pull.number, draft: r.draft ?? false, repository_url: `${this.url}/repos/${pull.fullName}`, pull_request: {} };
         });
       return json(200, { total_count: items.length, incomplete_results: false, items });
+    }
+    if (req.method === "GET" && url.pathname === "/user/repos") {
+      this.reposReads.push(url.search);
+      if (this.reposStatus !== 200) return json(this.reposStatus, { message: "Bad credentials" });
+      const page = Number(url.searchParams.get("page") ?? "1");
+      const more = page * this.reposPageSize < this.repos.length;
+      const next = new URLSearchParams(url.searchParams);
+      next.set("page", String(page + 1));
+      return json(200, this.repos.slice((page - 1) * this.reposPageSize, page * this.reposPageSize), more ? { link: `<${this.url}/user/repos?${next}>; rel="next"` } : {});
     }
     if ((m = /^\/repos\/([^/]+\/[^/]+)\/pulls\/(\d+)$/.exec(url.pathname)) && req.method === "GET") {
       const key = `${m[1]}#${m[2]}`;

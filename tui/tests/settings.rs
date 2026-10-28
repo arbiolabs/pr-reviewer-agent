@@ -173,3 +173,28 @@ fn open_settings_ask_again_for_the_last_poll_while_automatic_reviews_are_on() {
     send(&mut off, &read("fixtures/server.settings.auto-review-off.json").replace("req-settings", asked.as_str()));
     assert_eq!(update(&mut off, Msg::Tick(120_000)), [], "nothing moves while they are off");
 }
+
+#[test]
+fn the_repositories_are_asked_for_once_automatic_reviews_show_and_a_refusal_is_their_error() {
+    let mut m = desktop();
+    let asked = m.agent.request.clone().unwrap();
+    let fx = send(&mut m, &settings_reply(&asked));
+    let [Effect::Send(ClientMessage::ReposList { request_id })] = fx.as_slice() else { panic!("{fx:?}") };
+    let id = request_id.clone();
+    assert_eq!(update(&mut m, Msg::Tick(10)), [], "one request at a time");
+    send(&mut m, &read("fixtures/server.repos.list.result.json").replace("req-repos", id.as_str()));
+    assert_eq!(m.agent.repos.as_ref().map(|r| r.repos.len()), Some(30));
+    assert_eq!(update(&mut m, Msg::Tick(20)), [], "asked once per connection");
+
+    let mut ro = desktop();
+    let asked = ro.agent.request.clone().unwrap();
+    let fx = send(&mut ro, &settings_reply(&asked));
+    let [Effect::Send(ClientMessage::ReposList { request_id })] = fx.as_slice() else { panic!("{fx:?}") };
+    let refusal = format!(
+        r#"{{"type":"error","requestId":"{}","code":"CAPABILITY_DENIED","message":"repos.list is not available"}}"#,
+        request_id.as_str()
+    );
+    send(&mut ro, &refusal);
+    let r = ro.agent.repos.as_ref().unwrap();
+    assert_eq!((r.repos.len(), r.error.as_ref().map(Text::as_str)), (0, Some("repos.list is not available")));
+}

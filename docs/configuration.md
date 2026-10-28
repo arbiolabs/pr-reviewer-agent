@@ -161,7 +161,8 @@ pr-review always adds its hidden marker comment after the message, so a template
 			"enabled": true,
 			"interval_minutes": 15,
 			"include_team_requests": false,
-			"repos": { "include": ["acme/shop"], "exclude": [] }
+			"repos": { "include": ["acme/shop"], "exclude": [] },
+			"daily_cap": 20
 		}
 	}
 }
@@ -174,8 +175,11 @@ pr-review always adds its hidden marker comment after the message, so a template
 | `include_team_requests` | `false` | Also review PRs that request a team you are on, not only you. |
 | `repos.include` | `[]` | Only these repositories, as `owner/name`. Empty means every repository. |
 | `repos.exclude` | `[]` | Never these repositories. Exclude wins over include. Names match without regard to case. |
+| `daily_cap` | `20` | The most reviews polls start in one day, counted from midnight in the daemon's time zone. `0` means no cap. |
 
 Only a daemon with commands enabled (`--allow-commands` or `control.allow_commands`) polls, and only with a GitHub account it can read as. `pr-review serve` never polls; its webhooks already start reviews. Each poll searches GitHub as the selected account for open, non-draft PRs that request its review, oldest first, and starts at most 5 of them. The rest wait for the next poll. A PR the daemon does not track yet is added as ⌘N adds one. A tracked PR gets a review only for a head that has no review yet, so a head is never reviewed twice by a poll, and an archived PR is never started or brought back. Each review a poll starts says "started automatically: review requested" in its timeline.
+
+The daily cap counts those timeline lines since local midnight, so a restart keeps the day's count and a review you start yourself never counts. Once the count reaches the cap, polls keep searching and reporting what they find but start nothing until the next day. Settings shows the day's count, and "Daily cap reached" when polls have stopped.
 
 Every automatic review costs model usage like one you start. With `publish_mode: "approval"`, each one waits for your approval before anything is posted. A poll that fails (a rate limit, an expired token, no network) is shown in Settings with its error and retried after a doubling wait, up to an hour. The desktop app changes these settings under Settings → Reviewer → Automatic reviews.
 

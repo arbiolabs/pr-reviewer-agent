@@ -144,11 +144,13 @@
       ],
       "exclude": []
     },
+    "dailyCap": 20,
     "lastPoll": {
       "at": "2026-10-28T09:55:00Z",
       "found": 4,
       "started": 1,
-      "skipped": 3
+      "skipped": 3,
+      "startedToday": 7
     }
   }
 }

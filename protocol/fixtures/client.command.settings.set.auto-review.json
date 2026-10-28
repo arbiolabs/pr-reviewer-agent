@@ -11,8 +11,9 @@
           "acme/shop",
           "acme/api"
         ]
-      }
+      },
+      "dailyCap": 50
     }
   },
-  "idempotencyKey": "settings.set::auto:d5e2c3f1bd886bc9"
+  "idempotencyKey": "settings.set::auto:7afdf17955857111"
 }

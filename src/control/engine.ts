@@ -7,8 +7,8 @@ import { reviewerVersion } from "../runtime/task.ts";
 import type { Env } from "../github/accounts.ts";
 import { type GitHubClient, GitHubError } from "../github/client.ts";
 import { parsePullRef, parsePullUrl, type PullRef, type PullSource } from "../github/pulls.ts";
-import { reviewRequests } from "../github/requests.ts";
-import { type AutoReviewPoll, type ReviewCommand, settingsKey } from "../protocol/v1.ts";
+import { accessibleRepos, reviewRequests } from "../github/requests.ts";
+import { type AutoReviewPoll, type ReposAnswer, type ReviewCommand, settingsKey } from "../protocol/v1.ts";
 import { DEFAULT_SUMMARY_TEMPLATE, effectiveTemplate, TEMPLATE_VARIABLES, templateProblem } from "../publish/template.ts";
 import { type App, finishReview, generationOf, recover, type StartedReview, startPolicy, startReview } from "../runtime/app.ts";
 import { StateConflict } from "../persistence/store.ts";
@@ -30,6 +30,8 @@ export type EngineOptions = {
   model: { ref: string; source: ModelSource };
   /** Tests shorten the auto-review clock: the first poll after start, and the interval in place of the config's. */
   autoReviewMs?: { first: number; interval?: number };
+  /** Tests move the day: the daily cap counts from local midnight of this clock, and repos.list's cache ages by it. */
+  now?: () => number;
 };
 
 type ModelSource = (typeof MODEL_SOURCES)[number];
@@ -42,6 +44,10 @@ export const MAX_STARTS_PER_POLL = 5;
 const POLL_MAX_SLEEP_MS = 5000;
 /** Failed polls back off by doubling the interval, up to this. */
 const POLL_BACKOFF_CAP_MS = 60 * 60_000;
+/** The attribution a poll's start carries; the daily cap counts these lines, so the count survives a restart. */
+const AUTO_TOOL = "auto-review";
+const AUTO_STARTED = "started automatically: review requested";
+const REPOS_TTL_MS = 10 * 60_000;
 const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 /**
@@ -62,6 +68,7 @@ export class EngineSource extends AppDbSource {
   private pollFailures = 0;
   private pollTimer: NodeJS.Timeout | undefined;
   private closed = false;
+  private reposCache: { account: string | undefined; at: number; answer: Promise<ReposAnswer> } | undefined;
 
   private constructor(dataDir: string, app: App, options: EngineOptions) {
     super(dataDir, app.store, options.env ?? process.env);
@@ -166,10 +173,14 @@ export class EngineSource extends AppDbSource {
     return result;
   }
 
-  /** Start reviewing `pull` at its head under this daemon's config, as review.add does, and follow the review. */
-  private async start(pull: PullInfo): Promise<StartedReview> {
+  /**
+   * Start reviewing `pull` at its head under this daemon's config, as review.add does, and follow the review. A poll's
+   * start is attributed before the task runs, so the task's own activity can't crowd the line out of the rate limit.
+   */
+  private async start(pull: PullInfo, auto = false): Promise<StartedReview> {
     const { config } = this.options;
     const started = await startReview(this.app, pull, config.review.base_policy_version, { publish: config.review.publish_mode !== "dry_run" });
+    if (auto) this.app.store.appendActivity(started.revision.id, AUTO_TOOL, AUTO_STARTED);
     this.follow(started);
     return started;
   }
@@ -187,15 +198,21 @@ export class EngineSource extends AppDbSource {
     const at = new Date().toISOString();
     let found = 0;
     let started = 0;
+    let today = 0;
     let error: string | undefined;
+    const cap = this.options.config.review.auto_review.daily_cap;
     try {
+      today = this.startedToday();
       if (this.options.account === undefined) throw new Error("no GitHub account to search as; run gh auth login or set GITHUB_TOKEN, then restart the daemon");
       const search = await reviewRequests(this.options.github(0), this.options.config.review.auto_review, POLL_MAX_SLEEP_MS);
       found = search.found;
       for (const ref of search.pulls) {
-        if (started >= MAX_STARTS_PER_POLL) break;
+        if (started >= MAX_STARTS_PER_POLL || (cap > 0 && today >= cap)) break;
         try {
-          if (await this.startRequested(ref)) started++;
+          if (await this.startRequested(ref)) {
+            started++;
+            today++;
+          }
         } catch (failure) {
           // A rate limit or an outage stops the poll; anything else is this PR's own problem.
           if (failure instanceof GitHubError && failure.class === "retryable") throw failure;
@@ -209,8 +226,41 @@ export class EngineSource extends AppDbSource {
       error = message(failure);
       this.options.report?.(new Error(`auto-review poll failed: ${error}`));
     }
-    this.lastPoll = { at, found, started, skipped: found - started, ...(error === undefined ? {} : { error }) };
+    const capped = cap > 0 && today >= cap ? { capReached: true } : {};
+    this.lastPoll = { at, found, started, skipped: found - started, startedToday: today, ...capped, ...(error === undefined ? {} : { error }) };
     return this.lastPoll;
+  }
+
+  /** Automatic starts since local midnight, read back from their attribution lines, so a restart keeps the count. */
+  private startedToday(): number {
+    const midnight = new Date(this.options.now?.() ?? Date.now());
+    midnight.setHours(0, 0, 0, 0);
+    return this.app.store.countActivity(AUTO_TOOL, AUTO_STARTED, midnight.toISOString());
+  }
+
+  /**
+   * repos.list: what the account can reach on GitHub, unarchived, most recently pushed first. One answer serves every
+   * client for ten minutes, or until the account changes; a failure is the answer's `error` and is not kept.
+   */
+  repos(): Promise<ReposAnswer> {
+    const now = this.options.now?.() ?? Date.now();
+    const { account } = this.options;
+    const hit = this.reposCache;
+    if (hit && hit.account === account && now - hit.at < REPOS_TTL_MS) return hit.answer;
+    const fetchedAt = new Date(now).toISOString();
+    const fetch =
+      account === undefined
+        ? Promise.reject(new Error("no GitHub account to list repositories as; run gh auth login or set GITHUB_TOKEN, then restart the daemon"))
+        : accessibleRepos(this.options.github(0), POLL_MAX_SLEEP_MS);
+    const answer: Promise<ReposAnswer> = fetch.then(
+      (repos) => ({ repos, fetchedAt }),
+      (failure: unknown) => {
+        if (this.reposCache?.answer === answer) this.reposCache = undefined;
+        return { repos: [], fetchedAt, error: message(failure) };
+      },
+    );
+    this.reposCache = { account, at: now, answer };
+    return answer;
   }
 
   /**
@@ -225,8 +275,7 @@ export class EngineSource extends AppDbSource {
     if (pull.state !== "open") return false;
     const prId = store.upsertPull(pull);
     if (store.revisionsForPr(prId).some((r) => r.head_sha === pull.headSha)) return false;
-    const started = await this.start(pull);
-    store.appendActivity(started.revision.id, "auto-review", "started automatically: review requested");
+    await this.start(pull, true);
     return true;
   }
 
@@ -326,6 +375,7 @@ export class EngineSource extends AppDbSource {
       intervalMinutes: a.interval_minutes as 5 | 15 | 30,
       includeTeamRequests: a.include_team_requests,
       repos: { include: [...a.repos.include], exclude: [...a.repos.exclude] },
+      dailyCap: a.daily_cap,
       ...(this.lastPoll ? { lastPoll: this.lastPoll } : {}),
     };
     const publishMode = this.options.config.review.publish_mode;
@@ -361,6 +411,7 @@ export class EngineSource extends AppDbSource {
       interval_minutes: autoReview.intervalMinutes ?? was.interval_minutes,
       include_team_requests: autoReview.includeTeamRequests ?? was.include_team_requests,
       repos: { include: autoReview.repos?.include ?? was.repos.include, exclude: autoReview.repos?.exclude ?? was.repos.exclude },
+      daily_cap: autoReview.dailyCap ?? was.daily_cap,
     };
     const autoProblem = auto && autoReviewProblem(auto);
     if (autoProblem) throw new ControlError("INVALID_REQUEST", `autoReview: ${autoProblem}`);

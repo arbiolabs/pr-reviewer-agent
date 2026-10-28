@@ -62,6 +62,8 @@ pub enum Desk {
     Message(String),
     /// `message-saved`: the editor's text as the daemon would have it after Save, since a playback refuses commands.
     MessageSaved,
+    /// `repos:FIELD:QUERY`: Automatic reviews' `only` or `never` repository dropdown, open with QUERY typed.
+    Repos(crate::auto::Field, String),
     /// `scroll:Y`: Settings scrolled Y points down.
     Scroll(u64),
     /// `settings-tab:NAME`: Settings on its `review`, `reviewer`, `accounts` or `appearance` tab.
@@ -106,7 +108,7 @@ const SCREENS: &[(&str, Screen)] = &[
 /// Comma-separated steps: an action name, `goto:<screen>`, `type:<text>`, `pr:<number>`, `finding:<n>`,
 /// `wait:<ms>`, `add:<url>`, or a desktop step (`tab:done`, `palette:<text>`, `keys`, `confirm-post`, `add-pr[:<url>]`,
 /// `scrub:<n>`, `span:<name>`, `reviewer:<state>`, `message:<text>`, `message-saved`, `scroll:<points>`,
-/// `settings-tab:<name>`).
+/// `settings-tab:<name>`, `repos:<only|never>:<query>`).
 pub fn parse(s: &str) -> Result<Vec<Step>, String> {
     let mut steps = Vec::new();
     for t in s.split(',').map(str::trim).filter(|t| !t.is_empty()) {
@@ -126,6 +128,13 @@ pub fn parse(s: &str) -> Result<Vec<Step>, String> {
             Some(("message", v)) => steps.push(Step::Desk(Desk::Message(v.replace("\\n", "\n")))),
             None if t == "message-saved" => steps.push(Step::Desk(Desk::MessageSaved)),
             Some(("scroll", v)) => steps.push(Step::Desk(Desk::Scroll(number(v)?))),
+            Some(("repos", v)) => {
+                let (field, query) = v.split_once(':').unwrap_or((v, ""));
+                match crate::auto::Field::BOTH.into_iter().find(|f| f.id() == field) {
+                    Some(f) => steps.push(Step::Desk(Desk::Repos(f, query.into()))),
+                    None => return Err(format!("{t:?}: repository fields are only and never")),
+                }
+            }
             Some(("settings-tab", v)) => match crate::setup::Tab::ALL.into_iter().find(|tab| tab.id() == v) {
                 Some(tab) => steps.push(Step::Desk(Desk::SettingsTab(tab))),
                 None => return Err(format!("{t:?}: settings tabs are review, reviewer, accounts and appearance")),

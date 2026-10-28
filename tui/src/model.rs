@@ -621,6 +621,10 @@ pub struct AgentSettings {
     pub auto_save: SaveState,
     /// When Settings last asked on its own.
     pub asked_at_ms: u64,
+    /// `repos.list`, asked once per connection while Settings shows automatic reviews. A refusal or a timeout is an
+    /// answer with no repositories and its reason as the error.
+    pub repos_request: Option<RequestId>,
+    pub repos: Option<ReposList>,
 }
 
 /// What the daemon said about recorded model usage. `by` is the grouping a client shows, `None` while none does (the

@@ -1,6 +1,7 @@
 import type { AutoReview } from "../config/config.ts";
 import type { GitHubClient } from "./client.ts";
 import type { PullRef } from "./pulls.ts";
+import type { AccessibleRepo } from "../protocol/v1.ts";
 
 type SearchItem = { number: number; draft?: boolean; repository_url: string };
 
@@ -25,4 +26,21 @@ export async function reviewRequests(client: GitHubClient, a: AutoReview, maxSle
     return wanted ? [{ owner, repo, number: i.number }] : [];
   });
   return { found: listed.length, pulls };
+}
+
+type RepoItem = { full_name: string; private: boolean; archived: boolean; pushed_at: string | null };
+
+/** The most repositories repos.list reads, ten pages of a hundred; past it the least recently pushed are left out. */
+export const REPOS_CAP = 1000;
+
+/** The repositories the token's user owns, collaborates on or reaches through an organization, unarchived, most recently pushed first. */
+export async function accessibleRepos(client: GitHubClient, maxSleepMs: number): Promise<AccessibleRepo[]> {
+  const repos: AccessibleRepo[] = [];
+  let next: string | undefined = "/user/repos?per_page=100&affiliation=owner,collaborator,organization_member&sort=pushed";
+  for (let page = 0; next && page < REPOS_CAP / 100; page++) {
+    const { data, headers }: { data: RepoItem[]; headers: Headers } = await client.request<RepoItem[]>("GET", next, { maxSleepMs });
+    for (const r of data) if (!r.archived) repos.push({ fullName: r.full_name, private: r.private, archived: false, ...(r.pushed_at ? { pushedAt: r.pushed_at } : {}) });
+    next = /<([^>]+)>;\s*rel="next"/.exec(headers.get("link") ?? "")?.[1];
+  }
+  return repos;
 }

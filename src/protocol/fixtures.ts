@@ -1556,8 +1556,44 @@ const hostileTitle ="\u001b[31mred\u001b[0m \u001b]8;;https://evil.example\u0007
 /** A custom review summary, as an operator might write one: what the settings fixtures and the desktop show. */
 export const CUSTOM_TEMPLATE = "### Review of {{repo}} #{{pr_number}} at `{{short_sha}}`\n\n{{summary_line}}\n\n{{findings_list}}\n\n{{carried}}\n\nReviewed by {{model}}. A human still decides.\n";
 
-const autoReviewSet: AutoReviewParams = { enabled: true, intervalMinutes: 15, repos: { include: ["acme/shop", "acme/api"] } };
-const autoReviewOn = { enabled: true, intervalMinutes: 15, includeTeamRequests: false, repos: { include: ["acme/shop", "acme/api"], exclude: [] } } as const;
+const autoReviewSet: AutoReviewParams = { enabled: true, intervalMinutes: 15, repos: { include: ["acme/shop", "acme/api"] }, dailyCap: 50 };
+const autoReviewOn = { enabled: true, intervalMinutes: 15, includeTeamRequests: false, repos: { include: ["acme/shop", "acme/api"], exclude: [] }, dailyCap: 20 } as const;
+
+/** What the operator's account reaches: three owners, newest push first, as `repos.list` answers. */
+const accessibleRepos = (
+  [
+    ["acme/shop", false, 0.2],
+    ["acme/api", true, 1.5],
+    ["acme/web", false, 3],
+    ["octo/dotfiles", false, 5],
+    ["acme/checkout", true, 8],
+    ["northwind/billing", true, 11],
+    ["acme/design-system", false, 14],
+    ["northwind/ledger", true, 20],
+    ["acme/infra", true, 26],
+    ["octo/pr-review-notes", true, 30],
+    ["northwind/portal", true, 34],
+    ["acme/mobile-app", true, 41],
+    ["acme/search", true, 49],
+    ["northwind/etl", true, 55],
+    ["acme/docs", false, 62],
+    ["octo/advent-2025", false, 70],
+    ["northwind/forecasting", true, 83],
+    ["acme/payments", true, 96],
+    ["acme/analytics", true, 110],
+    ["northwind/sso", true, 130],
+    ["acme/shop-legacy", true, 160],
+    ["octo/blog", false, 190],
+    ["northwind/onboarding", true, 220],
+    ["acme/terraform-modules", true, 260],
+    ["acme/status-page", false, 300],
+    ["northwind/reporting", true, 350],
+    ["octo/keyboard-firmware", false, 420],
+    ["acme/data-pipeline", true, 500],
+    ["northwind/archive-tools", true, 610],
+    ["acme/hackweek-2024", true, 720],
+  ] as const
+).map(([fullName, isPrivate, hoursAgo]) => ({ fullName, private: isPrivate, archived: false, pushedAt: new Date(Date.parse("2026-10-28T10:00:00Z") - hoursAgo * 3600_000).toISOString() }));
 
 export const fixtures: Record<string, ClientMessage | ServerMessage | Record<string, unknown>> = {
   "client.hello": { type: "hello", requestId: "req-hello", protocolVersion: 1, client: "ratatui", capabilities: ["snapshots", "events"] },
@@ -1659,7 +1695,25 @@ export const fixtures: Record<string, ClientMessage | ServerMessage | Record<str
     configPath: "/Users/operator/.config/pr-review/pr-review.config.json",
     summaryTemplate: { value: DEFAULT_SUMMARY_TEMPLATE, isDefault: true, default: DEFAULT_SUMMARY_TEMPLATE, variables: [...TEMPLATE_VARIABLES] },
     publishMode: "approval",
-    autoReview: { ...autoReviewOn, lastPoll: { at: "2026-10-28T09:55:00Z", found: 4, started: 1, skipped: 3 } },
+    autoReview: { ...autoReviewOn, lastPoll: { at: "2026-10-28T09:55:00Z", found: 4, started: 1, skipped: 3, startedToday: 7 } },
+  },
+  "server.settings.auto-review-capped": {
+    type: "settings",
+    requestId: "req-settings",
+    model: { ref: "anthropic/claude-opus-5-5", source: "config" },
+    models: [{ ref: "anthropic/claude-opus-5-5", provider: "anthropic", name: "Claude Opus 5.5", contextWindow: 1_000_000, authSource: "oauth", preferred: true }],
+    configPath: "/Users/operator/.config/pr-review/pr-review.config.json",
+    publishMode: "approval",
+    autoReview: { ...autoReviewOn, lastPoll: { at: "2026-10-28T16:40:00Z", found: 6, started: 0, skipped: 6, startedToday: 20, capReached: true } },
+  },
+  "client.repos.list": { type: "repos.list", requestId: "req-repos" },
+  "server.repos.list.result": { type: "repos.list.result", requestId: "req-repos", repos: accessibleRepos, fetchedAt: "2026-10-28T10:00:00Z" },
+  "server.repos.list.result.error": {
+    type: "repos.list.result",
+    requestId: "req-repos",
+    repos: [],
+    fetchedAt: "2026-10-28T10:00:00Z",
+    error: "GET /user/repos: HTTP 403; rate limited for 120000 ms, over the 5000 ms cap",
   },
   "server.settings.auto-review-off": {
     type: "settings",
@@ -1668,7 +1722,7 @@ export const fixtures: Record<string, ClientMessage | ServerMessage | Record<str
     models: [{ ref: "anthropic/claude-opus-5-5", provider: "anthropic", name: "Claude Opus 5.5", contextWindow: 1_000_000, authSource: "oauth", preferred: true }],
     configPath: "/Users/operator/.config/pr-review/pr-review.config.json",
     publishMode: "approval",
-    autoReview: { enabled: false, intervalMinutes: 5, includeTeamRequests: false, repos: { include: [], exclude: [] } },
+    autoReview: { enabled: false, intervalMinutes: 5, includeTeamRequests: false, repos: { include: [], exclude: [] }, dailyCap: 20 },
   },
   "server.settings.auto-review-error": {
     type: "settings",
@@ -1679,7 +1733,7 @@ export const fixtures: Record<string, ClientMessage | ServerMessage | Record<str
     publishMode: "comment",
     autoReview: {
       ...autoReviewOn,
-      lastPoll: { at: "2026-10-28T09:55:00Z", found: 0, started: 0, skipped: 0, error: "GET /search/issues: HTTP 403; rate limited for 120000 ms, over the 5000 ms cap" },
+      lastPoll: { at: "2026-10-28T09:55:00Z", found: 0, started: 0, skipped: 0, startedToday: 3, error: "GET /search/issues: HTTP 403; rate limited for 120000 ms, over the 5000 ms cap" },
     },
   },
   "server.settings.custom-template": {
