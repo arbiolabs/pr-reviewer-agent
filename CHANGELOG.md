@@ -4,6 +4,8 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 ## [Unreleased]
 
+## [1.5.0] - 2026-10-28
+
 ### Added
 
 - **Desktop: a Dracula theme.** Settings → Appearance, View → Appearance and the palette offer Dracula: its Background and Foreground, Purple for the accent, Cyan, Green, Yellow, Orange, Pink and Red for meaning, and Dracula's syntax colors. Like Solarized and Nord, colors that fail the contrast test move in lightness only, and the selection is Current Line darkened; DESIGN.md lists each change. Save it as `theme = "dracula"` under `[desktop]` (#68).
@@ -143,7 +145,8 @@ This is the first release.
   - the PR is still open.
 - Command idempotency keys are bound to each run attempt, so a replayed command never has a second effect.
 
-[Unreleased]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.4.0...HEAD
+[Unreleased]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.5.0...HEAD
+[1.5.0]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.2.0...v1.3.0
 [1.2.0]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.1.0...v1.2.0
