@@ -34,6 +34,10 @@ Keep the socket path short. macOS refuses a socket path longer than 103 bytes, a
 
 The title bar shows the app's mark and name, "PR Reviewer Agent", then the page title. On the right, the reviewer pill always shows the reviewer's state ("Reviewer · Live", "Offline", "Stopped by you", "Starting…") with the one action that changes it: Stop while the daemon answers, Start while it doesn't. A start or stop under way shows a spinner, and an action that can't run is dimmed with the reason in its tooltip. Restart is in the **Reviewer** menu and the palette.
 
+### The menu bar item
+
+The app keeps an eye in the menu bar while it runs, also with its window closed. The eye is dimmed and has no pupil while the reviewer doesn't answer (stopped, starting or offline). While reviews run, its pupil glances left and right; with Reduce motion on it stays still. The number beside it is the Needs you count. Its tooltip and the menu's first line say the same in words, such as "Reviewer live · 2 reviewing · 3 need you". The menu also has Open, Check for Updates… and Quit.
+
 ### Review a new PR
 
 Against a daemon started with `--allow-commands`, press ⌘N, or choose **Review a PR…** in the sidebar, the palette or the empty state. Paste the PR's URL (⌘V), or type `owner/repo#N`. The sheet shows the repository and number it read, and ⏎ asks the daemon to add it. The daemon reads the PR from GitHub with its own account and starts its review; the sheet closes on the new PR. If the daemon refuses, the sheet says why in place: a PR its account can't see, a closed or merged PR, or text that isn't a PR link. A PR the window already tracks opens instead. On a read-only daemon the entries are locked with the reason.
