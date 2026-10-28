@@ -635,6 +635,26 @@ it("pr.archive and pr.unarchive on a read-only daemon: streamed as pr.updated, o
   expect(snap.prs.map((p) => [p.id, p.archivedAt])).toEqual([[prId, now]]);
 }, 30_000);
 
+it("usage.get on a read-only daemon: the recorded usage in the daemon's time zone, before streaming too", async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "ctl-usage-"));
+  const store = AppStore.open(join(dataDir, "app.sqlite"));
+  const prId = store.upsertPull(createFixture().pull);
+  const revision = store.ensureRevision({ prId, baseSha: "b".repeat(40), headSha: "h".repeat(40), policyVersion: "1", reviewerVersion: "m1" });
+  const usage = (output: number, total: number) => ({ input: 10, output, cacheRead: 100, cacheWrite: 5, totalTokens: 115 + output, cost: { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total } });
+  store.recordUsage(revision.id, "anthropic/claude-x", usage(20, 0.5));
+  store.recordUsage(revision.id, "anthropic/claude-x", usage(30, 0.25));
+  store.close();
+  const c = await attach((await daemon(dataDir)).path);
+  c.send({ type: "usage.get", requestId: "u", by: "week", periods: 3 });
+  const report = await c.waitFor<Extract<ServerMessage, { type: "usage.report" }>>((m) => m.type === "usage.report");
+  expect(report).toMatchObject({ requestId: "u", by: "week", timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone, currency: "USD", priceSource: "catalog" });
+  expect(report.buckets).toHaveLength(3);
+  expect(report.buckets.at(-1)).toMatchObject({ reviews: 1, responses: 2, input: 20, output: 50, cacheRead: 200, cacheWrite: 10, cost: 0.75 });
+  expect(report.models).toEqual([{ model: "anthropic/claude-x", reviews: 1, responses: 2, input: 20, output: 50, cacheRead: 200, cacheWrite: 10, cost: 0.75 }]);
+  c.send({ type: "usage.get", requestId: "bad", by: "year" });
+  expect(await c.waitFor((m) => m.type === "error" && m.requestId === "bad")).toMatchObject({ code: "INVALID_REQUEST" });
+}, 30_000);
+
 it("produced every server message and event type, each passing the v1 schema", () => {
   expect([...produced].sort()).toEqual(
     [
@@ -655,6 +675,7 @@ it("produced every server message and event type, each passing the v1 schema", (
       "resync.required",
       "snapshot",
       "timeline.page",
+      "usage.report",
       "welcome",
     ].sort(),
   );

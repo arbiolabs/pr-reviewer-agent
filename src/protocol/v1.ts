@@ -1,5 +1,6 @@
 import Type, { type Static, type TSchema } from "typebox";
 import { CATEGORIES, SEVERITIES } from "../domain/types.ts";
+import { USAGE_BY } from "../domain/usage.ts";
 import { COORDINATOR_STATES, FINDING_STATES, PUBLICATION_STATUSES, REVIEW_STATES } from "../domain/machines.ts";
 
 export const PROTOCOL_VERSION = 1;
@@ -202,6 +203,23 @@ export const PublicationChange = Type.Object({
 });
 export type PublicationChange = Static<typeof PublicationChange>;
 
+const Count = Type.Integer({ minimum: 0 });
+const usageTotals = {
+  reviews: Type.Integer({ minimum: 0, description: "distinct runs with at least one recorded model response" }),
+  responses: Type.Integer({ minimum: 0, description: "model responses, each retry and error answer included" }),
+  input: Count,
+  output: Count,
+  cacheRead: Count,
+  cacheWrite: Count,
+  cost: Type.Number({ minimum: 0, description: "USD at the model's catalog price, rounded to 6 decimals" }),
+};
+const LocalDate = Type.String({ pattern: "^\\d{4}-\\d{2}-\\d{2}$", description: "a calendar date in the report's timeZone" });
+
+/** One day, ISO week (Monday first) or month of model usage; `start` and `end` are both inside it. */
+export const UsageBucket = Type.Object({ start: LocalDate, end: LocalDate, ...usageTotals });
+export const UsageTotals = Type.Object(usageTotals);
+export const UsageModel = Type.Object({ model: Type.String({ minLength: 1, description: "provider/id" }), ...usageTotals });
+
 // ---------- events ----------
 
 const sequenced = {
@@ -374,6 +392,10 @@ export const ClientMessage = Type.Union([
   req("finding.get", { findingId: Id }),
   req("publication.get", { runId: Id }),
   req("settings.get"),
+  req("usage.get", {
+    by: oneOf(USAGE_BY),
+    periods: Type.Optional(Type.Integer({ minimum: 1, maximum: 400, description: "how many buckets up to the current one; 14 days, 12 weeks or 12 months when absent" })),
+  }),
   req("timeline.get", {
     prId: Type.Optional(Id),
     runId: Type.Optional(Id),
@@ -442,6 +464,16 @@ export const ServerMessage = Type.Union([
     models: Type.Array(ModelOption),
     configPath: Type.String({ description: "the config file settings.set writes" }),
   }),
+  // The answer to usage.get, which every daemon gives: recorded model usage, oldest bucket first, empty ones included.
+  reply("usage.report", {
+    by: oneOf(USAGE_BY),
+    timeZone: Type.String({ description: "the daemon's IANA time zone; buckets follow its calendar" }),
+    currency: Type.Literal("USD"),
+    priceSource: Type.Literal("catalog", { description: "costs are the model's list price as pi-ai's catalog has it, not what a subscription is billed" }),
+    buckets: Type.Array(UsageBucket),
+    totals: UsageTotals,
+    models: Type.Array(UsageModel, { description: "the whole range split by model, costliest first" }),
+  }),
   reply("timeline.page", {
     events: Type.Array(Type.Union([KnownEvent, UnknownEvent]), { description: "newest first" }),
     nextBeforeSequence: Type.Optional(Type.Integer({ minimum: 1 })),
@@ -467,6 +499,7 @@ export const ServerMessage = Type.Union([
   }),
 ]);
 export type ServerMessage = Static<typeof ServerMessage>;
+export type UsageAnswer = Omit<Extract<ServerMessage, { type: "usage.report" }>, "type" | "requestId">;
 export type PublicationPreview = Omit<Extract<ServerMessage, { type: "publication.preview" }>, "type" | "requestId">;
 
 export const ENTITIES = { pr: Pr, run: Run, finding: Finding, "finding-detail": FindingDetail, evidence: Evidence, "diff-file": DiffFile, account: Account, check: SetupCheck, "model-option": ModelOption, event: Event } as const;

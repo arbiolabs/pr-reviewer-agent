@@ -44,6 +44,10 @@ With the reviewer stopped or offline, ⌘N still opens the sheet when the app ca
 
 Press E on a PR's page, or choose **Archive** on its action bar or in the palette. The PR leaves Needs you, Done, the sidebar's repository lists and the live strip, and the next PR opens. **Archived** in the sidebar, **View → Archived** or ⌘3 lists the archived PRs; each row has **Unarchive**, and E on an archived PR's page unarchives it. A review running on the PR goes on, and starting a review on it brings it back. The daemon keeps the archive, so it survives a restart and every client sees it, and a read-only daemon allows it too.
 
+### Usage
+
+**Usage** in the sidebar, **View → Usage**, the palette or ⌘4 shows what reviews cost. Day, Week and Month (D, W, M) group the last 14 days, 12 weeks (Monday first) or 12 months in the reviewer's time zone. The page shows the range's estimated cost, a column chart of cost per day, week or month with its axis in USD (hover a column for its numbers), a table of each period's reviews and input, output, cache read and cache write tokens and cost with the range's totals, and the split by model. Costs are the model's list price from pi-ai's catalog, so a subscription login is billed differently. The daemon records usage from this version on, so reviews before it are not counted. The page asks the daemon again when it opens, on ⌘R, and whenever a review ends. Esc or ⌘[ leaves it.
+
 ### Start and stop the reviewer
 
 When nothing answers on the socket, the offline screen's primary action is **Start reviewer** (⌘R). The **Reviewer** menu, the palette and the Reviewer card in Settings also offer **Stop reviewer** and **Restart reviewer**. The card shows the state, the socket, the mode, how the daemon runs on this machine and where its log is. On a read-only daemon, stop and restart are off with the reason, because that daemon may belong to another process.

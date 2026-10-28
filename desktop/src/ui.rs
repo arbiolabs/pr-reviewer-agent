@@ -10,7 +10,7 @@ use pr_review_tui::app::dispatch;
 use pr_review_tui::keymap::{Action, Mutation};
 use pr_review_tui::model::{AddState, ConfirmState, Link, Modal, Model, PrRef, Screen};
 use pr_review_tui::net::NetCmd;
-use pr_review_tui::protocol::{Command, Pr, PrId, Run};
+use pr_review_tui::protocol::{Command, Pr, PrId, Run, UsageBy};
 use pr_review_tui::update::{Msg, can_add, can_confirm};
 use pr_review_tui::view::Hit;
 use std::time::{Duration, Instant};
@@ -40,6 +40,7 @@ gpui_kit::actions!(
         NeedsYou,
         DoneList,
         ArchivedList,
+        UsageView,
         FocusNext,
         FocusPrev,
         AddPr,
@@ -66,6 +67,7 @@ pub fn bindings() -> Vec<KeyBinding> {
         KeyBinding::new("cmd-1", NeedsYou, None),
         KeyBinding::new("cmd-2", DoneList, None),
         KeyBinding::new("cmd-3", ArchivedList, None),
+        KeyBinding::new("cmd-4", UsageView, None),
         KeyBinding::new("cmd-n", AddPr, None),
         KeyBinding::new("cmd-v", Paste, None),
         // Ours, not the kit root's: the window records that the keyboard owns focus, so the ring shows.
@@ -95,6 +97,7 @@ pub fn menus(chosen: tokens::Choice) -> Vec<Menu> {
             MenuItem::action("Needs You", NeedsYou),
             MenuItem::action("Done", DoneList),
             MenuItem::action("Archived", ArchivedList),
+            MenuItem::action("Usage", UsageView),
             MenuItem::action("Back", GoBack),
             MenuItem::separator(),
             MenuItem::action("Command Palette", Palette),
@@ -219,9 +222,9 @@ pub struct Shell {
     pub queued_add: Option<String>,
 }
 
-/// A page the reader went into: a finding, the proof, the diff or Settings. The live strip steps aside there.
+/// A page the reader went into: a finding, the proof, the diff, Settings or Usage. The live strip steps aside there.
 pub fn deep(m: &Model) -> bool {
-    front(m).is_some() || matches!(m.ui.screen, Screen::Diff | Screen::Settings)
+    front(m).is_some() || matches!(m.ui.screen, Screen::Diff | Screen::Settings) || m.usage.by.is_some()
 }
 
 /// The reader's theme choice, a global so every view and the menu bar read the same one.
@@ -349,7 +352,30 @@ impl Shell {
 
     /// The reader is on a deep page or the timeline: Back (⌘[) has somewhere to go.
     pub fn away(&self) -> bool {
-        !matches!(self.model.ui.screen, Screen::Inbox | Screen::Review) || front(&self.model).is_some()
+        !matches!(self.model.ui.screen, Screen::Inbox | Screen::Review)
+            || front(&self.model).is_some()
+            || self.usage_open()
+    }
+
+    /// The Usage page is in front. It is the reducer's `usage.by`, so what shows and what is asked for read one field.
+    pub fn usage_open(&self) -> bool {
+        self.model.usage.by.is_some()
+    }
+
+    /// ⌘4, the sidebar, the menu and the palette: the Usage page, grouped by `by` or as it was last.
+    pub fn open_usage(&mut self, by: Option<UsageBy>, cx: &mut Context<Self>) {
+        let by = by.or(self.model.usage.by).or(self.model.usage.report.as_ref().map(|r| r.by)).unwrap_or(UsageBy::Day);
+        if !self.usage_open() {
+            self.close_modals(cx);
+            self.home(cx);
+        }
+        self.send(Msg::Usage(Some(by)), cx);
+    }
+
+    fn close_usage(&mut self, cx: &mut Context<Self>) {
+        if self.usage_open() {
+            self.send(Msg::Usage(None), cx);
+        }
     }
 
     pub fn send(&mut self, msg: Msg, cx: &mut Context<Self>) {
@@ -360,7 +386,16 @@ impl Shell {
         cx.notify();
     }
 
+    /// Going anywhere leaves Usage, and Back from Usage only leaves it. Refresh there asks for usage again too.
     pub fn act(&mut self, a: Action, cx: &mut Context<Self>) {
+        if self.usage_open() {
+            match a {
+                Action::Back => return self.close_usage(cx),
+                Action::Goto(_) => self.close_usage(cx),
+                Action::Refresh => self.send(Msg::Usage(self.model.usage.by), cx),
+                _ => {}
+            }
+        }
         self.send(Msg::Action(a), cx);
     }
 
@@ -395,6 +430,7 @@ impl Shell {
     }
 
     pub fn select_pr(&mut self, pr: PrId, cx: &mut Context<Self>) {
+        self.close_usage(cx);
         self.close_modals(cx);
         self.home(cx);
         self.scrub = None;
@@ -600,6 +636,7 @@ impl Shell {
     }
 
     pub fn set_tab(&mut self, list: List, cx: &mut Context<Self>) {
+        self.close_usage(cx);
         self.done_tab = list == List::Done;
         self.model.ui.show_archived = list == List::Archived;
         self.close_modals(cx);
@@ -700,6 +737,16 @@ impl Shell {
         if ch == "/" {
             self.overlay = Some(Overlay::Palette { query: String::new(), selected: 0 });
             return cx.notify();
+        }
+        if self.usage_open() && m.top_modal().is_none() {
+            match (key, ch) {
+                ("escape", _) => self.close_usage(cx),
+                (_, "d") => self.open_usage(Some(UsageBy::Day), cx),
+                (_, "w") => self.open_usage(Some(UsageBy::Week), cx),
+                (_, "m") => self.open_usage(Some(UsageBy::Month), cx),
+                _ => {}
+            }
+            return;
         }
         let modal = m.top_modal().cloned();
         let screen = m.ui.screen;
@@ -817,6 +864,7 @@ impl Render for Shell {
         let body = match m.ui.screen {
             Screen::Diff => diff::view(self, &t, cx).into_any_element(),
             Screen::Settings => crate::setup::settings(self, &t, cx).into_any_element(),
+            _ if self.usage_open() => crate::usage::view(self, &t, cx).into_any_element(),
             _ => div()
                 .flex()
                 .flex_1()
@@ -895,6 +943,7 @@ impl Render for Shell {
             .on_action(cx.listener(|s, _: &NeedsYou, _, cx| s.set_tab(List::Queue, cx)))
             .on_action(cx.listener(|s, _: &DoneList, _, cx| s.set_tab(List::Done, cx)))
             .on_action(cx.listener(|s, _: &ArchivedList, _, cx| s.set_tab(List::Archived, cx)))
+            .on_action(cx.listener(|s, _: &UsageView, _, cx| s.open_usage(None, cx)))
             .on_action(cx.listener(|_, _: &CloseWindow, window, _| window.remove_window()))
             .relative()
             .size_full()
@@ -983,6 +1032,7 @@ fn titlebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         (Screen::Diff, _) => (format!("{number} diff"), pr_title),
         (Screen::Timeline, _) => (format!("{number} timeline"), pr_title),
         (Screen::Settings, _) => ("Settings".into(), "What the reviewer needs and how it reviews".into()),
+        _ if s.usage_open() => ("Usage".into(), "Tokens and estimated cost of reviews".into()),
         _ if s.list() == List::Archived => (
             "Archived".into(),
             format!("{} out of your lists until you unarchive or review one.", queue::count(m.archived().len(), "PR")),
@@ -1230,6 +1280,7 @@ pub fn setup_shown(s: &Shell) -> bool {
     m.ui.screen == Screen::Settings
         || matches!(m.ui.screen, Screen::Inbox | Screen::Review)
             && front(m).is_none()
+            && !s.usage_open()
             && m.selected_pr().is_none()
             && queue::stage(m) == Stage::Ready
             && queue::setup_count(m).blocking > 0
@@ -1241,7 +1292,9 @@ fn sidebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
     let stage = queue::stage(m);
     let cards = queue::cards(m);
     let done = queue::done(m);
-    let home = matches!(m.ui.screen, Screen::Inbox | Screen::Review | Screen::Timeline) && front(m).is_none();
+    let home = matches!(m.ui.screen, Screen::Inbox | Screen::Review | Screen::Timeline)
+        && front(m).is_none()
+        && !s.usage_open();
     // Nothing sits behind the lists while the window is offline, so they step back.
     let dim = stage == Stage::Offline;
     let selected = m.ui.selected_pr.clone();
@@ -1288,6 +1341,17 @@ fn sidebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
             home && s.list() == List::Archived,
             dim,
             click(cx, |s, cx| s.set_tab(List::Archived, cx)),
+        ))
+        .child(nav_item(
+            t,
+            "nav-usage",
+            IconName::ChartColumn,
+            "Usage",
+            None,
+            t.muted,
+            s.usage_open() && matches!(m.ui.screen, Screen::Inbox | Screen::Review),
+            dim,
+            click(cx, |s, cx| s.open_usage(None, cx)),
         ))
         .child(nav_item(
             t,

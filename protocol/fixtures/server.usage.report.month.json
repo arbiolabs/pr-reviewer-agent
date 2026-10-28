@@ -1,0 +1,173 @@
+{
+  "type": "usage.report",
+  "requestId": "req-usage",
+  "by": "month",
+  "timeZone": "Europe/Berlin",
+  "buckets": [
+    {
+      "start": "2025-11-01",
+      "end": "2025-11-30",
+      "reviews": 52,
+      "responses": 364,
+      "input": 1047761,
+      "output": 557814,
+      "cacheRead": 14933451,
+      "cacheWrite": 1422978,
+      "cost": 30.784471
+    },
+    {
+      "start": "2025-12-01",
+      "end": "2025-12-31",
+      "reviews": 52,
+      "responses": 387,
+      "input": 1108478,
+      "output": 626578,
+      "cacheRead": 16104893,
+      "cacheWrite": 1581878,
+      "cost": 31.927472
+    },
+    {
+      "start": "2026-01-01",
+      "end": "2026-01-31",
+      "reviews": 51,
+      "responses": 392,
+      "input": 1084264,
+      "output": 596741,
+      "cacheRead": 17226176,
+      "cacheWrite": 1611516,
+      "cost": 30.858926
+    },
+    {
+      "start": "2026-02-01",
+      "end": "2026-02-28",
+      "reviews": 48,
+      "responses": 357,
+      "input": 979647,
+      "output": 532781,
+      "cacheRead": 14921197,
+      "cacheWrite": 1439235,
+      "cost": 28.968203
+    },
+    {
+      "start": "2026-03-01",
+      "end": "2026-03-31",
+      "reviews": 56,
+      "responses": 431,
+      "input": 1254142,
+      "output": 644903,
+      "cacheRead": 19018609,
+      "cacheWrite": 1676939,
+      "cost": 34.994949
+    },
+    {
+      "start": "2026-04-01",
+      "end": "2026-04-30",
+      "reviews": 49,
+      "responses": 366,
+      "input": 1008730,
+      "output": 574169,
+      "cacheRead": 15741237,
+      "cacheWrite": 1439499,
+      "cost": 32.177253
+    },
+    {
+      "start": "2026-05-01",
+      "end": "2026-05-31",
+      "reviews": 52,
+      "responses": 370,
+      "input": 1020987,
+      "output": 544434,
+      "cacheRead": 15675389,
+      "cacheWrite": 1448236,
+      "cost": 30.838041
+    },
+    {
+      "start": "2026-06-01",
+      "end": "2026-06-30",
+      "reviews": 52,
+      "responses": 366,
+      "input": 1046123,
+      "output": 587516,
+      "cacheRead": 15755557,
+      "cacheWrite": 1452234,
+      "cost": 30.529277
+    },
+    {
+      "start": "2026-07-01",
+      "end": "2026-07-31",
+      "reviews": 49,
+      "responses": 364,
+      "input": 1018685,
+      "output": 562493,
+      "cacheRead": 16016281,
+      "cacheWrite": 1461294,
+      "cost": 30.670317
+    },
+    {
+      "start": "2026-08-01",
+      "end": "2026-08-31",
+      "reviews": 57,
+      "responses": 423,
+      "input": 1200964,
+      "output": 640682,
+      "cacheRead": 18336892,
+      "cacheWrite": 1661102,
+      "cost": 35.419467
+    },
+    {
+      "start": "2026-09-01",
+      "end": "2026-09-30",
+      "reviews": 80,
+      "responses": 546,
+      "input": 1527436,
+      "output": 857054,
+      "cacheRead": 22451670,
+      "cacheWrite": 2149133,
+      "cost": 48.546692
+    },
+    {
+      "start": "2026-10-01",
+      "end": "2026-10-31",
+      "reviews": 75,
+      "responses": 575,
+      "input": 1607912,
+      "output": 917943,
+      "cacheRead": 24568341,
+      "cacheWrite": 2326983,
+      "cost": 49.441044
+    }
+  ],
+  "totals": {
+    "reviews": 673,
+    "responses": 4941,
+    "input": 13905129,
+    "output": 7643108,
+    "cacheRead": 210749693,
+    "cacheWrite": 19671027,
+    "cost": 415.156112
+  },
+  "models": [
+    {
+      "model": "anthropic/claude-opus-5-5",
+      "reviews": 535,
+      "responses": 3945,
+      "input": 11102236,
+      "output": 6106257,
+      "cacheRead": 168217967,
+      "cacheWrite": 15790549,
+      "cost": 390.96752
+    },
+    {
+      "model": "openai/gpt-5.5",
+      "reviews": 138,
+      "responses": 996,
+      "input": 2802893,
+      "output": 1536851,
+      "cacheRead": 42531726,
+      "cacheWrite": 3880478,
+      "cost": 24.188592
+    }
+  ],
+  "currency": "USD",
+  "priceSource": "catalog"
+}

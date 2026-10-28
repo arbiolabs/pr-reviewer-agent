@@ -30,6 +30,8 @@ pub enum Msg {
     AddPr(String),
     /// Makes this `provider/id` the model for reviews started from now on: `settings.set`.
     SetModel(String),
+    /// Shows recorded model usage grouped this way, asking for it fresh (`usage.get`), or stops showing it.
+    Usage(Option<UsageBy>),
 }
 
 #[derive(Debug)]
@@ -159,9 +161,17 @@ pub fn update(m: &mut Model, msg: Msg) -> Vec<Effect> {
         Msg::Net(e) => net(m, e, &mut fx),
         Msg::AddPr(text) => add_pr(m, &text, &mut fx),
         Msg::SetModel(model) => set_model(m, model, &mut fx),
+        Msg::Usage(by) => {
+            m.usage.by = by;
+            if by.is_some() {
+                m.usage.stale = true;
+                m.usage.error = None;
+            }
+        }
     }
     prefetch(m, &mut fx);
     prefetch_settings(m, &mut fx);
+    prefetch_usage(m, &mut fx);
     settle_timeline_cursor(m);
     if !page_reloading(m) {
         clamp_page(m);
@@ -219,6 +229,20 @@ fn prefetch_settings(m: &mut Model, fx: &mut Vec<Effect>) {
         return;
     }
     m.agent.request = send(m, fx, |request_id| ClientMessage::SettingsGet { request_id });
+}
+
+/// Usage on screen asks for its grouping when it has no answer for it, or when the one it has went stale.
+fn prefetch_usage(m: &mut Model, fx: &mut Vec<Effect>) {
+    let u = &m.usage;
+    let Some(by) = u.by else { return };
+    let current = !u.stale && u.report.as_ref().is_some_and(|r| r.by == by);
+    if u.request.is_some() || u.error.is_some() || current {
+        return;
+    }
+    m.usage.request = send(m, fx, |request_id| ClientMessage::UsageGet { request_id, by, periods: None });
+    if m.usage.request.is_some() {
+        m.usage.stale = false;
+    }
 }
 
 /// Save on Settings' model picker: `settings.set`, then the settings asked for again once it is accepted.
@@ -374,6 +398,9 @@ fn fail_request(m: &mut Model, id: &RequestId, message: Text) -> bool {
     } else if m.agent.request.as_ref() == Some(id) {
         m.agent.request = None;
         m.agent.error = Some(message);
+    } else if m.usage.request.as_ref() == Some(id) {
+        m.usage.request = None;
+        m.usage.error = Some(message);
     } else if matches!(&m.agent.save, SaveState::Sending { request, .. } if request == id) {
         m.agent.save = SaveState::Refused(message);
     } else {
@@ -522,6 +549,8 @@ fn server_message(m: &mut Model, msg: ServerMessage, fx: &mut Vec<Effect>) {
             }
             // Another connection may be another daemon, with another model.
             m.agent = AgentSettings { wanted: m.agent.wanted, ..Default::default() };
+            // The last report stays on screen until this daemon answers; a request sent to the last one is lost.
+            m.usage = UsageView { by: m.usage.by, report: m.usage.report.take(), stale: true, ..Default::default() };
             m.server = Some(ServerInfo {
                 protocol_version,
                 server_version,
@@ -603,6 +632,13 @@ fn server_message(m: &mut Model, msg: ServerMessage, fx: &mut Vec<Effect>) {
                 m.agent.request = None;
                 m.agent.error = None;
                 m.agent.settings = Some(s);
+            }
+        }
+        ServerMessage::UsageReport(r) => {
+            if r.request_id.is_some() && r.request_id == m.usage.request {
+                m.usage.request = None;
+                m.usage.error = None;
+                m.usage.report = Some(r);
             }
         }
         ServerMessage::CommandResult(r) => {
@@ -801,6 +837,10 @@ fn apply_body(m: &mut Model, e: &SequencedEvent, fx: &mut Vec<Effect>) {
         EventBody::PrUpdated(pr) => archiving(m, pr),
         _ => None,
     };
+    // A review that ended spent its last tokens: usage on screen asks again.
+    if matches!(&e.body, EventBody::Run(change, _) if *change != RunChange::Started) {
+        m.usage.stale = true;
+    }
     let d = &mut m.domain;
     if let Some(at) = crate::waterfall::epoch_ms(e.occurred_at.as_str()) {
         d.clock = Some((at, m.now_ms));

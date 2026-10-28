@@ -599,6 +599,8 @@ pub struct Model {
     pub adding: Option<Adding>,
     /// The daemon's review model, for the desktop's Settings.
     pub agent: AgentSettings,
+    /// Recorded model usage, for the desktop's Usage view.
+    pub usage: UsageView,
     pub dirty: bool,
 }
 
@@ -612,6 +614,18 @@ pub struct AgentSettings {
     pub settings: Option<Settings>,
     pub error: Option<Text>,
     pub save: SaveState,
+}
+
+/// What the daemon said about recorded model usage. `by` is the grouping a client shows, `None` while none does (the
+/// TUI never asks). `report` is the last answer, kept on screen until the next one replaces it; `stale` asks for a new
+/// one, set on opening and whenever a review ends. `error` is why there is none, cleared by opening again.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct UsageView {
+    pub by: Option<UsageBy>,
+    pub request: Option<RequestId>,
+    pub report: Option<UsageReport>,
+    pub stale: bool,
+    pub error: Option<Text>,
 }
 
 /// A `settings.set` from Save, until its result.
@@ -688,6 +702,7 @@ impl Model {
             commands_sent: BTreeMap::new(),
             adding: None,
             agent: AgentSettings::default(),
+            usage: UsageView::default(),
             dirty: true,
         }
     }

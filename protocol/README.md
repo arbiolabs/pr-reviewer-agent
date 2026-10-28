@@ -20,6 +20,7 @@ also arrive unsolicited (`snapshot`, `resync.required`, `error`) have an optiona
 | `publication.get` | `runId` | `publication.preview`, or `error NOT_FOUND` for a run with no stored payload |
 | `timeline.get` | `prId?`, `runId?`, `findingId?`, `beforeSequence?`, `limit` (1..500) | `timeline.page` (newest first; pass `nextBeforeSequence` back to page) |
 | `settings.get` | | `settings`, from a daemon in `engine` mode; elsewhere `error CAPABILITY_DENIED` with the reason |
+| `usage.get` | `by` (`day`, `week` or `month`), `periods?` (1..400) | `usage.report`, from every daemon, a read-only one included (see [Usage](#usage)) |
 | `command` | `command`, `params`, `idempotencyKey` | `command.result`. A command the `welcome` did not grant is `rejected` with code `CAPABILITY_DENIED`. |
 
 | Server → client | Fields |
@@ -33,6 +34,7 @@ also arrive unsolicited (`snapshot`, `resync.required`, `error`) have an optiona
 | `publication.preview` | `runId`, `previewId` (the payload hash the approval must name), `headSha`, `body` (the exact review text, marker included), `comments[]` (`path`, `line`, `side: RIGHT`, `body`), `event: COMMENT`, `status` |
 | `timeline.page` | `events[]` (sequenced events), `nextBeforeSequence?` |
 | `settings` | `model` (`ref`, and `source`: `--model`, `PR_REVIEW_MODEL`, `config` or `default`), `models[]` (`ModelOption`: `ref`, `provider`, `name`, `contextWindow`, `authSource`, `preferred`; preferred first), `configPath` (the file `settings.set` writes) |
+| `usage.report` | `by`, `timeZone`, `currency: USD`, `priceSource: catalog`, `buckets[]` (`start`, `end`, `reviews`, `responses`, `input`, `output`, `cacheRead`, `cacheWrite`, `cost`), `totals` (the same counts for the range), `models[]` (the same counts per `model`, costliest first) |
 | `command.result` | `status: accepted` with `operationId` (and `prId`, `runId` from `review.add`), or `status: rejected` with `code` and `message` (and `prId` when `review.add` names a tracked PR) |
 | `error` | `code`, `message`, `supported?` |
 
@@ -149,6 +151,22 @@ new row. An unknown `prId` is `rejected` with `NOT_FOUND`. Archiving never touch
 A PR comes back only when a review is started on it: `review.start`, `review.again`, `review.retry`, and `review.add`
 of a PR already tracked (still `CONFLICT`, naming it) clear `archivedAt` and emit `pr.updated`.
 
+## Usage
+
+`usage.get` reads the model usage the engine recorded: one row per model response of a review, written when the response
+arrives. Error answers and retries count, since each was a request the provider billed. A resumed review never counts a
+response twice, because a response the engine had already stored is not sent again. Reviews that ran before the daemon
+recorded usage have no rows, so the history starts at that release.
+
+`usage.report` groups the rows by the daemon's own `timeZone` (an IANA name). A `day` is a local calendar date, a `week`
+runs Monday to Sunday (ISO 8601), and a `month` is a calendar month. `buckets` are the last `periods` buckets up to the
+one that holds now, oldest first, and an empty bucket is listed with zeros, so a chart has no gaps. Without `periods`
+the range is 14 days, 12 weeks or 12 months. `start` and `end` are local dates (`YYYY-MM-DD`), both inside the bucket.
+`reviews` counts distinct runs; the token counts and `cost` are sums over `responses`. `input` excludes cached tokens,
+which are `cacheRead` and `cacheWrite`. `cost` is in USD at the model's list price in pi-ai's catalog
+(`priceSource: catalog`), rounded to 6 decimals: an estimate, and not what a subscription login is billed. `totals` and
+`models` cover the whole range.
+
 ## Setup checks
 
 `welcome.checks` is what `pr-review setup --check` reports for the daemon's own environment and data dir: a list of
@@ -263,8 +281,10 @@ The fixtures write control bytes as JSON `\u` escapes.
   `tests/protocol.test.ts` produces exactly this state.
 - `--playback` answers `diff.get` with the `fixtures/server.diff.page*.json` whose `prId`, `baseSha` and `headSha` match
   (`server.diff.page.last.json` for a request with a `cursor`), `finding.get` with the
-  `fixtures/server.finding.detail*.json` whose finding id matches, and `publication.get` with
-  the `fixtures/server.publication.preview*.json` whose run id matches. Anything else is `NOT_FOUND`.
+  `fixtures/server.finding.detail*.json` whose finding id matches, `publication.get` with
+  the `fixtures/server.publication.preview*.json` whose run id matches, and `usage.get` with
+  `fixtures/server.usage.report.<by>.json`, a year of usage in `Europe/Berlin` that ignores `periods`. Anything else is
+  `NOT_FOUND`.
 
 | Script | Exercises |
 | --- | --- |

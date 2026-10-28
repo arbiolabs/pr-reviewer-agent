@@ -4,10 +4,11 @@ import { DatabaseSync } from "node:sqlite";
 import { COORDINATOR_STATES, FINDING_STATES, PUBLICATION_STATUSES, publicationStatus, REVIEW_STATES, type ReviewState } from "../domain/machines.ts";
 import type { CandidateFinding } from "../domain/types.ts";
 import { ACCOUNT_KEY, chooseAccount, detectGh, type Env, type GhDetection, listAccounts } from "../github/accounts.ts";
-import { AppStore, type OutboxRow, REOPENINGS, type PullRow, type RevisionRow, TRANSITIONS } from "../persistence/store.ts";
+import { type UsageBy, usageReport, usageSince } from "../domain/usage.ts";
+import { AppStore, type OutboxRow, REOPENINGS, type PullRow, type RevisionRow, TRANSITIONS, usageRows } from "../persistence/store.ts";
 import type { ReviewPayload } from "../publish/publisher.ts";
 import { sanitize } from "../protocol/sanitize.ts";
-import type { Account, Finding, FindingDetail, Pr, PublicationChange, PublicationPreview, Run, SequencedEvent } from "../protocol/v1.ts";
+import type { Account, Finding, FindingDetail, Pr, PublicationChange, PublicationPreview, Run, SequencedEvent, UsageAnswer } from "../protocol/v1.ts";
 import { isMissingObject, offlineReadsSupported, PinnedRepo } from "../source/git.ts";
 import { type DiffPage, pageDiff, parseDiffFiles } from "./diff.ts";
 import { ControlError, type ControlSource, type DiffRequest, type Snapshot, type TimelinePage, type TimelineRequest } from "./source.ts";
@@ -139,6 +140,13 @@ export class AppDbSource implements ControlSource {
     const seq = this.writer.setArchived(prId, archived);
     if (seq === undefined) throw new ControlError("NOT_FOUND", `no PR ${prId}`);
     return `${archived ? "pr.archive" : "pr.unarchive"}:${seq}`;
+  }
+
+  /** usage.get, in the daemon's own time zone. */
+  async usage(by: UsageBy, periods?: number): Promise<UsageAnswer> {
+    const options = { by, tz: Intl.DateTimeFormat().resolvedOptions().timeZone, now: Date.now(), periods };
+    const report = usageReport(this.read(() => usageRows(this.db, usageSince(options))), options);
+    return { ...report, currency: "USD", priceSource: "catalog" };
   }
 
   private accounts(): Account[] {
