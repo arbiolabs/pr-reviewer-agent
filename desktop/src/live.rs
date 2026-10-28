@@ -249,7 +249,7 @@ pub fn live(s: &Shell, t: &Colors, pr: &Pr, run: &Run, cx: &Context<Shell>) -> D
         .flex()
         .flex_col()
         .gap(space::S6)
-        .child(pr_header(t, pr, kicker, pr_sentence(m, pr, Some(run))))
+        .child(pr_header(t, pr, kicker, pr_sentence(m, pr, Some(run)), cx))
         .child(
             div()
                 .flex()

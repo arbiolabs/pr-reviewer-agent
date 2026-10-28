@@ -25,7 +25,7 @@ pub fn timeline(s: &Shell, t: &Colors, pr: &Pr, cx: &Context<Shell>) -> Div {
         .flex()
         .flex_col()
         .gap(space::S6)
-        .child(pr_header(t, pr, overline(t, "Pull request"), pr_sentence(m, pr, run)))
+        .child(pr_header(t, pr, overline(t, "Pull request"), pr_sentence(m, pr, run), cx))
         .child(tabs(t, findings, true, cx));
     let Some(tl) = &m.timeline else {
         return page(
