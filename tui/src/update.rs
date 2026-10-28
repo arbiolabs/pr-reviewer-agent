@@ -244,6 +244,7 @@ pub const SETTINGS_REFRESH_MS: u64 = 30_000;
 /// Settings shows the daemon's review model, so it is asked for once per connection while Settings is open, and again
 /// every `SETTINGS_REFRESH_MS` while automatic reviews are on.
 fn prefetch_settings(m: &mut Model, fx: &mut Vec<Effect>) {
+    prefetch_repos(m, fx);
     let a = &m.agent;
     let polling = a.settings.as_ref().and_then(|s| s.auto_review.as_ref()).is_some_and(|x| x.enabled);
     let fresh = !polling || m.now_ms.saturating_sub(a.asked_at_ms) < SETTINGS_REFRESH_MS;
@@ -257,6 +258,17 @@ fn prefetch_settings(m: &mut Model, fx: &mut Vec<Effect>) {
     }
     m.agent.request = send(m, fx, |request_id| ClientMessage::SettingsGet { request_id });
     m.agent.asked_at_ms = m.now_ms;
+}
+
+/// The repository pickers of automatic reviews offer what the account can reach: asked once per connection, once
+/// Settings shows a daemon that has automatic reviews.
+fn prefetch_repos(m: &mut Model, fx: &mut Vec<Effect>) {
+    let a = &m.agent;
+    let shown = a.settings.as_ref().is_some_and(|s| s.auto_review.is_some());
+    if !a.wanted || m.ui.screen != Screen::Settings || !shown || a.repos_request.is_some() || a.repos.is_some() {
+        return;
+    }
+    m.agent.repos_request = send(m, fx, |request_id| ClientMessage::ReposList { request_id });
 }
 
 /// Usage on screen asks for its grouping when it has no answer for it, or when the one it has went stale.
@@ -479,6 +491,10 @@ fn fail_request(m: &mut Model, id: &RequestId, message: Text) -> bool {
     } else if m.agent.request.as_ref() == Some(id) {
         m.agent.request = None;
         m.agent.error = Some(message);
+    } else if m.agent.repos_request.as_ref() == Some(id) {
+        m.agent.repos_request = None;
+        m.agent.repos =
+            Some(ReposList { request_id: None, repos: vec![], fetched_at: Text::new(""), error: Some(message) });
     } else if m.usage.request.as_ref() == Some(id) {
         m.usage.request = None;
         m.usage.error = Some(message);
@@ -719,6 +735,12 @@ fn server_message(m: &mut Model, msg: ServerMessage, fx: &mut Vec<Effect>) {
                 m.agent.request = None;
                 m.agent.error = None;
                 m.agent.settings = Some(s);
+            }
+        }
+        ServerMessage::ReposList(r) => {
+            if r.request_id.is_some() && r.request_id == m.agent.repos_request {
+                m.agent.repos_request = None;
+                m.agent.repos = Some(r);
             }
         }
         ServerMessage::UsageReport(r) => {

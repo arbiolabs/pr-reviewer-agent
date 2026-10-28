@@ -302,6 +302,8 @@ pub struct AutoReview {
     pub interval_minutes: u32,
     pub include_team_requests: bool,
     pub repos: Repos,
+    /// Automatic starts allowed per local day of the daemon; 0 is no cap. Absent from a daemon older than the cap.
+    pub daily_cap: Option<u32>,
     pub last_poll: Option<AutoReviewPoll>,
 }
 
@@ -314,12 +316,37 @@ pub struct Repos {
 
 /// What the daemon's last search for review requests found and started, or why it failed.
 #[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct AutoReviewPoll {
     pub at: Text,
     pub found: u32,
     pub started: u32,
     pub skipped: u32,
+    /// Automatic starts since the daemon's local midnight; absent from a daemon older than the daily cap.
+    pub started_today: Option<u32>,
+    #[serde(default)]
+    pub cap_reached: bool,
     pub error: Option<Text>,
+}
+
+/// The answer to `repos.list`: what the daemon's account can reach, most recently pushed first, or why it couldn't
+/// ask GitHub.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ReposList {
+    pub request_id: Option<RequestId>,
+    pub repos: Vec<AccessibleRepo>,
+    pub fetched_at: Text,
+    pub error: Option<Text>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AccessibleRepo {
+    pub full_name: Text,
+    pub private: bool,
+    pub archived: bool,
+    pub pushed_at: Option<Text>,
 }
 
 /// The review body template the daemon uses now, its built-in default, and every `{{name}}` it may hold.
@@ -769,6 +796,8 @@ pub enum ServerMessage {
     Settings(Settings),
     #[serde(rename = "usage.report")]
     UsageReport(UsageReport),
+    #[serde(rename = "repos.list.result")]
+    ReposList(ReposList),
     #[serde(rename = "error", rename_all = "camelCase")]
     Error { request_id: Option<RequestId>, code: ErrorCode, message: Text, supported: Option<Vec<u32>> },
 }
@@ -1022,6 +1051,8 @@ pub enum ClientMessage {
     PublicationGet { request_id: RequestId, run_id: RunId },
     #[serde(rename = "settings.get", rename_all = "camelCase")]
     SettingsGet { request_id: RequestId },
+    #[serde(rename = "repos.list", rename_all = "camelCase")]
+    ReposList { request_id: RequestId },
     #[serde(rename = "usage.get", rename_all = "camelCase")]
     UsageGet {
         request_id: RequestId,
@@ -1048,6 +1079,7 @@ impl ClientMessage {
             | ClientMessage::TimelineGet { request_id, .. }
             | ClientMessage::PublicationGet { request_id, .. }
             | ClientMessage::SettingsGet { request_id }
+            | ClientMessage::ReposList { request_id }
             | ClientMessage::UsageGet { request_id, .. } => request_id,
             ClientMessage::Command(c) => &c.request_id,
         }
@@ -1224,6 +1256,9 @@ pub struct AutoReviewParams {
     pub include_team_requests: Option<bool>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub repos: Option<RepoParams>,
+    /// 0 is no cap.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub daily_cap: Option<u32>,
 }
 
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]

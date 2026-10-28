@@ -459,6 +459,11 @@ pub fn answer(fixtures: &Path, played: &[ServerMessage], req: &ClientMessage) ->
             .find(|(n, _)| n == "server.settings.json")
             .map(|(_, v)| v)
             .unwrap_or_else(|| not_found(rid, "no settings".into())),
+        ClientMessage::ReposList { .. } => fixtures_named(fixtures, "server.repos.list.result", rid)
+            .into_iter()
+            .find(|(n, _)| n == "server.repos.list.result.json")
+            .map(|(_, v)| v)
+            .unwrap_or_else(|| not_found(rid, "no repositories".into())),
         ClientMessage::UsageGet { by, group, .. } => {
             let name = match group {
                 Some(g) if *g != UsageGroupBy::Time => {
