@@ -78,6 +78,9 @@ const findingFields = {
   line: Type.Union([Type.Integer({ minimum: 1 }), Type.Null()], { description: "head-revision line; null for a file-level finding" }),
   evidenceCount: Type.Integer({ minimum: 0 }),
   stale: Type.Boolean({ description: "the anchor's head SHA is no longer the PR head; never silently remapped" }),
+  unconfirmed: Type.Optional(
+    Type.Boolean({ description: "true when the reviewer suspects the finding but could not show it from the cited code alone; absent for a confirmed finding" }),
+  ),
 };
 export const Finding = Type.Object(findingFields);
 export type Finding = Static<typeof Finding>;

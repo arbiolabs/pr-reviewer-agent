@@ -405,7 +405,7 @@ const oversell = showDetail(ordersRun, ordersSeen + 6, {
     },
     { kind: "tool_summary", text: 'git log -S reserve_stock: added in #977 "Fix oversell on limited drops" (row lock inside the SQL function)' },
   ],
-});
+}, { unconfirmed: true });
 const historyN1 = showDetail(ordersRun, ordersSeen + 11, {
   title: "Order history runs one item query per order",
   category: "performance",

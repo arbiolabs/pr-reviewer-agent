@@ -44,6 +44,8 @@ Entities are in `schema/v1/{pr,run,finding,finding-detail,evidence,diff-file,acc
 (`id` is the revision id). `phase` is the engine state: `COLLECT_CONTEXT TRIAGE ANALYZE VERIFY PREPARE_PUBLICATION
 AWAITING_APPROVAL PUBLISH RECONCILE COMPLETED FAILED SUPERSEDED`. `AWAITING_APPROVAL` is a run whose review is stored and
 parked for a human (publish mode `approval`); its `status` is still `RUNNING`. A `Finding.line` of `null` means a file-level finding.
+`Finding.unconfirmed` is `true` when the reviewer suspects the finding but could not show it from the cited code alone.
+The server omits it for a confirmed finding, and a client that predates it ignores it.
 
 ## Commands
 

@@ -15,6 +15,7 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 ### Changed
 
 - **Suspected findings are published, marked unconfirmed.** Verify no longer discards a candidate the model marks `suspected`. The summary line and the inline comment read "High (unconfirmed)", and the comment says the reviewer could not show the defect from the cited code alone. A candidate marked `unreproducible` is still discarded, and a resolution still needs `confirmed_by_static_trace` (#58).
+- **Both clients mark an unconfirmed finding.** Protocol v1 `Finding` gains an optional `unconfirmed`, sent as `true` only for a suspected finding, and the desktop app and the terminal client say "unconfirmed" beside its confidence; the desktop finding page no longer says the verifier confirmed such a finding (#59).
 
 ### Fixed
 

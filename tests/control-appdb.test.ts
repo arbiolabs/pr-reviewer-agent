@@ -168,6 +168,7 @@ it("streams a real review to a client attached from the start, with no gaps", as
   ]);
   const [finding] = snapshot.findings;
   expect(finding).toMatchObject({ runId: revision.id, title: "Order deletion endpoint skips the admin check", severity: "high", status: "DETECTED", line: 5, evidenceCount: 1, stale: false });
+  expect(finding).not.toHaveProperty("unconfirmed");
 
   c.send({ type: "finding.get", requestId: "f", findingId: finding!.id });
   expect(await c.waitFor((m) => m.type === "finding.detail")).toMatchObject({
@@ -209,6 +210,24 @@ it("streams a real review to a client attached from the start, with no gaps", as
     expect(await c.waitFor((m) => m.type === "command.result" && m.requestId === `cmd-${command}`)).toMatchObject({ status: "rejected", code: "CAPABILITY_DENIED" });
   }
   expect(counts()).toEqual(before);
+}, 30_000);
+
+it("marks a suspected finding unconfirmed in the snapshot, its detail and its update event", async () => {
+  const fixture = createFixture();
+  const dataDir = mkdtempSync(join(tmpdir(), "ctl-e2e-"));
+  const server = await daemon(dataDir);
+  const c = await attach(server.path);
+  const app = await open(dataDir, fixture, [readDiff(), submitDefect(fixture, "suspected")]);
+  cleanup.push(() => app.close());
+  expect((await finishReview(app, await startReview(app, fixture.pull, "1"))).state).toBe("COMPLETED");
+  c.send({ type: "snapshot.get", requestId: "s" });
+  const { findings } = await c.waitFor<Extract<ServerMessage, { type: "snapshot" }>>((m) => m.type === "snapshot");
+  expect(findings).toMatchObject([{ title: "Order deletion endpoint skips the admin check", unconfirmed: true }]);
+  c.send({ type: "finding.get", requestId: "f", findingId: findings[0]!.id });
+  expect(await c.waitFor((m) => m.type === "finding.detail")).toMatchObject({ finding: { unconfirmed: true } });
+  c.send({ type: "timeline.get", requestId: "t", findingId: findings[0]!.id, limit: 10 });
+  const page = (await c.waitFor((m) => m.type === "timeline.page")) as { events: Ev[] };
+  expect(page.events.map((e) => (e.data as { unconfirmed?: boolean }).unconfirmed)).toEqual([true]);
 }, 30_000);
 
 it("replays what a disconnected client missed on resume, and the review completes without it", async () => {

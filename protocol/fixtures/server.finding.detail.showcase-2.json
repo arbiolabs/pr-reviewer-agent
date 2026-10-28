@@ -36,6 +36,7 @@
         "text": "git log -S reserve_stock: added in #977 \"Fix oversell on limited drops\" (row lock inside the SQL function)"
       }
     ],
+    "unconfirmed": true,
     "history": [
       {
         "runId": "7f24f52475b0cd1755a7ef64fd8a8080",

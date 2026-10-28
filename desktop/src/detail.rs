@@ -875,9 +875,9 @@ pub fn finding_row(s: &Shell, t: &Colors, f: &Finding, cx: &Context<Shell>) -> S
                 .text_color(t.muted)
                 .child(div().font_family(text::MONO).text_size(px(11.)).child(place))
                 .child(format!(
-                    "{} · {:.0}% sure · {} evidence",
+                    "{} · {} · {} evidence",
                     f.category.label(),
-                    f.confidence * 100.,
+                    queue::sure(f),
                     queue::evidence_count(m, f)
                 )),
         )
@@ -901,9 +901,15 @@ pub fn finding_row(s: &Shell, t: &Colors, f: &Finding, cx: &Context<Shell>) -> S
     )
 }
 
-/// The words for a confidence: the number, then what it means for the reader.
-pub fn confidence_words(c: f64) -> (&'static str, &'static str) {
-    if c >= 0.85 {
+/// The words for a confidence: the number, then what it means for the reader. An unconfirmed finding never claims
+/// the verifier confirmed it, however high its number.
+pub fn confidence_words(c: f64, unconfirmed: bool) -> (&'static str, &'static str) {
+    if unconfirmed {
+        (
+            "Unconfirmed",
+            "The reviewer suspects it but could not show it from the cited code alone. Read the evidence before you act.",
+        )
+    } else if c >= 0.85 {
         ("High confidence", "The verifier confirmed it against the code.")
     } else if c >= 0.6 {
         ("Moderate confidence", "Likely, with some doubt. Check the evidence.")
@@ -963,7 +969,10 @@ fn finding_page(s: &Shell, t: &Colors, id: &FindingId, cx: &Context<Shell>) -> D
     if f.stale {
         badges = badges.child(chip(t, "From an earlier head", t.warn));
     }
-    let (conf_word, conf_why) = confidence_words(f.confidence);
+    if f.unconfirmed {
+        badges = badges.child(chip(t, "Unconfirmed", t.warn));
+    }
+    let (conf_word, conf_why) = confidence_words(f.confidence, f.unconfirmed);
     let mut left = div().flex().flex_col().flex_none().w(layout::ARGUMENT).gap(space::S6).child(
         div()
             .flex()
@@ -1599,7 +1608,15 @@ pub fn md_line(t: &Colors, src: &str) -> StyledText {
 
 #[cfg(test)]
 mod tests {
-    use super::{Fit, fit};
+    use super::{Fit, confidence_words, fit};
+
+    #[test]
+    fn an_unconfirmed_finding_never_says_the_verifier_confirmed_it() {
+        assert_eq!(confidence_words(0.9, false), ("High confidence", "The verifier confirmed it against the code."));
+        let (word, why) = confidence_words(0.9, true);
+        assert_eq!(word, "Unconfirmed");
+        assert!(why.starts_with("The reviewer suspects it but could not show it"), "{why}");
+    }
 
     #[test]
     fn a_bar_drops_its_key_hints_then_folds_into_more_before_it_clips() {

@@ -170,10 +170,10 @@ fn face(m: &pr_review_tui::model::Model, c: &Card, selected: bool) -> Face {
                     format!("Also open: {}", queue::severity_summary(more))
                 },
                 meta: format!(
-                    "{}{} · {:.0}% sure · {} evidence",
+                    "{}{} · {} · {} evidence",
                     file,
                     top.line.map_or(String::new(), |l| format!(":{l}")),
-                    top.confidence * 100.,
+                    queue::sure(top),
                     queue::evidence_count(m, top)
                 ),
                 action: "Open finding",
