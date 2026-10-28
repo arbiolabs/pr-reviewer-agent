@@ -20,6 +20,7 @@ also arrive unsolicited (`snapshot`, `resync.required`, `error`) have an optiona
 | `publication.get` | `runId` | `publication.preview`, or `error NOT_FOUND` for a run with no stored payload |
 | `timeline.get` | `prId?`, `runId?`, `findingId?`, `beforeSequence?`, `limit` (1..500) | `timeline.page` (newest first; pass `nextBeforeSequence` back to page) |
 | `settings.get` | | `settings`, from a daemon in `engine` mode; elsewhere `error CAPABILITY_DENIED` with the reason |
+| `repos.list` | | `repos.list.result`, from a daemon in `engine` mode; elsewhere `error CAPABILITY_DENIED` with the reason (see [Repositories](#repositories)) |
 | `usage.get` | `by` (`day`, `week` or `month`), `periods?` (1..400), `group?` (`time`, `repo`, `author` or `pr`; `time` when absent) | `usage.report`, from every daemon, a read-only one included (see [Usage](#usage)) |
 | `command` | `command`, `params`, `idempotencyKey` | `command.result`. A command the `welcome` did not grant is `rejected` with code `CAPABILITY_DENIED`. |
 
@@ -33,7 +34,8 @@ also arrive unsolicited (`snapshot`, `resync.required`, `error`) have an optiona
 | `finding.detail` | `finding`: a `Finding` plus `explanation`, `reasoningSummary`, `suggestedFix?`, `evidence[]`, `history[]` (each entry a run, the finding state it ended in, and an optional `basis` for why) |
 | `publication.preview` | `runId`, `previewId` (the payload hash the approval must name), `headSha`, `body` (the exact review text, marker included), `comments[]` (`path`, `line`, `side: RIGHT`, `body`), `event: COMMENT`, `status` |
 | `timeline.page` | `events[]` (sequenced events), `nextBeforeSequence?` |
-| `settings` | `model` (`ref`, and `source`: `--model`, `PR_REVIEW_MODEL`, `config` or `default`), `models[]` (`ModelOption`: `ref`, `provider`, `name`, `contextWindow`, `authSource`, `preferred`; preferred first), `configPath` (the file `settings.set` writes), and from this version `summaryTemplate` (`value`: the review body template in force, `isDefault`, `default`: the built-in template, `variables[]`: `name`, `description`, `sample` for every `{{name}}` a template may use), and from this version `publishMode` (`comment`, `dry_run`, `silent_no_findings` or `approval`) and `autoReview` (`enabled`, `intervalMinutes`: 5, 15 or 30, `includeTeamRequests`, `repos`: `include[]` and `exclude[]` of `owner/name`, and `lastPoll?`: `at`, `found`, `started`, `skipped`, `error?`) |
+| `settings` | `model` (`ref`, and `source`: `--model`, `PR_REVIEW_MODEL`, `config` or `default`), `models[]` (`ModelOption`: `ref`, `provider`, `name`, `contextWindow`, `authSource`, `preferred`; preferred first), `configPath` (the file `settings.set` writes), and from this version `summaryTemplate` (`value`: the review body template in force, `isDefault`, `default`: the built-in template, `variables[]`: `name`, `description`, `sample` for every `{{name}}` a template may use), and from this version `publishMode` (`comment`, `dry_run`, `silent_no_findings` or `approval`) and `autoReview` (`enabled`, `intervalMinutes`: 5, 15 or 30, `includeTeamRequests`, `repos`: `include[]` and `exclude[]` of `owner/name`, from this version `dailyCap` (0 for no cap), and `lastPoll?`: `at`, `found`, `started`, `skipped`, from this version `startedToday` and `capReached?`, and `error?`) |
+| `repos.list.result` | `repos[]` (`fullName`, `private`, `archived`, `pushedAt?`), `fetchedAt`, `error?` |
 | `usage.report` | `by`, `timeZone`, `currency: USD`, `priceSource: catalog`, `buckets[]` (`start`, `end`, `reviews`, `responses`, `input`, `output`, `cacheRead`, `cacheWrite`, `cost`), `totals` (the same counts for the range), `models[]` (the same counts per `model`, costliest first), `group?` (absent from older servers), `groups[]?` (unless `group` is `time`: `key`, `label`, `repository?`, `number?`, `title?`, `prId?`, `author?`, the same counts and `share`) |
 | `command.result` | `status: accepted` with `operationId` (and `prId`, `runId` from `review.add`), or `status: rejected` with `code` and `message` (and `prId` when `review.add` names a tracked PR) |
 | `error` | `code`, `message`, `supported?` |
@@ -70,7 +72,7 @@ the recorded `operationId` and does nothing again. A key in any other form is `I
 | `pr.archive` | `prId` | `pr.archive:<prId>` | `pr.archive:<journal seq>` |
 | `pr.unarchive` | `prId` | `pr.unarchive:<prId>` | `pr.unarchive:<journal seq>` |
 | `daemon.stop` | `pauseReviews` | `daemon.stop` | `daemon.stop` |
-| `settings.set` | `model?`, `summaryTemplate?` (string, or `null`), `autoReview?` (`enabled?`, `intervalMinutes?`, `includeTeamRequests?`, `repos?`: `include?`, `exclude?`) | `settings.set:<model>`, plus `:template:<hash>` when it sets the template, plus `:auto:<hash>` when it sets `autoReview` | same as the key |
+| `settings.set` | `model?`, `summaryTemplate?` (string, or `null`), `autoReview?` (`enabled?`, `intervalMinutes?`, `includeTeamRequests?`, `repos?`: `include?`, `exclude?`, `dailyCap?`) | `settings.set:<model>`, plus `:template:<hash>` when it sets the template, plus `:auto:<hash>` when it sets `autoReview` | same as the key |
 
 `welcome.capabilities` lists what this daemon grants. A daemon in `read-only` mode (the default, or another pr-review
 holds the data dir, or the engine failed to open; `welcome.readOnlyReason` says which) grants only the reader's own
@@ -129,18 +131,31 @@ Every command is checked by the server whatever the client showed:
   `<model>` is empty when absent, and `<hash>` is the FNV-1a 64-bit hash of the template's UTF-8 bytes as 16 lowercase
   hex digits, or `default` for a reset: `settings.set::template:default`.
   `autoReview` changes only the fields it carries and saves the result under `review.auto_review`. An interval other
-  than 5, 15 or 30, or a repository that is not `owner/name`, is `INVALID_REQUEST`. Turning it on makes the daemon
+  than 5, 15 or 30, a repository that is not `owner/name`, or a `dailyCap` that is not a whole number of 0 or more, is
+  `INVALID_REQUEST`. Turning it on makes the daemon
   poll GitHub at once; any other change to it restarts the interval. Its `<hash>` is the FNV-1a 64-bit hash of its
   compact JSON with the keys in this order, absent ones left out: `enabled`, `intervalMinutes`,
-  `includeTeamRequests`, `repos` (`include`, `exclude`). `{"enabled":true}` gives
+  `includeTeamRequests`, `repos` (`include`, `exclude`), `dailyCap`. `{"enabled":true}` gives
   `settings.set::auto:` followed by that hash.
 - Automatic reviews (`settings.autoReview`). An `engine` daemon with `enabled` searches GitHub as its account, shortly
   after it starts and then every `intervalMinutes`, for open, non-draft PRs that request that account's review (and
   its teams' with `includeTeamRequests`). It starts at most 5 a poll, oldest first. A PR it does not track is added
   as `review.add` adds one; a tracked PR is started only when its head has no run yet, and never while archived. A run
   it starts carries a `tool.activity` line with `tool` `auto-review` and `summary` `started automatically: review
-  requested`. `lastPoll` is the daemon's last poll since it started; a failed one has `error` and is retried with a
+  requested`. A nonzero `dailyCap` stops a poll's starts once the automatic starts since the daemon's local midnight
+  reach it; the count is read back from those `tool.activity` lines, so it survives a restart and never counts a
+  review a client started. `lastPoll.startedToday` is that count after the poll, and `capReached` is `true` while it
+  is at the cap. `lastPoll` is the daemon's last poll since it started; a failed one has `error` and is retried with a
   doubling wait, up to an hour. A read-only daemon never polls.
+
+## Repositories
+
+`repos.list` answers what the engine's GitHub account can reach, for a client to offer in `autoReview.repos`:
+GitHub's `/user/repos` with `affiliation=owner,collaborator,organization_member`, most recently pushed first, archived
+ones left out, at most 1000. One answer serves every client for ten minutes, and a daemon with another account asks
+again. A failure is never an `error` message: it is a `repos.list.result` with empty `repos` and `error` saying why,
+and it is not kept, so the next request asks GitHub again. A read-only daemon has no account token to ask with and
+answers `CAPABILITY_DENIED`. `--playback` answers it with `fixtures/server.repos.list.result.json`.
 
 ## Accounts
 
