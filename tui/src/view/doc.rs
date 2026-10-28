@@ -597,8 +597,11 @@ fn card_head(c: &Ctx, f: &Finding, w: usize, selected: bool) -> Vec<Vec<Span<'st
     let cat = f.category.label();
     let left =
         vec![c.span(format!("{glyph} {}", sev_word(f.severity)), role), c.span(format!("   {cat}"), Role::Muted)];
-    let right =
-        vec![c.span(status, srole), c.span(format!(" {} {:.0}% confident", g.sep, f.confidence * 100.0), Role::Muted)];
+    let mut right = vec![c.span(status, srole)];
+    if f.unconfirmed {
+        right.push(c.span(format!(" {} unconfirmed", g.sep), Role::Pending));
+    }
+    right.push(c.span(format!(" {} {:.0}% confident", g.sep, f.confidence * 100.0), Role::Muted));
     let title_role = if selected { Role::Title } else { Role::Normal };
     let loc = match f.line {
         Some(l) => format!("{}:{l}", f.file),

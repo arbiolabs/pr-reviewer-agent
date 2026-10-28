@@ -244,27 +244,43 @@ fn an_empty_timeline_says_whether_filters_hide_events() {
 #[test]
 fn an_open_finding_event_shows_the_finding_not_the_row_again() {
     use crossterm::event::KeyCode;
-    use pr_review_tui::protocol::EventBody;
-    let mut s = showcase(2).key(KeyCode::Char('t'));
-    let t = s.m.timeline.as_mut().unwrap();
-    let (seq, f) = t
-        .events
-        .iter()
-        .find_map(|e| match &e.body {
-            EventBody::FindingUpdated(f) if f.severity == pr_review_tui::protocol::Severity::Critical => {
-                Some((e.sequence.get(), f.clone()))
-            }
-            _ => None,
-        })
-        .unwrap();
-    t.selected = Some(seq);
-    let mut s = s.key(KeyCode::Enter);
+    use pr_review_tui::protocol::{EventBody, Finding, Severity};
+    let open = |pick: &dyn Fn(&Finding) -> bool| {
+        let mut s = showcase(2).key(KeyCode::Char('t'));
+        let t = s.m.timeline.as_mut().unwrap();
+        let (seq, f) = t
+            .events
+            .iter()
+            .find_map(|e| match &e.body {
+                EventBody::FindingUpdated(f) if pick(f) => Some((e.sequence.get(), f.clone())),
+                _ => None,
+            })
+            .unwrap();
+        t.selected = Some(seq);
+        let mut s = s.key(KeyCode::Enter);
+        let (frame, _) = render(&mut s.m, 120, 38);
+        let detail = s.m.details.get(&f.id).expect("opening a finding event fetches its detail");
+        let first_words: String = detail.explanation.as_str().split(' ').take(6).collect::<Vec<_>>().join(" ");
+        assert!(frame.contains(&format!("{}:{}", f.file, f.line.unwrap())), "file:line:\n{frame}");
+        assert!(frame.contains(&first_words), "the explanation:\n{frame}");
+        assert!(frame.contains("% confident"), "{frame}");
+        frame
+    };
+    let confirmed = open(&|f| f.severity == Severity::Critical);
+    assert!(!confirmed.contains("unconfirmed"), "{confirmed}");
+    let suspected = open(&|f| f.unconfirmed);
+    assert!(suspected.contains("detected · unconfirmed · 88% confident"), "{suspected}");
+}
+
+#[test]
+fn a_card_says_unconfirmed_only_for_a_finding_the_reviewer_could_not_confirm() {
+    let mut s = showcase(2).key(crossterm::event::KeyCode::Enter);
     let (frame, _) = render(&mut s.m, 120, 38);
-    let detail = s.m.details.get(&f.id).expect("opening a finding event fetches its detail");
-    let first_words: String = detail.explanation.as_str().split(' ').take(6).collect::<Vec<_>>().join(" ");
-    assert!(frame.contains(&format!("{}:{}", f.file, f.line.unwrap())), "file:line:\n{frame}");
-    assert!(frame.contains(&first_words), "the explanation:\n{frame}");
-    assert!(frame.contains("% confident"), "{frame}");
+    let heads: Vec<&str> = frame.lines().filter(|l| l.contains("% confident")).collect();
+    let marked: Vec<&&str> = heads.iter().filter(|l| l.contains("· unconfirmed ·")).collect();
+    assert!(heads.len() >= 2, "{frame}");
+    assert_eq!(marked.len(), 1, "{frame}");
+    assert!(marked[0].contains("88% confident"), "{}", marked[0]);
 }
 
 #[test]

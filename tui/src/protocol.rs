@@ -430,6 +430,9 @@ pub struct Finding {
     pub line: Option<NonZeroU32>,
     pub evidence_count: u32,
     pub stale: bool,
+    /// The reviewer suspects it but could not show it from the cited code alone.
+    #[serde(default)]
+    pub unconfirmed: bool,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize)]

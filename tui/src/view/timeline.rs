@@ -89,7 +89,9 @@ fn detail_block(c: &Ctx, e: &SequencedEvent, phase: Option<Phase>, w: usize) -> 
             let (status, _) = finding_status(f.status);
             let cat = f.category.label();
             lines.extend(text(f.title.as_str(), Role::Title));
-            let head = format!("{glyph} {sev}  {cat}  {status} {} {:.0}% confident", g.sep, f.confidence * 100.0);
+            let unconfirmed = if f.unconfirmed { format!(" {} unconfirmed", g.sep) } else { String::new() };
+            let head =
+                format!("{glyph} {sev}  {cat}  {status}{unconfirmed} {} {:.0}% confident", g.sep, f.confidence * 100.0);
             lines.extend(text(&head, role));
             let place = match f.line {
                 Some(l) => format!("{}:{l}", f.file),
