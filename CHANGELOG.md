@@ -14,7 +14,7 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 ### Fixed
 
-- **Desktop: the setup checks' icons sit centred in their rows.** They were pinned to the top of each row; each status icon now centres on its row's height, however many lines the check holds.
+- **Desktop: the setup checks' icons sit centred in their rows.** They were pinned to the top of each row; each status icon now centres on its row's height, however many lines the check holds (#72).
 
 ## [1.5.0] - 2026-10-28
 
