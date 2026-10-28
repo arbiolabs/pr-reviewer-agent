@@ -3,6 +3,13 @@
 
 use std::path::{Path, PathBuf};
 
+use tokio::sync::mpsc::{UnboundedReceiver, UnboundedSender, unbounded_channel};
+
+/// What the menu bar item asks of the window, beyond showing it.
+pub enum Ask {
+    CheckForUpdates,
+}
+
 /// The LaunchAgent that opens the app at login. Its plist being there is the whole setting.
 const LOGIN_LABEL: &str = "io.github.diego-arbio-dev.pr-review.app";
 
@@ -96,11 +103,18 @@ fn show(mtm: objc2::MainThreadMarker) {
 
 #[cfg(target_os = "macos")]
 mod tray {
+    use std::sync::OnceLock;
+
     use objc2::rc::Retained;
     use objc2::runtime::{AnyObject, NSObject};
     use objc2::{AllocAnyThread, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
     use objc2_app_kit::{NSApplication, NSImage, NSMenu, NSMenuItem, NSStatusBar, NSVariableStatusItemLength};
     use objc2_foundation::{NSData, NSSize, NSString};
+
+    use super::{Ask, UnboundedReceiver, UnboundedSender, unbounded_channel};
+
+    /// Where the menu's asks go: `install` hands the window the other end.
+    static ASKS: OnceLock<UnboundedSender<Ask>> = OnceLock::new();
 
     define_class!(
         #[unsafe(super(NSObject))]
@@ -112,6 +126,14 @@ mod tray {
             #[unsafe(method(open:))]
             fn open(&self, _: Option<&AnyObject>) {
                 super::show(self.mtm());
+            }
+
+            #[unsafe(method(checkForUpdates:))]
+            fn check_for_updates(&self, _: Option<&AnyObject>) {
+                super::show(self.mtm());
+                if let Some(asks) = ASKS.get() {
+                    let _ = asks.send(Ask::CheckForUpdates);
+                }
             }
 
             #[unsafe(method(quit:))]
@@ -130,9 +152,11 @@ mod tray {
         Some(image)
     }
 
-    /// Puts the item in the menu bar for the life of the process.
-    pub fn install() {
-        let Some(mtm) = MainThreadMarker::new() else { return };
+    /// Puts the item in the menu bar for the life of the process, and returns what its menu asks of the window.
+    pub fn install() -> UnboundedReceiver<Ask> {
+        let (tx, rx) = unbounded_channel();
+        let Some(mtm) = MainThreadMarker::new() else { return rx };
+        let _ = ASKS.set(tx);
         let target: Retained<Target> = unsafe { msg_send![Target::alloc(mtm), init] };
         let item = NSStatusBar::systemStatusBar().statusItemWithLength(NSVariableStatusItemLength);
         if let Some(button) = item.button(mtm) {
@@ -152,6 +176,7 @@ mod tray {
             entry
         };
         menu.addItem(&entry(format!("Open {}", crate::ui::APP_NAME), Some(sel!(open:)), ""));
+        menu.addItem(&entry("Check for Updates…".into(), Some(sel!(checkForUpdates:)), ""));
         menu.addItem(&NSMenuItem::separatorItem(mtm));
         menu.addItem(&entry(format!("Quit {}", crate::ui::APP_NAME), Some(sel!(quit:)), "q"));
         item.setMenu(Some(&menu));
@@ -159,6 +184,7 @@ mod tray {
         // the process.
         std::mem::forget(item);
         std::mem::forget(target);
+        rx
     }
 }
 
@@ -166,7 +192,9 @@ mod tray {
 pub use tray::install;
 
 #[cfg(not(target_os = "macos"))]
-pub fn install() {}
+pub fn install() -> UnboundedReceiver<Ask> {
+    unbounded_channel::<Ask>().1
+}
 
 #[cfg(test)]
 mod tests {

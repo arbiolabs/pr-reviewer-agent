@@ -224,10 +224,7 @@ pub fn card(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         let run = on(cx, move |s, cx| match s.update {
             Update::Available(_) => s.install_update(cx),
             Update::Installed(_) => s.restart(cx),
-            _ => {
-                s.update = Update::Idle;
-                s.check_update(cx)
-            }
+            _ => s.check_update(cx),
         });
         div().flex_none().child(button(t, id, name, None, tone, run))
     });
