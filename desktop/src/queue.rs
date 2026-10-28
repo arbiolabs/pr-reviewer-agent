@@ -348,11 +348,11 @@ pub fn ending(r: &Run) -> Option<Ending> {
     })
 }
 
-/// What gets a stopped run going again: a cancel was the reader's choice, so it starts fresh; anything else
-/// retries from the last checkpoint.
+/// What gets a stopped run going again: a cancel was the reader's choice, so it reviews the head afresh (the daemon
+/// refuses a start at a head whose revision ended); anything else retries from the last checkpoint.
 pub fn redo(r: &Run) -> pr_review_tui::keymap::Mutation {
     use pr_review_tui::keymap::Mutation;
-    if ending(r) == Some(Ending::Cancelled) { Mutation::Start } else { Mutation::Retry }
+    if ending(r) == Some(Ending::Cancelled) { Mutation::Again } else { Mutation::Retry }
 }
 
 /// What the gauge says about one step: only what the run did.
@@ -826,12 +826,12 @@ mod tests {
     }
 
     #[test]
-    fn a_cancelled_review_reads_as_cancelled_and_starts_again() {
+    fn a_cancelled_review_reads_as_cancelled_and_reviews_again() {
         use super::Mark::{Done, Stopped, Waiting};
         let m = at(25_000, "wait:20000,pr:338,cancel,wait:100,confirm,wait:2000");
         let r = run_of(&m, 338);
         assert_eq!(super::ending(&r), Some(super::Ending::Cancelled));
-        assert_eq!(super::redo(&r), pr_review_tui::keymap::Mutation::Start);
+        assert_eq!(super::redo(&r), pr_review_tui::keymap::Mutation::Again);
         assert_eq!(super::marks(&m, &r), [Done, Done, Done, Stopped, Waiting, Waiting]);
         let row = rows(&m).into_iter().flat_map(|(_, r)| r).find(|r| r.pr.number == 338).unwrap().state;
         assert_eq!((row, row.word()), (RowState::Cancelled, "Cancelled"));

@@ -480,6 +480,11 @@ impl Run {
     pub fn parked(&self) -> bool {
         self.status == RunStatus::Running && self.phase == Phase::AwaitingApproval
     }
+    /// The engine records a cancel as a failed run whose reason starts with "cancelled".
+    pub fn cancelled(&self) -> bool {
+        self.status == RunStatus::Failed
+            && self.failure_reason.as_ref().is_some_and(|x| x.as_str().to_lowercase().starts_with("cancel"))
+    }
     /// The reviewer is working on it now.
     pub fn active(&self) -> bool {
         self.status == RunStatus::Running && !self.parked()

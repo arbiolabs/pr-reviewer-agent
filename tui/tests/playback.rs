@@ -341,11 +341,11 @@ fn every_command_the_showcase_grants_plays_a_scripted_outcome() {
 }
 
 #[test]
-fn the_showcases_started_retried_and_running_runs_reach_an_end_and_a_reviewed_head_is_refused() {
+fn the_showcases_started_retried_and_running_runs_reach_an_end_and_a_reviewed_head_is_not_started() {
     use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-    use pr_review_tui::model::{ConfirmState, Modal, Screen};
+    use pr_review_tui::model::Screen;
     use pr_review_tui::playback::{Player, load};
-    use pr_review_tui::protocol::{ErrorCode, RunStatus};
+    use pr_review_tui::protocol::RunStatus;
     let mut p = Player::new(load(&protocol_dir().join("playback/showcase.ndjson")).unwrap());
     let mut m = model();
     let fx = update(&mut m, Msg::Net(NetEvent::Opened));
@@ -364,17 +364,14 @@ fn the_showcases_started_retried_and_running_runs_reach_an_end_and_a_reviewed_he
             drive(&mut p, m, fx);
         }
     };
-    let refused = |m: &pr_review_tui::model::Model| match m.top_modal() {
-        Some(Modal::Confirm { state: ConfirmState::Refused { code: Some(ErrorCode::Conflict), message }, .. }) => {
-            message.to_string()
-        }
-        other => panic!("{other:?}"),
+    let unstarted = |m: &pr_review_tui::model::Model| {
+        assert_eq!(m.top_modal(), None, "the client sends no start for an ended head");
+        m.notice.as_ref().unwrap().text.clone()
     };
     let before = latest(&m, 1287).unwrap();
     for _ in 0..2 {
         keys(&mut m, 1287, "sy");
-        let why = refused(&m);
-        assert!(why.starts_with("#1287 at ") && why.ends_with(" is already reviewed"), "{why:?}");
+        assert_eq!(unstarted(&m), "Can't start #1287: it is already reviewed; review it again with S");
         assert_eq!(latest(&m, 1287).unwrap(), before, "a refused start plays nothing");
     }
     assert_eq!(latest(&m, 1296), None, "#1296 is tracked and never reviewed");
@@ -382,14 +379,13 @@ fn the_showcases_started_retried_and_running_runs_reach_an_end_and_a_reviewed_he
     assert_eq!(latest(&m, 1296).map(|r| r.0), Some(RunStatus::Completed), "{:?} {:?}", m.notice, m.top_modal());
     keys(&mut m, 345, "Ry");
     assert_eq!(latest(&m, 345).unwrap().0, RunStatus::Completed, "the retried run");
-    // The reader's own start replays as the daemon replays it: accepted for the run it made, which has ended.
-    keys(&mut m, 1296, "sy");
-    let why = refused(&m);
-    assert!(why.starts_with("#1296 at ") && why.ends_with(" is already reviewed"), "the same panel: {why:?}");
-    for number in [1287, 341] {
+    for number in [1296, 1287, 341] {
         keys(&mut m, number, "sy");
-        let why = refused(&m);
-        assert!(why.starts_with(&format!("#{number} at ")) && why.ends_with(" is already reviewed"), "{why:?}");
+        let why = unstarted(&m);
+        assert!(
+            why.starts_with(&format!("Can't start #{number}: ")) && why.ends_with("review it again with S"),
+            "{why:?}"
+        );
     }
     let mut p2 = Player::new(load(&protocol_dir().join("playback/showcase.ndjson")).unwrap());
     let mut m2 = model();
@@ -401,7 +397,7 @@ fn the_showcases_started_retried_and_running_runs_reach_an_end_and_a_reviewed_he
         let fx = update(&mut m2, Msg::Key(KeyEvent::new(KeyCode::Char(c), KeyModifiers::NONE)));
         drive(&mut p2, &mut m2, fx);
     }
-    assert!(refused(&m2).ends_with("failed its review; retry it instead"), "a failed head points at R");
+    assert_eq!(unstarted(&m2), "Can't start #345: it failed its review; retry it with R", "a failed head points at R");
 }
 
 #[test]

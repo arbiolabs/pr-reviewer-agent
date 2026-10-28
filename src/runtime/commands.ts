@@ -61,7 +61,9 @@ export function refuseReviewed(app: App, revisionId: string): void {
   if (!revision || !TERMINAL_REVIEW_STATES.includes(revision.state)) return;
   const pr = app.store.pullById(revision.pr_id);
   const head = `#${pr?.number ?? revision.pr_id} at ${revision.head_sha.slice(0, 7)}`;
-  const why = { COMPLETED: "is already reviewed", FAILED: "failed its review; retry it instead", SUPERSEDED: "is superseded by a newer head" };
+  const cancelled = revision.state === "FAILED" && app.store.auditEvents(revision.id).findLast((e) => e.to_state === "FAILED")?.detail?.startsWith("cancel");
+  const failed = cancelled ? "was cancelled; review it again instead" : "failed its review; retry it instead";
+  const why = { COMPLETED: "is already reviewed", FAILED: failed, SUPERSEDED: "is superseded by a newer head" };
   throw new Refused("CONFLICT", `${head} ${why[revision.state as keyof typeof why] ?? "is already reviewed"}`);
 }
 

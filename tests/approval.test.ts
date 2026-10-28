@@ -11,7 +11,7 @@ import { GitHubClient } from "../src/github/client.ts";
 import { GitHubPullSource } from "../src/github/pulls.ts";
 import { AppStore } from "../src/persistence/store.ts";
 import { type App, finishReview, openApp, startReview } from "../src/runtime/app.ts";
-import { approve, cancel, Refused, retry } from "../src/runtime/commands.ts";
+import { approve, cancel, Refused, retry, reviewAgain, startFromHead } from "../src/runtime/commands.ts";
 import { REVIEW_TASK_NAME } from "../src/runtime/task.ts";
 import { FakeGitHub } from "./fake-github.ts";
 import { createFixture, type Fixture } from "./fixture.ts";
@@ -142,6 +142,19 @@ it("cancels a parked revision, reopens it with retry as a fresh attempt, and app
   const done = await finishReview(h.app, await approve(h.app, h.pulls, { revisionId: revision.id, previewId: outbox.payload_hash }, "test"));
   expect([done.state, fake.postAttempts, h.app.store.reopenings(revision.id)]).toEqual(["COMPLETED", 1, ["MANUAL_RETRY", "APPROVED"]]);
   expect(await taskCount(h.app)).toEqual(["terminal", "terminal", "terminal"]);
+}, 30_000);
+
+it("refuses a start on a head cancelled while parked by pointing at review again, which reviews it afresh", async () => {
+  const h = await openApproving([readDiff(), submitDefect(fixture), readDiff(), submitDefect(fixture)]);
+  const { revision } = await park(h);
+  await cancel(h.app, revision.id, "cancelled from the TUI");
+  const options = { basePolicyVersion: "1", publish: true };
+  const params = { prId: revision.pr_id, expectedHeadSha: fixture.pull.headSha };
+  const head = `#1 at ${fixture.pull.headSha.slice(0, 7)}`;
+  expect(await refused(startFromHead(h.app, h.pulls, params, options))).toEqual(["CONFLICT", `${head} was cancelled; review it again instead`]);
+
+  const again = await finishReview(h.app, await reviewAgain(h.app, h.pulls, params, { ...options, source: "test" }));
+  expect([again.id === revision.id, again.state, h.app.store.revision(revision.id)!.state]).toEqual([false, "AWAITING_APPROVAL", "SUPERSEDED"]);
 }, 30_000);
 
 it("cancels a running review with the TUI's reason, and refuses while a GitHub write may be in flight", async () => {

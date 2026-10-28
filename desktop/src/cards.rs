@@ -187,7 +187,7 @@ fn face(m: &pr_review_tui::model::Model, c: &Card, selected: bool) -> Face {
                     "Cancelled",
                     "Stopped before it finished. Nothing was posted.".to_string(),
                     String::new(),
-                    "Start again",
+                    "Review again",
                 ),
                 Some(Ending::TooLarge) => (
                     IconName::CircleX,

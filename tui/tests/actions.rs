@@ -160,29 +160,44 @@ fn refusal(m: &Model) -> String {
 }
 
 #[test]
-fn a_start_on_a_head_whose_review_ended_goes_to_the_daemon_which_may_start_it_under_another_policy() {
-    // #185 was reviewed, but perhaps as a dry run: after a switch to approval the daemon starts it anew.
-    let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#185");
-    assert!(commands(&press(&mut m, KeyCode::Char('s'))).is_empty());
-    assert_eq!(prompt(&m), "Start a review of #185 at 5555555?");
-    let sent = press(&mut m, KeyCode::Char('y'));
-    let sent = commands(&sent);
-    assert_eq!(sent.len(), 1, "the daemon decides");
-    send(&mut m, &rejected(&sent[0].request_id, "CONFLICT", "#185 at 5555555 is already reviewed"));
-    assert_eq!(refusal(&m), "#185 at 5555555 is already reviewed", "and when it refuses, the panel says so");
+fn a_start_on_a_head_whose_review_ended_is_refused_naming_the_key_that_works() {
+    use pr_review_tui::protocol::{Phase, RunId, RunStatus, Text};
+    for (status, reason, want) in [
+        (RunStatus::Completed, None, "it is already reviewed; review it again with S"),
+        (RunStatus::Superseded, None, "it is superseded by a newer head; review it again with S"),
+        (RunStatus::Failed, Some("model timed out"), "it failed its review; retry it with R"),
+        (RunStatus::Failed, Some("cancelled from the TUI"), "it was cancelled; review it again with S"),
+    ] {
+        let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#185");
+        let r = m.domain.runs.get_mut(&RunId::new("rev-185-a")).unwrap();
+        (r.status, r.failure_reason) = (status, reason.map(Text::new));
+        if status == RunStatus::Failed {
+            r.phase = Phase::Failed;
+        }
+        assert!(!pr_review_tui::update::can_mutate(&m, pr_review_tui::keymap::Mutation::Start), "{want}");
+        assert!(commands(&press(&mut m, KeyCode::Char('s'))).is_empty());
+        assert_eq!(m.top_modal(), None);
+        assert_eq!(m.notice.as_ref().unwrap().text, format!("Can't start #185: {want}"));
+    }
+}
 
-    // The daemon replays the start that made a run the client has since seen end: the panel says why.
-    for (status, why) in [("COMPLETED", "is already reviewed"), ("FAILED", "failed its review; retry it instead")] {
+#[test]
+fn the_daemon_replaying_a_start_that_ended_says_why() {
+    for (status, reason, why) in [
+        ("COMPLETED", "model timed out", "is already reviewed"),
+        ("FAILED", "model timed out", "failed its review; retry it instead"),
+        ("FAILED", "cancelled from the TUI", "was cancelled; review it again instead"),
+    ] {
         let mut m = engine("fixtures/server.welcome.engine.json", "acme/shop#186");
         press(&mut m, KeyCode::Char('s'));
         let rid = commands(&press(&mut m, KeyCode::Char('y')))[0].request_id.clone();
-        let run: pr_review_tui::protocol::Run =
-            serde_json::from_str(&run_json("rev-186-a", "acme/shop#186", H186, status, status)).unwrap();
+        let json = run_json("rev-186-a", "acme/shop#186", H186, status, status).replace("model timed out", reason);
+        let run: pr_review_tui::protocol::Run = serde_json::from_str(&json).unwrap();
         m.domain.runs.insert(run.id.clone(), run);
         let replayed =
             r#"{"type":"command.result","requestId":"RID","status":"accepted","operationId":"review.start:rev-186-a"}"#;
         send(&mut m, &replayed.replace("RID", rid.as_str()));
-        assert_eq!(refusal(&m), format!("#186 at 6666666 {why}"), "{status}");
+        assert_eq!(refusal(&m), format!("#186 at 6666666 {why}"), "{status} {reason}");
     }
 }
 

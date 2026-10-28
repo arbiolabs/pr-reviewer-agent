@@ -74,7 +74,7 @@ fn entries(m: &Model, r: &Reviewer, theme: Choice) -> Vec<Entry> {
                 format!("Judge {} in #{}", queue::count(findings.len(), "finding"), pr.number)
             }
             Card::Failed { pr, run } if queue::ending(run) == Some(queue::Ending::Cancelled) => {
-                format!("Start the cancelled review of #{} again", pr.number)
+                format!("Review the cancelled #{} again", pr.number)
             }
             Card::Failed { pr, .. } => format!("Retry the failed review of #{}", pr.number),
             Card::Start { pr } => format!("Start a review of #{}", pr.number),
@@ -522,7 +522,6 @@ fn glyph(m: &Model, e: &Entry) -> IconName {
             Some(Card::Approve { .. }) => IconName::Send,
             Some(Card::Posting { .. }) => IconName::CircleAlert,
             Some(Card::Findings { .. }) => IconName::Eye,
-            Some(Card::Failed { run, .. }) if queue::redo(run) == Mutation::Start => IconName::Play,
             Some(Card::Failed { .. }) => IconName::RotateCw,
             Some(Card::Start { .. }) | None => IconName::Play,
         },
