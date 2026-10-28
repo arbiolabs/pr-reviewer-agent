@@ -8,7 +8,7 @@ use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use pr_review_tui::protocol::{UsageBucket, UsageBy, UsageCounts, UsageGroup, UsageGroupBy, UsageReport};
 
-use crate::kit::{OnClick, callout, focusable, heading, overline, tabular, tip};
+use crate::kit::{callout, focusable, heading, overline, segmented, tabular, tip};
 use crate::tokens::{Colors, radius, space, text};
 use crate::ui::{Shell, click};
 
@@ -263,44 +263,9 @@ pub fn title(by: UsageBy, group: UsageGroupBy) -> String {
     }
 }
 
-/// One segmented control: each option's name and key, the one in use filled.
-fn control(
-    t: &Colors,
-    options: impl IntoIterator<Item = (String, &'static str, &'static str, bool, String, OnClick)>,
-) -> Div {
-    let mut row = div()
-        .flex()
-        .flex_none()
-        .gap(space::S1)
-        .p(px(3.))
-        .rounded(radius::SM)
-        .bg(t.surface)
-        .border_1()
-        .border_color(t.border);
-    for (id, name, key, on, words, on_click) in options {
-        let face = div()
-            .id(SharedString::from(format!("{id}-face")))
-            .flex()
-            .items_center()
-            .gap(space::S2)
-            .h(px(26.))
-            .px(space::S3)
-            .rounded(px(5.))
-            .text_size(text::SMALL)
-            .font_weight(FontWeight::MEDIUM)
-            .text_color(if on { t.text } else { t.muted })
-            .when(on, |d| d.bg(t.selected))
-            .when(!on, |d| d.hover(move |d| d.bg(t.hover)))
-            .child(name)
-            .child(crate::kit::keycap(t, key, None, false));
-        row = row.child(tip(focusable(SharedString::from(id), face, t, px(5.), on_click), words));
-    }
-    div().flex().child(row)
-}
-
 /// Day, Week, Month: the range and, over time, its buckets.
 fn segments(t: &Colors, by: UsageBy, cx: &Context<Shell>) -> Div {
-    control(
+    segmented(
         t,
         UsageBy::ALL.map(|option| {
             let (name, key) = label(option);
@@ -312,6 +277,7 @@ fn segments(t: &Colors, by: UsageBy, cx: &Context<Shell>) -> Div {
                 option == by,
                 words,
                 click(cx, move |s, cx| s.open_usage(Some(option), cx)),
+                None,
             )
         }),
     )
@@ -319,7 +285,7 @@ fn segments(t: &Colors, by: UsageBy, cx: &Context<Shell>) -> Div {
 
 /// Over time, Repository, Author, PR: how the same range is split.
 fn breakdowns(t: &Colors, group: UsageGroupBy, cx: &Context<Shell>) -> Div {
-    control(
+    segmented(
         t,
         UsageGroupBy::ALL.map(|option| {
             let (name, key) = breakdown_label(option);
@@ -328,7 +294,7 @@ fn breakdowns(t: &Colors, group: UsageGroupBy, cx: &Context<Shell>) -> Div {
                 _ => format!("Cost by {}", name.to_lowercase()),
             };
             let on_click = click(cx, move |s, cx| s.usage_breakdown(option, cx));
-            (format!("group-{}", option.as_str()), name, key, option == group, words, on_click)
+            (format!("group-{}", option.as_str()), name, key, option == group, words, on_click, None)
         }),
     )
 }
