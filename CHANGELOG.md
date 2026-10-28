@@ -4,6 +4,8 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 ## [Unreleased]
 
+## [1.6.0] - 2026-10-28
+
 ### Added
 
 - **Automatic reviews of your review requests.** An engine-mode daemon can poll GitHub for the PRs that request its account's review and start them with no client command. It is off by default: `review.auto_review` in the config holds `enabled`, `interval_minutes` (5, 15 or 30), `include_team_requests` and `repos` (`include` and `exclude` lists of `owner/name`). Each poll, shortly after start and then every interval, searches `is:pr is:open draft:false archived:false user-review-requested:@me` (`review-requested:@me` with team requests), oldest first, and starts at most 5 PRs. A PR not tracked yet is added as `review.add` adds it; a tracked PR is started only for a head with no review yet, and an archived PR is never started or unarchived. Each automatic run's timeline carries "started automatically: review requested". A failed poll is recorded and retried with a doubling wait, up to an hour. A read-only daemon and `pr-review serve` never poll. Protocol v1 `settings` gains `publishMode` and `autoReview` (with `lastPoll`: `at`, `found`, `started`, `skipped`, `error`), and `settings.set` takes a partial `autoReview`, keyed with `:auto:<FNV-1a 64 hash>`. The desktop app adds Settings → Reviewer → Automatic reviews. The terminal client reads the new fields but has no screen for them (#71).
@@ -162,7 +164,8 @@ This is the first release.
   - the PR is still open.
 - Command idempotency keys are bound to each run attempt, so a replayed command never has a second effect.
 
-[Unreleased]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.5.0...HEAD
+[Unreleased]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.6.0...HEAD
+[1.6.0]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.3.0...v1.4.0
 [1.3.0]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.2.0...v1.3.0
