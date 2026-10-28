@@ -288,6 +288,71 @@ pub struct Settings {
     pub config_path: Text,
 }
 
+/// How `usage.get` groups model usage: by local day, ISO week (Monday first) or calendar month.
+#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum UsageBy {
+    Day,
+    Week,
+    Month,
+}
+
+impl UsageBy {
+    pub const ALL: [UsageBy; 3] = [UsageBy::Day, UsageBy::Week, UsageBy::Month];
+
+    /// The wire name.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            UsageBy::Day => "day",
+            UsageBy::Week => "week",
+            UsageBy::Month => "month",
+        }
+    }
+}
+
+/// Recorded model usage over a bucket, a model or the whole range. `cost` is USD at the model's list price.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageCounts {
+    pub reviews: u64,
+    pub responses: u64,
+    pub input: u64,
+    pub output: u64,
+    pub cache_read: u64,
+    pub cache_write: u64,
+    pub cost: f64,
+}
+
+/// One day, week or month; `start` and `end` are local dates (`YYYY-MM-DD`), both inside it.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct UsageBucket {
+    pub start: Text,
+    pub end: Text,
+    #[serde(flatten)]
+    pub counts: UsageCounts,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct UsageModel {
+    pub model: Text,
+    #[serde(flatten)]
+    pub counts: UsageCounts,
+}
+
+/// The answer to `usage.get`: buckets oldest first, empty ones included, in the daemon's time zone.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageReport {
+    pub request_id: Option<RequestId>,
+    pub by: UsageBy,
+    pub time_zone: Text,
+    pub currency: Text,
+    pub price_source: Text,
+    pub buckets: Vec<UsageBucket>,
+    pub totals: UsageCounts,
+    pub models: Vec<UsageModel>,
+}
+
 #[derive(Clone, Debug, PartialEq, Deserialize)]
 pub struct ModelInUse {
     #[serde(rename = "ref")]
@@ -598,6 +663,8 @@ pub enum ServerMessage {
     CommandResult(CommandResult),
     #[serde(rename = "settings")]
     Settings(Settings),
+    #[serde(rename = "usage.report")]
+    UsageReport(UsageReport),
     #[serde(rename = "error", rename_all = "camelCase")]
     Error { request_id: Option<RequestId>, code: ErrorCode, message: Text, supported: Option<Vec<u32>> },
 }
@@ -851,6 +918,13 @@ pub enum ClientMessage {
     PublicationGet { request_id: RequestId, run_id: RunId },
     #[serde(rename = "settings.get", rename_all = "camelCase")]
     SettingsGet { request_id: RequestId },
+    #[serde(rename = "usage.get", rename_all = "camelCase")]
+    UsageGet {
+        request_id: RequestId,
+        by: UsageBy,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        periods: Option<u16>,
+    },
     /// Sent only from the confirmation modal, and only for a capability the server granted.
     #[serde(rename = "command")]
     Command(CommandRequest),
@@ -866,7 +940,8 @@ impl ClientMessage {
             | ClientMessage::FindingGet { request_id, .. }
             | ClientMessage::TimelineGet { request_id, .. }
             | ClientMessage::PublicationGet { request_id, .. }
-            | ClientMessage::SettingsGet { request_id } => request_id,
+            | ClientMessage::SettingsGet { request_id }
+            | ClientMessage::UsageGet { request_id, .. } => request_id,
             ClientMessage::Command(c) => &c.request_id,
         }
     }

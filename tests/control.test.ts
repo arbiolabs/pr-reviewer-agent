@@ -239,6 +239,15 @@ describe("fixture source", () => {
       history: [{ disposition: "DETECTED" }],
     });
   });
+
+  it("answers usage.get with the recorded report for that grouping", async () => {
+    const c = await client(await serve({ source: FixtureSource.load("showcase") }));
+    await c.hello();
+    c.send({ type: "usage.get", requestId: "u", by: "month" });
+    const report = await c.waitFor((m) => m.type === "usage.report");
+    expect(report).toMatchObject({ requestId: "u", by: "month", timeZone: "Europe/Berlin", currency: "USD" });
+    expect(report.type === "usage.report" && report.buckets).toHaveLength(12);
+  });
 });
 
 describe("slow client", () => {

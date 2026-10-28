@@ -458,6 +458,14 @@ pub fn answer(fixtures: &Path, played: &[ServerMessage], req: &ClientMessage) ->
             .find(|(n, _)| n == "server.settings.json")
             .map(|(_, v)| v)
             .unwrap_or_else(|| not_found(rid, "no settings".into())),
+        ClientMessage::UsageGet { by, .. } => {
+            let name = format!("server.usage.report.{}.json", by.as_str());
+            fixtures_named(fixtures, "server.usage.report", rid)
+                .into_iter()
+                .find(|(n, _)| *n == name)
+                .map(|(_, v)| v)
+                .unwrap_or_else(|| not_found(rid, "no usage".into()))
+        }
         ClientMessage::FindingGet { finding_id, .. } => fixtures_named(fixtures, "server.finding.detail", rid)
             .into_iter()
             .map(|(_, v)| v)

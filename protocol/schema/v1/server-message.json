@@ -2173,6 +2173,210 @@
       "required": [
         "type",
         "requestId",
+        "by",
+        "timeZone",
+        "currency",
+        "priceSource",
+        "buckets",
+        "totals",
+        "models"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "usage.report"
+        },
+        "requestId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "by": {
+          "enum": [
+            "day",
+            "week",
+            "month"
+          ]
+        },
+        "timeZone": {
+          "type": "string",
+          "description": "the daemon's IANA time zone; buckets follow its calendar"
+        },
+        "currency": {
+          "type": "string",
+          "const": "USD"
+        },
+        "priceSource": {
+          "type": "string",
+          "const": "catalog",
+          "description": "costs are the model's list price as pi-ai's catalog has it, not what a subscription is billed"
+        },
+        "buckets": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "start",
+              "end",
+              "reviews",
+              "responses",
+              "input",
+              "output",
+              "cacheRead",
+              "cacheWrite",
+              "cost"
+            ],
+            "properties": {
+              "start": {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                "description": "a calendar date in the report's timeZone"
+              },
+              "end": {
+                "type": "string",
+                "pattern": "^\\d{4}-\\d{2}-\\d{2}$",
+                "description": "a calendar date in the report's timeZone"
+              },
+              "reviews": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "distinct runs with at least one recorded model response"
+              },
+              "responses": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "model responses, each retry and error answer included"
+              },
+              "input": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "output": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "cacheRead": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "cacheWrite": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "cost": {
+                "type": "number",
+                "minimum": 0,
+                "description": "USD at the model's catalog price, rounded to 6 decimals"
+              }
+            }
+          }
+        },
+        "totals": {
+          "type": "object",
+          "required": [
+            "reviews",
+            "responses",
+            "input",
+            "output",
+            "cacheRead",
+            "cacheWrite",
+            "cost"
+          ],
+          "properties": {
+            "reviews": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "distinct runs with at least one recorded model response"
+            },
+            "responses": {
+              "type": "integer",
+              "minimum": 0,
+              "description": "model responses, each retry and error answer included"
+            },
+            "input": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "output": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "cacheRead": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "cacheWrite": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "cost": {
+              "type": "number",
+              "minimum": 0,
+              "description": "USD at the model's catalog price, rounded to 6 decimals"
+            }
+          }
+        },
+        "models": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "model",
+              "reviews",
+              "responses",
+              "input",
+              "output",
+              "cacheRead",
+              "cacheWrite",
+              "cost"
+            ],
+            "properties": {
+              "model": {
+                "type": "string",
+                "minLength": 1,
+                "description": "provider/id"
+              },
+              "reviews": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "distinct runs with at least one recorded model response"
+              },
+              "responses": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "model responses, each retry and error answer included"
+              },
+              "input": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "output": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "cacheRead": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "cacheWrite": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "cost": {
+                "type": "number",
+                "minimum": 0,
+                "description": "USD at the model's catalog price, rounded to 6 decimals"
+              }
+            }
+          },
+          "description": "the whole range split by model, costliest first"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "requestId",
         "events"
       ],
       "properties": {

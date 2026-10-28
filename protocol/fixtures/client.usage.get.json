@@ -1,0 +1,6 @@
+{
+  "type": "usage.get",
+  "requestId": "req-usage",
+  "by": "week",
+  "periods": 12
+}

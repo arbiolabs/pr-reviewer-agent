@@ -188,6 +188,37 @@
       "required": [
         "type",
         "requestId",
+        "by"
+      ],
+      "properties": {
+        "type": {
+          "type": "string",
+          "const": "usage.get"
+        },
+        "requestId": {
+          "type": "string",
+          "minLength": 1
+        },
+        "by": {
+          "enum": [
+            "day",
+            "week",
+            "month"
+          ]
+        },
+        "periods": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 400,
+          "description": "how many buckets up to the current one; 14 days, 12 weeks or 12 months when absent"
+        }
+      }
+    },
+    {
+      "type": "object",
+      "required": [
+        "type",
+        "requestId",
         "limit"
       ],
       "properties": {

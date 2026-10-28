@@ -2,7 +2,8 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PROTOCOL_DIR } from "../protocol/emit.ts";
 import { fixtures, type PlaybackLine } from "../protocol/fixtures.ts";
-import type { ClientMessage, ErrorCode, Finding, FindingDetail, PublicationPreview, ReviewCommand, SequencedEvent, ServerMessage } from "../protocol/v1.ts";
+import type { UsageBy } from "../domain/usage.ts";
+import type { ClientMessage, ErrorCode, Finding, FindingDetail, PublicationPreview, ReviewCommand, SequencedEvent, ServerMessage, UsageAnswer } from "../protocol/v1.ts";
 import type { DiffPage } from "./diff.ts";
 
 export class ControlError extends Error {
@@ -60,6 +61,8 @@ export interface ControlSource {
   setModel?(ref: string): Promise<string>;
   /** The stored payload of a run, or throw ControlError NOT_FOUND. */
   publication?(runId: string): Promise<PublicationPreview>;
+  /** usage.get: recorded model usage by day, week or month. A read, so read-only sources answer it too. */
+  usage?(by: UsageBy, periods?: number): Promise<UsageAnswer>;
   close(): void | Promise<void>;
 }
 
@@ -190,6 +193,12 @@ export class FixtureSource implements ControlSource {
   async publication(runId: string): Promise<PublicationPreview> {
     const { type: _, requestId: __, ...scripted } = fixtures["server.publication.preview"] as Extract<ServerMessage, { type: "publication.preview" }>;
     if (scripted.runId !== runId) throw new ControlError("NOT_FOUND", `no stored publication for run ${runId}`);
+    return scripted;
+  }
+
+  /** The recorded `server.usage.report.<by>` fixture; `periods` is not applied to a recording. */
+  async usage(by: UsageBy): Promise<UsageAnswer> {
+    const { type: _, requestId: __, ...scripted } = fixtures[`server.usage.report.${by}`] as Extract<ServerMessage, { type: "usage.report" }>;
     return scripted;
   }
 

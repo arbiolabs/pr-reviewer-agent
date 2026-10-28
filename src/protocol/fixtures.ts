@@ -1,5 +1,6 @@
 // Source of protocol/fixtures and protocol/playback. Edit here, then run `pnpm protocol:emit`.
 import { sha256, stableId } from "../domain/types.ts";
+import { type UsageBy, type UsageRow, usageReport } from "../domain/usage.ts";
 import { type Account, type ActivitySpan, type ClientMessage, type DiffFile, type Evidence, type Finding, type FindingDetail, type Pr, type PublicationChange, REVIEW_COMMANDS, type Run, type ServerMessage, type SetupCheck } from "./v1.ts";
 
 const EPOCH = "epoch-1";
@@ -1505,7 +1506,41 @@ const detail: FindingDetail = {
   history: [{ runId: run1.id, disposition: "DETECTED", at: at(30) }],
 };
 
-const hostileTitle = "\u001b[31mred\u001b[0m \u001b]8;;https://evil.example\u0007click\u001b]8;;\u0007 \u009b2J\u0085done";
+// A year of reviews in Berlin, priced the way pi-ai's catalog would, so every usage.report fixture comes from the
+// one function the daemon answers with.
+const USAGE_NOW = Date.parse("2026-10-28T15:00:00Z");
+const PRICES = { "anthropic/claude-opus-5-5": [5, 25, 0.5, 6.25], "openai/gpt-5.5": [1.25, 10, 0.125, 0] } as const;
+const usageRowsFixture: UsageRow[] = (() => {
+  let seed = 7;
+  const rand = (n: number) => (seed = (seed * 48_271) % 2_147_483_647) % n;
+  const rows: UsageRow[] = [];
+  for (let day = 400; day >= 0; day--) {
+    const reviews = [0, 3, 2, 4, 1, 0, 2][day % 7]! + (day < 60 ? 1 : 0) - (day % 30 === 3 ? 1 : 0);
+    for (let r = 0; r < reviews; r++) {
+      const model = rand(5) === 0 ? "openai/gpt-5.5" : "anthropic/claude-opus-5-5";
+      const [pin, pout, pread, pwrite] = PRICES[model];
+      const revisionId = `run-u${day}-${r}`;
+      for (let k = 0, n = 4 + rand(8); k < n; k++) {
+        const input = 800 + rand(4000);
+        const output = 300 + rand(2500);
+        const cacheRead = k === 0 ? 0 : 20_000 + rand(60_000);
+        const cacheWrite = 1_000 + rand(6_000);
+        const cost = (input * pin + output * pout + cacheRead * pread + cacheWrite * pwrite) / 1e6;
+        rows.push({ revisionId, at: new Date(USAGE_NOW - day * 86_400_000 - (r * 3 + k) * 60_000).toISOString(), model, input, output, cacheRead, cacheWrite, cost });
+      }
+    }
+  }
+  return rows;
+})();
+const usageFixture = (by: UsageBy, rows = usageRowsFixture) => ({
+  type: "usage.report",
+  requestId: "req-usage",
+  ...usageReport(rows, { by, tz: "Europe/Berlin", now: USAGE_NOW }),
+  currency: "USD",
+  priceSource: "catalog",
+});
+
+const hostileTitle ="\u001b[31mred\u001b[0m \u001b]8;;https://evil.example\u0007click\u001b]8;;\u0007 \u009b2J\u0085done";
 
 export const fixtures: Record<string, ClientMessage | ServerMessage | Record<string, unknown>> = {
   "client.hello": { type: "hello", requestId: "req-hello", protocolVersion: 1, client: "ratatui", capabilities: ["snapshots", "events"] },
@@ -1556,6 +1591,12 @@ export const fixtures: Record<string, ClientMessage | ServerMessage | Record<str
   "client.command.daemon.stop": { type: "command", requestId: "req-cmd", command: "daemon.stop", params: { pauseReviews: false }, idempotencyKey: "daemon.stop" },
   "client.publication.get": { type: "publication.get", requestId: "req-pub", runId: run1.id },
   "client.settings.get": { type: "settings.get", requestId: "req-settings" },
+  "client.usage.get": { type: "usage.get", requestId: "req-usage", by: "week", periods: 12 },
+  "client.usage.get.minimal": { type: "usage.get", requestId: "req-usage", by: "day" },
+  "server.usage.report.day": usageFixture("day"),
+  "server.usage.report.week": usageFixture("week"),
+  "server.usage.report.month": usageFixture("month"),
+  "server.usage.report.empty": usageFixture("day", []),
   "client.command.settings.set": {
     type: "command",
     requestId: "req-cmd",

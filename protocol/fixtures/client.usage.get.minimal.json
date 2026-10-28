@@ -1,0 +1,5 @@
+{
+  "type": "usage.get",
+  "requestId": "req-usage",
+  "by": "day"
+}
