@@ -339,6 +339,10 @@
               "stale": {
                 "type": "boolean",
                 "description": "the anchor's head SHA is no longer the PR head; never silently remapped"
+              },
+              "unconfirmed": {
+                "type": "boolean",
+                "description": "true when the reviewer suspects the finding but could not show it from the cited code alone; absent for a confirmed finding"
               }
             }
           }
@@ -859,6 +863,10 @@
                     "stale": {
                       "type": "boolean",
                       "description": "the anchor's head SHA is no longer the PR head; never silently remapped"
+                    },
+                    "unconfirmed": {
+                      "type": "boolean",
+                      "description": "true when the reviewer suspects the finding but could not show it from the cited code alone; absent for a confirmed finding"
                     }
                   }
                 }
@@ -1888,6 +1896,10 @@
               "type": "boolean",
               "description": "the anchor's head SHA is no longer the PR head; never silently remapped"
             },
+            "unconfirmed": {
+              "type": "boolean",
+              "description": "true when the reviewer suspects the finding but could not show it from the cited code alone; absent for a confirmed finding"
+            },
             "explanation": {
               "type": "string"
             },
@@ -2626,6 +2638,10 @@
                           "stale": {
                             "type": "boolean",
                             "description": "the anchor's head SHA is no longer the PR head; never silently remapped"
+                          },
+                          "unconfirmed": {
+                            "type": "boolean",
+                            "description": "true when the reviewer suspects the finding but could not show it from the cited code alone; absent for a confirmed finding"
                           }
                         }
                       }

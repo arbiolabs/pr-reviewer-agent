@@ -3,7 +3,7 @@ import { type Config, DEFAULT_CONFIG } from "../src/config/config.ts";
 import { type App, openApp } from "../src/runtime/app.ts";
 import { createFixture, DEFECT, type Fixture } from "./fixture.ts";
 
-export function submitDefect(fixture: Fixture) {
+export function submitDefect(fixture: Fixture, evidenceKind = "confirmed_by_static_trace") {
   return fauxAssistantMessage(
     [
       fauxToolCall("submit_candidates", {
@@ -19,7 +19,7 @@ export function submitDefect(fixture: Fixture) {
             codeEvidence: [{ path: DEFECT.file, start: 4, end: 5, refSha: fixture.headSha }],
             reasoningSummary: "Compared the new route registration with its guarded sibling.",
             confidence: 0.9,
-            evidenceKind: "confirmed_by_static_trace",
+            evidenceKind,
           },
         ],
       }),

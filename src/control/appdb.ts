@@ -444,5 +444,6 @@ function toFinding(row: FindingRow): Finding {
     line: c.newLine !== null && c.newLine >= 1 ? c.newLine : null,
     evidenceCount: c.codeEvidence.length,
     stale: row.stale === 1,
+    ...(c.evidenceKind === "suspected" ? { unconfirmed: true } : {}),
   };
 }
