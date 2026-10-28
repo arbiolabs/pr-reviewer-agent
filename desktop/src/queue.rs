@@ -223,6 +223,12 @@ pub fn evidence_count(m: &Model, f: &Finding) -> usize {
     m.details.get(&f.id).map_or(f.evidence_count as usize, |d| d.evidence.len())
 }
 
+/// How sure the reviewer is, as every row and annotation prints it: "88% sure", or "unconfirmed · 88% sure".
+pub fn sure(f: &Finding) -> String {
+    let pct = format!("{:.0}% sure", f.confidence * 100.);
+    if f.unconfirmed { format!("unconfirmed · {pct}") } else { pct }
+}
+
 /// What setup still wants, in the one vocabulary the sidebar badge, the setup card and the setup page share:
 /// `blocking` checks keep reviews from running (a missing check, or commands that are off on a daemon with nothing
 /// missing), `limited` checks let them run with less.

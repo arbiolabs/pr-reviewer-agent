@@ -401,7 +401,7 @@ pub fn view(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                                         div()
                                             .text_color(t.faint)
                                             .font_weight(FontWeight::NORMAL)
-                                            .child(format!("{:.0}% sure · ⏎ opens", f.confidence * 100.)),
+                                            .child(format!("{} · ⏎ opens", crate::queue::sure(f))),
                                     ),
                             )
                             .child(
