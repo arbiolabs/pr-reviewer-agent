@@ -101,9 +101,9 @@ A tab with something to fix carries a count: Reviewer the blocking and limited c
 
 ### Themes
 
-**Settings → Appearance** has a tile for each theme: **System**, which follows macOS between Light and Dark and is the default, **Light**, **Dark**, **Solarized Light**, **Solarized Dark** and **Nord**. **View → Appearance** and the palette (type `theme`) offer the same list. A theme applies at once. The app saves it as `theme` in the `[desktop]` section of its config file, the one `--config` names, else `~/Library/Application Support/pr-review/config.toml`, and opens in it on the next launch. The app changes only that line and leaves the file's other keys and comments as they are. When the file holds `[desktop]` as an inline table it can't edit that way, the app says so in a toast and saves nothing. An unknown `theme` falls back to System with a warning on stderr. The terminal client's own `[ui] theme` is separate.
+**Settings → Appearance** has a tile for each theme: **System**, which follows macOS between Light and Dark and is the default, **Light**, **Dark**, **Solarized Light**, **Solarized Dark**, **Nord** and **Dracula**. **View → Appearance** and the palette (type `theme`) offer the same list. A theme applies at once. The app saves it as `theme` in the `[desktop]` section of its config file, the one `--config` names, else `~/Library/Application Support/pr-review/config.toml`, and opens in it on the next launch. The app changes only that line and leaves the file's other keys and comments as they are. When the file holds `[desktop]` as an inline table it can't edit that way, the app says so in a toast and saves nothing. An unknown `theme` falls back to System with a warning on stderr. The terminal client's own `[ui] theme` is separate.
 
-The Solarized and Nord palettes keep their canonical colors where those pass the app's contrast test, and move the others in lightness only. [DESIGN.md](DESIGN.md#themes) lists each change.
+The Solarized, Nord and Dracula palettes keep their canonical colors where those pass the app's contrast test, and move the others in lightness only. [DESIGN.md](DESIGN.md#themes) lists each change.
 
 To play a scripted session with no daemon:
 
