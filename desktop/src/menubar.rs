@@ -86,6 +86,56 @@ fn xml(s: &str) -> String {
     s.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;")
 }
 
+/// What the menu bar item shows of the reviewer.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Glance {
+    /// The eye without its pupil, dimmed: the reviewer doesn't answer.
+    pub asleep: bool,
+    /// The pupil's offset from the middle, in viewBox units: it glances side to side while reviews run.
+    pub pupil: i8,
+    /// The Needs you count beside the eye.
+    pub count: Option<usize>,
+    /// The state in words, for the tooltip and the menu's first line.
+    pub line: String,
+}
+
+/// How long the pupil rests at each place while reviews run.
+const GLANCE_MS: u64 = 400;
+
+/// `link` is the title bar's word for the reviewer; `now_ms` is `None` when the reader asked for less motion.
+pub fn glance(link: &str, live: bool, running: usize, waiting: usize, now_ms: Option<u64>) -> Glance {
+    if !live {
+        return Glance { asleep: true, pupil: 0, count: None, line: format!("Reviewer: {link}") };
+    }
+    let mut line = vec!["Reviewer live".to_string()];
+    if running > 0 {
+        line.push(format!("{running} reviewing"));
+    }
+    match waiting {
+        0 => {}
+        1 => line.push("1 needs you".into()),
+        n => line.push(format!("{n} need you")),
+    }
+    let pupil = match now_ms {
+        Some(t) if running > 0 => [0, 2, 0, -2][(t / GLANCE_MS % 4) as usize],
+        _ => 0,
+    };
+    Glance { asleep: false, pupil, count: (waiting > 0).then_some(waiting), line: line.join(" · ") }
+}
+
+/// Shows the window's state on the menu bar item.
+pub fn reflect(s: &crate::ui::Shell, cx: &gpui_kit::App) {
+    let m = &s.model;
+    let live = matches!(m.link, pr_review_tui::model::Link::Live);
+    let waiting = crate::queue::decisions(&crate::queue::cards(m));
+    let (_, link) = crate::ui::link_word(s, &crate::ui::colors(cx));
+    let now = (!s.still).then_some(m.now_ms);
+    paint(&glance(&link, live, crate::queue::running(m).len(), waiting, now));
+}
+
+#[cfg(not(target_os = "macos"))]
+fn paint(_: &Glance) {}
+
 /// Brings the window back: out of a hidden app, off the Dock if minimized, and in front.
 #[cfg(target_os = "macos")]
 fn show(mtm: objc2::MainThreadMarker) {
@@ -103,15 +153,30 @@ fn show(mtm: objc2::MainThreadMarker) {
 
 #[cfg(target_os = "macos")]
 mod tray {
+    use std::cell::RefCell;
     use std::sync::OnceLock;
 
     use objc2::rc::Retained;
     use objc2::runtime::{AnyObject, NSObject};
     use objc2::{AllocAnyThread, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
-    use objc2_app_kit::{NSApplication, NSImage, NSMenu, NSMenuItem, NSStatusBar, NSVariableStatusItemLength};
+    use objc2_app_kit::{
+        NSApplication, NSCellImagePosition, NSImage, NSMenu, NSMenuItem, NSStatusBar, NSStatusItem,
+        NSVariableStatusItemLength,
+    };
     use objc2_foundation::{NSData, NSSize, NSString};
 
-    use super::{Ask, UnboundedReceiver, UnboundedSender, unbounded_channel};
+    use super::{Ask, Glance, UnboundedReceiver, UnboundedSender, unbounded_channel};
+
+    /// The item, its menu's status line, and what they show now, so an unchanged state costs nothing.
+    struct Shown {
+        item: Retained<NSStatusItem>,
+        line: Retained<NSMenuItem>,
+        glance: Option<Glance>,
+    }
+
+    thread_local! {
+        static SHOWN: RefCell<Option<Shown>> = const { RefCell::new(None) };
+    }
 
     /// Where the menu's asks go: `install` hands the window the other end.
     static ASKS: OnceLock<UnboundedSender<Ask>> = OnceLock::new();
@@ -143,9 +208,14 @@ mod tray {
         }
     );
 
-    /// The app's mark as a template image, so macOS tints it for a light or dark menu bar.
-    fn mark() -> Option<Retained<NSImage>> {
-        let data = NSData::with_bytes(include_bytes!("../assets/mark.svg"));
+    /// The app's mark as a template image, so macOS tints it for a light or dark menu bar: the eye, and its pupil
+    /// `pupil` units from the middle when it has one.
+    fn mark(pupil: Option<i8>) -> Option<Retained<NSImage>> {
+        let eye = include_str!("../assets/mark.svg").trim_end().trim_end_matches("</svg>");
+        let pupil = pupil.map_or(String::new(), |dx| {
+            format!(r##"<circle cx="{}" cy="12" r="2.2" fill="#000" stroke="none"/>"##, 12 + i32::from(dx))
+        });
+        let data = NSData::with_bytes(format!("{eye}{pupil}</svg>").as_bytes());
         let image = NSImage::initWithData(NSImage::alloc(), &data)?;
         image.setSize(NSSize::new(18., 18.));
         image.setTemplate(true);
@@ -160,10 +230,11 @@ mod tray {
         let target: Retained<Target> = unsafe { msg_send![Target::alloc(mtm), init] };
         let item = NSStatusBar::systemStatusBar().statusItemWithLength(NSVariableStatusItemLength);
         if let Some(button) = item.button(mtm) {
-            match mark() {
+            match mark(Some(0)) {
                 Some(image) => button.setImage(Some(&image)),
                 None => button.setTitle(&NSString::from_str("PR")),
             }
+            button.setImagePosition(NSCellImagePosition::ImageLeft);
             button.setToolTip(Some(&NSString::from_str(crate::ui::APP_NAME)));
         }
         let menu = NSMenu::new(mtm);
@@ -175,21 +246,45 @@ mod tray {
             unsafe { entry.setTarget(Some(&target)) };
             entry
         };
+        // No action, so the menu shows it greyed: it reports, it doesn't do.
+        let line = entry("Connecting…".into(), None, "");
+        menu.addItem(&line);
+        menu.addItem(&NSMenuItem::separatorItem(mtm));
         menu.addItem(&entry(format!("Open {}", crate::ui::APP_NAME), Some(sel!(open:)), ""));
         menu.addItem(&entry("Check for Updates…".into(), Some(sel!(checkForUpdates:)), ""));
         menu.addItem(&NSMenuItem::separatorItem(mtm));
         menu.addItem(&entry(format!("Quit {}", crate::ui::APP_NAME), Some(sel!(quit:)), "q"));
         item.setMenu(Some(&menu));
-        // An item leaves the menu bar when released, and a menu item holds its target weakly: both live as long as
-        // the process.
-        std::mem::forget(item);
+        SHOWN.with(|s| *s.borrow_mut() = Some(Shown { item, line, glance: None }));
+        // A menu item holds its target weakly: it lives as long as the process, as the item does in SHOWN.
         std::mem::forget(target);
         rx
+    }
+
+    pub fn paint(glance: &Glance) {
+        let Some(mtm) = MainThreadMarker::new() else { return };
+        SHOWN.with(|s| {
+            let mut s = s.borrow_mut();
+            let Some(s) = s.as_mut().filter(|s| s.glance.as_ref() != Some(glance)) else { return };
+            if let Some(button) = s.item.button(mtm) {
+                if let Some(image) = mark((!glance.asleep).then_some(glance.pupil)) {
+                    button.setImage(Some(&image));
+                }
+                button.setAppearsDisabled(glance.asleep);
+                let count = glance.count.map_or(String::new(), |n| format!(" {n}"));
+                button.setTitle(&NSString::from_str(&count));
+                button.setToolTip(Some(&NSString::from_str(&format!("{}: {}", crate::ui::APP_NAME, glance.line))));
+            }
+            s.line.setTitle(&NSString::from_str(&glance.line));
+            s.glance = Some(glance.clone());
+        });
     }
 }
 
 #[cfg(target_os = "macos")]
 pub use tray::install;
+#[cfg(target_os = "macos")]
+use tray::paint;
 
 #[cfg(not(target_os = "macos"))]
 pub fn install() -> UnboundedReceiver<Ask> {
@@ -199,6 +294,23 @@ pub fn install() -> UnboundedReceiver<Ask> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_eye_closes_offline_glances_while_reviewing_and_counts_what_needs_you() {
+        let off = glance("Stopped by you", false, 2, 3, Some(0));
+        assert_eq!(off, Glance { asleep: true, pupil: 0, count: None, line: "Reviewer: Stopped by you".into() });
+
+        let idle = glance("Live", true, 0, 0, Some(400));
+        assert_eq!(idle, Glance { asleep: false, pupil: 0, count: None, line: "Reviewer live".into() });
+
+        let busy = |t| glance("Live", true, 2, 1, t);
+        assert_eq!(busy(Some(0)).line, "Reviewer live · 2 reviewing · 1 needs you");
+        assert_eq!(busy(Some(0)).count, Some(1));
+        let looks: Vec<i8> = [0, 400, 800, 1200, 1600].map(|t| busy(Some(t)).pupil).to_vec();
+        assert_eq!(looks, [0, 2, 0, -2, 0]);
+        assert_eq!(busy(None).pupil, 0, "reduce motion keeps the pupil still");
+        assert_eq!(glance("Live", true, 0, 3, Some(0)).line, "Reviewer live · 3 need you");
+    }
 
     #[test]
     fn the_login_item_opens_the_bundle_in_the_background() {

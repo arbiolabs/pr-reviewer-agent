@@ -6,6 +6,7 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 ### Added
 
+- **Desktop: the menu bar item shows the reviewer's state.** The eye is dimmed with no pupil while the reviewer doesn't answer, its pupil glances side to side while reviews run (still under Reduce motion), and the Needs you count sits beside it. The tooltip and a new first line in its menu say it in words, such as "Reviewer live · 2 reviewing · 3 need you" (#79).
 - **Desktop: Check for Updates… in the menu bar item.** It brings the window forward on Settings → General, whose Updates card leads, and asks for the newest release there (#78).
 - **Updates to new releases.** `scripts/update.sh` updates an install from source to a release tag: it fast-forwards the checkout, runs `pnpm install` and builds the desktop app, and only then replaces the app's binary, re-signs the bundle and restarts the daemon's LaunchAgent when it is running. A failed step resets the source and leaves the app untouched; each step prints one line and the commands log to `~/Library/Logs/pr-review/update.log`. `--check` prints the newest `vX.Y.Z` tag on origin. The desktop app checks at launch and every six hours, shows **Update to X.Y.Z** in the title bar, and runs the update and a restart from Settings → General → Updates (#77).
 

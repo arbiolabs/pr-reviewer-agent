@@ -409,6 +409,7 @@ fn run_app(
                     let quit = shell.update(cx, |s, cx| {
                         let quit = dispatch(&mut s.model, msg, &s.cmds);
                         s.observe_reviewer(cx);
+                        menubar::reflect(s, cx);
                         if std::mem::take(&mut s.model.dirty) {
                             cx.notify();
                         }
