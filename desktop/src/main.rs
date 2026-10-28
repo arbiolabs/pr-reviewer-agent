@@ -373,7 +373,20 @@ fn run_app(
                     false
                 })
             });
-            menubar::install();
+            let mut asks = menubar::install();
+            let asked = shell.downgrade();
+            cx.spawn(async move |cx| {
+                while let Some(menubar::Ask::CheckForUpdates) = asks.recv().await {
+                    let shown = asked.update(cx, |s, cx| {
+                        s.settings_on(setup::Tab::General, cx);
+                        s.check_update(cx);
+                    });
+                    if shown.is_err() {
+                        return;
+                    }
+                }
+            })
+            .detach();
             if hide_dock {
                 cx.set_activation_policy(ActivationPolicy::Accessory);
             }
