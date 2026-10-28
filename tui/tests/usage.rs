@@ -2,7 +2,7 @@ mod common;
 
 use common::*;
 use pr_review_tui::model::Model;
-use pr_review_tui::protocol::{ClientMessage, RequestId, ServerMessage, UsageBy};
+use pr_review_tui::protocol::{ClientMessage, RequestId, ServerMessage, UsageBy, UsageGroupBy};
 use pr_review_tui::update::{Effect, Msg, NetEvent, update};
 
 fn send(m: &mut Model, json: &str) -> Vec<Effect> {
@@ -20,7 +20,9 @@ fn live() -> Model {
 
 fn asked(fx: &[Effect]) -> (RequestId, UsageBy) {
     match fx {
-        [Effect::Send(ClientMessage::UsageGet { request_id, by, periods: None })] => (request_id.clone(), *by),
+        [Effect::Send(ClientMessage::UsageGet { request_id, by, periods: None, group: None })] => {
+            (request_id.clone(), *by)
+        }
         other => panic!("{other:?}"),
     }
 }
@@ -108,13 +110,70 @@ fn a_reconnect_keeps_the_report_and_asks_the_new_daemon() {
 fn playback_answers_each_grouping_with_its_recording() {
     let dir = protocol_dir().join("fixtures");
     for by in UsageBy::ALL {
-        let req = ClientMessage::UsageGet { request_id: RequestId::new("u-1"), by, periods: Some(3) };
+        let req = ClientMessage::UsageGet { request_id: RequestId::new("u-1"), by, periods: Some(3), group: None };
         match pr_review_tui::playback::answer(&dir, &[], &req).as_slice() {
             [ServerMessage::UsageReport(r)] => {
                 assert_eq!((r.by, r.request_id.as_ref().map(|i| i.as_str())), (by, Some("u-1")));
                 assert!(r.totals.cost > 0.0);
             }
             other => panic!("{other:?}"),
+        }
+    }
+}
+
+fn asked_grouped(fx: &[Effect]) -> (RequestId, UsageBy, UsageGroupBy) {
+    match fx {
+        [Effect::Send(ClientMessage::UsageGet { request_id, by, periods: None, group: Some(g) })] => {
+            (request_id.clone(), *by, *g)
+        }
+        other => panic!("{other:?}"),
+    }
+}
+
+#[test]
+fn a_breakdown_asks_for_its_split_over_the_same_range_and_keeps_it_across_groupings() {
+    let mut m = live();
+    let (id, _) = asked(&update(&mut m, Msg::Usage(Some(UsageBy::Week))));
+    send(&mut m, &reply(UsageBy::Week, &id));
+    let (id, by, group) = asked_grouped(&update(&mut m, Msg::UsageGroup(UsageGroupBy::Pr)));
+    assert_eq!((by, group), (UsageBy::Week, UsageGroupBy::Pr));
+    send(&mut m, &read("fixtures/server.usage.report.week.pr.json").replace("req-usage", id.as_str()));
+    let r = m.usage.report.as_ref().unwrap();
+    assert_eq!(r.group, Some(UsageGroupBy::Pr));
+    assert!(r.groups.iter().any(|g| g.pr_id.is_some() && g.number.is_some()));
+    assert_eq!(update(&mut m, Msg::Tick(10)), [], "the answer is current");
+    let (_, by, group) = asked_grouped(&update(&mut m, Msg::Usage(Some(UsageBy::Month))));
+    assert_eq!((by, group), (UsageBy::Month, UsageGroupBy::Pr));
+}
+
+#[test]
+fn a_daemon_that_ignores_the_breakdown_is_said_so_and_not_asked_again() {
+    let mut m = live();
+    update(&mut m, Msg::UsageGroup(UsageGroupBy::Repo));
+    let (id, ..) = asked_grouped(&update(&mut m, Msg::Usage(Some(UsageBy::Day))));
+    let old = read("fixtures/server.usage.report.day.json")
+        .replace("req-usage", id.as_str())
+        .replace(r#""group": "time","#, "");
+    assert!(!old.contains(r#""group""#));
+    send(&mut m, &old);
+    assert!(m.usage.error.as_ref().is_some_and(|e| e.as_str().contains("older")));
+    assert_eq!(update(&mut m, Msg::Tick(10)), []);
+}
+
+#[test]
+fn playback_answers_each_breakdown_with_its_recording() {
+    let dir = protocol_dir().join("fixtures");
+    for by in UsageBy::ALL {
+        for group in UsageGroupBy::ALL {
+            let req =
+                ClientMessage::UsageGet { request_id: RequestId::new("u-1"), by, periods: None, group: Some(group) };
+            match pr_review_tui::playback::answer(&dir, &[], &req).as_slice() {
+                [ServerMessage::UsageReport(r)] => {
+                    assert_eq!((r.by, r.group), (by, Some(group)));
+                    assert_eq!(r.groups.is_empty(), group == UsageGroupBy::Time);
+                }
+                other => panic!("{other:?}"),
+            }
         }
     }
 }

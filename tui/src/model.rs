@@ -618,10 +618,12 @@ pub struct AgentSettings {
 
 /// What the daemon said about recorded model usage. `by` is the grouping a client shows, `None` while none does (the
 /// TUI never asks). `report` is the last answer, kept on screen until the next one replaces it; `stale` asks for a new
-/// one, set on opening and whenever a review ends. `error` is why there is none, cleared by opening again.
+/// one, set on opening and whenever a review ends. `error` is why there is none, cleared by opening again. `group` is
+/// the breakdown over the same range, kept while the page is closed.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct UsageView {
     pub by: Option<UsageBy>,
+    pub group: UsageGroupBy,
     pub request: Option<RequestId>,
     pub report: Option<UsageReport>,
     pub stale: bool,

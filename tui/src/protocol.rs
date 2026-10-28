@@ -310,6 +310,48 @@ impl UsageBy {
     }
 }
 
+/// How `usage.get` splits the range besides the buckets: not at all (`Time`), or by repository, PR author or PR.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum UsageGroupBy {
+    #[default]
+    Time,
+    Repo,
+    Author,
+    Pr,
+}
+
+impl UsageGroupBy {
+    pub const ALL: [UsageGroupBy; 4] = [UsageGroupBy::Time, UsageGroupBy::Repo, UsageGroupBy::Author, UsageGroupBy::Pr];
+
+    /// The wire name.
+    pub fn as_str(self) -> &'static str {
+        match self {
+            UsageGroupBy::Time => "time",
+            UsageGroupBy::Repo => "repo",
+            UsageGroupBy::Author => "author",
+            UsageGroupBy::Pr => "pr",
+        }
+    }
+}
+
+/// One repository, author or PR of a breakdown. `label` is display text; a PR row has its `pr_id` and the rest.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UsageGroup {
+    pub key: Text,
+    pub label: Text,
+    pub repository: Option<Text>,
+    pub number: Option<u64>,
+    pub title: Option<Text>,
+    pub pr_id: Option<PrId>,
+    pub author: Option<Text>,
+    #[serde(flatten)]
+    pub counts: UsageCounts,
+    /// This row's part of the range's cost, 0 to 1.
+    pub share: f64,
+}
+
 /// Recorded model usage over a bucket, a model or the whole range. `cost` is USD at the model's list price.
 #[derive(Clone, Debug, Default, PartialEq, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -351,6 +393,12 @@ pub struct UsageReport {
     pub buckets: Vec<UsageBucket>,
     pub totals: UsageCounts,
     pub models: Vec<UsageModel>,
+    /// `None` from a daemon that predates breakdowns, which answers over time whatever was asked.
+    #[serde(default)]
+    pub group: Option<UsageGroupBy>,
+    /// Costliest first; empty over time.
+    #[serde(default)]
+    pub groups: Vec<UsageGroup>,
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize)]
@@ -929,6 +977,9 @@ pub enum ClientMessage {
         by: UsageBy,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         periods: Option<u16>,
+        /// Left out over time, so the request reads as it did before breakdowns.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        group: Option<UsageGroupBy>,
     },
     /// Sent only from the confirmation modal, and only for a capability the server granted.
     #[serde(rename = "command")]

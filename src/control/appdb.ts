@@ -4,7 +4,7 @@ import { DatabaseSync } from "node:sqlite";
 import { COORDINATOR_STATES, FINDING_STATES, PUBLICATION_STATUSES, publicationStatus, REVIEW_STATES, type ReviewState } from "../domain/machines.ts";
 import type { CandidateFinding } from "../domain/types.ts";
 import { ACCOUNT_KEY, chooseAccount, detectGh, type Env, type GhDetection, listAccounts } from "../github/accounts.ts";
-import { type UsageBy, usageReport, usageSince } from "../domain/usage.ts";
+import { type UsageBy, type UsageGroupBy, usageReport, usageSince } from "../domain/usage.ts";
 import { AppStore, type OutboxRow, REOPENINGS, type PullRow, type RevisionRow, TRANSITIONS, usageRows } from "../persistence/store.ts";
 import type { ReviewPayload } from "../publish/publisher.ts";
 import { sanitize } from "../protocol/sanitize.ts";
@@ -143,8 +143,8 @@ export class AppDbSource implements ControlSource {
   }
 
   /** usage.get, in the daemon's own time zone. */
-  async usage(by: UsageBy, periods?: number): Promise<UsageAnswer> {
-    const options = { by, tz: Intl.DateTimeFormat().resolvedOptions().timeZone, now: Date.now(), periods };
+  async usage(by: UsageBy, periods?: number, group?: UsageGroupBy): Promise<UsageAnswer> {
+    const options = { by, tz: Intl.DateTimeFormat().resolvedOptions().timeZone, now: Date.now(), periods, group };
     const report = usageReport(this.read(() => usageRows(this.db, usageSince(options))), options);
     return { ...report, currency: "USD", priceSource: "catalog" };
   }

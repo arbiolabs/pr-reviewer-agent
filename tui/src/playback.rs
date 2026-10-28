@@ -15,7 +15,7 @@ use serde_json::{Value, json};
 use tokio::sync::mpsc;
 
 use crate::net::NetCmd;
-use crate::protocol::{ClientMessage, Event, EventBody, RunStatus, SequencedEvent, ServerMessage};
+use crate::protocol::{ClientMessage, Event, EventBody, RunStatus, SequencedEvent, ServerMessage, UsageGroupBy};
 use crate::update::{Msg, NetEvent};
 
 pub struct Step {
@@ -459,8 +459,13 @@ pub fn answer(fixtures: &Path, played: &[ServerMessage], req: &ClientMessage) ->
             .find(|(n, _)| n == "server.settings.json")
             .map(|(_, v)| v)
             .unwrap_or_else(|| not_found(rid, "no settings".into())),
-        ClientMessage::UsageGet { by, .. } => {
-            let name = format!("server.usage.report.{}.json", by.as_str());
+        ClientMessage::UsageGet { by, group, .. } => {
+            let name = match group {
+                Some(g) if *g != UsageGroupBy::Time => {
+                    format!("server.usage.report.{}.{}.json", by.as_str(), g.as_str())
+                }
+                _ => format!("server.usage.report.{}.json", by.as_str()),
+            };
             fixtures_named(fixtures, "server.usage.report", rid)
                 .into_iter()
                 .find(|(n, _)| *n == name)

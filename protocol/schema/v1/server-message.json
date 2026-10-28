@@ -2369,6 +2369,98 @@
             }
           },
           "description": "the whole range split by model, costliest first"
+        },
+        "group": {
+          "enum": [
+            "time",
+            "repo",
+            "author",
+            "pr"
+          ]
+        },
+        "groups": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "required": [
+              "key",
+              "label",
+              "reviews",
+              "responses",
+              "input",
+              "output",
+              "cacheRead",
+              "cacheWrite",
+              "cost",
+              "share"
+            ],
+            "properties": {
+              "key": {
+                "type": "string",
+                "minLength": 1,
+                "description": "unique within the breakdown"
+              },
+              "label": {
+                "type": "string",
+                "description": "display text: the repository, the login, the PR's title, or Unknown author / Unknown PR"
+              },
+              "repository": {
+                "type": "string"
+              },
+              "number": {
+                "type": "integer",
+                "minimum": 1
+              },
+              "title": {
+                "type": "string"
+              },
+              "prId": {
+                "type": "string",
+                "minLength": 1
+              },
+              "author": {
+                "type": "string"
+              },
+              "reviews": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "distinct runs with at least one recorded model response"
+              },
+              "responses": {
+                "type": "integer",
+                "minimum": 0,
+                "description": "model responses, each retry and error answer included"
+              },
+              "input": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "output": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "cacheRead": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "cacheWrite": {
+                "type": "integer",
+                "minimum": 0
+              },
+              "cost": {
+                "type": "number",
+                "minimum": 0,
+                "description": "USD at the model's catalog price, rounded to 6 decimals"
+              },
+              "share": {
+                "type": "number",
+                "minimum": 0,
+                "maximum": 1,
+                "description": "this row's part of the range's cost, rounded to 6 decimals; 0 when the range cost nothing"
+              }
+            }
+          },
+          "description": "the whole range split by group, costliest first; absent when group is time"
         }
       }
     },

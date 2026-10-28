@@ -1,6 +1,6 @@
 // Source of protocol/fixtures and protocol/playback. Edit here, then run `pnpm protocol:emit`.
 import { sha256, stableId } from "../domain/types.ts";
-import { type UsageBy, type UsageRow, usageReport } from "../domain/usage.ts";
+import { USAGE_BY, USAGE_GROUPS, type UsageBy, type UsageGroupBy, type UsagePr, type UsageRow, usageReport } from "../domain/usage.ts";
 import { type Account, type ActivitySpan, type ClientMessage, type DiffFile, type Evidence, type Finding, type FindingDetail, type Pr, type PublicationChange, REVIEW_COMMANDS, type Run, type ServerMessage, type SetupCheck } from "./v1.ts";
 
 const EPOCH = "epoch-1";
@@ -1510,6 +1510,15 @@ const detail: FindingDetail = {
 // one function the daemon answers with.
 const USAGE_NOW = Date.parse("2026-10-28T15:00:00Z");
 const PRICES = { "anthropic/claude-opus-5-5": [5, 25, 0.5, 6.25], "openai/gpt-5.5": [1.25, 10, 0.125, 0] } as const;
+// Weighted by how often each PR is reviewed; one has no known author and one is gone (undefined).
+const usagePr = ({ id, repository, number, title, author }: Pr): UsagePr => ({ id, repository, number, title, ...(author ? { author } : {}) });
+const USAGE_PRS: (UsagePr | undefined)[] = [
+  ...[orders, orders, orders, ledger, ledger, requestIds, signIn, giftCards, holdsBase, drainOld, tokensPr].map(usagePr),
+  { id: stableId("pr", "acme/web", 1305), repository: "acme/web", number: 1305, title: "Footer: link the status page" },
+  { id: stableId("pr", "acme/api", 350), repository: "acme/api", number: 350, title: "Rate-limit the export endpoint", author: "cokafor" },
+  { id: stableId("pr", "acme/web", 1312), repository: "acme/web", number: 1312, title: "Dark mode: follow the system setting", author: "lchen" },
+  undefined,
+];
 const usageRowsFixture: UsageRow[] = (() => {
   let seed = 7;
   const rand = (n: number) => (seed = (seed * 48_271) % 2_147_483_647) % n;
@@ -1520,22 +1529,23 @@ const usageRowsFixture: UsageRow[] = (() => {
       const model = rand(5) === 0 ? "openai/gpt-5.5" : "anthropic/claude-opus-5-5";
       const [pin, pout, pread, pwrite] = PRICES[model];
       const revisionId = `run-u${day}-${r}`;
+      const pr = USAGE_PRS[(day * 3 + r) % USAGE_PRS.length];
       for (let k = 0, n = 4 + rand(8); k < n; k++) {
         const input = 800 + rand(4000);
         const output = 300 + rand(2500);
         const cacheRead = k === 0 ? 0 : 20_000 + rand(60_000);
         const cacheWrite = 1_000 + rand(6_000);
         const cost = (input * pin + output * pout + cacheRead * pread + cacheWrite * pwrite) / 1e6;
-        rows.push({ revisionId, at: new Date(USAGE_NOW - day * 86_400_000 - (r * 3 + k) * 60_000).toISOString(), model, input, output, cacheRead, cacheWrite, cost });
+        rows.push({ revisionId, ...(pr && { pr }), at: new Date(USAGE_NOW - day * 86_400_000 - (r * 3 + k) * 60_000).toISOString(), model, input, output, cacheRead, cacheWrite, cost });
       }
     }
   }
   return rows;
 })();
-const usageFixture = (by: UsageBy, rows = usageRowsFixture) => ({
+const usageFixture = (by: UsageBy, rows = usageRowsFixture, group: UsageGroupBy = "time") => ({
   type: "usage.report",
   requestId: "req-usage",
-  ...usageReport(rows, { by, tz: "Europe/Berlin", now: USAGE_NOW }),
+  ...usageReport(rows, { by, tz: "Europe/Berlin", now: USAGE_NOW, group }),
   currency: "USD",
   priceSource: "catalog",
 });
@@ -1597,6 +1607,10 @@ export const fixtures: Record<string, ClientMessage | ServerMessage | Record<str
   "server.usage.report.week": usageFixture("week"),
   "server.usage.report.month": usageFixture("month"),
   "server.usage.report.empty": usageFixture("day", []),
+  "client.usage.get.group": { type: "usage.get", requestId: "req-usage", by: "month", group: "repo" },
+  ...Object.fromEntries(
+    USAGE_BY.flatMap((by) => USAGE_GROUPS.filter((g) => g !== "time").map((group) => [`server.usage.report.${by}.${group}`, usageFixture(by, usageRowsFixture, group)])),
+  ),
   "client.command.settings.set": {
     type: "command",
     requestId: "req-cmd",

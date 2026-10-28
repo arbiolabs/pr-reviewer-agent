@@ -176,7 +176,7 @@ export async function startControlServer(options: ServerOptions): Promise<Contro
       }
       case "usage.get": {
         if (!source.usage) throw new ControlError("CAPABILITY_DENIED", "usage.get is not available in this version");
-        send(c, { type: "usage.report", requestId, ...(await source.usage(message.by, message.periods)) });
+        send(c, { type: "usage.report", requestId, ...(await source.usage(message.by, message.periods, message.group)) });
         return;
       }
       case "timeline.get":

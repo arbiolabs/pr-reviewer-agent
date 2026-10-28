@@ -32,6 +32,8 @@ pub enum Msg {
     SetModel(String),
     /// Shows recorded model usage grouped this way, asking for it fresh (`usage.get`), or stops showing it.
     Usage(Option<UsageBy>),
+    /// Splits usage on screen this way too, asking for it fresh.
+    UsageGroup(UsageGroupBy),
 }
 
 #[derive(Debug)]
@@ -168,6 +170,11 @@ pub fn update(m: &mut Model, msg: Msg) -> Vec<Effect> {
                 m.usage.error = None;
             }
         }
+        Msg::UsageGroup(group) => {
+            m.usage.group = group;
+            m.usage.stale = true;
+            m.usage.error = None;
+        }
     }
     prefetch(m, &mut fx);
     prefetch_settings(m, &mut fx);
@@ -235,11 +242,13 @@ fn prefetch_settings(m: &mut Model, fx: &mut Vec<Effect>) {
 fn prefetch_usage(m: &mut Model, fx: &mut Vec<Effect>) {
     let u = &m.usage;
     let Some(by) = u.by else { return };
-    let current = !u.stale && u.report.as_ref().is_some_and(|r| r.by == by);
+    let group = u.group;
+    let current = !u.stale && u.report.as_ref().is_some_and(|r| r.by == by && r.group.unwrap_or_default() == group);
     if u.request.is_some() || u.error.is_some() || current {
         return;
     }
-    m.usage.request = send(m, fx, |request_id| ClientMessage::UsageGet { request_id, by, periods: None });
+    let group = (group != UsageGroupBy::Time).then_some(group);
+    m.usage.request = send(m, fx, |request_id| ClientMessage::UsageGet { request_id, by, periods: None, group });
     if m.usage.request.is_some() {
         m.usage.stale = false;
     }
@@ -662,6 +671,11 @@ fn server_message(m: &mut Model, msg: ServerMessage, fx: &mut Vec<Effect>) {
             if r.request_id.is_some() && r.request_id == m.usage.request {
                 m.usage.request = None;
                 m.usage.error = None;
+                // An older daemon ignores the breakdown it was asked for; asking again would get the same answer.
+                if r.group.is_none() && m.usage.group != UsageGroupBy::Time {
+                    m.usage.error =
+                        Some(Text::new("This reviewer is older than usage breakdowns. Update it to split usage."));
+                }
                 m.usage.report = Some(r);
             }
         }

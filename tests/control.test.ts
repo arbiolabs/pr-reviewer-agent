@@ -247,6 +247,10 @@ describe("fixture source", () => {
     const report = await c.waitFor((m) => m.type === "usage.report");
     expect(report).toMatchObject({ requestId: "u", by: "month", timeZone: "Europe/Berlin", currency: "USD" });
     expect(report.type === "usage.report" && report.buckets).toHaveLength(12);
+    c.send({ type: "usage.get", requestId: "g", by: "week", group: "author" });
+    const grouped = await c.waitFor((m) => m.type === "usage.report" && m.requestId === "g");
+    expect(grouped).toMatchObject({ by: "week", group: "author" });
+    expect(grouped.type === "usage.report" && grouped.groups?.map((g) => g.label)).toContain("Unknown author");
   });
 });
 
