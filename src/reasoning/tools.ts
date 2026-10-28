@@ -128,6 +128,12 @@ export function createReviewTools(deps: ToolDeps): Extension {
         },
         afterResponse: async (message, api, context) => {
           const revisionId = await revisionOf(api, context);
+          // Recorded before the turn check: a response polled after a restart has no open turn but was still billed.
+          // The harness calls this hook only on a live provider answer, never on a replayed entry, so it counts once.
+          const u = message.usage;
+          if (revisionId && u && u.input + u.output + u.cacheRead + u.cacheWrite + u.cost.total > 0) {
+            deps.store.recordUsage(revisionId, `${message.provider}/${message.model}`, u);
+          }
           const turn = revisionId ? turns.get(revisionId) : undefined;
           if (!revisionId || !turn?.open) return;
           const calls = new Map<string, number>();

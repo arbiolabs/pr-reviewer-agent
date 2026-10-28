@@ -14,6 +14,8 @@ import {
   type ReviewState,
   TERMINAL_REVIEW_STATES,
 } from "../domain/machines.ts";
+import type { Usage } from "@earendil-works/pi-ai";
+import type { UsageRow } from "../domain/usage.ts";
 import { type CandidateFinding, type ChangedFile, type Disposition, type PullInfo, type ResolutionClaim, type ResolutionVerdict, stableId } from "../domain/types.ts";
 import { sanitize } from "../protocol/sanitize.ts";
 import type { ActivitySpan } from "../protocol/v1.ts";
@@ -501,6 +503,17 @@ export class AppStore {
       .run(detail, now(), span ? JSON.stringify(span) : null, revisionId);
   }
 
+  /** One model response of a review: its tokens and the cost pi-ai priced it at. */
+  recordUsage(revisionId: string, model: string, usage: Usage): void {
+    const { input, output, cacheRead, cacheWrite, cost } = usage;
+    this.db
+      .prepare(
+        `INSERT INTO model_usage (revision_id, pr_id, at, model, input, output, cache_read, cache_write, cost_input, cost_output, cost_cache_read, cost_cache_write, cost_total)
+         SELECT id, pr_id, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ? FROM review_revisions WHERE id = ?`,
+      )
+      .run(now(), model, input, output, cacheRead, cacheWrite, cost.input, cost.output, cost.cacheRead, cost.cacheWrite, cost.total, revisionId);
+  }
+
   saveSnapshot(snapshot: Omit<Snapshot, "id">): string {
     const id = stableId("snapshot", snapshot.revisionId);
     this.db
@@ -813,6 +826,16 @@ export class AppStore {
   releaseLease(prId: string, owner: string): void {
     this.db.prepare("DELETE FROM leases WHERE pr_id = ? AND owner = ?").run(prId, owner);
   }
+}
+
+/** The recorded model responses from `since` (an ISO instant) on; `db` may be a read-only connection. */
+export function usageRows(db: DatabaseSync, since: string): UsageRow[] {
+  return db
+    .prepare(
+      `SELECT revision_id AS revisionId, at, model, input, output, cache_read AS cacheRead, cache_write AS cacheWrite, cost_total AS cost
+       FROM model_usage WHERE at >= ? ORDER BY at, id`,
+    )
+    .all(since) as UsageRow[];
 }
 
 /** Run `fn` on the data dir's app DB, creating the dir and DB if needed. Takes no data-dir lock: WAL lets it share the DB. */
