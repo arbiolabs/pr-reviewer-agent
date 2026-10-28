@@ -14,7 +14,7 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 ### Changed
 
-- **Suspected findings are published, marked unconfirmed.** Verify no longer discards a candidate the model marks `suspected`. The summary line and the inline comment read "High (unconfirmed)", and the comment says the reviewer could not show the defect from the cited code alone. A candidate marked `unreproducible` is still discarded, and a resolution still needs `confirmed_by_static_trace`.
+- **Suspected findings are published, marked unconfirmed.** Verify no longer discards a candidate the model marks `suspected`. The summary line and the inline comment read "High (unconfirmed)", and the comment says the reviewer could not show the defect from the cited code alone. A candidate marked `unreproducible` is still discarded, and a resolution still needs `confirmed_by_static_trace` (#58).
 
 ### Fixed
 
