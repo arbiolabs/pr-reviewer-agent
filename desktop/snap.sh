@@ -82,6 +82,16 @@ settings_script=desktop/target/settings/playback/settings.ndjson
 sed '1s/"review.publish"\]/"review.publish","settings.set"]/' "$script" > "$settings_script"
 # The review message section on the Review tab, scrolled into view; a message: step's \n is a line break and it can't hold a comma.
 message_at="wait:19000,goto:settings,settings-tab:review,scroll:840"
+# Automatic reviews off, and after a failed poll: the settings session answering settings.get from another fixture.
+for v in off error; do
+  mkdir -p desktop/target/auto-$v/playback
+  rm -rf desktop/target/auto-$v/fixtures
+  cp -R protocol/fixtures desktop/target/auto-$v/fixtures
+  cp protocol/fixtures/server.settings.auto-review-$v.json desktop/target/auto-$v/fixtures/server.settings.json
+  cp "$settings_script" desktop/target/auto-$v/playback/auto-$v.ndjson
+done
+# The Automatic reviews card, at the foot of the Reviewer tab.
+auto_at="wait:19000,goto:settings,settings-tab:reviewer,scroll:3000"
 message_custom='### {{repo}} #{{pr_number}} by {{pr_author}}\n\n{{summary_line}}\n\n{{findings_list}}\n\n{{carried}}\n\nReviewed by {{model}} at {{short_sha}}. A human still decides.\n'
 message_unknown='### {{repo}} #{{pr_number}} for {{reviewer_name}}\n\n{{summary_line}}\n\n{{findings_list}}\n\n{{carried}}\n\nSee {{dashboard_url}}.\n'
 
@@ -176,6 +186,9 @@ for look in dark light; do
   snap 24b-settings-reviewer-$look   $look 1000  "goto:settings" protocol/playback/setup.ndjson
   snap 24c-settings-accounts-$look   $look 20000 "wait:19000,goto:settings,settings-tab:accounts"
   snap 24d-settings-appearance-$look $look 20000 "wait:19000,goto:settings,settings-tab:appearance"
+  snap 25a-auto-review-off-$look   $look 20000 "$auto_at" desktop/target/auto-off/playback/auto-off.ndjson
+  snap 25b-auto-review-on-$look    $look 20000 "$auto_at" "$settings_script"
+  snap 25c-auto-review-error-$look $look 20000 "$auto_at" desktop/target/auto-error/playback/auto-error.ndjson
 done
 snap 20b-footer-no-account     dark  20000 "" "$no_account_script"
 

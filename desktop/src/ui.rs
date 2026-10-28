@@ -216,6 +216,8 @@ pub struct Shell {
     pub jev: crate::jev::KeyField,
     /// Settings → Review message: the template editor.
     pub message: crate::message::MessageEditor,
+    /// Settings → Reviewer → Automatic reviews: the repository fields.
+    pub repos: crate::auto::RepoFields,
     /// The Settings tab in front, for this session.
     pub settings_tab: crate::setup::Tabs,
     /// Settings' scroll position, so a snapshot can show a section below the fold.
@@ -310,6 +312,7 @@ impl Shell {
             picker: crate::agent::Picker::default(),
             jev: crate::jev::KeyField::new(),
             message: Default::default(),
+            repos: Default::default(),
             settings_tab: Default::default(),
             settings_scroll: ScrollHandle::new(),
             settings_scroll_to: None,
@@ -873,6 +876,7 @@ impl Render for Shell {
             self.key_input(window, cx);
             self.model_search(window, cx);
             self.message_editor(window, cx);
+            self.repo_fields(window, cx);
             if let Some(y) = self.settings_scroll_to {
                 if self.settings_scroll.max_offset().y > px(0.) {
                     self.settings_scroll.set_offset(point(px(0.), -px(y)));

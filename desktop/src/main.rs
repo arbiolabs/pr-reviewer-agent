@@ -2,6 +2,7 @@
 
 mod account;
 mod agent;
+mod auto;
 mod capture;
 mod cards;
 mod code;

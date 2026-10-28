@@ -168,7 +168,7 @@ impl Shell {
 
     /// Whether a Settings field has the keyboard, so the page's single-key shortcuts stay out of it.
     pub fn typing(&self, window: &Window, cx: &App) -> bool {
-        [self.jev.input.as_ref(), self.picker.search.as_ref()]
+        [self.jev.input.as_ref(), self.picker.search.as_ref(), self.repos.include.as_ref(), self.repos.exclude.as_ref()]
             .into_iter()
             .flatten()
             .any(|i| i.read(cx).focus_handle(cx).is_focused(window))

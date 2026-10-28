@@ -90,12 +90,13 @@ With that setting, Stop is a plain `daemon.stop` and Start is a `launchctl kicks
 ⌘, opens Settings, on the tab you last used in this session. It has four tabs, and 1 to 4 switch between them while no text field has the keyboard:
 
 1. **Review**: the model (Agent), the risk check (Jev) and the review message. It is the default tab.
-2. **Reviewer**: the daemon's setup checks, then the reviewer with Start, Restart and Stop. Settings opens here while reviews can't run: a check blocks them, the daemon is read-only, or the window can't reach it.
+2. **Reviewer**: the daemon's setup checks, then the reviewer with Start, Restart and Stop, then Automatic reviews. Settings opens here while reviews can't run: a check blocks them, the daemon is read-only, or the window can't reach it.
 3. **Accounts**: the GitHub accounts.
 4. **Appearance**: the themes (see [Themes](#themes)).
 
 A tab with something to fix carries a count: Reviewer the blocking and limited checks, or a read-only or unreachable daemon, and Review the model and Jev checks. The count is red when reviews can't run. The palette has a row for each tab (type `settings`, `model`, `jev`, `accounts` or `themes`).
 
+- **Automatic reviews** turns on the daemon's polling for PRs that request your review, which is off by default. The switch, the interval (5, 15 or 30 minutes) and **Include requests to my teams** save at once. The repository fields take `owner/name` separated by commas: **Only these repositories** (empty means every repository) and **Never these repositories**, saved with **Save repositories**. The card says what posting does with these reviews ("Reviews still wait for your approval before posting." under approval mode) and shows the last poll: when it ran and how many PRs it found, started and skipped, or its error. While the switch is on, open Settings asks the daemon again every 30 seconds. [Configuration](../docs/configuration.md#automatic-reviews) explains what a poll does.
 - **Risk check (Jev)** saves your TypeSafe key in the login keychain, where the daemon reads it for the next review with no restart. The field is masked and the page says only whether a key is saved. Off macOS, set `TYPESAFE_API_KEY` in the daemon's environment instead. [Configuration](../docs/configuration.md#typesafe-key-in-the-macos-keychain) explains how the key is kept.
 - **Agent** lists the models the daemon can review with, grouped by provider and searchable, with the one in use and where each provider's credential comes from. Save makes the choice the daemon's `models.default`. Reviews started from then on use it, and a PR reviewed again with another model gets a new revision.
 
