@@ -1,5 +1,5 @@
 import { sha256 } from "../domain/types.ts";
-import { capitalize, renderSummary, unseen } from "../cli/report.ts";
+import { findingLabel, renderSummary, unseen } from "../cli/report.ts";
 import { type GitHubClient, GitHubError } from "../github/client.ts";
 import type { AppStore, FindingView, OutboxRow } from "../persistence/store.ts";
 import type { FileDiff } from "../source/diff.ts";
@@ -11,6 +11,8 @@ import type { FileDiff } from "../source/diff.ts";
 export const PUBLISHER_VERSION = "p2";
 
 export type ReviewComment = { path: string; line: number; side: "RIGHT"; body: string };
+const UNCONFIRMED_NOTE = "Unconfirmed: the reviewer suspects this defect but could not show it from the cited code alone.";
+
 /** The POST body, exactly as sent. `event` is always COMMENT: the reviewer never approves or requests changes. */
 export type ReviewPayload = { commit_id: string; body: string; event: "COMMENT"; comments: ReviewComment[] };
 export type PullTarget = { fullName: string; number: number };
@@ -50,7 +52,7 @@ export function buildPayload(input: {
     path: c.file,
     line: c.newLine!,
     side: "RIGHT",
-    body: inert([`**${capitalize(c.severity)}: ${c.title}**`, "", c.explanation, ...(c.suggestedFix ? ["", `Suggested fix: ${c.suggestedFix}`] : [])].join("\n")),
+    body: inert([`**${findingLabel(c)}: ${c.title}**`, ...(c.evidenceKind === "suspected" ? ["", UNCONFIRMED_NOTE] : []), "", c.explanation, ...(c.suggestedFix ? ["", `Suggested fix: ${c.suggestedFix}`] : [])].join("\n")),
   }));
   const body = fitBody(inert(renderSummary(input.headSha, input.findings, input.limitations)), input.revisionId);
   const hash = sha256(JSON.stringify({ body, commit_id: input.headSha, event: "COMMENT", comments }));

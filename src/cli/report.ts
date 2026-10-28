@@ -1,4 +1,4 @@
-import { type Disposition, type ResolutionVerdict, SEVERITIES } from "../domain/types.ts";
+import { type CandidateFinding, type Disposition, type ResolutionVerdict, SEVERITIES } from "../domain/types.ts";
 import type { AppStore, AuditEvent, FindingView, OutboxRow, RevisionRow } from "../persistence/store.ts";
 
 export type ReviewReport = {
@@ -37,6 +37,9 @@ export function loadReport(store: AppStore, revisionId: string): ReviewReport {
 }
 
 export const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
+
+/** `High`, or `High (unconfirmed)` for a finding the model only suspected. */
+export const findingLabel = (c: CandidateFinding) => capitalize(c.severity) + (c.evidenceKind === "suspected" ? " (unconfirmed)" : "");
 
 /** Spec §12 summary format. A run that did not complete says so; it is never reported as a clean review. */
 export function renderMarkdown(report: ReviewReport): string {
@@ -83,7 +86,7 @@ export function renderSummary(headSha: string, findings: FindingView[], limitati
     lines.push(`Found ${n} actionable ${n === 1 ? "issue" : "issues"}.`, "");
     for (const { candidate: c, reopens } of fresh) {
       const back = reopens ? `; looked resolved at \`${reopens.resolvedAt.slice(0, 7)}\`, but its code is still here` : "";
-      lines.push(`- ${capitalize(c.severity)}: ${c.title} (\`${c.file}:${c.newLine}\`${back})`);
+      lines.push(`- ${findingLabel(c)}: ${c.title} (\`${c.file}:${c.newLine}\`${back})`);
     }
   }
   const sectioned = new Set(CARRIED_SECTIONS.flatMap(([, states]) => states));
@@ -91,7 +94,7 @@ export function renderSummary(headSha: string, findings: FindingView[], limitati
     const group = carried.filter((f) => (states.length === 0 ? !sectioned.has(f.status) : states.includes(f.status)));
     if (group.length === 0) continue;
     lines.push("", heading, "");
-    for (const f of group.slice(0, MAX_CARRIED_PER_SECTION)) lines.push(`- ${capitalize(f.candidate.severity)}: ${f.candidate.title} (\`${where(f)}\`, first reported on \`${f.firstHeadSha.slice(0, 7)}\`)`);
+    for (const f of group.slice(0, MAX_CARRIED_PER_SECTION)) lines.push(`- ${findingLabel(f.candidate)}: ${f.candidate.title} (\`${where(f)}\`, first reported on \`${f.firstHeadSha.slice(0, 7)}\`)`);
     if (group.length > MAX_CARRIED_PER_SECTION) lines.push(`- and ${group.length - MAX_CARRIED_PER_SECTION} more`);
   }
   for (const limitation of limitations) lines.push("", `Scope limited: ${limitation}.`);

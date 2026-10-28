@@ -4,6 +4,10 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 ## [Unreleased]
 
+### Changed
+
+- **Suspected findings are published, marked unconfirmed.** Verify no longer discards a candidate the model marks `suspected`. The summary line and the inline comment read "High (unconfirmed)", and the comment says the reviewer could not show the defect from the cited code alone. A candidate marked `unreproducible` is still discarded, and a resolution still needs `confirmed_by_static_trace`.
+
 ### Added
 
 - **A verification skill.** `.claude/skills/verify/` drives pr-review the way a user does, on a scratch instance in `/private/tmp/<name>` with its own socket, data dir, config and test Keychain service. Its helpers start this checkout's daemon in fixture or engine mode (`daemon-up.sh`), check it (`doctor.sh`), open the desktop app on it (`app-up.sh`), type into that window only (`keys.sh`), capture that window by id (`shot.sh`), count a PR's GitHub reviews and comments to prove nothing was posted (`gh-counts.sh`), and stop everything they started, by pid (`down.sh`). The skill keeps its proof in the gitignored `.verify-evidence/`. Its feature map covers the queue and a finding, a live review and its waterfall, Review a PR (⌘N), reviewer Start/Stop and Settings (#56).

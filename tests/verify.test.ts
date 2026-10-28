@@ -88,11 +88,15 @@ it("rejects traversal in evidence paths", async () => {
   expect(d.reason).toBe("path traversal rejected: ../../etc/passwd");
 });
 
-it("sends suspected evidence through INCONCLUSIVE to DISCARDED", async () => {
-  expect(await disposition(candidate({ evidenceKind: "suspected" }))).toMatchObject({
+it("verifies a suspected candidate, so it is published marked unconfirmed", async () => {
+  expect(await disposition(candidate({ evidenceKind: "suspected" }))).toMatchObject({ state: "VERIFIED", reason: null });
+});
+
+it("sends unreproducible evidence through INCONCLUSIVE to DISCARDED", async () => {
+  expect(await disposition(candidate({ evidenceKind: "unreproducible" }))).toMatchObject({
     state: "DISCARDED",
     path: ["DISCOVERED", "INVESTIGATING", "INCONCLUSIVE", "DISCARDED"],
-    reason: "evidence is suspected",
+    reason: "evidence is unreproducible",
   });
 });
 
@@ -130,7 +134,7 @@ it("links a candidate that names a doubted finding by the finding's text found i
   expect(linked.unverified).toEqual([]);
   // A name no open finding has is ignored; the candidate is judged by the other rules, which make this one new.
   const stranger = candidate({ id: "c4", title: "Deleting an order never checks who owns it", priorFindingId: "f-nobody" });
-  const failed = await verifyCandidates([{ ...named, evidenceKind: "suspected" }, stranger], { ...ctx, prior: [doubted] });
+  const failed = await verifyCandidates([{ ...named, evidenceKind: "unreproducible" }, stranger], { ...ctx, prior: [doubted] });
   expect(failed.dispositions.map((d) => [d.state, d.findingId])).toEqual([
     ["DISCARDED", null],
     ["VERIFIED", stableId("finding", "pr-1", "rev-1", fingerprint(stranger))],
@@ -189,7 +193,7 @@ it("refuses a resolution claim when a candidate of the same revision reports the
   const relinked = await verifyCandidates([candidate({})], { ...ctx, prior: [prior] }, [fixed]);
   expect(relinked.dispositions[0]!.findingId).toBe("f-doubted");
   expect(relinked.verdicts).toEqual([{ findingId: "f-doubted", state: "REFUSED", reason: "candidate c1 reports it again" }]);
-  const named = await verifyCandidates([candidate({ id: "c2", title: "Deleting an order never checks who owns it", priorFindingId: "f-doubted", evidenceKind: "suspected" })], { ...ctx, prior: [prior] }, [fixed]);
+  const named = await verifyCandidates([candidate({ id: "c2", title: "Deleting an order never checks who owns it", priorFindingId: "f-doubted", evidenceKind: "unreproducible" })], { ...ctx, prior: [prior] }, [fixed]);
   expect([named.dispositions[0]!.state, named.unverified, named.verdicts[0]!.reason]).toEqual(["DISCARDED", ["f-doubted"], "candidate c2 reports it again"]);
   // A second defect in the same handler: its verified report cites two of the finding's lines, so the handler is still live.
   const sibling = candidate({ id: "c3", title: "Deleting an order never checks who owns it", codeEvidence: [{ path: DEFECT.file, start: 4, end: 5, refSha: fixture.headSha }] });
