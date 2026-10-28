@@ -137,6 +137,7 @@ pr-review-desktop --playback protocol/playback/showcase.ndjson --snapshot out.pn
 | `--actions STEPS` | Steps to apply before the capture. Needs `--playback`. |
 | `--window WxH` | The window size in points. The default is 1280x800. |
 | `--appearance THEME` | The theme: `system`, `light`, `dark`, `solarized-light`, `solarized-dark` or `nord`. It wins over the theme Settings saved. The default is the saved theme, else `system`. |
+| `--background` | Start in the menu bar with the window hidden, as the Open at login item does. |
 
 The window must fit on the screen, because macOS shrinks a larger one and the capture then never matches the requested size. The PNG is the window's content area at the display's scale, so `--window 1280x800` gives a 2560x1600 image on a Retina display. The title bar's chrome above the content area is cropped off; the app's own title bar, with the traffic lights, is in the capture.
 

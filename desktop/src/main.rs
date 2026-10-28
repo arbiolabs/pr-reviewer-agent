@@ -11,6 +11,7 @@ mod diff;
 mod jev;
 mod kit;
 mod live;
+mod menubar;
 mod message;
 mod overlay;
 mod publish;
@@ -42,6 +43,7 @@ use tokio::sync::mpsc;
 
 const USAGE: &str = "usage: pr-review-desktop [--socket PATH] [--pr URL] [--playback FILE.ndjson] [--config FILE]
        [--snapshot OUT.png [--snapshot-after-ms N] [--actions STEPS]] [--window WxH] [--appearance THEME]
+       [--background]
 
   --snapshot OUT.png      capture the window to OUT.png, then quit
   --snapshot-after-ms N   when to capture, in milliseconds from launch (default 1000); with --playback the script
@@ -51,6 +53,7 @@ const USAGE: &str = "usage: pr-review-desktop [--socket PATH] [--pr URL] [--play
   --window WxH            window size in points (default 1280x800)
   --appearance THEME      system, light, dark, solarized-light, solarized-dark or nord, over the one Settings
                           saved (default: that one, else system)
+  --background            start in the menu bar with the window hidden, as the login item does
 
 The other flags are pr-review-tui's.";
 
@@ -61,6 +64,7 @@ struct Opts {
     steps: Vec<script::Step>,
     window: (f32, f32),
     appearance: Option<tokens::Choice>,
+    background: bool,
 }
 
 enum Cli {
@@ -71,6 +75,7 @@ enum Cli {
 fn parse_args(mut it: impl Iterator<Item = String>) -> Result<Cli, String> {
     let mut rest = Vec::new();
     let (mut snapshot, mut after_ms, mut steps, mut window, mut appearance) = (None, 1000, Vec::new(), None, None);
+    let mut background = false;
     while let Some(flag) = it.next() {
         let mut value = |name: &str| it.next().ok_or(format!("{name} needs a value"));
         match flag.as_str() {
@@ -88,6 +93,7 @@ fn parse_args(mut it: impl Iterator<Item = String>) -> Result<Cli, String> {
                     format!("--appearance: {v:?} is not one of {}", ids.join(", "))
                 })?)
             }
+            menubar::BACKGROUND_FLAG => background = true,
             "-h" | "--help" => return Ok(Cli::Print(USAGE.into())),
             "-V" | "--version" => return Ok(Cli::Print(format!("pr-review-desktop {}", env!("CARGO_PKG_VERSION")))),
             _ => rest.push(flag),
@@ -100,7 +106,15 @@ fn parse_args(mut it: impl Iterator<Item = String>) -> Result<Cli, String> {
     if !steps.is_empty() && (snapshot.is_none() || tui.playback.is_none()) {
         return Err("--actions needs --snapshot and --playback".into());
     }
-    Ok(Cli::Run(Opts { tui, snapshot, after_ms, steps, window: window.unwrap_or((1280., 800.)), appearance }))
+    Ok(Cli::Run(Opts {
+        tui,
+        snapshot,
+        after_ms,
+        steps,
+        window: window.unwrap_or((1280., 800.)),
+        appearance,
+        background,
+    }))
 }
 
 fn size_arg(v: &str) -> Result<(f32, f32), String> {
@@ -152,6 +166,7 @@ fn start(opts: Opts) -> Result<(), String> {
         choice
     });
     let theme = opts.appearance.or(saved).unwrap_or(tokens::Choice::System);
+    let hide_dock = settings.desktop.hide_dock;
     let reviewer = reviewer::Reviewer::new(socket, settings.desktop, settings.config_path, opts.snapshot.is_some());
     let mut model = Model::new(endpoint, settings.look, settings.start, settings.wanted_pr);
     model.agent.wanted = true;
@@ -162,7 +177,16 @@ fn start(opts: Opts) -> Result<(), String> {
     if let (Source::Playback(p), Some(_)) = (&settings.source, &opts.snapshot) {
         script::play(playback::load(p)?, &mut model, &opts.steps, opts.after_ms)?;
         let snapshot = opts.snapshot.map(|out| (out, 0));
-        let view = View { model, cmds, reviewer, desk: desk(&opts.steps), still: true, snapshot: true };
+        let view = View {
+            model,
+            cmds,
+            reviewer,
+            desk: desk(&opts.steps),
+            still: true,
+            snapshot: true,
+            hide_dock: false,
+            background: false,
+        };
         run_app(view, None, snapshot, opts.window, theme);
         drop(cmd_rx);
         return Ok(());
@@ -185,8 +209,16 @@ fn start(opts: Opts) -> Result<(), String> {
     let snapshot = opts.snapshot.clone().map(|out| (out, opts.after_ms));
     let is_snapshot = opts.snapshot.is_some();
     // `rt` lives until the process exits, since `run_app` returns only after the app quits.
-    let view =
-        View { model, cmds, reviewer, desk: Vec::new(), still: is_snapshot || reduce_motion(), snapshot: is_snapshot };
+    let view = View {
+        model,
+        cmds,
+        reviewer,
+        desk: Vec::new(),
+        still: is_snapshot || reduce_motion(),
+        snapshot: is_snapshot,
+        hide_dock,
+        background: opts.background,
+    };
     run_app(view, Some(msgs), snapshot, opts.window, theme);
     drop(rt);
     Ok(())
@@ -200,6 +232,8 @@ struct View {
     desk: Vec<script::Desk>,
     still: bool,
     snapshot: bool,
+    hide_dock: bool,
+    background: bool,
 }
 
 fn desk(steps: &[script::Step]) -> Vec<script::Desk> {
@@ -298,12 +332,15 @@ fn run_app(
             window_min_size: Some(size(px(960.), px(600.))),
             ..Default::default()
         };
-        let View { model, cmds, reviewer, desk, still, snapshot: is_snapshot } = view;
+        let View { model, cmds, reviewer, desk, still, snapshot: is_snapshot, hide_dock, background } = view;
         if !is_snapshot && let Some(c) = system_accent() {
             let _ = kit::SYSTEM_ACCENT.set(c);
         }
         let built = gpui_kit::open_window(options, cx, |window, cx| {
-            let shell = cx.new(|cx| ui::Shell::new(model, cmds, reviewer, still, is_snapshot, &desk, cx));
+            let shell = cx.new(|cx| ui::Shell {
+                hide_dock,
+                ..ui::Shell::new(model, cmds, reviewer, still, is_snapshot, &desk, cx)
+            });
             let focus = shell.read(cx).focus.clone();
             window.focus(&focus, cx);
             // System follows macOS as it switches between light and dark.
@@ -324,7 +361,23 @@ fn run_app(
             });
         }
         cx.on_window_closed(|cx, _| cx.quit()).detach();
-        cx.activate(true);
+        if is_snapshot {
+            cx.activate(true);
+        } else {
+            // Closing the window hides the app: reviews keep running, and the menu bar item or the Dock brings it
+            // back. Quit is ⌘Q or the menu bar item's Quit.
+            let _ = window.update(cx, |_, window, cx| {
+                window.on_window_should_close(cx, |_, cx| {
+                    cx.hide();
+                    false
+                })
+            });
+            menubar::install();
+            if hide_dock {
+                cx.set_activation_policy(ActivationPolicy::Accessory);
+            }
+            if background { cx.hide() } else { cx.activate(true) }
+        }
         if let Some(mut msgs) = msgs {
             cx.spawn(async move |cx| {
                 while let Some(msg) = msgs.recv().await {

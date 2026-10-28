@@ -78,40 +78,47 @@ pub struct Desktop {
     pub launch_agent: String,
     /// The app's theme, as its Settings page writes it. The app reads the id; this file only carries it.
     pub theme: Option<String>,
+    /// The app runs without a Dock icon, from its menu bar item alone.
+    pub hide_dock: bool,
 }
 
 impl Default for Desktop {
     fn default() -> Self {
-        Desktop { daemon_command: None, launch_agent: "io.github.diego-arbio-dev.pr-review.daemon".into(), theme: None }
+        Desktop {
+            daemon_command: None,
+            launch_agent: "io.github.diego-arbio-dev.pr-review.daemon".into(),
+            theme: None,
+            hide_dock: false,
+        }
     }
 }
 
-/// Writes `theme = "<id>"` into the `[desktop]` section of the config file at `path`, adding the section or the
-/// file when it is missing. Every other line stays as it was, comments included. Nothing is written unless the new
-/// text parses, as a config file, to the old values plus the theme.
-pub fn set_desktop_theme(path: &Path, id: &str) -> Result<(), String> {
+/// Writes `key = value` into the `[desktop]` section of the config file at `path`, adding the section or the file
+/// when it is missing. Every other line stays as it was, comments included. Nothing is written unless the new text
+/// parses, as a config file, to the old values plus the key.
+pub fn set_desktop(path: &Path, key: &str, value: toml::Value) -> Result<(), String> {
     let at = |e: &dyn std::fmt::Display| format!("{}: {e}", path.display());
     let old = match std::fs::read_to_string(path) {
         Ok(text) => text,
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => String::new(),
         Err(e) => return Err(at(&e)),
     };
-    let new = with_desktop_theme(&old, id);
-    // The file's values with the theme taken out, and an emptied [desktop] with it.
-    let without_theme = |text: &str| -> Result<(toml::Table, Option<toml::Value>), String> {
+    let new = with_desktop_key(&old, key, &value);
+    // The file's values with the key taken out, and an emptied [desktop] with it.
+    let without_key = |text: &str| -> Result<(toml::Table, Option<toml::Value>), String> {
         let mut t: toml::Table = toml::from_str(text).map_err(|e| at(&e))?;
         let desktop = t.get_mut("desktop").and_then(|d| d.as_table_mut());
-        let theme = desktop.and_then(|d| d.remove("theme"));
+        let found = desktop.and_then(|d| d.remove(key));
         if t.get("desktop").and_then(|d| d.as_table()).is_some_and(|d| d.is_empty()) {
             t.remove("desktop");
         }
-        Ok((t, theme))
+        Ok((t, found))
     };
-    let (before, _) = without_theme(&old)?;
-    let (after, theme) = without_theme(&new)?;
+    let (before, _) = without_key(&old)?;
+    let (after, found) = without_key(&new)?;
     toml::from_str::<File>(&new).map_err(|e| at(&e))?;
-    if before != after || theme.as_ref().and_then(|v| v.as_str()) != Some(id) {
-        return Err(at(&"can't set [desktop] theme without changing other keys; edit it by hand"));
+    if before != after || found.as_ref() != Some(&value) {
+        return Err(at(&format!("can't set [desktop] {key} without changing other keys; edit it by hand")));
     }
     if let Some(dir) = path.parent() {
         std::fs::create_dir_all(dir).map_err(|e| at(&e))?;
@@ -120,10 +127,10 @@ pub fn set_desktop_theme(path: &Path, id: &str) -> Result<(), String> {
     std::fs::write(&tmp, new).and_then(|()| std::fs::rename(&tmp, path)).map_err(|e| at(&e))
 }
 
-/// `text` with its `[desktop]` section's `theme` line replaced, or added under the section's header, or a new
-/// section at the end.
-fn with_desktop_theme(text: &str, id: &str) -> String {
-    let line = format!("theme = {}", toml::Value::from(id));
+/// `text` with its `[desktop]` section's `key` line replaced, or added under the section's header, or a new section
+/// at the end.
+fn with_desktop_key(text: &str, key: &str, value: &toml::Value) -> String {
+    let line = format!("{key} = {value}");
     let is_desktop = |l: &str| {
         l.trim().strip_prefix("[desktop]").is_some_and(|rest| rest.trim().is_empty() || rest.trim().starts_with('#'))
     };
@@ -139,9 +146,9 @@ fn with_desktop_theme(text: &str, id: &str) -> String {
         .iter()
         .position(|l| l.trim_start().starts_with('['))
         .map_or(lines.len(), |i| header + 1 + i);
-    let theme = (header + 1..end)
-        .find(|&i| lines[i].trim_start().strip_prefix("theme").is_some_and(|rest| rest.trim_start().starts_with('=')));
-    match theme {
+    let found = (header + 1..end)
+        .find(|&i| lines[i].trim_start().strip_prefix(key).is_some_and(|rest| rest.trim_start().starts_with('=')));
+    match found {
         Some(i) => lines[i] = &line,
         None => lines.insert(header + 1, &line),
     }
@@ -403,31 +410,41 @@ mod tests {
         let path = dir.join("nested/config.toml");
         let read = || std::fs::read_to_string(&path).unwrap();
 
-        set_desktop_theme(&path, "nord").unwrap();
+        set_desktop(&path, "theme", "nord".into()).unwrap();
         assert_eq!(read(), "[desktop]\ntheme = \"nord\"\n");
 
         let user = "# mine\n[ui]\nascii = true # keep\n\n[desktop] # the app\nlaunch_agent = \"x.y\"\n\n[connection]\nreconnect = false\n";
         std::fs::write(&path, user).unwrap();
-        set_desktop_theme(&path, "solarized-dark").unwrap();
+        set_desktop(&path, "theme", "solarized-dark".into()).unwrap();
         assert_eq!(
             read(),
             "# mine\n[ui]\nascii = true # keep\n\n[desktop] # the app\ntheme = \"solarized-dark\"\nlaunch_agent = \"x.y\"\n\n[connection]\nreconnect = false\n"
         );
-        set_desktop_theme(&path, "light").unwrap();
+        set_desktop(&path, "theme", "light".into()).unwrap();
         assert_eq!(read(), user.replace("[desktop] # the app\n", "[desktop] # the app\ntheme = \"light\"\n"));
         let desktop =
             resolve(Args { config: Some(path.clone()), ..Args::default() }, false, || Palette::Dark).unwrap().desktop;
         assert_eq!((desktop.theme.as_deref(), desktop.launch_agent.as_str()), (Some("light"), "x.y"));
 
         std::fs::write(&path, "[ui]\nascii = true").unwrap();
-        set_desktop_theme(&path, "dark").unwrap();
+        set_desktop(&path, "theme", "dark".into()).unwrap();
         assert_eq!(read(), "[ui]\nascii = true\n\n[desktop]\ntheme = \"dark\"\n");
 
         // A [desktop] table the line edit can't see into is left alone rather than rewritten.
         let inline = "desktop = { launch_agent = \"x.y\" }\n";
         std::fs::write(&path, inline).unwrap();
-        assert!(set_desktop_theme(&path, "nord").is_err());
+        assert!(set_desktop(&path, "theme", "nord".into()).is_err());
         assert_eq!(read(), inline);
+
+        // A second key goes in beside the first, and a rewrite keeps its place.
+        std::fs::write(&path, "[desktop]\ntheme = \"nord\"\n").unwrap();
+        set_desktop(&path, "hide_dock", true.into()).unwrap();
+        assert_eq!(read(), "[desktop]\nhide_dock = true\ntheme = \"nord\"\n");
+        set_desktop(&path, "hide_dock", false.into()).unwrap();
+        assert_eq!(read(), "[desktop]\nhide_dock = false\ntheme = \"nord\"\n");
+        let desktop =
+            resolve(Args { config: Some(path.clone()), ..Args::default() }, false, || Palette::Dark).unwrap().desktop;
+        assert!(!desktop.hide_dock);
     }
 
     #[test]
