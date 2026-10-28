@@ -141,6 +141,9 @@ for look in dark light; do
   snap 15-usage-day-$look      $look 20000 "wait:19000,usage:day"
   snap 15b-usage-week-$look    $look 20000 "wait:19000,usage:week"
   snap 15c-usage-month-$look   $look 20000 "wait:19000,usage:month"
+  snap 15d-usage-repo-$look    $look 20000 "wait:19000,usage:month,breakdown:repo"
+  snap 15e-usage-author-$look  $look 20000 "wait:19000,usage:month,breakdown:author"
+  snap 15f-usage-pr-$look      $look 20000 "wait:19000,usage:week,breakdown:pr"
   snap 15-tracking-$look       $look 3000  "wait:2000,pr:1302" protocol/playback/tracking.ndjson
   snap 15b-reopened-$look      $look 3000  "wait:2000,pr:1302,finding:2,finding:2" protocol/playback/tracking.ndjson
   snap 16-discards-$look       $look 3000  "wait:2000,pr:1302,open-timeline,discards" protocol/playback/tracking.ndjson

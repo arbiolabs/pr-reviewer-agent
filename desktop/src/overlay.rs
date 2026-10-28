@@ -1305,6 +1305,7 @@ const KEYS: &[(&str, &[(&str, &str)])] = &[
             ("⌘N", "review a PR by its URL"),
             ("⌘1 ⌘2 ⌘3 ⌘4", "needs you, done, archived, usage"),
             ("D  W  M", "usage by day, week, month"),
+            ("T  R  A  P", "usage over time, by repository, author, PR"),
             ("⌘,", "settings and accounts"),
             ("⌘⇧O", "open on GitHub"),
             ("⌘R", "refresh"),
