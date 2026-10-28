@@ -14,6 +14,7 @@ const pull: PullInfo = {
   fullName: "acme/shop",
   number: 7,
   title: "t",
+  author: "octocat",
   body: "",
   baseSha: "b".repeat(40),
   headSha: "h".repeat(40),
@@ -36,8 +37,16 @@ it("derives the same revision id on reopen and applies migrations once", () => {
   store.close();
   const reopened = AppStore.open(path);
   expect(reopened.ensureRevision(key).id).toBe(first.id);
-  expect(reopened.db.prepare("SELECT name FROM schema_migrations").all()).toEqual([{ name: "001_init.sql" }, { name: "002_code_read.sql" }, { name: "003_publication.sql" }, { name: "004_coordinator.sql" }, { name: "005_webhook_retry.sql" }, { name: "006_meta.sql" }, { name: "050_stream_meta.sql" }, { name: "051_journal_without_revision.sql" }, { name: "052_control_commands.sql" }, { name: "053_control_command_attempt.sql" }, { name: "054_pull_title.sql" }, { name: "055_finding_tracking.sql" }, { name: "056_resolution_claims.sql" }, { name: "057_reopened_findings.sql" }, { name: "058_activity_span.sql" }, { name: "059_archive.sql" }, { name: "060_model_usage.sql" }]);
+  expect(reopened.db.prepare("SELECT name FROM schema_migrations").all()).toEqual([{ name: "001_init.sql" }, { name: "002_code_read.sql" }, { name: "003_publication.sql" }, { name: "004_coordinator.sql" }, { name: "005_webhook_retry.sql" }, { name: "006_meta.sql" }, { name: "050_stream_meta.sql" }, { name: "051_journal_without_revision.sql" }, { name: "052_control_commands.sql" }, { name: "053_control_command_attempt.sql" }, { name: "054_pull_title.sql" }, { name: "055_finding_tracking.sql" }, { name: "056_resolution_claims.sql" }, { name: "057_reopened_findings.sql" }, { name: "058_activity_span.sql" }, { name: "059_archive.sql" }, { name: "060_model_usage.sql" }, { name: "061_pull_author.sql" }]);
   expect(reopened.revisionsForPr(prId).length).toBe(1);
+});
+
+it("refreshes the author on every read of the PR, as it does the title", () => {
+  const { store } = openFresh();
+  const prId = store.upsertPull({ ...pull, author: null });
+  expect(store.pullById(prId)!.author).toBeNull();
+  store.upsertPull({ ...pull, title: "renamed", author: "octocat" });
+  expect(store.pullById(prId)).toMatchObject({ title: "renamed", author: "octocat" });
 });
 
 it("advances through the domain machine with one audit row per transition and converges on retry", () => {

@@ -14,7 +14,7 @@ import { typeSafeKey } from "../jev/key.ts";
 import { PiAuthFileStore } from "../models/credential-store.ts";
 import { buildModels, detectModels } from "../models/detect.ts";
 import { type AvailableModel, chooseModel, listAvailableModels, type ModelChoice } from "../models/select.ts";
-import { USAGE_BY, type UsageBy, type UsageTotals, usageReport, usageSince } from "../domain/usage.ts";
+import { USAGE_BY, USAGE_GROUPS, type UsageBy, type UsageGroup, type UsageGroupBy, type UsageTotals, usageReport, usageSince } from "../domain/usage.ts";
 import { AppStore, usageRows, withStore } from "../persistence/store.ts";
 import { reconcileOutbox } from "../publish/publisher.ts";
 import { finishReview, lockDataDir, openApp, startReview } from "../runtime/app.ts";
@@ -46,7 +46,7 @@ const USAGE = `usage:
   pr-review serve
   pr-review inspect --pr owner/repo#123 [--json]
   pr-review models [--json]
-  pr-review usage [--by day|week|month] [--json]
+  pr-review usage [--by day|week|month] [--group time|repo|author|pr] [--json]
   pr-review accounts [--json]
   pr-review accounts use <host/login | login>
   pr-review login [provider] [--api-key]
@@ -425,27 +425,41 @@ const compact = new Intl.NumberFormat("en-US", { notation: "compact", maximumFra
 const COLUMNS = ["Reviews", "Responses", "Input", "Output", "Cache read", "Cache write", "Cost"];
 const cells = (t: UsageTotals) => [String(t.reviews), String(t.responses), ...[t.input, t.output, t.cacheRead, t.cacheWrite].map((n) => compact.format(n)), `$${t.cost.toFixed(2)}`];
 
+const GROUP_NAMES: Record<UsageGroupBy, string> = { time: "Time", repo: "Repository", author: "Author", pr: "PR" };
+const clip = (s: string) => (s.length > 64 ? `${s.slice(0, 63)}…` : s);
+const groupLabel = (g: UsageGroup) => clip(g.prId ? `${g.repository}#${g.number} ${g.label}` : g.label);
+
 /** `pr-review usage`: recorded model usage from this data dir, the way the daemon's usage.get reports it. */
 async function usage(args: string[], dataDir: string, out: Out): Promise<number> {
-  const { values } = parseArgs({ args, options: { by: { type: "string", default: "day" }, json: { type: "boolean" } } });
+  const { values } = parseArgs({ args, options: { by: { type: "string", default: "day" }, group: { type: "string", default: "time" }, json: { type: "boolean" } } });
   if (!(USAGE_BY as readonly string[]).includes(values.by)) throw new Error(`--by must be one of ${USAGE_BY.join(", ")}`);
-  const options = { by: values.by as UsageBy, tz: Intl.DateTimeFormat().resolvedOptions().timeZone, now: Date.now() };
+  if (!(USAGE_GROUPS as readonly string[]).includes(values.group)) throw new Error(`--group must be one of ${USAGE_GROUPS.join(", ")}`);
+  const options = { by: values.by as UsageBy, group: values.group as UsageGroupBy, tz: Intl.DateTimeFormat().resolvedOptions().timeZone, now: Date.now() };
   const report = usageReport(await withStore(dataDir, (store) => usageRows(store.db, usageSince(options))), options);
   if (values.json) {
     out.json({ ...report, currency: "USD", priceSource: "catalog" });
     return 0;
   }
-  out(`Usage by ${report.by}, ${report.timeZone}. Estimated at the model's list price in USD; a subscription login is billed differently.\n`);
+  const first = report.buckets[0]!.start;
+  const last = report.buckets.at(-1)!.end;
+  const split = report.groups ? `, split by ${report.group === "pr" ? "PR" : GROUP_NAMES[report.group].toLowerCase()}` : "";
+  out(`Usage by ${report.by} from ${first} to ${last}${split}, ${report.timeZone}. Estimated at the model's list price in USD; a subscription login is billed differently.\n`);
   if (report.totals.responses === 0) {
     out("No usage recorded in this range. Usage is recorded from this version on.\n");
     return 0;
   }
   const label = { day: "Day", week: "Week of", month: "Month" }[report.by];
-  const rows = [
-    [label, ...COLUMNS],
-    ...report.buckets.map((b) => [report.by === "month" ? b.start.slice(0, 7) : b.start, ...cells(b)]),
-    ["Total", ...cells(report.totals)],
-  ];
+  const rows = report.groups
+    ? [
+        [GROUP_NAMES[report.group], ...COLUMNS, "Share"],
+        ...report.groups.map((g) => [groupLabel(g), ...cells(g), `${(g.share * 100).toFixed(1)}%`]),
+        ["Total", ...cells(report.totals), "100%"],
+      ]
+    : [
+        [label, ...COLUMNS],
+        ...report.buckets.map((b) => [report.by === "month" ? b.start.slice(0, 7) : b.start, ...cells(b)]),
+        ["Total", ...cells(report.totals)],
+      ];
   const widths = rows[0]!.map((_, i) => Math.max(...rows.map((r) => r[i]!.length)));
   const line = (r: string[]) => `${r.map((c, i) => (i === 0 ? c.padEnd(widths[i]!) : c.padStart(widths[i]!))).join("  ")}\n`;
   for (const r of rows) out(line(r));

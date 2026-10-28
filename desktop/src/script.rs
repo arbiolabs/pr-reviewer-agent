@@ -11,7 +11,7 @@ use pr_review_tui::view::Hit;
 use tokio::sync::mpsc;
 
 use crate::ui::List;
-use pr_review_tui::protocol::UsageBy;
+use pr_review_tui::protocol::{UsageBy, UsageGroupBy};
 
 /// The TUI's tick cadence.
 pub const TICK_MS: u64 = 125;
@@ -29,6 +29,8 @@ pub enum Step {
     Add(String),
     /// `usage:day`, `usage:week` or `usage:month`: the Usage page, as ⌘4 and its control open it.
     Usage(UsageBy),
+    /// `breakdown:time`, `breakdown:repo`, `breakdown:author` or `breakdown:pr`: how Usage splits its range, as T, R, A and P do.
+    Breakdown(UsageGroupBy),
     /// A step for the desktop's own view state, which the reducer never sees.
     Desk(Desk),
 }
@@ -123,6 +125,10 @@ pub fn parse(s: &str) -> Result<Vec<Step>, String> {
                 Some(by) => steps.push(Step::Usage(by)),
                 None => return Err(format!("{t:?}: usage groups by day, week or month")),
             },
+            Some(("breakdown", v)) => match UsageGroupBy::ALL.into_iter().find(|g| g.as_str() == v) {
+                Some(g) => steps.push(Step::Breakdown(g)),
+                None => return Err(format!("{t:?}: usage splits by time, repo, author or pr")),
+            },
             Some(("reviewer", v)) => steps.push(Step::Desk(Desk::Reviewer(match v {
                 "stopped" => Staged::Stopped,
                 "starting" => Staged::Starting,
@@ -165,6 +171,7 @@ fn message(m: &Model, step: &Step) -> Result<Option<Msg>, String> {
         Step::Act(a) => Msg::Action(*a),
         Step::Add(text) => Msg::AddPr(text.clone()),
         Step::Usage(by) => Msg::Usage(Some(*by)),
+        Step::Breakdown(g) => Msg::UsageGroup(*g),
         Step::Pr(n) => match m.domain.prs.values().find(|p| p.number == *n) {
             Some(p) => Msg::Pick(Hit::Pr(p.id.clone())),
             None => return Err(format!("pr:{n}: no such PR at {} ms", m.now_ms)),
@@ -319,6 +326,32 @@ mod tests {
         assert_eq!(m.usage.by, Some(UsageBy::Month));
         let r = m.usage.report.as_ref().expect("playback answers usage.get");
         assert_eq!((r.by, r.buckets.len()), (UsageBy::Month, 12));
+    }
+
+    #[test]
+    fn a_breakdown_answers_with_the_playback_s_split_of_that_range() {
+        let mut m = model();
+        play(showcase(), &mut m, &parse("wait:1000,usage:week,breakdown:pr").unwrap(), 1_500).unwrap();
+        let r = m.usage.report.as_ref().expect("playback answers the breakdown");
+        assert_eq!((r.by, r.group), (UsageBy::Week, Some(UsageGroupBy::Pr)));
+        assert!(
+            r.groups.iter().any(|g| g.pr_id.as_ref().is_some_and(|id| m.domain.prs.contains_key(id))),
+            "a PR row opens a PR the snapshot has"
+        );
+        assert!(parse("breakdown:model").is_err());
+    }
+
+    #[test]
+    fn a_switch_still_on_its_way_shows_under_the_selection_s_title_never_the_last_breakdown() {
+        let mut m = model();
+        play(showcase(), &mut m, &parse("wait:1000,usage:week,breakdown:pr").unwrap(), 1_500).unwrap();
+        assert!(!pr_review_tui::update::update(&mut m, Msg::UsageGroup(UsageGroupBy::Time)).is_empty());
+        assert_eq!(m.usage.report.as_ref().and_then(|r| r.group), Some(UsageGroupBy::Pr), "the answer is on its way");
+        assert!(m.usage.current().is_none(), "the PR split is not the selected breakdown");
+        let shown = m.usage.by.map(|by| crate::usage::title(by, m.usage.group));
+        assert_eq!(shown.as_deref(), Some("Cost per week, USD"));
+        assert_eq!(crate::usage::title(UsageBy::Month, UsageGroupBy::Pr), "Cost by PR, USD");
+        assert_eq!(crate::usage::title(UsageBy::Day, UsageGroupBy::Repo), "Cost by repository, USD");
     }
 
     #[test]

@@ -150,7 +150,7 @@ it("streams a real review to a client attached from the start, with no gaps", as
   const snapshot = await c.waitFor<Extract<ServerMessage, { type: "snapshot" }>>((m) => m.type === "snapshot" && m.requestId === "s2");
   expect(snapshot.sequence).toBe(events.at(-1)!.sequence);
   expect(snapshot.prs).toEqual([
-    { id: revision.pr_id, repository: "acme/shop", number: 1, title: "Add order deletion", headSha: fixture.headSha, baseSha: fixture.baseSha, lifecycle: "ACTIVE" },
+    { id: revision.pr_id, repository: "acme/shop", number: 1, title: "Add order deletion", author: "octocat", headSha: fixture.headSha, baseSha: fixture.baseSha, lifecycle: "ACTIVE" },
   ]);
   expect(snapshot.runs).toEqual([
     {
@@ -271,7 +271,7 @@ it("maps failure, manual retry and supersession, and sanitizes repository text",
   const store = AppStore.open(join(dataDir, "app.sqlite"));
   cleanup.push(() => store.close());
   // GitHub's title is what the PR reads as; the reviewed context's copy only stands in for rows that predate it.
-  const prId = store.upsertPull({ ...createFixture().pull, title: "\u001b[31mevil\u001b[0m\u009b2J title" });
+  const prId = store.upsertPull({ ...createFixture().pull, title: "\u001b[31mevil\u001b[0m\u009b2J title", author: null });
   const rev = store.ensureRevision({ prId, baseSha: "b".repeat(40), headSha: "h".repeat(40), policyVersion: "1", reviewerVersion: "m1+faux/reviewer" });
   store.saveSnapshot({ revisionId: rev.id, pr: { title: "an older title", body: "", fullName: "acme/shop", number: 1, cloneUrl: "" }, changedFiles: [], diff: "", limitations: [] });
   store.advance(rev.id, "COLLECT_CONTEXT", "CONTEXT_PERSISTED");
@@ -296,6 +296,7 @@ it("maps failure, manual retry and supersession, and sanitizes repository text",
   c.send({ type: "snapshot.get", requestId: "s2" });
   const snapshot = await c.waitFor<Extract<ServerMessage, { type: "snapshot" }>>((m) => m.type === "snapshot" && m.requestId === "s2");
   expect(snapshot.prs[0]!.title).toBe("evil title");
+  expect(snapshot.prs[0]).not.toHaveProperty("author");
   expect(snapshot.runs.map((r) => r.attempt)).toEqual([2]);
   c.send({ type: "resume", requestId: "r", streamEpoch: "other", afterSequence: 1 });
   expect(await c.waitFor((m) => m.type === "resync.required")).toMatchObject({ requestId: "r" });
@@ -651,6 +652,14 @@ it("usage.get on a read-only daemon: the recorded usage in the daemon's time zon
   expect(report.buckets).toHaveLength(3);
   expect(report.buckets.at(-1)).toMatchObject({ reviews: 1, responses: 2, input: 20, output: 50, cacheRead: 200, cacheWrite: 10, cost: 0.75 });
   expect(report.models).toEqual([{ model: "anthropic/claude-x", reviews: 1, responses: 2, input: 20, output: 50, cacheRead: 200, cacheWrite: 10, cost: 0.75 }]);
+  expect(report).toMatchObject({ group: "time" });
+  expect(report).not.toHaveProperty("groups");
+  c.send({ type: "usage.get", requestId: "by-pr", by: "week", periods: 3, group: "pr" });
+  const byPr = await c.waitFor<Extract<ServerMessage, { type: "usage.report" }>>((m) => m.type === "usage.report" && m.requestId === "by-pr");
+  expect(byPr.totals).toEqual(report.totals);
+  expect(byPr.groups).toEqual([
+    { key: prId, label: "Add order deletion", repository: "acme/shop", number: 1, title: "Add order deletion", prId, author: "octocat", reviews: 1, responses: 2, input: 20, output: 50, cacheRead: 200, cacheWrite: 10, cost: 0.75, share: 1 },
+  ]);
   c.send({ type: "usage.get", requestId: "bad", by: "year" });
   expect(await c.waitFor((m) => m.type === "error" && m.requestId === "bad")).toMatchObject({ code: "INVALID_REQUEST" });
 }, 30_000);

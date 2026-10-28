@@ -53,7 +53,7 @@ const github = new GitHubClient({ auth: { kind: "token", token: undefined }, bas
 
 async function reviewOnce(n: number, run: number): Promise<RunRecord> {
   const stored = JSON.parse(readFileSync(join(dataset, "prs", String(n), "pull.json"), "utf8")) as StoredPull;
-  const pull: PullInfo = { installationId: 0, repositoryId: stored.repositoryId, fullName: stored.fullName, number: n, title: stored.title, body: stored.body, baseSha: stored.baseSha, headSha: stored.headSha, state: "open", merged: false, private: stored.private, cloneUrl: join(dataset, "repo.git") };
+  const pull: PullInfo = { installationId: 0, repositoryId: stored.repositoryId, fullName: stored.fullName, number: n, title: stored.title, author: null, body: stored.body, baseSha: stored.baseSha, headSha: stored.headSha, state: "open", merged: false, private: stored.private, cloneUrl: join(dataset, "repo.git") };
   const dataDir = join(dataset, "work", `pr-${n}-run-${run}`);
   rmSync(dataDir, { recursive: true, force: true });
   mkdirSync(dataDir, { recursive: true });

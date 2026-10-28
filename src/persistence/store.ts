@@ -61,6 +61,8 @@ export type PullRow = {
   repo_full_name: string;
   /** NULL on rows written before migration 054 until GitHub reports the PR again. */
   title: string | null;
+  /** NULL on rows written before migration 061 until GitHub reports the PR again. */
+  author: string | null;
   /** When a reader archived the PR (migration 059); NULL when it is not archived. */
   archived_at: string | null;
 };
@@ -196,13 +198,13 @@ export class AppStore {
     const status = pr.merged ? "MERGED" : pr.state === "closed" ? "CLOSED" : "ACTIVE";
     this.db
       .prepare(
-        `INSERT INTO pull_requests (id, installation_id, repository_id, number, status, latest_base_sha, latest_head_sha, updated_at, repo_full_name, title)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        `INSERT INTO pull_requests (id, installation_id, repository_id, number, status, latest_base_sha, latest_head_sha, updated_at, repo_full_name, title, author)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
          ON CONFLICT (id) DO UPDATE SET latest_base_sha = excluded.latest_base_sha,
            latest_head_sha = excluded.latest_head_sha, updated_at = excluded.updated_at, repo_full_name = excluded.repo_full_name,
-           title = excluded.title`,
+           title = excluded.title, author = excluded.author`,
       )
-      .run(id, pr.installationId, pr.repositoryId, pr.number, status, pr.baseSha, pr.headSha, now(), pr.fullName, pr.title);
+      .run(id, pr.installationId, pr.repositoryId, pr.number, status, pr.baseSha, pr.headSha, now(), pr.fullName, pr.title, pr.author);
     return id;
   }
 
@@ -830,12 +832,20 @@ export class AppStore {
 
 /** The recorded model responses from `since` (an ISO instant) on; `db` may be a read-only connection. */
 export function usageRows(db: DatabaseSync, since: string): UsageRow[] {
-  return db
+  type Joined = Omit<UsageRow, "pr"> & { prId: string | null; repository: string; number: number; title: string | null; author: string | null };
+  const rows = db
     .prepare(
-      `SELECT revision_id AS revisionId, at, model, input, output, cache_read AS cacheRead, cache_write AS cacheWrite, cost_total AS cost
-       FROM model_usage WHERE at >= ? ORDER BY at, id`,
+      // A title from before migration 054 falls back to the one the run's context recorded, as the snapshot's does.
+      `SELECT u.revision_id AS revisionId, u.at, u.model, u.input, u.output, u.cache_read AS cacheRead, u.cache_write AS cacheWrite, u.cost_total AS cost,
+         p.id AS prId, p.repo_full_name AS repository, p.number,
+         coalesce(p.title, (SELECT json_extract(c.pr_json, '$.title') FROM context_snapshots c WHERE c.revision_id = u.revision_id)) AS title,
+         p.author
+       FROM model_usage u LEFT JOIN pull_requests p ON p.id = u.pr_id WHERE u.at >= ? ORDER BY u.at, u.id`,
     )
-    .all(since) as UsageRow[];
+    .all(since) as unknown as Joined[];
+  return rows.map(({ prId, repository, number, title, author, ...row }) =>
+    prId === null ? row : { ...row, pr: { id: prId, repository, number, title: title ?? `${repository}#${number}`, ...(author !== null && { author }) } },
+  );
 }
 
 /** Run `fn` on the data dir's app DB, creating the dir and DB if needed. Takes no data-dir lock: WAL lets it share the DB. */

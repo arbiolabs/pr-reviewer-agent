@@ -43,6 +43,8 @@ export type PullInfo = {
   fullName: string;
   number: number;
   title: string;
+  /** The author's login; null when GitHub reports no user. */
+  author: string | null;
   body: string;
   baseSha: string;
   headSha: string;

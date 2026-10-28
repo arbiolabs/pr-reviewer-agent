@@ -198,7 +198,7 @@ To check what Jev decided, run `node bin/pr-review.mjs inspect --pr owner/repo#1
 | `reconcile --revision <id>` | Decide an uncertain publication by listing the PR's reviews. Never posts. |
 | `serve` | Run the webhook receiver, the worker, and the reviews in one process. |
 | `models [--json]` | List the installed agent CLIs and the models you can use. |
-| `usage [--by day\|week\|month] [--json]` | Show the tokens and estimated cost of reviews per day (last 14), ISO week (last 12) or month (last 12), with totals and a split by model. Costs are the model's list price; usage is recorded from the release after 1.4.0 on. |
+| `usage [--by day\|week\|month] [--group time\|repo\|author\|pr] [--json]` | Show the tokens and estimated cost of reviews per day (last 14), ISO week (last 12) or month (last 12), with totals and a split by model. `--group` splits the same range by repository, PR author or PR instead, costliest first, with each row's share of the cost. Costs are the model's list price; usage is recorded from the release after 1.4.0 on. |
 | `login [provider] [--api-key]` | Store a model credential in pi's auth file. |
 | `accounts [--json]` | List your `gh` accounts and show which one pr-review uses. |
 | `accounts use <login>` | Use that `gh` account for GitHub reads and publishing in this data directory. |

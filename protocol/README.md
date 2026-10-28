@@ -20,7 +20,7 @@ also arrive unsolicited (`snapshot`, `resync.required`, `error`) have an optiona
 | `publication.get` | `runId` | `publication.preview`, or `error NOT_FOUND` for a run with no stored payload |
 | `timeline.get` | `prId?`, `runId?`, `findingId?`, `beforeSequence?`, `limit` (1..500) | `timeline.page` (newest first; pass `nextBeforeSequence` back to page) |
 | `settings.get` | | `settings`, from a daemon in `engine` mode; elsewhere `error CAPABILITY_DENIED` with the reason |
-| `usage.get` | `by` (`day`, `week` or `month`), `periods?` (1..400) | `usage.report`, from every daemon, a read-only one included (see [Usage](#usage)) |
+| `usage.get` | `by` (`day`, `week` or `month`), `periods?` (1..400), `group?` (`time`, `repo`, `author` or `pr`; `time` when absent) | `usage.report`, from every daemon, a read-only one included (see [Usage](#usage)) |
 | `command` | `command`, `params`, `idempotencyKey` | `command.result`. A command the `welcome` did not grant is `rejected` with code `CAPABILITY_DENIED`. |
 
 | Server → client | Fields |
@@ -34,7 +34,7 @@ also arrive unsolicited (`snapshot`, `resync.required`, `error`) have an optiona
 | `publication.preview` | `runId`, `previewId` (the payload hash the approval must name), `headSha`, `body` (the exact review text, marker included), `comments[]` (`path`, `line`, `side: RIGHT`, `body`), `event: COMMENT`, `status` |
 | `timeline.page` | `events[]` (sequenced events), `nextBeforeSequence?` |
 | `settings` | `model` (`ref`, and `source`: `--model`, `PR_REVIEW_MODEL`, `config` or `default`), `models[]` (`ModelOption`: `ref`, `provider`, `name`, `contextWindow`, `authSource`, `preferred`; preferred first), `configPath` (the file `settings.set` writes) |
-| `usage.report` | `by`, `timeZone`, `currency: USD`, `priceSource: catalog`, `buckets[]` (`start`, `end`, `reviews`, `responses`, `input`, `output`, `cacheRead`, `cacheWrite`, `cost`), `totals` (the same counts for the range), `models[]` (the same counts per `model`, costliest first) |
+| `usage.report` | `by`, `timeZone`, `currency: USD`, `priceSource: catalog`, `buckets[]` (`start`, `end`, `reviews`, `responses`, `input`, `output`, `cacheRead`, `cacheWrite`, `cost`), `totals` (the same counts for the range), `models[]` (the same counts per `model`, costliest first), `group?` (absent from older servers), `groups[]?` (unless `group` is `time`: `key`, `label`, `repository?`, `number?`, `title?`, `prId?`, `author?`, the same counts and `share`) |
 | `command.result` | `status: accepted` with `operationId` (and `prId`, `runId` from `review.add`), or `status: rejected` with `code` and `message` (and `prId` when `review.add` names a tracked PR) |
 | `error` | `code`, `message`, `supported?` |
 
@@ -166,6 +166,16 @@ the range is 14 days, 12 weeks or 12 months. `start` and `end` are local dates (
 which are `cacheRead` and `cacheWrite`. `cost` is in USD at the model's list price in pi-ai's catalog
 (`priceSource: catalog`), rounded to 6 decimals: an estimate, and not what a subscription login is billed. `totals` and
 `models` cover the whole range.
+
+`group` splits the same range a second way. `time` (the default) sends the buckets alone. `repo`, `author` and `pr` also
+send `groups`, costliest first, ties broken by tokens and then by `label`. Each row has the same counts as a bucket and
+its `share` of the range's cost (0 when the range cost nothing), so the shares add up to 1 within rounding. `key` is
+unique within the breakdown and `label` is the display text. A `repo` row has `repository`, an `author` row has
+`author`, and a `pr` row has `repository`, `number`, `title`, `prId` and `author` when it is known. A PR whose author
+is not known yet is labelled `Unknown author`, and a response whose PR the daemon no longer has is labelled `Unknown PR`
+in every breakdown. The daemon learns a PR's author when it next reads the PR from GitHub. `group` is optional on both
+sides. A client that predates it never asks. A server that predates it ignores it and answers over time with no
+`group`, which is how a client that asked for a breakdown tells it has none.
 
 ## Setup checks
 

@@ -136,7 +136,7 @@ it("gives up on a rate-limit wait longer than the caller's cap with a retryable 
   try {
     const sleeps: number[] = [];
     const client = new GitHubClient({ auth: { kind: "token", token: "t" }, baseUrl: fake.url, maxRetries: 3, backoffMs: 1, concurrency: 1, timeoutMs: 5000, sleep: async (ms) => void sleeps.push(ms) });
-    fake.setPull({ installationId: 0, repositoryId: 1, fullName: "acme/shop", number: 1, title: "t", body: "", baseSha: "b", headSha: "h", state: "open", merged: false, private: false, cloneUrl: "x" });
+    fake.setPull({ installationId: 0, repositoryId: 1, fullName: "acme/shop", number: 1, title: "t", author: "octocat", body: "", baseSha: "b", headSha: "h", state: "open", merged: false, private: false, cloneUrl: "x" });
     fake.rateLimitedPullReads = 1;
     const error = await new GitHubPullSource(() => client).getPull({ owner: "acme", repo: "shop", number: 1 }, { maxSleepMs: 30_000 }).catch((e: unknown) => e);
     expect([error instanceof GitHubError && error.class, (error as Error).message, sleeps]).toEqual([
@@ -147,6 +147,21 @@ it("gives up on a rate-limit wait longer than the caller's cap with a retryable 
     fake.rateLimitedPullReads = 1;
     expect((await new GitHubPullSource(() => client).getPull({ owner: "acme", repo: "shop", number: 1 })).headSha).toBe("h");
     expect(sleeps).toEqual([120_000]);
+  } finally {
+    await fake.close();
+  }
+});
+
+it("reads the PR author's login, and null for a PR GitHub reports no user on", async () => {
+  const fake = await FakeGitHub.start();
+  try {
+    const client = new GitHubClient({ auth: { kind: "token", token: "t" }, baseUrl: fake.url, maxRetries: 0, backoffMs: 1, concurrency: 1, timeoutMs: 5000 });
+    const pulls = new GitHubPullSource(() => client);
+    const pull = { installationId: 0, repositoryId: 1, fullName: "acme/shop", number: 1, title: "t", author: "octocat", body: "", baseSha: "b", headSha: "h", state: "open" as const, merged: false, private: false, cloneUrl: "x" };
+    fake.setPull(pull);
+    expect((await pulls.getPull({ owner: "acme", repo: "shop", number: 1 })).author).toBe("octocat");
+    fake.setPull({ ...pull, author: null });
+    expect((await pulls.getPull({ owner: "acme", repo: "shop", number: 1 })).author).toBeNull();
   } finally {
     await fake.close();
   }

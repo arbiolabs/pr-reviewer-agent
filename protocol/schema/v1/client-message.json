@@ -211,6 +211,14 @@
           "minimum": 1,
           "maximum": 400,
           "description": "how many buckets up to the current one; 14 days, 12 weeks or 12 months when absent"
+        },
+        "group": {
+          "enum": [
+            "time",
+            "repo",
+            "author",
+            "pr"
+          ]
         }
       }
     },

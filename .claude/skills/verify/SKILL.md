@@ -91,7 +91,7 @@ The app's shortcuts are bound in `desktop/src/ui.rs`:
 | ⌘R | Start reviewer, on the offline screen |
 | ⌘1 | Needs you |
 | ⌘2 | Done |
-| ⌘4 | Usage; then D, W, M group it, Esc leaves |
+| ⌘4 | Usage; then D, W, M group it, T, R, A, P split it, Esc leaves |
 | ⇧S | Review again |
 | ⌘⏎ | Post. Never on a live daemon. |
 

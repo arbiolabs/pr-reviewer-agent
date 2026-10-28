@@ -1,6 +1,6 @@
 import Type, { type Static, type TSchema } from "typebox";
 import { CATEGORIES, SEVERITIES } from "../domain/types.ts";
-import { USAGE_BY } from "../domain/usage.ts";
+import { USAGE_BY, USAGE_GROUPS } from "../domain/usage.ts";
 import { COORDINATOR_STATES, FINDING_STATES, PUBLICATION_STATUSES, REVIEW_STATES } from "../domain/machines.ts";
 
 export const PROTOCOL_VERSION = 1;
@@ -219,6 +219,18 @@ const LocalDate = Type.String({ pattern: "^\\d{4}-\\d{2}-\\d{2}$", description: 
 export const UsageBucket = Type.Object({ start: LocalDate, end: LocalDate, ...usageTotals });
 export const UsageTotals = Type.Object(usageTotals);
 export const UsageModel = Type.Object({ model: Type.String({ minLength: 1, description: "provider/id" }), ...usageTotals });
+/** One repository, PR author or PR of a usage breakdown. */
+export const UsageGroup = Type.Object({
+  key: Type.String({ minLength: 1, description: "unique within the breakdown" }),
+  label: Type.String({ description: "display text: the repository, the login, the PR's title, or Unknown author / Unknown PR" }),
+  repository: Type.Optional(Type.String()),
+  number: Type.Optional(Type.Integer({ minimum: 1 })),
+  title: Type.Optional(Type.String()),
+  prId: Type.Optional(Id),
+  author: Type.Optional(Type.String()),
+  ...usageTotals,
+  share: Type.Number({ minimum: 0, maximum: 1, description: "this row's part of the range's cost, rounded to 6 decimals; 0 when the range cost nothing" }),
+});
 
 // ---------- events ----------
 
@@ -395,6 +407,7 @@ export const ClientMessage = Type.Union([
   req("usage.get", {
     by: oneOf(USAGE_BY),
     periods: Type.Optional(Type.Integer({ minimum: 1, maximum: 400, description: "how many buckets up to the current one; 14 days, 12 weeks or 12 months when absent" })),
+    group: Type.Optional(oneOf(USAGE_GROUPS)),
   }),
   req("timeline.get", {
     prId: Type.Optional(Id),
@@ -473,6 +486,8 @@ export const ServerMessage = Type.Union([
     buckets: Type.Array(UsageBucket),
     totals: UsageTotals,
     models: Type.Array(UsageModel, { description: "the whole range split by model, costliest first" }),
+    group: Type.Optional(oneOf(USAGE_GROUPS)),
+    groups: Type.Optional(Type.Array(UsageGroup, { description: "the whole range split by group, costliest first; absent when group is time" })),
   }),
   reply("timeline.page", {
     events: Type.Array(Type.Union([KnownEvent, UnknownEvent]), { description: "newest first" }),

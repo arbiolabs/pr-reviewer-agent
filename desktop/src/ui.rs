@@ -10,7 +10,7 @@ use pr_review_tui::app::dispatch;
 use pr_review_tui::keymap::{Action, Mutation};
 use pr_review_tui::model::{AddState, ConfirmState, Link, Modal, Model, PrRef, Screen};
 use pr_review_tui::net::NetCmd;
-use pr_review_tui::protocol::{Command, Pr, PrId, Run, UsageBy};
+use pr_review_tui::protocol::{Command, Pr, PrId, Run, UsageBy, UsageGroupBy};
 use pr_review_tui::update::{Msg, can_add, can_confirm};
 use pr_review_tui::view::Hit;
 use std::time::{Duration, Instant};
@@ -378,6 +378,11 @@ impl Shell {
             self.home(cx);
         }
         self.send(Msg::Usage(Some(by)), cx);
+    }
+
+    /// The breakdown control and T, R, A, P: the same range over time or split by repository, author or PR.
+    pub fn usage_breakdown(&mut self, group: UsageGroupBy, cx: &mut Context<Self>) {
+        self.send(Msg::UsageGroup(group), cx);
     }
 
     fn close_usage(&mut self, cx: &mut Context<Self>) {
@@ -749,6 +754,10 @@ impl Shell {
                 (_, "d") => self.open_usage(Some(UsageBy::Day), cx),
                 (_, "w") => self.open_usage(Some(UsageBy::Week), cx),
                 (_, "m") => self.open_usage(Some(UsageBy::Month), cx),
+                (_, "t") => self.usage_breakdown(UsageGroupBy::Time, cx),
+                (_, "r") => self.usage_breakdown(UsageGroupBy::Repo, cx),
+                (_, "a") => self.usage_breakdown(UsageGroupBy::Author, cx),
+                (_, "p") => self.usage_breakdown(UsageGroupBy::Pr, cx),
                 _ => {}
             }
             return;

@@ -2,7 +2,7 @@ import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { PROTOCOL_DIR } from "../protocol/emit.ts";
 import { fixtures, type PlaybackLine } from "../protocol/fixtures.ts";
-import type { UsageBy } from "../domain/usage.ts";
+import type { UsageBy, UsageGroupBy } from "../domain/usage.ts";
 import type { ClientMessage, ErrorCode, Finding, FindingDetail, PublicationPreview, ReviewCommand, SequencedEvent, ServerMessage, UsageAnswer } from "../protocol/v1.ts";
 import type { DiffPage } from "./diff.ts";
 
@@ -61,8 +61,8 @@ export interface ControlSource {
   setModel?(ref: string): Promise<string>;
   /** The stored payload of a run, or throw ControlError NOT_FOUND. */
   publication?(runId: string): Promise<PublicationPreview>;
-  /** usage.get: recorded model usage by day, week or month. A read, so read-only sources answer it too. */
-  usage?(by: UsageBy, periods?: number): Promise<UsageAnswer>;
+  /** usage.get: recorded model usage by day, week or month, split by `group`. A read, so read-only sources answer it too. */
+  usage?(by: UsageBy, periods?: number, group?: UsageGroupBy): Promise<UsageAnswer>;
   close(): void | Promise<void>;
 }
 
@@ -196,9 +196,10 @@ export class FixtureSource implements ControlSource {
     return scripted;
   }
 
-  /** The recorded `server.usage.report.<by>` fixture; `periods` is not applied to a recording. */
-  async usage(by: UsageBy): Promise<UsageAnswer> {
-    const { type: _, requestId: __, ...scripted } = fixtures[`server.usage.report.${by}`] as Extract<ServerMessage, { type: "usage.report" }>;
+  /** The recorded `server.usage.report.<by>[.<group>]` fixture; `periods` is not applied to a recording. */
+  async usage(by: UsageBy, _periods?: number, group: UsageGroupBy = "time"): Promise<UsageAnswer> {
+    const name = group === "time" ? `server.usage.report.${by}` : `server.usage.report.${by}.${group}`;
+    const { type: _, requestId: __, ...scripted } = fixtures[name] as Extract<ServerMessage, { type: "usage.report" }>;
     return scripted;
   }
 

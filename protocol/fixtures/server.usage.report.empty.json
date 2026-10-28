@@ -2,6 +2,7 @@
   "type": "usage.report",
   "requestId": "req-usage",
   "by": "day",
+  "group": "time",
   "timeZone": "Europe/Berlin",
   "buckets": [
     {

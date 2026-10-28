@@ -16,6 +16,7 @@ const base: PullInfo = {
   fullName: "acme/shop",
   number: 1,
   title: "t",
+  author: "octocat",
   body: "",
   baseSha: "b".repeat(40),
   headSha: "a".repeat(40),

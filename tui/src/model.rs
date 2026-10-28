@@ -618,14 +618,24 @@ pub struct AgentSettings {
 
 /// What the daemon said about recorded model usage. `by` is the grouping a client shows, `None` while none does (the
 /// TUI never asks). `report` is the last answer, kept on screen until the next one replaces it; `stale` asks for a new
-/// one, set on opening and whenever a review ends. `error` is why there is none, cleared by opening again.
+/// one, set on opening and whenever a review ends. `error` is why there is none, cleared by opening again. `group` is
+/// the breakdown over the same range, kept while the page is closed and across reconnects. Until an answer to the
+/// selection comes, `report` may be another grouping's or breakdown's: `current` is the one a view may present.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct UsageView {
     pub by: Option<UsageBy>,
+    pub group: UsageGroupBy,
     pub request: Option<RequestId>,
     pub report: Option<UsageReport>,
     pub stale: bool,
     pub error: Option<Text>,
+}
+
+impl UsageView {
+    /// The last answer when it is the grouping and breakdown selected now; any other is only the one before.
+    pub fn current(&self) -> Option<&UsageReport> {
+        self.report.as_ref().filter(|r| Some(r.by) == self.by && r.group.unwrap_or_default() == self.group)
+    }
 }
 
 /// A `settings.set` from Save, until its result.
