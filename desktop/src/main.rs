@@ -19,6 +19,7 @@ mod setup;
 mod timeline;
 mod tokens;
 mod ui;
+mod usage;
 mod waterfall;
 
 use std::path::PathBuf;

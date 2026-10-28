@@ -11,6 +11,7 @@ use pr_review_tui::view::Hit;
 use tokio::sync::mpsc;
 
 use crate::ui::List;
+use pr_review_tui::protocol::UsageBy;
 
 /// The TUI's tick cadence.
 pub const TICK_MS: u64 = 125;
@@ -26,6 +27,8 @@ pub enum Step {
     Wait(u64),
     /// `add:TEXT`: what ⏎ in the add-a-PR sheet sends the reducer.
     Add(String),
+    /// `usage:day`, `usage:week` or `usage:month`: the Usage page, as ⌘4 and its control open it.
+    Usage(UsageBy),
     /// A step for the desktop's own view state, which the reducer never sees.
     Desk(Desk),
 }
@@ -116,6 +119,10 @@ pub fn parse(s: &str) -> Result<Vec<Step>, String> {
                 _ => return Err(format!("{t:?}: tabs are queue, done and archived")),
             }))),
             Some(("palette", v)) => steps.push(Step::Desk(Desk::Palette(v.into()))),
+            Some(("usage", v)) => match UsageBy::ALL.into_iter().find(|b| b.as_str() == v) {
+                Some(by) => steps.push(Step::Usage(by)),
+                None => return Err(format!("{t:?}: usage groups by day, week or month")),
+            },
             Some(("reviewer", v)) => steps.push(Step::Desk(Desk::Reviewer(match v {
                 "stopped" => Staged::Stopped,
                 "starting" => Staged::Starting,
@@ -157,6 +164,7 @@ fn message(m: &Model, step: &Step) -> Result<Option<Msg>, String> {
         Step::Wait(_) | Step::Desk(_) => return Ok(None),
         Step::Act(a) => Msg::Action(*a),
         Step::Add(text) => Msg::AddPr(text.clone()),
+        Step::Usage(by) => Msg::Usage(Some(*by)),
         Step::Pr(n) => match m.domain.prs.values().find(|p| p.number == *n) {
             Some(p) => Msg::Pick(Hit::Pr(p.id.clone())),
             None => return Err(format!("pr:{n}: no such PR at {} ms", m.now_ms)),
@@ -301,6 +309,16 @@ mod tests {
         assert!(parse("goto:nowhere").is_err());
         assert!(parse("finding:0").is_err());
         assert!(parse("scrub:0").is_err());
+        assert!(parse("usage:year").is_err());
+    }
+
+    #[test]
+    fn usage_opens_on_the_playback_s_recording_and_switches_grouping() {
+        let mut m = model();
+        play(showcase(), &mut m, &parse("wait:1000,usage:day,usage:month").unwrap(), 1_500).unwrap();
+        assert_eq!(m.usage.by, Some(UsageBy::Month));
+        let r = m.usage.report.as_ref().expect("playback answers usage.get");
+        assert_eq!((r.by, r.buckets.len()), (UsageBy::Month, 12));
     }
 
     #[test]
