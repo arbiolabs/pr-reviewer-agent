@@ -36,7 +36,7 @@ it("derives the same revision id on reopen and applies migrations once", () => {
   store.close();
   const reopened = AppStore.open(path);
   expect(reopened.ensureRevision(key).id).toBe(first.id);
-  expect(reopened.db.prepare("SELECT name FROM schema_migrations").all()).toEqual([{ name: "001_init.sql" }, { name: "002_code_read.sql" }, { name: "003_publication.sql" }, { name: "004_coordinator.sql" }, { name: "005_webhook_retry.sql" }, { name: "006_meta.sql" }, { name: "050_stream_meta.sql" }, { name: "051_journal_without_revision.sql" }, { name: "052_control_commands.sql" }, { name: "053_control_command_attempt.sql" }, { name: "054_pull_title.sql" }, { name: "055_finding_tracking.sql" }, { name: "056_resolution_claims.sql" }, { name: "057_reopened_findings.sql" }, { name: "058_activity_span.sql" }]);
+  expect(reopened.db.prepare("SELECT name FROM schema_migrations").all()).toEqual([{ name: "001_init.sql" }, { name: "002_code_read.sql" }, { name: "003_publication.sql" }, { name: "004_coordinator.sql" }, { name: "005_webhook_retry.sql" }, { name: "006_meta.sql" }, { name: "050_stream_meta.sql" }, { name: "051_journal_without_revision.sql" }, { name: "052_control_commands.sql" }, { name: "053_control_command_attempt.sql" }, { name: "054_pull_title.sql" }, { name: "055_finding_tracking.sql" }, { name: "056_resolution_claims.sql" }, { name: "057_reopened_findings.sql" }, { name: "058_activity_span.sql" }, { name: "059_archive.sql" }]);
   expect(reopened.revisionsForPr(prId).length).toBe(1);
 });
 
@@ -286,5 +286,29 @@ it("backfills the review of record at migration 055 only for findings a publishe
   expect(store.db.prepare("SELECT id, github_review_id FROM findings ORDER BY id").all()).toEqual([
     { id: "f-commented", github_review_id: 7 },
     { id: "f-listed", github_review_id: null },
+  ]);
+});
+
+it("migration 059 leaves every PR of an existing store unarchived, and archiving journals once per change", () => {
+  const path = join(mkdtempSync(join(tmpdir(), "store-")), "app.sqlite");
+  const db = new DatabaseSync(path);
+  db.exec("CREATE TABLE IF NOT EXISTS schema_migrations (name TEXT PRIMARY KEY, applied_at TEXT NOT NULL)");
+  for (const name of readdirSync(MIGRATIONS).filter((f) => f.endsWith(".sql") && f < "059").sort()) {
+    db.exec(readFileSync(new URL(name, MIGRATIONS), "utf8"));
+    db.prepare("INSERT INTO schema_migrations (name, applied_at) VALUES (?, ?)").run(name, "2026-10-20T00:00:00Z");
+  }
+  db.prepare("INSERT INTO pull_requests (id, installation_id, repository_id, number, status, latest_base_sha, latest_head_sha, updated_at, repo_full_name) VALUES ('pr', 0, 42, 7, 'ACTIVE', 'b', 'h', '2026-10-20T00:00:00Z', 'acme/shop')").run();
+  db.close();
+  const store = AppStore.open(path);
+  expect(store.pullById("pr")!.archived_at).toBeNull();
+  expect(store.setArchived("pr", false)).toBe(0);
+  const archived = store.setArchived("pr", true)!;
+  expect([store.setArchived("pr", true), store.pullById("pr")!.archived_at]).toEqual([archived, expect.any(String)]);
+  const unarchived = store.setArchived("pr", false)!;
+  expect([store.setArchived("pr", true), store.setArchived("nope", true)]).toEqual([unarchived + 1, undefined]);
+  expect(store.db.prepare("SELECT event, detail FROM audit_events ORDER BY seq").all()).toEqual([
+    { event: "PR_ARCHIVED", detail: "pr" },
+    { event: "PR_UNARCHIVED", detail: "pr" },
+    { event: "PR_ARCHIVED", detail: "pr" },
   ]);
 });

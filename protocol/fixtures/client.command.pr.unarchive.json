@@ -1,0 +1,9 @@
+{
+  "type": "command",
+  "requestId": "req-cmd",
+  "command": "pr.unarchive",
+  "params": {
+    "prId": "acme/shop#184"
+  },
+  "idempotencyKey": "pr.unarchive:acme/shop#184"
+}

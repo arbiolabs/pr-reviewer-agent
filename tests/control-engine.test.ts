@@ -144,7 +144,7 @@ const UP_TO_APPROVAL = [
   "publication awaiting_approval",
 ];
 
-it("is read-only while another pr-review holds the data dir, and grants only account.select there", async () => {
+it("is read-only while another pr-review holds the data dir, and grants only the reader commands there", async () => {
   const holder = await host();
   const notes: string[] = [];
   const source = await openSource(
@@ -157,14 +157,14 @@ it("is read-only while another pr-review holds the data dir, and grants only acc
   expect(source.mode).toBe("read-only");
   expect(notes).toEqual([`pr-review daemon: read-only mode (another pr-review is running on ${holder.dataDir})\n`]);
   const { c, welcome } = await serve(source);
-  expect(welcome).toMatchObject({ mode: "read-only", capabilities: ["account.select"] });
+  expect(welcome).toMatchObject({ mode: "read-only", capabilities: ["account.select", "pr.archive", "pr.unarchive"] });
   c.send({ type: "snapshot.get", requestId: "s" });
   await c.waitFor((m) => m.type === "snapshot");
   expect(await command(c, { command: "review.start", params: { prId: "p", expectedHeadSha: fixture.headSha } })).toEqual(
     rejected("CAPABILITY_DENIED", `review.start is not available: another pr-review is running on ${holder.dataDir}`),
   );
   // The holder is still the engine: its own welcome grants the commands.
-  expect((await serve(holder.source)).welcome).toMatchObject({ mode: "engine", capabilities: ["account.select", "review.add", "review.start", "review.again", "review.retry", "review.cancel", "review.publish", "settings.set"] });
+  expect((await serve(holder.source)).welcome).toMatchObject({ mode: "engine", capabilities: ["account.select", "pr.archive", "pr.unarchive", "review.add", "review.start", "review.again", "review.retry", "review.cancel", "review.publish", "settings.set"] });
 }, 30_000);
 
 it("falls back to read-only with the reason when recovery fails, holding no lock and running no task", async () => {
@@ -191,7 +191,7 @@ it("falls back to read-only with the reason when recovery fails, holding no lock
   const why = "this PR was recorded without a GitHub App installation (0); use token auth for it";
   expect([source.mode, notes]).toEqual(["read-only", [`pr-review daemon: read-only mode (${why})\n`]]);
   const { c, welcome } = await serve(source);
-  expect(welcome).toMatchObject({ mode: "read-only", readOnlyReason: why, capabilities: ["account.select"] });
+  expect(welcome).toMatchObject({ mode: "read-only", readOnlyReason: why, capabilities: ["account.select", "pr.archive", "pr.unarchive"] });
   c.send({ type: "snapshot.get", requestId: "s" });
   await c.waitFor((m) => m.type === "snapshot");
   expect(await command(c, { command: "review.retry", params: { runId: "r" } })).toEqual(rejected("CAPABILITY_DENIED", `review.retry is not available: ${why}`));
@@ -209,7 +209,7 @@ it("falls back to read-only with the reason when recovery fails, holding no lock
   expect(await taskStatuses(cli)).toEqual([]);
 }, 30_000);
 
-it("is read-only by default: no lock, no engine, account.select only; the review commands need --allow-commands, and review.publish approval mode", async () => {
+it("is read-only by default: no lock, no engine, the reader commands only; the review commands need --allow-commands, and review.publish approval mode", async () => {
   const dataDir = mkdtempSync(join(tmpdir(), "engine-"));
   seedUncertainOutbox(dataDir);
   let engines = 0;
@@ -217,7 +217,7 @@ it("is read-only by default: no lock, no engine, account.select only; the review
   const off = await openSource(dataDir, false, { openEngine: async (dir) => (engines++, (await host({ dataDir: dir })).source) }, (t) => notes.push(t));
   cleanup.push(() => off.close());
   const { c, welcome } = await serve(off);
-  expect([engines, notes, welcome]).toEqual([0, [], expect.objectContaining({ mode: "read-only", readOnlyReason: COMMANDS_OFF, capabilities: ["account.select"] })]);
+  expect([engines, notes, welcome]).toEqual([0, [], expect.objectContaining({ mode: "read-only", readOnlyReason: COMMANDS_OFF, capabilities: ["account.select", "pr.archive", "pr.unarchive"] })]);
   c.send({ type: "snapshot.get", requestId: "s" });
   await c.waitFor((m) => m.type === "snapshot");
   expect(await command(c, { command: "review.cancel", params: { runId: "r" } })).toEqual(rejected("CAPABILITY_DENIED", `review.cancel is not available: ${COMMANDS_OFF}`));
@@ -236,7 +236,7 @@ it("is read-only by default: no lock, no engine, account.select only; the review
 
   const comment = await host({ config: { ...approvalConfig, review: { ...approvalConfig.review, publish_mode: "comment" } } });
   const served = await serve(comment.source);
-  expect(served.welcome).toMatchObject({ mode: "engine", capabilities: ["account.select", "review.add", "review.start", "review.again", "review.retry", "review.cancel", "settings.set"] });
+  expect(served.welcome).toMatchObject({ mode: "engine", capabilities: ["account.select", "pr.archive", "pr.unarchive", "review.add", "review.start", "review.again", "review.retry", "review.cancel", "settings.set"] });
   expect(served.welcome).not.toHaveProperty("readOnlyReason");
   served.c.send({ type: "snapshot.get", requestId: "s" });
   await served.c.waitFor((m) => m.type === "snapshot");
@@ -700,7 +700,7 @@ it("produced the M3 server messages, each passing the v1 schema", () => {
 it("review.add tracks a new PR from its URL and starts its review; a replay answers the same run and starts nothing", async () => {
   const h = await host({ config: { ...approvalConfig, review: { ...approvalConfig.review, publish_mode: "dry_run" } } });
   const { c, welcome } = await serve(h.source);
-  expect(welcome).toMatchObject({ capabilities: ["account.select", "review.add", "review.start", "review.again", "review.retry", "review.cancel", "settings.set"] });
+  expect(welcome).toMatchObject({ capabilities: ["account.select", "pr.archive", "pr.unarchive", "review.add", "review.start", "review.again", "review.retry", "review.cancel", "settings.set"] });
   c.send({ type: "snapshot.get", requestId: "s" });
   const snap = await c.waitFor<Extract<ServerMessage, { type: "snapshot" }>>((m) => m.type === "snapshot");
   expect(snap.prs).toEqual([]);
@@ -739,6 +739,55 @@ it("review.add refuses an already tracked PR naming it, an invalid URL, a PR Git
   expect(await command(c, { command: "review.add", params: { url: "acme/shop#2" } })).toEqual(rejected("CONFLICT", "acme/shop#2 is merged; only open PRs are reviewed"));
   expect([h.app.store.pullByName("acme/shop", 2), await taskStatuses(h.app)]).toEqual([undefined, []]);
 }, 30_000);
+
+it("archiving leaves a running review alone; starting, retrying, reviewing again or re-adding the PR brings it back", async () => {
+  const reached: (() => void)[] = [];
+  const blocked: FauxResponseStep = (_context, options) =>
+    new Promise((resolve) => {
+      reached.shift()!();
+      options?.signal?.addEventListener("abort", () => resolve(fauxAssistantMessage("", { stopReason: "aborted" })), { once: true });
+    });
+  const h = await host({ responses: [readDiff(), blocked, readDiff(), submitDefect(fixture), readDiff(), submitDefect(fixture)] });
+  const { c } = await serve(h.source);
+  const prId = h.app.store.upsertPull(fixture.pull);
+  c.send({ type: "snapshot.get", requestId: "s" });
+  await c.waitFor((m) => m.type === "snapshot");
+  const archive = () => command(c, { command: "pr.archive", params: { prId } });
+  const archived = () => h.source.snapshot().prs.find((p) => p.id === prId)!.archivedAt !== undefined;
+  const parked = (from: number) => c.waitFor((m) => m.type === "event" && m.eventType === "review.phase_changed" && (m.data as { to: string }).to === "AWAITING_APPROVAL", from);
+
+  await archive();
+  const inAnalyze = new Promise<void>((resolve) => reached.push(resolve));
+  const started = (await command(c, { command: "review.start", params: { prId, expectedHeadSha: fixture.headSha } })) as { operationId: string };
+  const runId = started.operationId.slice("review.start:".length);
+  expect(archived()).toBe(false);
+  await inAnalyze;
+
+  expect(await archive()).toMatchObject({ status: "accepted" });
+  expect([archived(), h.app.store.revision(runId)!.state, await taskStatuses(h.app)]).toEqual([true, "ANALYZE", ["running"]]);
+  await command(c, { command: "review.cancel", params: { runId } });
+  await c.waitFor((m) => m.type === "event" && m.eventType === "run.failed");
+  expect(archived()).toBe(true);
+
+  let mark = c.messages.length;
+  expect(await command(c, { command: "review.retry", params: { runId } })).toMatchObject({ status: "accepted" });
+  expect(archived()).toBe(false);
+  await parked(mark);
+
+  await archive();
+  mark = c.messages.length;
+  expect(await command(c, { command: "review.again", params: { prId, expectedHeadSha: fixture.headSha } })).toMatchObject({ status: "accepted" });
+  expect(archived()).toBe(false);
+  await parked(mark);
+
+  await archive();
+  expect(await command(c, { command: "review.add", params: { url: "acme/shop#1" } })).toEqual(expect.objectContaining({ status: "rejected", code: "CONFLICT", prId }));
+  expect(archived()).toBe(false);
+  await c.waitFor(() => h.source.latestSequence() === c.events().at(-1)?.sequence);
+  const updates = c.events().filter((e) => e.eventType === "pr.updated" && e.prId === prId);
+  expect(updates.some((e) => "archivedAt" in (e.data as object))).toBe(true);
+  expect("archivedAt" in (updates.at(-1)!.data as object)).toBe(false);
+}, 60_000);
 
 it("a read-only daemon refuses review.add", async () => {
   const off = await openSource(mkdtempSync(join(tmpdir(), "engine-")), false, {}, () => {});

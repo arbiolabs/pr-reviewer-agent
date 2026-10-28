@@ -6,6 +6,8 @@
   "sessionId": "session-1",
   "capabilities": [
     "account.select",
+    "pr.archive",
+    "pr.unarchive",
     "review.add",
     "review.start",
     "review.again",

@@ -29,7 +29,7 @@ export type ErrorCode = (typeof ERROR_CODES)[number];
 export const RUN_STATUSES = ["RUNNING", "COMPLETED", "FAILED", "SUPERSEDED"] as const;
 /** Engine mode hosts the review engine and may grant the review commands; read-only mode only reads the app DB. */
 export const DAEMON_MODES = ["engine", "read-only"] as const;
-/** The commands a daemon in engine mode can grant (`welcome.capabilities`), besides `account.select`. */
+/** The commands a daemon in engine mode can grant (`welcome.capabilities`), besides the reader's `account.select`, `pr.archive` and `pr.unarchive`. */
 export const REVIEW_COMMANDS = ["review.add", "review.start", "review.again", "review.retry", "review.cancel", "review.publish"] as const;
 export const DIFF_FILE_STATUSES = ["added", "modified", "deleted", "renamed", "binary"] as const;
 export const CHECK_STATUSES = ["ok", "warn", "missing"] as const;
@@ -46,6 +46,9 @@ export const Pr = Type.Object({
   headSha: Sha,
   baseSha: Sha,
   lifecycle: oneOf(COORDINATOR_STATES),
+  archivedAt: Type.Optional(
+    Type.String({ description: "RFC 3339 UTC timestamp: when a reader archived the PR; absent unless it is archived, and cleared when a review is started on it" }),
+  ),
 });
 export type Pr = Static<typeof Pr>;
 
@@ -309,6 +312,8 @@ export const Command = Type.Union([
   command("review.retry", { runId: Id }),
   command("review.publish", { runId: Id, previewId: Id, expectedHeadSha: Sha }),
   command("account.select", { accountId: Id }),
+  command("pr.archive", { prId: Id }),
+  command("pr.unarchive", { prId: Id }),
   command("settings.set", {
     model: Type.String({
       minLength: 1,
@@ -321,7 +326,7 @@ export const Command = Type.Union([
   }),
 ]);
 export type Command = Static<typeof Command>;
-export type ReviewCommand = Exclude<Command, { command: "account.select" | "daemon.stop" | "settings.set" }>;
+export type ReviewCommand = Exclude<Command, { command: "account.select" | "pr.archive" | "pr.unarchive" | "daemon.stop" | "settings.set" }>;
 
 /** The one key a command may carry: it binds the key to the target, so a replayed key is the same request. */
 export function idempotencyKey(c: Command): string {
@@ -340,6 +345,9 @@ export function idempotencyKey(c: Command): string {
       return `review.publish:${c.params.runId}:${c.params.previewId}`;
     case "account.select":
       return `account.select:${c.params.accountId}`;
+    case "pr.archive":
+    case "pr.unarchive":
+      return `${c.command}:${c.params.prId}`;
     case "settings.set":
       return `settings.set:${c.params.model}`;
     case "daemon.stop":

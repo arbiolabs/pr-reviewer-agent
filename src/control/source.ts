@@ -42,6 +42,8 @@ export interface ControlSource {
   refreshAccounts?(maxAgeMs: number): Promise<void>;
   /** Journal the selection and return the operation id, or throw ControlError NOT_FOUND / CONFLICT. */
   selectAccount?(accountId: string): Promise<string>;
+  /** Archive or unarchive a PR and return the operation, or throw ControlError NOT_FOUND. Present on every source that can write its PRs. */
+  archivePr?(prId: string, archived: boolean): Promise<string>;
   /** `welcome.mode`: engine sources host the review engine; read-only ones only read its database. */
   mode?: "engine" | "read-only";
   /** `welcome.readOnlyReason`: why a read-only source is read-only, as display text. */
