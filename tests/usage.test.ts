@@ -347,6 +347,30 @@ describe("pr-review usage", () => {
     expect(parsed.buckets).toHaveLength(12);
   });
 
+  it("splits the range by repository, author or PR, with each row's share and the same totals", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "usage-cli-"));
+    const store = AppStore.open(join(dataDir, "app.sqlite"));
+    const pull = createFixture().pull;
+    const cost = (total: number) => ({ input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total });
+    for (const [n, author, total] of [[1, "octocat", 0.75], [2, null, 0.25]] as const) {
+      const prId = store.upsertPull({ ...pull, number: n, title: `PR ${n}`, author });
+      const revision = store.ensureRevision({ prId, baseSha: "b".repeat(40), headSha: "h".repeat(40), policyVersion: "1", reviewerVersion: "m1" });
+      store.recordUsage(revision.id, "anthropic/claude-x", { input: 1000, output: 100, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost: cost(total) });
+    }
+    store.close();
+
+    const byAuthor = (await run(["--by", "week", "--group", "author"], dataDir)).out.split("\n");
+    expect(byAuthor[0]).toMatch(/^Usage by week from \d{4}-\d{2}-\d{2} to \d{4}-\d{2}-\d{2}, split by author, /);
+    expect(byAuthor[1]).toMatch(/^Author\s+Reviews\s+Responses\s+Input\s+Output\s+Cache read\s+Cache write\s+Cost\s+Share$/);
+    expect(byAuthor[2]).toMatch(/^octocat\s+1\s+1\s+1K\s+100\s+0\s+0\s+\$0\.75\s+75\.0%$/);
+    expect(byAuthor[3]).toMatch(/^Unknown author\s+1\s+1\s+1K\s+100\s+0\s+0\s+\$0\.25\s+25\.0%$/);
+    expect(byAuthor[4]).toMatch(/^Total\s+2\s+2\s+2K\s+200\s+0\s+0\s+\$1\.00\s+100%$/);
+    expect((await run(["--group", "pr"], dataDir)).out).toContain("acme/shop#1 PR 1 ");
+    const json = JSON.parse((await run(["--group", "repo", "--json"], dataDir)).out);
+    expect(json).toMatchObject({ group: "repo", totals: { cost: 1 }, groups: [{ key: "acme/shop", label: "acme/shop", cost: 1, share: 1 }] });
+    expect(await run(["--group", "model"], dataDir)).toMatchObject({ code: 1, err: "pr-review: --group must be one of time, repo, author, pr\n" });
+  });
+
   it("says when nothing is recorded, and refuses an unknown grouping", async () => {
     const dataDir = mkdtempSync(join(tmpdir(), "usage-cli-"));
     expect((await run([], dataDir)).out).toContain("No usage recorded in this range. Usage is recorded from this version on.");
