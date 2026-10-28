@@ -231,6 +231,10 @@ pub struct Shell {
     pub avatar: crate::account::Avatar,
     /// A PR the add sheet sent while the reviewer was stopped: it goes to the daemon once the start brings it up.
     pub queued_add: Option<String>,
+    /// The app runs from the menu bar alone, as `[desktop] hide_dock` saved it.
+    pub hide_dock: bool,
+    /// The login item is installed.
+    pub open_at_login: bool,
 }
 
 /// A page the reader went into: a finding, the proof, the diff, Settings or Usage. The live strip steps aside there.
@@ -317,6 +321,8 @@ impl Shell {
             settings_scroll: ScrollHandle::new(),
             settings_scroll_to: None,
             queued_add: None,
+            hide_dock: false,
+            open_at_login: !snapshot && crate::menubar::opens_at_login(),
         };
         for d in desk {
             match d {
@@ -448,12 +454,43 @@ impl Shell {
     pub fn set_theme(&mut self, choice: tokens::Choice, cx: &mut Context<Self>) {
         apply_theme(choice, cx);
         if !self.snapshot
-            && let Err(e) = pr_review_tui::config::set_desktop_theme(&self.reviewer.config_path, choice.id())
+            && let Err(e) = pr_review_tui::config::set_desktop(&self.reviewer.config_path, "theme", choice.id().into())
         {
-            let until_ms = self.model.now_ms + crate::reviewer::NOTICE_MS;
-            self.model.notice = Some(pr_review_tui::model::Notice { text: format!("Theme not saved: {e}"), until_ms });
+            self.notice(format!("Theme not saved: {e}"));
         }
         cx.notify();
+    }
+
+    /// Takes the Dock icon away or brings it back at once, and saves it as [desktop] hide_dock. The menu bar item
+    /// stays either way, so the app is always reachable.
+    pub fn set_hide_dock(&mut self, hide: bool, cx: &mut Context<Self>) {
+        if self.snapshot {
+            return;
+        }
+        cx.set_activation_policy(if hide { ActivationPolicy::Accessory } else { ActivationPolicy::Regular });
+        // Leaving the Dock deactivates the app; Settings stays in front.
+        cx.activate(true);
+        self.hide_dock = hide;
+        if let Err(e) = pr_review_tui::config::set_desktop(&self.reviewer.config_path, "hide_dock", hide.into()) {
+            self.notice(format!("Dock setting not saved: {e}"));
+        }
+        cx.notify();
+    }
+
+    pub fn set_open_at_login(&mut self, on: bool, cx: &mut Context<Self>) {
+        if self.snapshot {
+            return;
+        }
+        match crate::menubar::set_open_at_login(on) {
+            Ok(()) => self.open_at_login = on,
+            Err(e) => self.notice(format!("Login item not changed: {e}")),
+        }
+        cx.notify();
+    }
+
+    fn notice(&mut self, text: String) {
+        let until_ms = self.model.now_ms + crate::reviewer::NOTICE_MS;
+        self.model.notice = Some(pr_review_tui::model::Notice { text, until_ms });
     }
 
     /// Closes the reducer's panels, so a pick lands on the page and not under a panel.
@@ -1006,7 +1043,8 @@ impl Render for Shell {
             .on_action(cx.listener(|s, _: &DoneList, _, cx| s.set_tab(List::Done, cx)))
             .on_action(cx.listener(|s, _: &ArchivedList, _, cx| s.set_tab(List::Archived, cx)))
             .on_action(cx.listener(|s, _: &UsageView, _, cx| s.open_usage(None, cx)))
-            .on_action(cx.listener(|_, _: &CloseWindow, window, _| window.remove_window()))
+            // ⌘W hides the app as the close button does, so reviews keep running in the menu bar.
+            .on_action(cx.listener(|_, _: &CloseWindow, _, cx| cx.hide()))
             .relative()
             .size_full()
             .flex()

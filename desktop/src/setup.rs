@@ -3,6 +3,8 @@
 //! link comes up.
 
 use gpui_kit::assets::IconName;
+use gpui_kit::component::Disableable as _;
+use gpui_kit::component::switch::Switch;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use pr_review_tui::keymap::Action;
@@ -126,6 +128,54 @@ fn themes(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                 s.reviewer.config_path.display()
             )
         }))
+}
+
+/// Where the app lives: closing the window leaves it in the menu bar, and these choose the rest.
+fn app(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
+    let row = |switch: Switch, title: &'static str, words: &'static str| {
+        div()
+            .flex()
+            .items_start()
+            .gap(space::S3)
+            .child(switch.disabled(s.snapshot).color(t.accent).accessibility_label(title))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.))
+                    .child(div().text_size(text::BODY).font_weight(FontWeight::SEMIBOLD).child(title))
+                    .child(div().text_size(text::SMALL).text_color(t.muted).child(words)),
+            )
+    };
+    let (login, dock) = (s.open_at_login, s.hide_dock);
+    div()
+        .flex()
+        .flex_col()
+        .gap(space::S4)
+        .p(space::S4)
+        .child(row(
+            Switch::new("open-at-login")
+                .checked(login)
+                .on_click(cx.listener(move |s, _: &bool, _, cx| s.set_open_at_login(!login, cx))),
+            "Open at login",
+            "Starts in the menu bar when you log in, so reviews run without opening the window.",
+        ))
+        .child(row(
+            Switch::new("hide-dock")
+                .checked(dock)
+                .on_click(cx.listener(move |s, _: &bool, _, cx| s.set_hide_dock(!dock, cx))),
+            "Hide the Dock icon",
+            "Open the window from the menu bar item instead. It also leaves the app switcher and the menu bar's \
+             app menus.",
+        ))
+        .child(
+            div()
+                .text_size(text::SMALL)
+                .text_color(t.muted)
+                .child("Closing the window keeps the app running in the menu bar. Quit from there or with ⌘Q."),
+        )
 }
 
 /// Why this daemon can't act, as a sentence for the reader rather than the daemon's own words.
@@ -865,7 +915,9 @@ pub fn setup_body(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
             .child(card("Reviewer", conn))
             .child(crate::auto::section(s, t, cx)),
         Tab::Accounts => body.child(card("GitHub accounts", accounts)),
-        Tab::Appearance => body.child(card("Appearance", themes(s, t, cx))),
+        Tab::Appearance => {
+            body.child(card("Appearance", themes(s, t, cx))).child(card("Menu bar and Dock", app(s, t, cx)))
+        }
     };
     div().flex().flex_col().gap(space::S6).child(tab_control(s, t, cx)).child(body)
 }
