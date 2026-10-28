@@ -16,6 +16,7 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 ### Fixed
 
+- **Desktop: the repository pickers work with the mouse and the keyboard.** In Settings → Reviewer → Automatic reviews, the Only and Never dropdowns float over the card from their field, below it or above it when the window has no room, instead of pushing the card down and off the bottom of the window. The list scrolls with the wheel and keeps the row ↑ and ↓ light in view. A chip's × no longer takes the keyboard from the field and is a 24 pt target with a "Remove owner/name" tooltip; with the field empty, ⌫ removes the last chip, and ← reaches the chips, which ⌫ and ⌦ remove. A second esc leaves the field. The lit row and a chip with the keyboard carry the focus ring, and a repository in the other list says "already in Only" or "already in Never".
 - **Desktop: the setup checks' icons sit centred in their rows.** They were pinned to the top of each row; each status icon now centres on its row's height, however many lines the check holds (#72).
 
 ## [1.5.0] - 2026-10-28

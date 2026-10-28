@@ -91,6 +91,12 @@ for v in off error capped; do
   cp protocol/fixtures/server.settings.auto-review-$v.json desktop/target/auto-$v/fixtures/server.settings.json
   cp "$settings_script" desktop/target/auto-$v/playback/auto-$v.ndjson
 done
+# The repository comboboxes when the account's repositories can't be listed: repos.list answered with its error.
+mkdir -p desktop/target/repos-error/playback
+rm -rf desktop/target/repos-error/fixtures
+cp -R protocol/fixtures desktop/target/repos-error/fixtures
+cp protocol/fixtures/server.repos.list.result.error.json desktop/target/repos-error/fixtures/server.repos.list.result.json
+cp "$settings_script" desktop/target/repos-error/playback/repos-error.ndjson
 # The Automatic reviews card, at the foot of the Reviewer tab.
 auto_at="wait:19000,goto:settings,settings-tab:reviewer,scroll:3000"
 message_custom='### {{repo}} #{{pr_number}} by {{pr_author}}\n\n{{summary_line}}\n\n{{findings_list}}\n\n{{carried}}\n\nReviewed by {{model}} at {{short_sha}}. A human still decides.\n'
@@ -191,8 +197,11 @@ for look in dark light; do
   snap 25b-auto-review-on-$look    $look 20000 "$auto_at" "$settings_script"
   snap 25c-auto-review-error-$look $look 20000 "$auto_at" desktop/target/auto-error/playback/auto-error.ndjson
   snap 25d-auto-review-capped-$look $look 20000 "$auto_at" desktop/target/auto-capped/playback/auto-capped.ndjson
-  snap 25e-auto-review-dropdown-$look $look 20000 "$auto_at,repos:only:north" "$settings_script"
-  snap 25f-auto-review-taken-$look $look 20000 "$auto_at,repos:never:acme" "$settings_script"
+  # The dropdown floats from its field: below it while the rows fit under it, else flipped above it.
+  snap 25e-auto-review-dropdown-below-$look $look 20000 "$auto_at,repos:only:northwind/l" "$settings_script"
+  snap 25f-auto-review-dropdown-above-$look $look 20000 "$auto_at,repos:never:acme" "$settings_script"
+  snap 25g-auto-review-repos-error-$look $look 20000 "$auto_at,repos:never:octo/lib" \
+    desktop/target/repos-error/playback/repos-error.ndjson
 done
 snap 20b-footer-no-account     dark  20000 "" "$no_account_script"
 

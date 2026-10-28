@@ -2,8 +2,14 @@
 //! the account's review, how often it asks GitHub, how many a day, which repositories count, and what its last poll
 //! did.
 
+use std::cell::Cell;
+use std::rc::Rc;
+
 use gpui_kit::assets::IconName;
-use gpui_kit::component::input::{Escape, Input, InputEvent, InputState, MoveDown, MoveUp};
+use gpui_kit::base::{Align, POPUP_PRIORITY, Placement, Positioner};
+use gpui_kit::component::input::{
+    Backspace, Delete, Escape, Input, InputEvent, InputState, MoveDown, MoveLeft, MoveRight, MoveUp,
+};
 use gpui_kit::component::scroll::ScrollableElement as _;
 use gpui_kit::component::switch::Switch;
 use gpui_kit::component::{Disableable as _, Sizable as _};
@@ -21,7 +27,9 @@ const INTERVALS: [(u32, &str); 3] = [(5, "5 min"), (15, "15 min"), (30, "30 min"
 const CAPS: [(u32, &str); 5] = [(10, "10"), (20, "20"), (50, "50"), (100, "100"), (0, "No cap")];
 /// The dropdown lists this many matches at most; typing narrows the rest in.
 const MENU_ROWS: usize = 50;
-const MENU_HEIGHT: Pixels = px(264.);
+const ROW_HEIGHT: Pixels = px(30.);
+/// Eight rows show at once; the rest scroll inside the dropdown.
+const MENU_HEIGHT: Pixels = px(8. * 30. + 8.);
 
 /// The repository list a combobox edits: `include` (Only) or `exclude` (Never).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -58,15 +66,133 @@ impl Field {
 /// Both lists, indexed by `Field`: `[include, exclude]`.
 pub type Lists = [Vec<String>; 2];
 
-/// One combobox: its search field and whether its dropdown is open, on which row.
+/// One combobox: its search field, where its keyboard is, and where the field sits in the window.
 #[derive(Default)]
 pub struct Combo {
     pub input: Option<Entity<InputState>>,
-    open: bool,
-    highlight: Option<usize>,
+    mode: Mode,
     /// Why ⏎ added nothing, until the next keystroke.
     problem: Option<String>,
+    /// The field's bounds as last painted: the dropdown floats from them.
+    at: Rc<Cell<Bounds<Pixels>>>,
+    /// The dropdown's rows, scrolled to keep the lit one in view.
+    scroll: ScrollHandle,
     _events: Option<Subscription>,
+}
+
+impl Combo {
+    fn set_mode(&mut self, mode: Mode) {
+        if let Mode::Open(Some(i)) = mode {
+            self.scroll.scroll_to_item(i);
+        } else if mode.is_open() {
+            self.scroll.set_offset(Point::default());
+        }
+        self.mode = mode;
+    }
+}
+
+/// Where one combobox's keyboard is. GPUI's focus stays on the field throughout; a chip that holds the keyboard
+/// draws the ring and takes ←, →, ⌫ and ⌦.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum Mode {
+    /// In the field, the dropdown closed.
+    #[default]
+    Closed,
+    /// In the field, the dropdown open with this row lit.
+    Open(Option<usize>),
+    /// On the chip at this index.
+    Chip(usize),
+}
+
+/// The keys a combobox answers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Key {
+    Up,
+    Down,
+    Left,
+    Right,
+    Enter,
+    Escape,
+    Backspace,
+    Delete,
+}
+
+/// What a key asks of the page, besides the mode it leaves.
+#[derive(Debug, PartialEq)]
+pub enum Effect {
+    /// Not the combobox's key: the field edits its text with it.
+    Pass,
+    Stay,
+    Add(String),
+    /// Removes the chip at this index.
+    Remove(usize),
+    Problem(String),
+    /// The keyboard leaves the field for the page.
+    Leave,
+}
+
+/// What a key sees: the dropdown's rows, the typed text, both lists, and which of them this combobox edits.
+pub struct View<'a> {
+    pub rows: &'a [Row],
+    pub query: &'a str,
+    pub lists: &'a Lists,
+    pub field: Field,
+}
+
+impl Mode {
+    /// The dropdown as it opens: on the first row that can be picked.
+    pub fn opened(rows: &[Row]) -> Mode {
+        Mode::Open(step(rows, None, true))
+    }
+
+    pub fn is_open(self) -> bool {
+        matches!(self, Mode::Open(_))
+    }
+
+    pub fn press(self, key: Key, v: &View) -> (Mode, Effect) {
+        let chips = v.lists[v.field as usize].len();
+        let blank = v.query.is_empty();
+        match (self, key) {
+            (Mode::Chip(i), Key::Left) => (Mode::Chip(i.saturating_sub(1)), Effect::Stay),
+            (Mode::Chip(i), Key::Right) if i + 1 < chips => (Mode::Chip(i + 1), Effect::Stay),
+            (Mode::Chip(_), Key::Right | Key::Escape) => (Mode::Closed, Effect::Stay),
+            (Mode::Chip(i), Key::Backspace) => {
+                let next = match i.checked_sub(1) {
+                    Some(prev) => Mode::Chip(prev),
+                    None if chips > 1 => Mode::Chip(0),
+                    None => Mode::Closed,
+                };
+                (next, Effect::Remove(i))
+            }
+            (Mode::Chip(i), Key::Delete) => {
+                let next = if i + 1 < chips {
+                    Mode::Chip(i)
+                } else if i > 0 {
+                    Mode::Chip(i - 1)
+                } else {
+                    Mode::Closed
+                };
+                (next, Effect::Remove(i))
+            }
+            (Mode::Chip(_), Key::Up | Key::Down) => (Mode::opened(v.rows), Effect::Stay),
+            (Mode::Chip(_), Key::Enter) => (self, Effect::Stay),
+            (_, Key::Left) if blank && chips > 0 => (Mode::Chip(chips - 1), Effect::Stay),
+            (_, Key::Backspace) if blank && chips > 0 => (self, Effect::Remove(chips - 1)),
+            (_, Key::Left | Key::Right | Key::Backspace | Key::Delete) => (self, Effect::Pass),
+            (Mode::Open(lit), Key::Up | Key::Down) => (Mode::Open(step(v.rows, lit, key == Key::Down)), Effect::Stay),
+            (Mode::Closed, Key::Up | Key::Down) => (Mode::Open(step(v.rows, None, key == Key::Down)), Effect::Stay),
+            (Mode::Open(_), Key::Escape) => (Mode::Closed, Effect::Stay),
+            (Mode::Closed, Key::Escape) => (Mode::Closed, Effect::Leave),
+            (_, Key::Enter) => {
+                let lit = if let Mode::Open(lit) = self { lit } else { None };
+                match pick(v.rows, lit, v.query, v.lists, v.field) {
+                    Ok(Some(name)) => (self, Effect::Add(name)),
+                    Ok(None) => (self, Effect::Stay),
+                    Err(why) => (self, Effect::Problem(why)),
+                }
+            }
+        }
+    }
 }
 
 /// The two repository comboboxes. Each change saves at once: one settings.set is in flight at a time and each
@@ -253,18 +379,20 @@ impl Shell {
         cx.notify();
     }
 
+    fn combo_query(&self, f: Field, cx: &App) -> String {
+        self.repos.combo(f).input.as_ref().map(|i| i.read(cx).value().to_string()).unwrap_or_default()
+    }
+
     fn combo_rows(&self, f: Field, cx: &App) -> Vec<Row> {
         let listed = self.model.agent.repos.as_ref().map(|r| r.repos.as_slice()).unwrap_or_default();
-        let query = self.repos.combo(f).input.as_ref().map(|i| i.read(cx).value().to_string()).unwrap_or_default();
-        rows(listed, &query, &self.repo_lists().unwrap_or_default(), f)
+        rows(listed, &self.combo_query(f, cx), &self.repo_lists().unwrap_or_default(), f)
     }
 
     fn combo_open(&mut self, f: Field, cx: &mut Context<Self>) {
-        let first = step(&self.combo_rows(f, cx), None, true);
+        let opened = Mode::opened(&self.combo_rows(f, cx));
         let c = self.repos.combo_mut(f);
-        c.open = true;
-        c.highlight = first;
         c.problem = None;
+        c.set_mode(opened);
         cx.notify();
     }
 
@@ -272,26 +400,41 @@ impl Shell {
         match ev {
             InputEvent::Focus | InputEvent::Change => self.combo_open(f, cx),
             InputEvent::Blur => {
-                self.repos.combo_mut(f).open = false;
+                self.repos.combo_mut(f).mode = Mode::Closed;
                 cx.notify();
             }
-            InputEvent::PressEnter { .. } => self.combo_enter(f, window, cx),
+            InputEvent::PressEnter { .. } => self.combo_key(f, Key::Enter, window, cx),
         }
     }
 
-    fn combo_enter(&mut self, f: Field, window: &mut Window, cx: &mut Context<Self>) {
+    /// A key the field's own bindings would take: the combobox's state decides whether it does.
+    fn combo_key(&mut self, f: Field, key: Key, window: &mut Window, cx: &mut Context<Self>) {
         let rows = self.combo_rows(f, cx);
-        let c = self.repos.combo(f);
-        let query = c.input.as_ref().map(|i| i.read(cx).value().to_string()).unwrap_or_default();
-        let highlight = c.highlight.filter(|_| c.open);
-        match pick(&rows, highlight, &query, &self.repo_lists().unwrap_or_default(), f) {
-            Ok(Some(name)) => self.add_repo(f, name, window, cx),
-            Ok(None) => {}
-            Err(why) => {
-                self.repos.combo_mut(f).problem = Some(why);
-                cx.notify();
-            }
+        let query = self.combo_query(f, cx);
+        let lists = self.repo_lists().unwrap_or_default();
+        let view = View { rows: &rows, query: &query, lists: &lists, field: f };
+        let (mode, effect) = self.repos.combo(f).mode.press(key, &view);
+        if effect == Effect::Pass {
+            return;
         }
+        cx.stop_propagation();
+        self.repos.combo_mut(f).set_mode(mode);
+        match effect {
+            Effect::Add(name) => self.add_repo(f, name, window, cx),
+            Effect::Remove(i) => self.edit_repos(
+                f,
+                |l| {
+                    if i < l.len() {
+                        l.remove(i);
+                    }
+                },
+                cx,
+            ),
+            Effect::Problem(why) => self.repos.combo_mut(f).problem = Some(why),
+            Effect::Leave => window.focus(&self.focus, cx),
+            Effect::Pass | Effect::Stay => {}
+        }
+        cx.notify();
     }
 
     fn add_repo(&mut self, f: Field, name: String, window: &mut Window, cx: &mut Context<Self>) {
@@ -300,24 +443,6 @@ impl Shell {
             input.update(cx, |i, cx| i.set_value("", window, cx));
         }
         self.combo_open(f, cx);
-    }
-
-    fn combo_move(&mut self, f: Field, down: bool, cx: &mut Context<Self>) {
-        let rows = self.combo_rows(f, cx);
-        let c = self.repos.combo_mut(f);
-        c.highlight = if c.open { step(&rows, c.highlight, down) } else { step(&rows, None, true) };
-        c.open = true;
-        cx.stop_propagation();
-        cx.notify();
-    }
-
-    fn combo_escape(&mut self, f: Field, cx: &mut Context<Self>) {
-        let c = self.repos.combo_mut(f);
-        if c.open {
-            c.open = false;
-            cx.stop_propagation();
-            cx.notify();
-        }
     }
 }
 
@@ -536,7 +661,8 @@ pub fn section(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
     card(t, body)
 }
 
-/// One list as removable chips over a search field, and under it, while the field has the keyboard, the dropdown.
+/// One list as removable chips over a search field, and, while the field has the keyboard, the dropdown floating
+/// from the field: below it, or above it when the window has no room below.
 fn combo(s: &Shell, t: &Colors, f: Field, lists: &Lists, can: bool, cx: &Context<Shell>) -> Div {
     let c = s.repos.combo(f);
     let mine = &lists[f as usize];
@@ -548,16 +674,41 @@ fn combo(s: &Shell, t: &Colors, f: Field, lists: &Lists, can: bool, cx: &Context
         .flex()
         .flex_wrap()
         .items_center()
-        .gap(space::S1)
+        .gap(space::S2)
+        .min_h(px(28.))
         .when(mine.is_empty(), |d| d.child(div().py(px(3.)).text_size(text::SMALL).text_color(t.muted).child(empty)))
-        .children(mine.iter().map(|name| repo_chip(t, f, name, can, cx)));
+        .children(mine.iter().enumerate().map(|(i, name)| {
+            crate::kit::ringed(t, c.mode == Mode::Chip(i), radius::SM, repo_chip(t, f, i, name, can, cx))
+        }));
+    let at = c.at.clone();
     let field = div()
         .font_family(text::MONO)
         .text_size(text::CODE)
         .children(c.input.as_ref().map(|i| Input::new(i).disabled(!can)))
-        .capture_action(cx.listener(move |s, _: &MoveDown, _, cx| s.combo_move(f, true, cx)))
-        .capture_action(cx.listener(move |s, _: &MoveUp, _, cx| s.combo_move(f, false, cx)))
-        .capture_action(cx.listener(move |s, _: &Escape, _, cx| s.combo_escape(f, cx)));
+        .capture_action(cx.listener(move |s, _: &MoveDown, w, cx| s.combo_key(f, Key::Down, w, cx)))
+        .capture_action(cx.listener(move |s, _: &MoveUp, w, cx| s.combo_key(f, Key::Up, w, cx)))
+        .capture_action(cx.listener(move |s, _: &MoveLeft, w, cx| s.combo_key(f, Key::Left, w, cx)))
+        .capture_action(cx.listener(move |s, _: &MoveRight, w, cx| s.combo_key(f, Key::Right, w, cx)))
+        .capture_action(cx.listener(move |s, _: &Backspace, w, cx| s.combo_key(f, Key::Backspace, w, cx)))
+        .capture_action(cx.listener(move |s, _: &Delete, w, cx| s.combo_key(f, Key::Delete, w, cx)))
+        .capture_action(cx.listener(move |s, _: &Escape, w, cx| s.combo_key(f, Key::Escape, w, cx)))
+        .relative()
+        .child(
+            canvas(
+                move |bounds, window, _| {
+                    // The dropdown is built before this frame lays the field out: a field that moved draws once more.
+                    if at.replace(bounds) != bounds {
+                        window.refresh();
+                    }
+                },
+                |_, _, _, _| {},
+            )
+            .absolute()
+            .top_0()
+            .left_0()
+            .size_full(),
+        );
+    let field_at = c.at.get();
     div()
         .flex_1()
         .min_w_0()
@@ -566,18 +717,56 @@ fn combo(s: &Shell, t: &Colors, f: Field, lists: &Lists, can: bool, cx: &Context
         .gap(space::S2)
         .child(chips)
         .child(field)
-        .when(c.open && can, |d| d.child(menu(s, t, f, cx)))
+        .when(c.mode.is_open() && can && field_at.size.width > px(0.), |d| {
+            d.child(
+                deferred(
+                    Positioner::side(field_at)
+                        .placement(Placement::Bottom)
+                        .align(Align::Start)
+                        .offset(px(4.))
+                        .margin(space::S2)
+                        .occlude()
+                        .child(menu(s, t, f, field_at.size.width, cx)),
+                )
+                .with_priority(POPUP_PRIORITY),
+            )
+        })
         .children(c.problem.clone().map(|why| div().text_size(text::SMALL).text_color(t.danger).child(why)))
 }
 
-fn repo_chip(t: &Colors, f: Field, name: &str, can: bool, cx: &Context<Shell>) -> Div {
-    let gone = name.to_string();
+/// A repository in the list: its name, and an × that removes it without taking the keyboard from the field.
+fn repo_chip(t: &Colors, f: Field, i: usize, name: &str, can: bool, cx: &Context<Shell>) -> Div {
+    let remove = div()
+        .id(SharedString::from(format!("auto-{}-remove-{name}", f.id())))
+        .flex()
+        .flex_none()
+        .items_center()
+        .justify_center()
+        .size(px(24.))
+        .rounded(radius::SM)
+        .cursor_pointer()
+        .hover(|h| h.bg(t.hover))
+        .active(|h| h.bg(t.press))
+        .child(icon(IconName::Close, px(14.), t.muted))
+        // The field keeps the keyboard: a press here must not hand focus to the page.
+        .on_mouse_down(MouseButton::Left, |_, window, _| window.prevent_default())
+        .on_click(cx.listener(move |s, _: &ClickEvent, _, cx| {
+            s.edit_repos(
+                f,
+                |l| {
+                    if i < l.len() {
+                        l.remove(i);
+                    }
+                },
+                cx,
+            )
+        }));
     div()
         .flex()
         .flex_none()
         .items_center()
         .gap(space::S1)
-        .h(px(24.))
+        .h(px(28.))
         .pl(space::S2)
         .pr(if can { px(2.) } else { space::S2 })
         .rounded(radius::SM)
@@ -588,46 +777,33 @@ fn repo_chip(t: &Colors, f: Field, name: &str, can: bool, cx: &Context<Shell>) -
         .text_size(text::CODE)
         .text_color(t.text)
         .child(name.to_string())
-        .when(can, |d| {
-            d.child(crate::kit::icon_button(
-                t,
-                SharedString::from(format!("auto-{}-remove-{name}", f.id())),
-                IconName::Close,
-                &format!("Remove {name}"),
-                px(20.),
-                crate::ui::on(cx, move |s, cx| {
-                    let gone = gone.clone();
-                    s.edit_repos(f, move |l| l.retain(|x| *x != gone), cx)
-                }),
-            ))
-        })
+        .when(can, |d| d.child(crate::kit::tip(remove, format!("Remove {name}"))))
 }
 
 /// The dropdown: the account's repositories that match, or why there are none to offer.
-fn menu(s: &Shell, t: &Colors, f: Field, cx: &Context<Shell>) -> Div {
+fn menu(s: &Shell, t: &Colors, f: Field, width: Pixels, cx: &Context<Shell>) -> Div {
     let rows = s.combo_rows(f, cx);
-    let highlight = s.repos.combo(f).highlight;
+    let lit = match s.repos.combo(f).mode {
+        Mode::Open(lit) => lit,
+        _ => None,
+    };
     let note =
         |words: String| div().px(space::S3).py(space::S2).text_size(text::SMALL).text_color(t.muted).child(words);
-    let query = s.repos.combo(f).input.as_ref().map(|i| i.read(cx).value().trim().to_string()).unwrap_or_default();
+    let query = s.combo_query(f, cx).trim().to_string();
     let state = match &s.model.agent.repos {
-        None => Some("Loading your repositories…".to_string()),
+        None => Some("Loading repositories…".to_string()),
         Some(r) => match &r.error {
-            Some(why) => Some(crate::kit::sentence(&format!(
-                "couldn't list your repositories: {why}. Type owner/name and press ⏎ to add one"
-            ))),
+            Some(why) => {
+                Some(crate::kit::sentence(&format!("couldn't load repositories: {why}. Type owner/name to add one")))
+            }
             None if rows.is_empty() && !query.is_empty() => Some(format!("No repository matches “{query}”.")),
             None if rows.is_empty() => Some("Every repository you can reach is in a list.".to_string()),
             None => None,
         },
     };
-    let list = div()
-        .flex()
-        .flex_col()
-        .py(space::S1)
-        .children(rows.iter().enumerate().map(|(i, r)| menu_row(t, f, r, highlight == Some(i), cx)));
+    let scroll = &s.repos.combo(f).scroll;
     div()
-        .w_full()
+        .w(width)
         .flex()
         .flex_col()
         .rounded(radius::SM)
@@ -647,9 +823,14 @@ fn menu(s: &Shell, t: &Colors, f: Field, cx: &Context<Shell>) -> Div {
             d.child(
                 div()
                     .id(SharedString::from(format!("auto-{}-menu", f.id())))
+                    .flex()
+                    .flex_col()
                     .max_h(MENU_HEIGHT)
-                    .child(list)
-                    .overflow_y_scrollbar(),
+                    .p(space::S1)
+                    .children(rows.iter().enumerate().map(|(i, r)| menu_row(t, f, r, lit == Some(i), cx)))
+                    .track_scroll(scroll)
+                    .overflow_y_scroll()
+                    .vertical_scrollbar(scroll),
             )
         })
 }
@@ -658,20 +839,26 @@ fn menu_row(t: &Colors, f: Field, r: &Row, lit: bool, cx: &Context<Shell>) -> St
     let name = r.name.clone();
     let open = r.taken.is_none();
     let ink = if open { t.text } else { t.disabled };
+    let ring = crate::kit::ring(t);
     div()
         .id(SharedString::from(format!("auto-{}-row-{}", f.id(), r.name)))
         .flex()
+        .flex_none()
         .items_center()
         .gap(space::S2)
-        .px(space::S3)
-        .h(px(30.))
+        .px(space::S2)
+        .h(ROW_HEIGHT)
+        .rounded(radius::SM)
+        .border_2()
+        .border_color(if lit { ring } else { ring.alpha(0.) })
         .when(lit, |d| d.bg(t.selected))
         .when(open && !lit, |d| d.hover(|h| h.bg(t.hover)))
         .when(open, |d| {
             d.cursor_pointer().on_mouse_down(
                 MouseButton::Left,
                 cx.listener(move |s, _: &MouseDownEvent, window, cx| {
-                    // Down, not click: the field keeps the keyboard, so the dropdown stays open for the next pick.
+                    // The field keeps the keyboard, so the dropdown stays open for the next pick.
+                    window.prevent_default();
                     cx.stop_propagation();
                     s.add_repo(f, name.clone(), window, cx);
                 }),
@@ -695,7 +882,11 @@ fn menu_row(t: &Colors, f: Field, r: &Row, lit: bool, cx: &Context<Shell>) -> St
                 .child(if r.typed { format!("Add {}", r.name) } else { r.name.clone() }),
         )
         .children(r.taken.map(|other| {
-            div().flex_none().text_size(text::SMALL).text_color(t.disabled).child(format!("in {}", other.word()))
+            div()
+                .flex_none()
+                .text_size(text::SMALL)
+                .text_color(t.disabled)
+                .child(format!("already in {}", other.word()))
         }))
 }
 
@@ -709,7 +900,7 @@ fn card(t: &Colors, content: Div) -> Div {
 
 #[cfg(test)]
 mod tests {
-    use super::{Field, Lists, Row, pick, rows, step, valid};
+    use super::{Effect, Field, Key, Lists, Mode, Row, View, pick, rows, step, valid};
     use pr_review_tui::protocol::{AccessibleRepo, Text};
 
     fn listed(names: &[&str]) -> Vec<AccessibleRepo> {
@@ -810,5 +1001,86 @@ mod tests {
         let repos = listed(&["acme/shop", "acme/api"]);
         let r = rows(&repos, "acme", &lists(&[], &[]), Field::Only);
         assert_eq!(pick(&r, Some(1), "acme", &lists(&[], &[]), Field::Only), Ok(Some("acme/api".into())));
+    }
+
+    /// Presses `keys` in turn from `mode` on the Never list over `listed`, and returns the last mode and every effect.
+    fn press(mode: Mode, keys: &[Key], query: &str, l: &Lists) -> (Mode, Vec<Effect>) {
+        let listed = listed(&["acme/shop", "acme/api", "acme/web"]);
+        let r = rows(&listed, query, l, Field::Never);
+        let v = View { rows: &r, query, lists: l, field: Field::Never };
+        let mut effects = Vec::new();
+        let mut m = mode;
+        for k in keys {
+            let (next, effect) = m.press(*k, &v);
+            m = next;
+            effects.push(effect);
+        }
+        (m, effects)
+    }
+
+    #[test]
+    fn the_dropdown_opens_on_an_arrow_and_closes_on_esc_and_a_second_esc_leaves_the_field() {
+        let l = lists(&["acme/api"], &[]);
+        assert_eq!(press(Mode::Closed, &[Key::Down], "", &l).0, Mode::Open(Some(0)));
+        assert_eq!(press(Mode::Closed, &[Key::Up], "", &l).0, Mode::Open(Some(2)), "↑ opens on the last row");
+        let (m, e) = press(Mode::Open(Some(0)), &[Key::Escape, Key::Escape], "", &l);
+        assert_eq!((m, e), (Mode::Closed, vec![Effect::Stay, Effect::Leave]));
+    }
+
+    #[test]
+    fn arrows_skip_a_row_the_other_list_has_and_stop_at_the_ends() {
+        let l = lists(&["acme/api"], &[]);
+        let (m, _) = press(Mode::Open(Some(0)), &[Key::Down], "", &l);
+        assert_eq!(m, Mode::Open(Some(2)));
+        assert_eq!(press(m, &[Key::Down, Key::Down], "", &l).0, Mode::Open(Some(2)));
+        assert_eq!(press(m, &[Key::Up, Key::Up], "", &l).0, Mode::Open(Some(0)));
+    }
+
+    #[test]
+    fn enter_adds_the_lit_row_or_a_typed_name_and_says_why_it_cant() {
+        let l = lists(&[], &[]);
+        assert_eq!(press(Mode::Open(Some(2)), &[Key::Enter], "", &l).1, [Effect::Add("acme/web".into())]);
+        assert_eq!(press(Mode::Closed, &[Key::Enter], "other/lib", &l).1, [Effect::Add("other/lib".into())]);
+        assert_eq!(press(Mode::Closed, &[Key::Enter], "", &l).1, [Effect::Stay]);
+        assert_eq!(
+            press(Mode::Closed, &[Key::Enter], "not a repo", &l).1,
+            [Effect::Problem("“not a repo” is not owner/name.".into())]
+        );
+    }
+
+    #[test]
+    fn backspace_in_an_empty_field_removes_the_last_chip_and_edits_text_otherwise() {
+        let l = lists(&[], &["a/one", "a/two"]);
+        assert_eq!(press(Mode::Closed, &[Key::Backspace], "", &l), (Mode::Closed, vec![Effect::Remove(1)]));
+        assert_eq!(press(Mode::Open(None), &[Key::Backspace], "a/", &l).1, [Effect::Pass]);
+        assert_eq!(press(Mode::Closed, &[Key::Backspace], "", &lists(&[], &[])).1, [Effect::Pass]);
+        for k in [Key::Left, Key::Right, Key::Delete] {
+            assert_eq!(press(Mode::Closed, &[k], "a/", &l).1, [Effect::Pass], "{k:?} moves the caret in the text");
+        }
+    }
+
+    #[test]
+    fn left_from_an_empty_field_walks_the_chips_and_right_past_the_last_comes_back() {
+        let l = lists(&[], &["a/one", "a/two", "a/three"]);
+        assert_eq!(press(Mode::Open(Some(0)), &[Key::Left], "", &l).0, Mode::Chip(2));
+        assert_eq!(press(Mode::Chip(2), &[Key::Left, Key::Left, Key::Left], "", &l).0, Mode::Chip(0));
+        assert_eq!(press(Mode::Chip(0), &[Key::Right], "", &l).0, Mode::Chip(1));
+        assert_eq!(press(Mode::Chip(2), &[Key::Right], "", &l).0, Mode::Closed);
+        assert_eq!(press(Mode::Chip(1), &[Key::Escape], "", &l), (Mode::Closed, vec![Effect::Stay]));
+        assert_eq!(press(Mode::Chip(1), &[Key::Down], "", &l).0, Mode::Open(Some(0)));
+        assert_eq!(press(Mode::Chip(1), &[Key::Enter], "", &l), (Mode::Chip(1), vec![Effect::Stay]));
+    }
+
+    #[test]
+    fn a_chip_with_the_keyboard_is_removed_by_backspace_or_delete_and_the_keyboard_stays_on_a_neighbour() {
+        let three = lists(&[], &["a/one", "a/two", "a/three"]);
+        assert_eq!(press(Mode::Chip(1), &[Key::Backspace], "", &three), (Mode::Chip(0), vec![Effect::Remove(1)]));
+        assert_eq!(press(Mode::Chip(0), &[Key::Backspace], "", &three), (Mode::Chip(0), vec![Effect::Remove(0)]));
+        assert_eq!(press(Mode::Chip(1), &[Key::Delete], "", &three), (Mode::Chip(1), vec![Effect::Remove(1)]));
+        assert_eq!(press(Mode::Chip(2), &[Key::Delete], "", &three), (Mode::Chip(1), vec![Effect::Remove(2)]));
+        let one = lists(&[], &["a/one"]);
+        for k in [Key::Backspace, Key::Delete] {
+            assert_eq!(press(Mode::Chip(0), &[k], "", &one), (Mode::Closed, vec![Effect::Remove(0)]), "{k:?}");
+        }
     }
 }

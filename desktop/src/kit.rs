@@ -76,7 +76,7 @@ pub fn focusable(
     radius: Pixels,
     on: OnClick,
 ) -> Stateful<Div> {
-    let ring = SYSTEM_ACCENT.get().copied().filter(|c| crate::tokens::ring_holds(*c, t)).unwrap_or(t.focus);
+    let ring = ring(t);
     div()
         .id(id)
         .when(!SHEET_OPEN.get() || IN_SHEET.get(), |d| d.tab_index(0))
@@ -90,6 +90,25 @@ pub fn focusable(
         .cursor_pointer()
         .when(KEYBOARD.load(Ordering::Relaxed), |d| d.focus(move |s| s.border_color(ring)))
         .on_click(on)
+        .child(inner)
+}
+
+/// The focus ring's color: the system accent where it holds 3:1, else the theme's.
+pub fn ring(t: &Colors) -> Hsla {
+    SYSTEM_ACCENT.get().copied().filter(|c| crate::tokens::ring_holds(*c, t)).unwrap_or(t.focus)
+}
+
+/// `inner` in `focusable`'s ring frame, lit by the caller: for a part of a control that holds the keyboard while
+/// GPUI's focus stays on the control, such as a combobox's chip.
+pub fn ringed(t: &Colors, lit: bool, radius: Pixels, inner: impl IntoElement) -> Div {
+    div()
+        .flex()
+        .flex_none()
+        .m(-(RING_GAP + RING))
+        .p(RING_GAP)
+        .border(RING)
+        .border_color(if lit { ring(t) } else { ring(t).alpha(0.) })
+        .rounded(radius + RING_GAP + RING)
         .child(inner)
 }
 
