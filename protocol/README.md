@@ -46,6 +46,9 @@ AWAITING_APPROVAL PUBLISH RECONCILE COMPLETED FAILED SUPERSEDED`. `AWAITING_APPR
 parked for a human (publish mode `approval`); its `status` is still `RUNNING`. A `Finding.line` of `null` means a file-level finding.
 `Finding.unconfirmed` is `true` when the reviewer suspects the finding but could not show it from the cited code alone.
 The server omits it for a confirmed finding, and a client that predates it ignores it.
+`Pr.archivedAt` is the time a reader archived the PR. The server sends it only for an archived PR, so a PR that is not
+archived reads exactly as before, and a client that predates it ignores it. The server still sends archived PRs, their
+runs and their findings; a client leaves archived PRs out of its lists.
 
 ## Commands
 
@@ -62,11 +65,14 @@ the recorded `operationId` and does nothing again. A key in any other form is `I
 | `review.cancel` | `runId` | `review.cancel:<runId>` | `review.cancel:<runId>` |
 | `review.publish` | `runId`, `previewId`, `expectedHeadSha` | `review.publish:<runId>:<previewId>` | `review.publish:<runId>` |
 | `account.select` | `accountId` | `account.select:<accountId>` | `account.select:<journal seq>` |
+| `pr.archive` | `prId` | `pr.archive:<prId>` | `pr.archive:<journal seq>` |
+| `pr.unarchive` | `prId` | `pr.unarchive:<prId>` | `pr.unarchive:<journal seq>` |
 | `daemon.stop` | `pauseReviews` | `daemon.stop` | `daemon.stop` |
 | `settings.set` | `model` | `settings.set:<model>` | `settings.set:<model>` |
 
 `welcome.capabilities` lists what this daemon grants. A daemon in `read-only` mode (the default, or another pr-review
-holds the data dir, or the engine failed to open; `welcome.readOnlyReason` says which) grants `account.select` only.
+holds the data dir, or the engine failed to open; `welcome.readOnlyReason` says which) grants only the reader's own
+commands: `account.select`, `pr.archive` and `pr.unarchive`.
 A daemon started with `--allow-commands` or `control.allow_commands` runs in `engine` mode and grants the review
 commands, and `review.publish` only under `review.publish_mode: "approval"`. The `pr-review daemon` process in
 `engine` mode also grants `daemon.stop` and `settings.set`; a read-only daemon never does, because its data dir may belong to another
@@ -132,6 +138,16 @@ connection that is streaming (after `snapshot.get` or `resume`), for a `github.c
 now in state `ok`, and while no `GITHUB_TOKEN` or `GH_TOKEN` overrides the selection. Otherwise it answers `rejected` with
 `NOT_FOUND` (no such account) or `CONFLICT`. `accepted` only means the selection was journaled. The client shows the
 new selection when the `accounts.updated` event arrives, never on `accepted`. Tokens never cross the socket.
+
+## Archiving
+
+`pr.archive` and `pr.unarchive` are a reader preference, not a review action, so every daemon grants them, a read-only
+one included. They set or clear `Pr.archivedAt` and journal one row, which streams as `pr.updated` with the PR as it is
+now. Like `account.select`, they take effect by state, not by key: archiving an archived PR journals nothing and answers
+the `operationId` of the row that archived it, so a duplicate applies once, and archiving again after an unarchive is a
+new row. An unknown `prId` is `rejected` with `NOT_FOUND`. Archiving never touches a run: a review in progress goes on.
+A PR comes back only when a review is started on it: `review.start`, `review.again`, `review.retry`, and `review.add`
+of a PR already tracked (still `CONFLICT`, naming it) clear `archivedAt` and emit `pr.updated`.
 
 ## Setup checks
 

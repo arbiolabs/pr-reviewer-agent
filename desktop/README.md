@@ -40,6 +40,10 @@ Against a daemon started with `--allow-commands`, press ⌘N, or choose **Review
 
 With the reviewer stopped or offline, ⌘N still opens the sheet when the app can start the reviewer: ⏎ starts it, the sheet reads "Starting the reviewer, then adding …", and the PR is sent once the daemon answers. A start that fails says why in the sheet.
 
+### Archive a PR
+
+Press E on a PR's page, or choose **Archive** on its action bar or in the palette. The PR leaves Needs you, Done, the sidebar's repository lists and the live strip, and the next PR opens. **Archived** in the sidebar, **View → Archived** or ⌘3 lists the archived PRs; each row has **Unarchive**, and E on an archived PR's page unarchives it. A review running on the PR goes on, and starting a review on it brings it back. The daemon keeps the archive, so it survives a restart and every client sees it, and a read-only daemon allows it too.
+
 ### Start and stop the reviewer
 
 When nothing answers on the socket, the offline screen's primary action is **Start reviewer** (⌘R). The **Reviewer** menu, the palette and the Reviewer card in Settings also offer **Stop reviewer** and **Restart reviewer**. The card shows the state, the socket, the mode, how the daemon runs on this machine and where its log is. On a read-only daemon, stop and restart are off with the reason, because that daemon may belong to another process.
@@ -144,7 +148,7 @@ With `--socket`, the capture happens `--snapshot-after-ms` milliseconds after la
 | `goto:SCREEN` | Go to `inbox`, `review`, `diff`, `timeline` or `settings`. |
 | `type:TEXT` | Type TEXT into the focused input, one character at a time. TEXT cannot contain a comma. |
 | an action name | Do what the key for that action does. |
-| `tab:done`, `tab:queue` | Show the done list or the queue. |
+| `tab:done`, `tab:queue`, `tab:archived` | Show the done list, the queue or the archived list. |
 | `palette:TEXT` | Open the command palette with TEXT typed. |
 | `keys` | Open the shortcut sheet. |
 | `confirm-post` | Open the sheet that asks before posting the proof in front. |
