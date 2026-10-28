@@ -758,6 +758,13 @@ fn pr_actions(s: &Shell, pr: &Pr, run: Option<&Run>, cx: &Context<Shell>) -> Bar
     if pr.lifecycle == Lifecycle::Active && run.is_some_and(|r| r.parked()) {
         bar.lead.push(mutation_item(s, "a-cancel", "Cancel", "C", Tone::Ghost, Mutation::Cancel, cx));
     }
+    // A reader preference, not a review command: a read-only daemon grants it, so it never wears the lock.
+    let label = if pr.archived() { "Unarchive" } else { "Archive" };
+    let why = write_block(m, "pr.archive");
+    bar.trail.push(Item {
+        why: why.map(|w| format!("Can't {}: {w}", label.to_lowercase())),
+        ..Item::new("a-archive", label, "E", Tone::Ghost, on(cx, |s, cx| s.archive(cx)).filter(|_| why.is_none()))
+    });
     bar.trail.push(Item::new("a-gh", "Open on GitHub", "⌘⇧O", Tone::Ghost, on(cx, |s, cx| s.open_github(cx))));
     bar
 }

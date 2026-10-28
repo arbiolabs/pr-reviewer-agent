@@ -70,7 +70,7 @@ function stop(c: TestClient, pauseReviews: boolean): Promise<Result> {
 it("stops on daemon.stop: replies first, then closes, removes the socket, frees the data dir and exits 0", async () => {
   const fixture = createFixture();
   const d = await daemon(fixture, []);
-  expect(d.welcome.capabilities).toEqual(["account.select", "review.add", "review.start", "review.again", "review.retry", "review.cancel", "settings.set", "daemon.stop"]);
+  expect(d.welcome.capabilities).toEqual(["account.select", "pr.archive", "pr.unarchive", "review.add", "review.start", "review.again", "review.retry", "review.cancel", "settings.set", "daemon.stop"]);
   expect(await stop(d.c, false)).toEqual({ type: "command.result", requestId: expect.any(String), status: "accepted", operationId: "daemon.stop" });
   await d.c.closed;
   expect(await d.exit).toBe(0);
@@ -86,7 +86,7 @@ it("is not granted by a read-only daemon, which may belong to another process, a
   const server = await startControlServer({ socketPath: join(mkdtempSync(join(tmpdir(), "ctl-")), "run", "s.sock"), source, stop: () => stops++ });
   cleanup.push(() => server.close());
   const { c, welcome } = await streaming(server.path);
-  expect(welcome).toMatchObject({ mode: "read-only", capabilities: ["account.select"] });
+  expect(welcome).toMatchObject({ mode: "read-only", capabilities: ["account.select", "pr.archive", "pr.unarchive"] });
   expect(await stop(c, true)).toMatchObject({ status: "rejected", code: "CAPABILITY_DENIED", message: `daemon.stop is not available: ${COMMANDS_OFF}` });
   expect((await streaming(server.path)).welcome).toMatchObject({ type: "welcome" });
   expect(stops).toBe(0);

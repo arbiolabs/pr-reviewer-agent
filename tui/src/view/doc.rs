@@ -107,7 +107,7 @@ pub fn screen(c: &Ctx, f: &mut Frame, area: Rect) {
     let Some(doc_area) = doc_area else { return };
     let col = column(doc_area);
     let Some(pr) = c.m.selected_pr() else {
-        let total = c.m.domain.prs.len();
+        let total = c.m.pr_list_total();
         let empty = match rail {
             // The rail already says nothing matches; the column says how to change that.
             Some(_) if total > 0 => vec![("/ edits the search".to_string(), Role::Muted)],

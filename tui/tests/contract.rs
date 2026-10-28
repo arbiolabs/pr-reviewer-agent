@@ -156,8 +156,8 @@ fn m3_messages_parse_into_the_client_enums() {
 
     for (name, mode, granted) in [
         ("server.welcome", None, 0),
-        ("server.welcome.engine", Some(DaemonMode::Engine), 7),
-        ("server.welcome.read-only", Some(DaemonMode::ReadOnly), 1),
+        ("server.welcome.engine", Some(DaemonMode::Engine), 9),
+        ("server.welcome.read-only", Some(DaemonMode::ReadOnly), 3),
     ] {
         let ServerMessage::Welcome { mode: m, capabilities, read_only_reason, .. } =
             ServerMessage::parse(&read(name)).unwrap()
@@ -167,6 +167,25 @@ fn m3_messages_parse_into_the_client_enums() {
         assert_eq!((m, capabilities.len()), (mode, granted), "{name}");
         assert_eq!(read_only_reason.is_some(), mode == Some(DaemonMode::ReadOnly), "{name}");
     }
+}
+
+#[test]
+fn archive_commands_round_trip_and_archived_at_is_optional_on_a_pr() {
+    let read = |name: &str| fs::read_to_string(protocol_dir().join(format!("fixtures/{name}.json"))).unwrap();
+    for (name, archive) in [("client.command.pr.archive", true), ("client.command.pr.unarchive", false)] {
+        let json = read(name);
+        let ClientMessage::Command(c) = serde_json::from_str(&json).unwrap() else { panic!() };
+        assert!(matches!((&c.command, archive), (Command::Archive(_), true) | (Command::Unarchive(_), false)));
+        assert_eq!(c.idempotency_key, c.command.idempotency_key(), "{name}");
+        let back: serde_json::Value = serde_json::to_value(ClientMessage::Command(c)).unwrap();
+        assert_eq!(back, serde_json::from_str::<serde_json::Value>(&json).unwrap(), "{name}");
+    }
+    let pr = |name: &str| match sequenced(ServerMessage::parse(&read(name)).unwrap()).body {
+        EventBody::PrUpdated(p) => p,
+        other => panic!("{other:?}"),
+    };
+    assert!(pr("server.event.pr.updated.archived").archived());
+    assert!(!pr("server.event.pr.updated").archived());
 }
 
 #[test]

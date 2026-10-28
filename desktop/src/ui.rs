@@ -39,6 +39,7 @@ gpui_kit::actions!(
         GoBack,
         NeedsYou,
         DoneList,
+        ArchivedList,
         FocusNext,
         FocusPrev,
         AddPr,
@@ -64,6 +65,7 @@ pub fn bindings() -> Vec<KeyBinding> {
         KeyBinding::new("cmd-[", GoBack, None),
         KeyBinding::new("cmd-1", NeedsYou, None),
         KeyBinding::new("cmd-2", DoneList, None),
+        KeyBinding::new("cmd-3", ArchivedList, None),
         KeyBinding::new("cmd-n", AddPr, None),
         KeyBinding::new("cmd-v", Paste, None),
         // Ours, not the kit root's: the window records that the keyboard owns focus, so the ring shows.
@@ -92,6 +94,7 @@ pub fn menus(chosen: tokens::Choice) -> Vec<Menu> {
         Menu::new("View").items([
             MenuItem::action("Needs You", NeedsYou),
             MenuItem::action("Done", DoneList),
+            MenuItem::action("Archived", ArchivedList),
             MenuItem::action("Back", GoBack),
             MenuItem::separator(),
             MenuItem::action("Command Palette", Palette),
@@ -166,6 +169,14 @@ impl Arm {
     }
 }
 
+/// The list the home shows beside the PR page.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum List {
+    Queue,
+    Done,
+    Archived,
+}
+
 pub struct Shell {
     pub model: Model,
     pub cmds: mpsc::Sender<NetCmd>,
@@ -173,7 +184,8 @@ pub struct Shell {
     pub reviewer: crate::reviewer::Reviewer,
     /// The offline page shows the command that starts the daemon by hand.
     pub show_command: bool,
-    /// The home shows the done list instead of the queue.
+    /// The home shows the done list instead of the queue. The archived list is the reducer's `show_archived`, so
+    /// its cursor rule and the window read one flag.
     pub done_tab: bool,
     pub overlay: Option<Overlay>,
     pub focus: FocusHandle,
@@ -281,7 +293,7 @@ impl Shell {
         };
         for d in desk {
             match d {
-                Desk::Done(on) => s.done_tab = *on,
+                Desk::Tab(list) => s.set_tab(*list, cx),
                 Desk::Palette(q) => s.overlay = Some(Overlay::Palette { query: q.clone(), selected: 0 }),
                 Desk::Keys => s.overlay = Some(Overlay::Keys),
                 Desk::ConfirmPost => s.post(false, cx),
@@ -304,7 +316,29 @@ impl Shell {
     /// The home shows the done list: the reader asked for it, or a live queue is empty and the done list is what
     /// there is to show, under a line that says the reader is clear.
     pub fn shows_done(&self) -> bool {
-        self.done_tab || (queue::stage(&self.model) == Stage::Ready && queue::cards(&self.model).is_empty())
+        !self.model.ui.show_archived
+            && (self.done_tab || (queue::stage(&self.model) == Stage::Ready && queue::cards(&self.model).is_empty()))
+    }
+
+    /// The list the home shows now.
+    pub fn list(&self) -> List {
+        if self.model.ui.show_archived {
+            List::Archived
+        } else if self.shows_done() {
+            List::Done
+        } else {
+            List::Queue
+        }
+    }
+
+    /// The PRs of `list`, in the order the home shows them.
+    fn list_prs(&self, list: List) -> Vec<PrId> {
+        let m = &self.model;
+        match list {
+            List::Queue => queue::cards(m).iter().filter_map(|c| c.pr().map(|p| p.id.clone())).collect(),
+            List::Done => queue::done(m).iter().map(|(p, _)| p.id.clone()).collect(),
+            List::Archived => m.archived().iter().map(|p| p.id.clone()).collect(),
+        }
     }
 
     /// A color for the sidebar and the title bar: a little see-through where the window blurs what is behind it,
@@ -378,6 +412,7 @@ impl Shell {
             c => (c.pr().map(|p| p.id.clone()).unwrap_or_else(|| unreachable!("only setup has no PR")), false),
         };
         self.done_tab = false;
+        self.model.ui.show_archived = false;
         self.select_pr(pr, cx);
         if approve {
             self.send(Msg::Pick(Hit::Ready), cx);
@@ -543,13 +578,12 @@ impl Shell {
     }
 
     fn move_card(&mut self, delta: isize, cx: &mut Context<Self>) {
-        if self.done_tab {
-            let done = queue::done(&self.model);
-            let at = done.iter().position(|(p, _)| Some(&p.id) == self.model.ui.selected_pr.as_ref());
-            let next = at.map_or(0, |i| (i as isize + delta).clamp(0, done.len() as isize - 1) as usize);
-            if let Some((p, _)) = done.get(next) {
-                let id = p.id.clone();
-                self.select_pr(id, cx);
+        if let list @ (List::Done | List::Archived) = self.list() {
+            let ids = self.list_prs(list);
+            let at = ids.iter().position(|id| Some(id) == self.model.ui.selected_pr.as_ref());
+            let next = at.map_or(0, |i| (i as isize + delta).clamp(0, ids.len() as isize - 1) as usize);
+            if let Some(id) = ids.get(next) {
+                self.select_pr(id.clone(), cx);
             }
             return;
         }
@@ -565,11 +599,30 @@ impl Shell {
         self.select_card(next, cx);
     }
 
-    pub fn set_tab(&mut self, done: bool, cx: &mut Context<Self>) {
-        self.done_tab = done;
+    pub fn set_tab(&mut self, list: List, cx: &mut Context<Self>) {
+        self.done_tab = list == List::Done;
+        self.model.ui.show_archived = list == List::Archived;
         self.close_modals(cx);
         self.home(cx);
+        // An archived PR's page shows only beside the archived list, and only an archived one shows there.
+        let fits = self.model.selected_pr().is_some_and(|p| p.archived() == (list == List::Archived));
+        if !fits {
+            match self.list_prs(list).first().cloned() {
+                Some(id) => self.select_pr(id, cx),
+                None => self.model.ui.selected_pr = None,
+            }
+        }
         cx.notify();
+    }
+
+    /// E or the PR page's Archive: archives the open PR, or unarchives it beside the archived list. It hides
+    /// nothing else and undoes in one key, so it asks nothing; the reducer moves the selection on once the daemon
+    /// confirms.
+    pub fn archive(&mut self, cx: &mut Context<Self>) {
+        if self.model.ui.screen == Screen::Inbox {
+            self.act(Action::Goto(Screen::Review), cx);
+        }
+        self.act(Action::Archive, cx);
     }
 
     fn on_key(&mut self, ev: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
@@ -706,6 +759,7 @@ impl Shell {
                     (_, "S") => Action::Mutation(Mutation::Again),
                     (_, "c") => Action::Mutation(Mutation::Cancel),
                     (_, "p") => Action::Mutation(Mutation::Publish),
+                    (_, "e") if modal.is_none() => return self.archive(cx),
                     _ => return,
                 }
             }
@@ -768,10 +822,10 @@ impl Render for Shell {
                 .flex_1()
                 .min_h_0()
                 .when(stage == Stage::Ready && !finding_open, |d| {
-                    d.child(if self.shows_done() {
-                        crate::cards::done_column(self, &t, cx)
-                    } else {
-                        crate::cards::queue_column(self, &t, cx)
+                    d.child(match self.list() {
+                        List::Archived => crate::cards::archived_column(self, &t, cx),
+                        List::Done => crate::cards::done_column(self, &t, cx),
+                        List::Queue => crate::cards::queue_column(self, &t, cx),
                     })
                 })
                 .when(stage == Stage::Connecting, |d| d.child(crate::cards::skeleton_column(&t)))
@@ -838,8 +892,9 @@ impl Render for Shell {
                 let text: String = text.chars().filter(|c| !c.is_control()).collect();
                 s.edit_add(|u| u.push_str(text.trim()), cx);
             }))
-            .on_action(cx.listener(|s, _: &NeedsYou, _, cx| s.set_tab(false, cx)))
-            .on_action(cx.listener(|s, _: &DoneList, _, cx| s.set_tab(true, cx)))
+            .on_action(cx.listener(|s, _: &NeedsYou, _, cx| s.set_tab(List::Queue, cx)))
+            .on_action(cx.listener(|s, _: &DoneList, _, cx| s.set_tab(List::Done, cx)))
+            .on_action(cx.listener(|s, _: &ArchivedList, _, cx| s.set_tab(List::Archived, cx)))
             .on_action(cx.listener(|_, _: &CloseWindow, window, _| window.remove_window()))
             .relative()
             .size_full()
@@ -928,6 +983,10 @@ fn titlebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         (Screen::Diff, _) => (format!("{number} diff"), pr_title),
         (Screen::Timeline, _) => (format!("{number} timeline"), pr_title),
         (Screen::Settings, _) => ("Settings".into(), "What the reviewer needs and how it reviews".into()),
+        _ if s.list() == List::Archived => (
+            "Archived".into(),
+            format!("{} out of your lists until you unarchive or review one.", queue::count(m.archived().len(), "PR")),
+        ),
         _ if s.done_tab && !queue::cards(m).is_empty() => {
             ("Done".into(), format!("{} with nothing left for you.", queue::count(queue::done(m).len(), "PR")))
         }
@@ -1204,9 +1263,9 @@ fn sidebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
             "Needs you",
             (!dim).then_some(queue::decisions(&cards)),
             t.accent,
-            home && !s.shows_done() && !setup_shown(s),
+            home && s.list() == List::Queue && !setup_shown(s),
             dim,
-            click(cx, |s, cx| s.set_tab(false, cx)),
+            click(cx, |s, cx| s.set_tab(List::Queue, cx)),
         ))
         .child(nav_item(
             t,
@@ -1215,9 +1274,20 @@ fn sidebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
             "Done",
             (!dim).then_some(done.len()),
             t.ok,
-            home && s.shows_done(),
+            home && s.list() == List::Done,
             dim,
-            click(cx, |s, cx| s.set_tab(true, cx)),
+            click(cx, |s, cx| s.set_tab(List::Done, cx)),
+        ))
+        .child(nav_item(
+            t,
+            "nav-archived",
+            IconName::Archive,
+            "Archived",
+            (!dim).then_some(m.archived().len()),
+            t.muted,
+            home && s.list() == List::Archived,
+            dim,
+            click(cx, |s, cx| s.set_tab(List::Archived, cx)),
         ))
         .child(nav_item(
             t,
@@ -1383,6 +1453,7 @@ fn pr_row(s: &Shell, t: &Colors, pr: &Pr, state: RowState, on: bool, cx: &Contex
             radius::SM,
             Box::new(cx.listener(move |s, _: &ClickEvent, _, cx| {
                 s.done_tab = queue::done(&s.model).iter().any(|(p, _)| p.id == id);
+                s.model.ui.show_archived = false;
                 s.select_pr(id.clone(), cx)
             })),
         ),

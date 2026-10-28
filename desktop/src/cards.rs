@@ -456,6 +456,84 @@ fn clear(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         })
 }
 
+/// The archived PRs, each with Unarchive. Archiving is the reader's preference, so a read-only daemon grants it too.
+pub fn archived_column(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
+    let m = &s.model;
+    let archived = m.archived();
+    if archived.is_empty() {
+        let empty = div()
+            .pt(px(48.))
+            .text_center()
+            .text_size(text::BODY)
+            .text_color(t.muted)
+            .child("Archived PRs collect here. E archives the PR you are reading.");
+        return column(t, "archived", div().child(empty));
+    }
+    let why = pr_review_tui::update::write_block(m, "pr.unarchive");
+    let mut col = div().child(overline(t, "Out of your lists"));
+    for p in archived {
+        let selected = m.ui.selected_pr.as_ref() == Some(&p.id);
+        let (id, again) = (p.id.clone(), p.id.clone());
+        let unarchive = button(
+            t,
+            SharedString::from(format!("unarchive-{}", p.number)),
+            "Unarchive",
+            None,
+            Tone::Secondary,
+            why.is_none().then(|| {
+                Box::new(cx.listener(move |s, _: &ClickEvent, _, cx| {
+                    s.select_pr(again.clone(), cx);
+                    s.archive(cx);
+                })) as crate::kit::OnClick
+            }),
+        );
+        let unarchive = match why {
+            Some(why) => crate::kit::tip(unarchive, format!("Can't unarchive: {why}")),
+            None => crate::kit::tip(unarchive, "Back to Needs you and Done (E on its page)"),
+        };
+        col = col.child(
+            div()
+                .id(SharedString::from(format!("archived-{}", p.number)))
+                .flex()
+                .items_center()
+                .gap(space::S3)
+                .p(space::S3)
+                .rounded(radius::LG)
+                .border_1()
+                .border_color(if selected { t.accent.alpha(0.75) } else { t.border })
+                .bg(if selected { t.selected } else { t.surface })
+                .cursor_pointer()
+                .hover(move |d| d.bg(crate::kit::lift(t, if selected { t.selected } else { t.surface })))
+                .active(|d| d.bg(t.press))
+                .on_click(cx.listener(move |s, _: &ClickEvent, _, cx| s.select_pr(id.clone(), cx)))
+                .child(icon(IconName::Archive, px(15.), t.muted))
+                .child(
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap(px(3.))
+                        .flex_1()
+                        .min_w_0()
+                        .child(
+                            div()
+                                .text_size(text::BODY)
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .text_ellipsis()
+                                .line_clamp(2)
+                                .child(format!("#{} {}", p.number, p.title)),
+                        )
+                        .child(div().text_size(text::SMALL).text_color(t.muted).child(format!(
+                            "{} · {}",
+                            p.repository,
+                            queue::outcome(m, p, m.domain.latest_run(&p.id))
+                        ))),
+                )
+                .child(unarchive),
+        );
+    }
+    column(t, "archived", col)
+}
+
 pub fn done_column(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
     let m = &s.model;
     let done = queue::done(m);

@@ -21,8 +21,8 @@ export type DaemonDeps = {
 export const COMMANDS_OFF = "review commands are off; start the daemon with --allow-commands or set control.allow_commands";
 
 /**
- * Read-only by default (TUI_SPEC §15.2): the daemon takes no lock, runs no task and grants only `account.select`.
- * With commands enabled it hosts the engine when it can take the data-dir lock, and stays read-only otherwise (another
+ * Read-only by default (TUI_SPEC §15.2): the daemon takes no lock, runs no task and grants only the reader's own
+ * commands, `account.select`, `pr.archive` and `pr.unarchive`. With commands enabled it hosts the engine when it can take the data-dir lock, and stays read-only otherwise (another
  * pr-review holds the lock, or the engine fails to open for another reason, no model say), saying why in `welcome` and
  * on every command.
  */

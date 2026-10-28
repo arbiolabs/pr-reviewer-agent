@@ -10,6 +10,8 @@ use pr_review_tui::update::{Msg, NetEvent};
 use pr_review_tui::view::Hit;
 use tokio::sync::mpsc;
 
+use crate::ui::List;
+
 /// The TUI's tick cadence.
 pub const TICK_MS: u64 = 125;
 
@@ -31,8 +33,8 @@ pub enum Step {
 /// The desktop's own view state: which list the home shows and what floats over it.
 #[derive(Clone, Debug, PartialEq)]
 pub enum Desk {
-    /// `tab:done` or `tab:queue`.
-    Done(bool),
+    /// `tab:queue`, `tab:done` or `tab:archived`.
+    Tab(List),
     /// `palette:QUERY`: the command palette, open with QUERY typed.
     Palette(String),
     /// `keys`: the shortcut sheet.
@@ -77,6 +79,7 @@ const NAMES: &[(&str, Action)] = &[
     ("cycle-category", Action::CycleCategory), ("cycle-phase", Action::CyclePhase),
     ("backspace", Action::InputBackspace), ("submit", Action::InputSubmit), ("cancel-input", Action::InputCancel),
     ("confirm", Action::Confirm), ("open-url", Action::OpenUrl), ("toggle-raw", Action::ToggleRaw),
+    ("archive", Action::Archive),
 ];
 
 const SCREENS: &[(&str, Screen)] = &[
@@ -106,10 +109,12 @@ pub fn parse(s: &str) -> Result<Vec<Step>, String> {
                 n => steps.push(Step::Desk(Desk::Scrub(n as usize))),
             },
             Some(("span", v)) => steps.push(Step::Desk(Desk::Span(v.into()))),
-            Some(("tab", v)) => match v {
-                "done" | "queue" => steps.push(Step::Desk(Desk::Done(v == "done"))),
-                _ => return Err(format!("{t:?}: tabs are queue and done")),
-            },
+            Some(("tab", v)) => steps.push(Step::Desk(Desk::Tab(match v {
+                "queue" => List::Queue,
+                "done" => List::Done,
+                "archived" => List::Archived,
+                _ => return Err(format!("{t:?}: tabs are queue, done and archived")),
+            }))),
             Some(("palette", v)) => steps.push(Step::Desk(Desk::Palette(v.into()))),
             Some(("reviewer", v)) => steps.push(Step::Desk(Desk::Reviewer(match v {
                 "stopped" => Staged::Stopped,
@@ -286,6 +291,11 @@ mod tests {
                 Step::Add("acme/web#7".into())
             ]
         );
+        assert_eq!(
+            parse("tab:archived,archive").unwrap(),
+            [Step::Desk(Desk::Tab(List::Archived)), Step::Act(Action::Archive)]
+        );
+        assert!(parse("tab:trash").is_err());
         assert!(parse("reviewer:asleep").is_err());
         assert!(parse("sideways").unwrap_err().contains("known: quit, up"));
         assert!(parse("goto:nowhere").is_err());

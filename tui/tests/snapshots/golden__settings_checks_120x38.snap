@@ -1,5 +1,6 @@
 ---
 source: tests/golden.rs
+assertion_line: 104
 expression: text
 ---
   pr-review · 0 PRs tracked · nothing running                                                                   ● live
@@ -28,7 +29,7 @@ expression: text
       protocol              client 1, server 1
       server version        0.1.0
       session               session-1
-      capabilities          account.select
+      capabilities          account.select, pr.archive, pr.unarchive
       mode                  read-only: review commands are off; start the daemon with --allow-commands or set contr…
 
     Stream

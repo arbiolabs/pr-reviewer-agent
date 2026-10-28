@@ -26,9 +26,9 @@ impl Hint {
 /// A start on an unreviewed PR is the page's one action. On a reviewed head the daemon most likely refuses a start,
 /// so s shares its hint with S, which reviews the head again, as `s/S` and goes early. S alone (a parked run, which
 /// no start reaches) ranks with the run's other actions.
-pub const RANK: [&str; 28] = [
+pub const RANK: [&str; 30] = [
     "?", "Esc", "n/Esc", "y", "Enter", "Enter/l", "j/k", "p", "s", "q", "R", "S", "c", "d", "n/N", "h", "/", ":",
-    "J/K", "m", "o", "t", "w", "f", "v", "P", "s/S", "r",
+    "J/K", "m", "o", "t", "w", "f", "v", "P", "s/S", "r", "e", "E",
 ];
 
 fn rank(keys: &str) -> usize {
@@ -117,6 +117,9 @@ pub fn offered(m: &Model) -> Vec<Hint> {
                 offer(u::can_mutate(m, Mutation::Cancel), "c", "cancel review");
                 offer(u::can_diff(m), "d", "diff");
                 offer(u::can_scroll_doc(m), "J/K", "scroll");
+                let archived = m.selected_pr().is_some_and(|p| p.archived());
+                offer(u::can_archive(m), "e", if archived { "unarchive" } else { "archive" });
+                offer(u::can_show_archived(m), "E", if m.ui.show_archived { "tracked" } else { "archived" });
             }
             let back = if screen == Screen::Review { "pull requests" } else { "files" };
             offer(!rail && u::can_focus(m, Pane::Sidebar), "h", back);

@@ -508,7 +508,7 @@ describe("account.select", () => {
   it("rejects before streaming, then selects through the journal; the client sees the selection only in accounts.updated", async () => {
     const gh = fakeGh();
     const d = await accountsDaemon({ PATH: gh.dir });
-    expect(d.c.messages[0]).toMatchObject({ type: "welcome", capabilities: ["account.select"] });
+    expect(d.c.messages[0]).toMatchObject({ type: "welcome", capabilities: ["account.select", "pr.archive", "pr.unarchive"] });
     expect(await d.select("github.com/octo-work", "early")).toMatchObject({ status: "rejected", code: "CONFLICT" });
 
     d.c.send({ type: "snapshot.get", requestId: "s" });
@@ -587,6 +587,53 @@ describe("account.select", () => {
     expect(d.dbDump()).not.toContain(secret);
   }, 30_000);
 });
+
+it("pr.archive and pr.unarchive on a read-only daemon: streamed as pr.updated, once per change, kept across a restart", async () => {
+  const dataDir = mkdtempSync(join(tmpdir(), "ctl-archive-"));
+  const store = AppStore.open(join(dataDir, "app.sqlite"));
+  const prId = store.upsertPull(createFixture().pull);
+  store.close();
+  const server = await daemon(dataDir);
+  const c = await attach(server.path);
+  expect(c.messages[0]).toMatchObject({ type: "welcome", mode: "read-only", capabilities: ["account.select", "pr.archive", "pr.unarchive"] });
+  let raw = "";
+  c.socket.on("data", (chunk) => (raw += chunk));
+  c.send({ type: "snapshot.get", requestId: "s" });
+  await c.waitFor((m) => m.type === "snapshot");
+  expect(raw).not.toContain("archivedAt");
+
+  let n = 0;
+  const send = (command: "pr.archive" | "pr.unarchive", id = prId) => {
+    const requestId = `r${++n}`;
+    c.send({ type: "command", requestId, command, params: { prId: id }, idempotencyKey: `${command}:${id}` });
+    return c.waitFor<Extract<ServerMessage, { type: "command.result" }>>((m) => m.type === "command.result" && m.requestId === requestId);
+  };
+  const updates = () => c.events().filter((e) => e.eventType === "pr.updated").map((e) => [e.sequence, (e.data as { id: string }).id, (e.data as { archivedAt?: string }).archivedAt ?? null]);
+
+  expect(await send("pr.archive")).toMatchObject({ status: "accepted", operationId: "pr.archive:1" });
+  expect(await send("pr.archive")).toMatchObject({ status: "accepted", operationId: "pr.archive:1" });
+  expect(await send("pr.unarchive")).toMatchObject({ status: "accepted", operationId: "pr.unarchive:2" });
+  expect(await send("pr.archive")).toMatchObject({ status: "accepted", operationId: "pr.archive:3" });
+  expect(await send("pr.archive", "nope")).toMatchObject({ status: "rejected", code: "NOT_FOUND", message: "no PR nope" });
+  await c.waitFor(() => updates().length === 3);
+  const reader = AppDbSource.open(dataDir, { PATH: "" });
+  cleanup.push(() => reader.close());
+  const now = reader.snapshot().prs[0]!.archivedAt;
+  expect(updates()).toEqual([
+    [1, prId, expect.any(String)],
+    [2, prId, null],
+    [3, prId, now],
+  ]);
+  // A replay carries the PR as it is now, so a client resuming from any point converges on the latest state.
+  expect(reader.eventsAfter(0, 10).map((e) => (e.data as { archivedAt?: string }).archivedAt)).toEqual([now, now, now]);
+
+  await server.close();
+  const restarted = await daemon(dataDir);
+  const again = await attach(restarted.path);
+  again.send({ type: "snapshot.get", requestId: "s2" });
+  const snap = await again.waitFor<Extract<ServerMessage, { type: "snapshot" }>>((m) => m.type === "snapshot");
+  expect(snap.prs.map((p) => [p.id, p.archivedAt])).toEqual([[prId, now]]);
+}, 30_000);
 
 it("produced every server message and event type, each passing the v1 schema", () => {
   expect([...produced].sort()).toEqual(

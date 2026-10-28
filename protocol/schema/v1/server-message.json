@@ -164,6 +164,10 @@
                   "CLOSED",
                   "MERGED"
                 ]
+              },
+              "archivedAt": {
+                "type": "string",
+                "description": "RFC 3339 UTC timestamp: when a reader archived the PR; absent unless it is archived, and cleared when a review is started on it"
               }
             }
           }
@@ -493,6 +497,10 @@
                         "CLOSED",
                         "MERGED"
                       ]
+                    },
+                    "archivedAt": {
+                      "type": "string",
+                      "description": "RFC 3339 UTC timestamp: when a reader archived the PR; absent unless it is archived, and cleared when a review is started on it"
                     }
                   }
                 }
@@ -2268,6 +2276,10 @@
                               "CLOSED",
                               "MERGED"
                             ]
+                          },
+                          "archivedAt": {
+                            "type": "string",
+                            "description": "RFC 3339 UTC timestamp: when a reader archived the PR; absent unless it is archived, and cleared when a review is started on it"
                           }
                         }
                       }

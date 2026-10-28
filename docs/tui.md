@@ -116,6 +116,8 @@ result. `pr-review-tui --playback protocol/playback/setup.ndjson` shows a missin
 | `s` | Start a review of the selected PR at its head |
 | `R` | Retry the selected PR's failed run |
 | `c` | Cancel the selected PR's running or parked review |
+| `e` | Archive the PR on the Review page, or unarchive an archived one. An archived PR leaves the PR list. |
+| `E` | Switch the PR list between the tracked PRs and the archived ones |
 | `p` | Preview the review that a parked run would publish |
 | `y` | Confirm, only in a confirmation panel or the publication preview |
 | `o` | Open the published review in the browser, from the publication preview |

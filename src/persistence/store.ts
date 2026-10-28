@@ -59,6 +59,8 @@ export type PullRow = {
   repo_full_name: string;
   /** NULL on rows written before migration 054 until GitHub reports the PR again. */
   title: string | null;
+  /** When a reader archived the PR (migration 059); NULL when it is not archived. */
+  archived_at: string | null;
 };
 
 export type Snapshot = {
@@ -455,6 +457,26 @@ export class AppStore {
       for (const [key, value] of Object.entries(meta)) this.db.prepare("INSERT INTO meta (key, value) VALUES (?, ?) ON CONFLICT (key) DO UPDATE SET value = excluded.value").run(key, value);
       const row = this.db.prepare("INSERT INTO audit_events (revision_id, from_state, event, to_state, detail, at) VALUES (NULL, '-', ?, '-', ?, ?) RETURNING seq").get(event, detail, now()) as { seq: number };
       return row.seq;
+    });
+  }
+
+  /**
+   * Archive or unarchive a PR, journaling a revision-less PR_ARCHIVED or PR_UNARCHIVED row whose detail is the PR id.
+   * Returns the seq of the row that put the PR in that state, so a repeat answers it and journals nothing (0 for a PR
+   * never archived), or undefined for an unknown PR.
+   */
+  setArchived(prId: string, archived: boolean): number | undefined {
+    return this.tx(() => {
+      const pull = this.pullById(prId);
+      if (!pull) return undefined;
+      const event = archived ? "PR_ARCHIVED" : "PR_UNARCHIVED";
+      if ((pull.archived_at !== null) === archived) {
+        const last = this.db.prepare("SELECT max(seq) AS seq FROM audit_events WHERE revision_id IS NULL AND event = ? AND detail = ?").get(event, prId) as { seq: number | null };
+        return last.seq ?? 0;
+      }
+      const at = now();
+      this.db.prepare("UPDATE pull_requests SET archived_at = ? WHERE id = ?").run(archived ? at : null, prId);
+      return (this.db.prepare("INSERT INTO audit_events (revision_id, from_state, event, to_state, detail, at) VALUES (NULL, '-', ?, '-', ?, ?) RETURNING seq").get(event, prId, at) as { seq: number }).seq;
     });
   }
 

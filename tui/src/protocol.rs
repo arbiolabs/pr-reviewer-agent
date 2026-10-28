@@ -248,7 +248,7 @@ pub enum AccountState {
 }
 
 /// `welcome.mode`: an engine daemon may grant the review commands; a read-only one (another pr-review holds the
-/// data dir) grants `account.select` only.
+/// data dir) grants only the reader's commands: `account.select`, `pr.archive` and `pr.unarchive`.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "kebab-case")]
 pub enum DaemonMode {
@@ -383,6 +383,14 @@ pub struct Pr {
     pub head_sha: Sha,
     pub base_sha: Sha,
     pub lifecycle: Lifecycle,
+    /// When a reader archived it; `None` unless it is archived.
+    pub archived_at: Option<Text>,
+}
+
+impl Pr {
+    pub fn archived(&self) -> bool {
+        self.archived_at.is_some()
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Deserialize)]
@@ -883,6 +891,9 @@ pub enum Command {
     Retry(RunParams),
     Publish(PublishParams),
     SelectAccount(AccountParams),
+    /// Granted by every daemon, a read-only one included: archiving is the reader's preference, not a review action.
+    Archive(PrParams),
+    Unarchive(PrParams),
     /// Granted only by a daemon in engine mode; the desktop sends it to stop the reviewer.
     StopDaemon(StopParams),
     /// Granted only by a daemon in engine mode; the desktop's Settings sends it to change the review model.
@@ -900,6 +911,8 @@ impl Command {
             Command::Retry(_) => "review.retry",
             Command::Publish(_) => "review.publish",
             Command::SelectAccount(_) => "account.select",
+            Command::Archive(_) => "pr.archive",
+            Command::Unarchive(_) => "pr.unarchive",
             Command::StopDaemon(_) => "daemon.stop",
             Command::SetModel(_) => "settings.set",
         }
@@ -915,6 +928,8 @@ impl Command {
             Command::Retry(_) => "retry",
             Command::Publish(_) => "publish",
             Command::SelectAccount(_) => "switch accounts",
+            Command::Archive(_) => "archive",
+            Command::Unarchive(_) => "unarchive",
             Command::StopDaemon(_) => "stop the reviewer",
             Command::SetModel(_) => "change the model",
         }
@@ -930,6 +945,8 @@ impl Command {
             Command::Retry(p) => format!("review.retry:{}", p.run_id),
             Command::Publish(p) => format!("review.publish:{}:{}", p.run_id, p.preview_id),
             Command::SelectAccount(p) => format!("account.select:{}", p.account_id),
+            Command::Archive(p) => format!("pr.archive:{}", p.pr_id),
+            Command::Unarchive(p) => format!("pr.unarchive:{}", p.pr_id),
             Command::StopDaemon(_) => "daemon.stop".into(),
             Command::SetModel(p) => format!("settings.set:{}", p.model),
         }
@@ -972,6 +989,12 @@ pub struct AccountParams {
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct PrParams {
+    pub pr_id: PrId,
+}
+
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
 pub struct StopParams {
     /// Stop even while reviews run: they pause and resume on the next start. Without it, a running review makes the
     /// daemon refuse with `CONFLICT`.
@@ -1005,6 +1028,8 @@ impl TryFrom<RawCommand> for CommandRequest {
             "review.retry" => Command::Retry(from_value(raw.params)?),
             "review.publish" => Command::Publish(from_value(raw.params)?),
             "account.select" => Command::SelectAccount(from_value(raw.params)?),
+            "pr.archive" => Command::Archive(from_value(raw.params)?),
+            "pr.unarchive" => Command::Unarchive(from_value(raw.params)?),
             "daemon.stop" => Command::StopDaemon(from_value(raw.params)?),
             "settings.set" => Command::SetModel(from_value(raw.params)?),
             other => return Err(format!("unknown command {other}")),
@@ -1024,6 +1049,8 @@ impl From<CommandRequest> for RawCommand {
             Command::Retry(p) => ("review.retry", to(serde_json::to_value(p))),
             Command::Publish(p) => ("review.publish", to(serde_json::to_value(p))),
             Command::SelectAccount(p) => ("account.select", to(serde_json::to_value(p))),
+            Command::Archive(p) => ("pr.archive", to(serde_json::to_value(p))),
+            Command::Unarchive(p) => ("pr.unarchive", to(serde_json::to_value(p))),
             Command::StopDaemon(p) => ("daemon.stop", to(serde_json::to_value(p))),
             Command::SetModel(p) => ("settings.set", to(serde_json::to_value(p))),
         };

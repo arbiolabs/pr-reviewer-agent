@@ -5,7 +5,9 @@
   "serverVersion": "0.1.0",
   "sessionId": "session-1",
   "capabilities": [
-    "account.select"
+    "account.select",
+    "pr.archive",
+    "pr.unarchive"
   ],
   "mode": "read-only",
   "readOnlyReason": "another pr-review is running on /srv/pr-review/.data",

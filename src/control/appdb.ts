@@ -134,6 +134,13 @@ export class AppDbSource implements ControlSource {
     return `account.select:${this.writer.journalMeta("ACCOUNT_SELECTED", choice.account.id, { [ACCOUNT_KEY]: choice.account.id })}`;
   }
 
+  /** pr.archive and pr.unarchive: a reader preference, so a read-only daemon grants them too. */
+  async archivePr(prId: string, archived: boolean): Promise<string> {
+    const seq = this.writer.setArchived(prId, archived);
+    if (seq === undefined) throw new ControlError("NOT_FOUND", `no PR ${prId}`);
+    return `${archived ? "pr.archive" : "pr.unarchive"}:${seq}`;
+  }
+
   private accounts(): Account[] {
     const selected = this.db.prepare("SELECT value FROM meta WHERE key = ?").get(ACCOUNT_KEY) as { value: string } | undefined;
     return listAccounts(this.gh?.detection ?? { installed: false }, selected?.value, this.env);
@@ -336,6 +343,7 @@ export class AppDbSource implements ControlSource {
       headSha: at?.head_sha ?? pull.latest_head_sha,
       baseSha: at?.base_sha ?? pull.latest_base_sha,
       lifecycle: (COORDINATOR_STATES as readonly string[]).includes(pull.status) ? (pull.status as Pr["lifecycle"]) : "ACTIVE",
+      ...(pull.archived_at ? { archivedAt: pull.archived_at } : {}),
     };
   }
 
@@ -392,6 +400,11 @@ export class AppDbSource implements ControlSource {
       const head = { type: "event" as const, streamEpoch: this.streamEpoch, sequence: row.seq, prevSequence: row.prev, occurredAt: row.at };
       // The list is the current one, not the one at row.seq: accounts.updated replaces the whole list, so a replay converges.
       if (row.event === "ACCOUNT_SELECTED" || row.event === "ACCOUNTS_DETECTED") return { ...head, eventType: "accounts.updated", data: { accounts: this.accounts() } };
+      // Like accounts.updated, the PR as it is now, so a replay converges on the current archive state.
+      if (row.event === "PR_ARCHIVED" || row.event === "PR_UNARCHIVED") {
+        const pull = this.db.prepare("SELECT * FROM pull_requests WHERE id = ?").get(row.detail) as PullRow;
+        return { ...head, prId: pull.id, eventType: "pr.updated", data: this.pr(pull) };
+      }
       return { ...head, eventType: `journal.${row.event}`, data: { event: row.event, detail: row.detail } };
     }
     const rev = this.revision(row.revision_id);

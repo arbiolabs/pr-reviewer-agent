@@ -184,11 +184,13 @@ export async function startControlServer(options: ServerOptions): Promise<Contro
         const granted =
           message.command === "account.select"
             ? Boolean(source.selectAccount)
-            : message.command === "daemon.stop"
-              ? canStop
-              : message.command === "settings.set"
-                ? Boolean(source.setModel)
-                : Boolean(source.command) && (source.capabilities?.() ?? []).includes(message.command);
+            : message.command === "pr.archive" || message.command === "pr.unarchive"
+              ? Boolean(source.archivePr)
+              : message.command === "daemon.stop"
+                ? canStop
+                : message.command === "settings.set"
+                  ? Boolean(source.setModel)
+                  : Boolean(source.command) && (source.capabilities?.() ?? []).includes(message.command);
         if (!granted) return reject("CAPABILITY_DENIED", source.unavailable?.(message.command) ?? `${message.command} is not available in this version`);
         if (c.phase !== "streaming") return reject("CONFLICT", `send snapshot.get or resume before ${message.command}`);
         const expectedKey = idempotencyKey(message);
@@ -198,7 +200,9 @@ export async function startControlServer(options: ServerOptions): Promise<Contro
           const accepted =
             message.command === "account.select"
               ? { operationId: await source.selectAccount!(message.params.accountId) }
-              : message.command === "settings.set"
+              : message.command === "pr.archive" || message.command === "pr.unarchive"
+                ? { operationId: await source.archivePr!(message.params.prId, message.command === "pr.archive") }
+                : message.command === "settings.set"
                 ? { operationId: await source.setModel!(message.params.model) }
                 : await source.command!(message);
           send(c, { type: "command.result", requestId, status: "accepted", ...accepted });
@@ -269,7 +273,7 @@ export async function startControlServer(options: ServerOptions): Promise<Contro
         protocolVersion: PROTOCOL_VERSION,
         serverVersion: SERVER_VERSION,
         sessionId: randomUUID(),
-        capabilities: [...(source.selectAccount ? ["account.select"] : []), ...(source.capabilities?.() ?? []), ...(source.setModel ? ["settings.set"] : []), ...(canStop ? ["daemon.stop"] : [])],
+        capabilities: [...(source.selectAccount ? ["account.select"] : []), ...(source.archivePr ? ["pr.archive", "pr.unarchive"] : []),...(source.capabilities?.() ?? []), ...(source.setModel ? ["settings.set"] : []), ...(canStop ? ["daemon.stop"] : [])],
         ...(source.mode ? { mode: source.mode } : {}),
         ...(source.readOnlyReason ? { readOnlyReason: source.readOnlyReason } : {}),
         ...(checks ? { checks } : {}),

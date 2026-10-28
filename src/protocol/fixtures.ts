@@ -86,6 +86,8 @@ const welcome = (latestSequence: number, epoch = EPOCH, capabilities: string[] =
   streamEpoch: epoch,
   latestSequence,
 });
+/** What every daemon on a data dir grants, read-only ones included: the reader's own preferences. */
+const READER_COMMANDS = ["account.select", "pr.archive", "pr.unarchive"];
 const publicationChanged = (s: Seq, r: Run, status: PublicationChange["status"], reviewId?: number) =>
   ev(
     s,
@@ -1032,7 +1034,7 @@ const setupChecks: SetupCheck[] = [
   },
 ];
 const welcomeChecks = {
-  ...welcome(0, EPOCH, ["account.select"], "read-only", "review commands are off; start the daemon with --allow-commands or set control.allow_commands"),
+  ...welcome(0, EPOCH, READER_COMMANDS, "read-only", "review commands are off; start the daemon with --allow-commands or set control.allow_commands"),
   checks: setupChecks,
 } as ServerMessage;
 
@@ -1445,7 +1447,7 @@ const PLAYED_COMMANDS = REVIEW_COMMANDS.filter((c) => c !== "review.again");
 const replay =(prs: Pr[], recorded: Recorded[]): PlaybackLine[] => {
   const rows = recorded.map(([t, make], k) => ({ t, k, make })).sort((a, b) => a.t - b.t || a.k - b.k);
   return [
-    { delayMs: 0, message: welcome(0, EPOCH, ["account.select", ...PLAYED_COMMANDS], "engine") },
+    { delayMs: 0, message: welcome(0, EPOCH, [...READER_COMMANDS, ...PLAYED_COMMANDS], "engine") },
     { delayMs: 0, message: snapshot(0, prs, [], [], EPOCH, showAccounts) },
     ...rows.map(({ t, make }, i): PlaybackLine => ({ delayMs: 20, message: make({ seq: i + 1, t }) })),
   ];
@@ -1549,6 +1551,8 @@ export const fixtures: Record<string, ClientMessage | ServerMessage | Record<str
   "client.command.review.retry": { type: "command", requestId: "req-cmd", command: "review.retry", params: { runId: run1.id }, idempotencyKey: `review.retry:${run1.id}` },
   "client.command.review.publish": publishCommand,
   "client.command.account-select": selectCommand(work),
+  "client.command.pr.archive": { type: "command", requestId: "req-cmd", command: "pr.archive", params: { prId: pr1.id }, idempotencyKey: `pr.archive:${pr1.id}` },
+  "client.command.pr.unarchive": { type: "command", requestId: "req-cmd", command: "pr.unarchive", params: { prId: pr1.id }, idempotencyKey: `pr.unarchive:${pr1.id}` },
   "client.command.daemon.stop": { type: "command", requestId: "req-cmd", command: "daemon.stop", params: { pauseReviews: false }, idempotencyKey: "daemon.stop" },
   "client.publication.get": { type: "publication.get", requestId: "req-pub", runId: run1.id },
   "client.settings.get": { type: "settings.get", requestId: "req-settings" },
@@ -1580,9 +1584,9 @@ export const fixtures: Record<string, ClientMessage | ServerMessage | Record<str
   },
 
   "server.welcome": welcome(108),
-  "server.welcome.engine": welcome(108, EPOCH, ["account.select", ...REVIEW_COMMANDS], "engine"),
+  "server.welcome.engine": welcome(108, EPOCH, [...READER_COMMANDS, ...REVIEW_COMMANDS], "engine"),
   "server.welcome.checks": welcomeChecks,
-  "server.welcome.read-only": welcome(108, EPOCH, ["account.select"], "read-only", "another pr-review is running on /srv/pr-review/.data"),
+  "server.welcome.read-only": welcome(108, EPOCH, READER_COMMANDS, "read-only", "another pr-review is running on /srv/pr-review/.data"),
   "server.publication.preview": preview,
   "server.publication.preview.published": { ...preview, status: "published", reviewId: 3141, url: "https://github.com/acme/shop/pull/184#pullrequestreview-3141" },
   "server.snapshot": snapshot(108, [pr1, pr2, pr3], [run1, run2], [f1, f2]),
@@ -1595,6 +1599,7 @@ export const fixtures: Record<string, ClientMessage | ServerMessage | Record<str
   "server.snapshot.empty": { type: "snapshot", streamEpoch: EPOCH, sequence: 0, prs: [], runs: [], findings: [] },
   "server.snapshot.hostile": snapshot(5, [pr(1, { title: hostileTitle })], [], [finding("f-h", run1, { title: "safe\rEVIL\u001bc" })]),
   "server.event.pr.updated": ev({ seq: 109 }, "pr.updated", pr1, { prId: pr1.id }),
+  "server.event.pr.updated.archived": ev({ seq: 109 }, "pr.updated", { ...pr1, archivedAt: at(109) }, { prId: pr1.id }),
   "server.event.run.started": runEvent({ seq: 109 }, "run.started", run(run1.id, pr1, { phase: "COLLECT_CONTEXT" })),
   "server.event.review.phase_changed": phase({ seq: 109 }, run1, "VERIFY", "PREPARE_PUBLICATION", "CANDIDATES_DISPOSED"),
   "server.event.finding.updated": findingUpdated({ seq: 109 }, f1),
@@ -1911,7 +1916,7 @@ const accounts = lines(40, [
 // Approval mode end to end: the run parks, the preview is shown, the approval is accepted, then the publisher's
 // own statuses arrive. The client never shows a publication as done on `accepted`, only on `published`.
 const approval = lines(40, [
-  welcome(10, EPOCH, ["account.select", ...PLAYED_COMMANDS], "engine"),
+  welcome(10, EPOCH, [...READER_COMMANDS, ...PLAYED_COMMANDS], "engine"),
   snapshot(10, [pr1, pr2, pr3], [run1, run2], [f1, f2], EPOCH, [personal, work]),
   phase({ seq: 11 }, run1, "VERIFY", "PREPARE_PUBLICATION", "CANDIDATES_DISPOSED"),
   phase({ seq: 12 }, run1, "PREPARE_PUBLICATION", "AWAITING_APPROVAL", "APPROVAL_REQUIRED"),
@@ -1939,7 +1944,7 @@ const showcaseScript = (): PlaybackLine[] => {
     return { delayMs, ...(after ? { after } : {}), message: make({ seq, t: clock }) };
   });
   return [
-    { delayMs: 0, message: welcome(40, EPOCH, ["account.select", ...PLAYED_COMMANDS], "engine") },
+    { delayMs: 0, message: welcome(40, EPOCH, [...READER_COMMANDS, ...PLAYED_COMMANDS], "engine") },
     {
       delayMs: 0,
       message: snapshot(

@@ -560,6 +560,90 @@
             },
             "command": {
               "type": "string",
+              "const": "pr.archive"
+            },
+            "params": {
+              "type": "object",
+              "required": [
+                "prId"
+              ],
+              "properties": {
+                "prId": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "additionalProperties": false
+            },
+            "idempotencyKey": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "requestId",
+            "command",
+            "params",
+            "idempotencyKey"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "command"
+            },
+            "requestId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "command": {
+              "type": "string",
+              "const": "pr.unarchive"
+            },
+            "params": {
+              "type": "object",
+              "required": [
+                "prId"
+              ],
+              "properties": {
+                "prId": {
+                  "type": "string",
+                  "minLength": 1
+                }
+              },
+              "additionalProperties": false
+            },
+            "idempotencyKey": {
+              "type": "string",
+              "minLength": 1
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": [
+            "type",
+            "requestId",
+            "command",
+            "params",
+            "idempotencyKey"
+          ],
+          "properties": {
+            "type": {
+              "type": "string",
+              "const": "command"
+            },
+            "requestId": {
+              "type": "string",
+              "minLength": 1
+            },
+            "command": {
+              "type": "string",
               "const": "settings.set"
             },
             "params": {

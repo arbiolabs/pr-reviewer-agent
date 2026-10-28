@@ -109,7 +109,12 @@ export class EngineSource extends AppDbSource {
 
   async command(request: ReviewCommand): Promise<Accepted> {
     if (request.command === "review.add") return this.add(request.params.url, request.idempotencyKey);
-    return { operationId: await this.runCommand(request) };
+    const operationId = await this.runCommand(request);
+    // Starting a review brings an archived PR back; archiving never touched the run.
+    const { params } = request;
+    if ("prId" in params) this.writer.setArchived(params.prId, false);
+    else if (request.command === "review.retry") this.writer.setArchived(this.app.store.revision(params.runId)!.pr_id, false);
+    return { operationId };
   }
 
   /**
@@ -121,10 +126,18 @@ export class EngineSource extends AppDbSource {
     const { app, options } = this;
     const accepted = (runId: string): Accepted => ({ operationId: `review.add:${runId}`, prId: app.store.revision(runId)!.pr_id, runId });
     const replay = app.store.commandResult(key);
-    if (replay) return accepted(replay.operationId.slice("review.add:".length));
+    // Adding a PR again is asking to see it, so an archived one comes back to the lists.
+    if (replay) {
+      const result = accepted(replay.operationId.slice("review.add:".length));
+      this.writer.setArchived(result.prId!, false);
+      return result;
+    }
     const ref = pullTarget(url);
     const tracked = app.store.pullByName(`${ref.owner}/${ref.repo}`, ref.number);
-    if (tracked) throw new ControlError("CONFLICT", `${tracked.repo_full_name}#${tracked.number} is already tracked`, tracked.id);
+    if (tracked) {
+      this.writer.setArchived(tracked.id, false);
+      throw new ControlError("CONFLICT", `${tracked.repo_full_name}#${tracked.number} is already tracked`, tracked.id);
+    }
     const pull = await options.pulls.getPull(ref, { maxSleepMs: 5000 }).catch((error: unknown) => {
       throw unreadable(error, `${ref.owner}/${ref.repo}#${ref.number}`, options.account);
     });

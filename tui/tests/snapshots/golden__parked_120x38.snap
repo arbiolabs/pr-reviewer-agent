@@ -1,5 +1,6 @@
 ---
 source: tests/golden.rs
+assertion_line: 31
 expression: text
 ---
   pr-review · ◔ #184 waiting for you · p previews                                                               ● live
@@ -39,4 +40,4 @@ expression: text
 
 
 
-   j/k move  Enter read  p publish  c cancel  d diff  h PRs  / search  t timeline  ? help  q quit             1 2 3 4 5
+   j/k move  Enter read  p publish  c cancel  d diff  e archive  h PRs  / search  t timeline  ? help  q quit  1 2 3 4 5

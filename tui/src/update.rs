@@ -797,6 +797,10 @@ fn apply_batch(m: &mut Model, b: ActivityBatch, fx: &mut Vec<Effect>) {
 
 fn apply_body(m: &mut Model, e: &SequencedEvent, fx: &mut Vec<Effect>) {
     let seq = e.sequence.get();
+    let archiving = match &e.body {
+        EventBody::PrUpdated(pr) => archiving(m, pr),
+        _ => None,
+    };
     let d = &mut m.domain;
     if let Some(at) = crate::waterfall::epoch_ms(e.occurred_at.as_str()) {
         d.clock = Some((at, m.now_ms));
@@ -868,6 +872,18 @@ fn apply_body(m: &mut Model, e: &SequencedEvent, fx: &mut Vec<Effect>) {
         d.push_activity(Activity { sequence: seq, at: e.occurred_at.clone(), pr_id: pr, kind, recv_ms: m.now_ms });
     }
     settle_command(m, e);
+    if let (Some((text, moves, next)), EventBody::PrUpdated(pr)) = (archiving, &e.body) {
+        if moves {
+            // Unarchiving the last archived PR empties the list: go back to the tracked PRs, on the one brought back.
+            if next.is_none() && m.ui.show_archived {
+                m.ui.show_archived = false;
+            }
+            m.ui.selected_pr = next.or(Some(pr.id.clone()));
+            m.ui.selected_finding = None;
+            m.ui.doc_scroll = 0;
+        }
+        notice(m, format!("{text} #{}", pr.number));
+    }
     if let EventBody::FindingUpdated(f) = &e.body
         && matches!(m.top_modal(), Some(Modal::Finding { id, .. }) if id == &f.id)
     {
@@ -946,9 +962,24 @@ fn settle_command(m: &mut Model, e: &SequencedEvent) {
     notice(m, what);
 }
 
+/// A `pr.updated` that archives or unarchives a PR this client knows: what the notice says, and when it takes the
+/// selected PR out of the list the rail shows, where the cursor goes instead: the next PR down, else the one above.
+fn archiving(m: &Model, pr: &Pr) -> Option<(&'static str, bool, Option<PrId>)> {
+    let was = m.domain.prs.get(&pr.id)?.archived();
+    if was == pr.archived() {
+        return None;
+    }
+    let text = if pr.archived() { "Archived" } else { "Unarchived" };
+    let list = m.pr_list();
+    let at = list.iter().position(|p| p.id == pr.id).filter(|_| m.ui.selected_pr.as_ref() == Some(&pr.id));
+    let Some(i) = at else { return Some((text, false, None)) };
+    let next = list.get(i + 1).or_else(|| i.checked_sub(1).and_then(|j| list.get(j)));
+    Some((text, true, next.map(|p| p.id.clone())))
+}
+
 /// Re-resolves selections by ID after the lists changed; an ID that vanished falls back to the first entry.
 fn reselect(m: &mut Model) {
-    let inbox = m.inbox();
+    let inbox = m.pr_list();
     let keep = m.ui.selected_pr.as_ref().is_some_and(|id| inbox.iter().any(|p| &p.id == id));
     if !keep {
         m.ui.selected_pr = inbox.first().map(|p| p.id.clone());
@@ -1409,6 +1440,15 @@ fn act(m: &mut Model, a: Action, fx: &mut Vec<Effect>) {
         }),
         Action::OpenDiff => open_diff(m, fx),
         Action::Watch => watch(m),
+        Action::Archive if m.ui.screen != Screen::Review => {}
+        Action::Archive => archive(m, fx),
+        Action::ShowArchived if !can_show_archived(m) => {}
+        Action::ShowArchived => {
+            m.ui.show_archived = !m.ui.show_archived;
+            m.ui.selected_finding = None;
+            m.ui.doc_scroll = 0;
+            reselect(m);
+        }
         Action::ScrollDown => m.ui.doc_scroll = (m.ui.doc_scroll + 1).min(crate::view::doc_scroll_limit(m)),
         Action::ScrollUp => m.ui.doc_scroll = (m.ui.doc_scroll - 1).max(0),
         Action::OpenTimeline if !can_timeline(m) => {
@@ -1633,7 +1673,7 @@ pub fn can_move(m: &Model) -> bool {
         Some(_) => false,
         None => match (m.ui.screen, m.ui.focus) {
             (Screen::Inbox, _) | (Screen::Review, Pane::Sidebar) => {
-                let ids: Vec<PrId> = m.inbox().iter().map(|p| p.id.clone()).collect();
+                let ids: Vec<PrId> = m.pr_list().iter().map(|p| p.id.clone()).collect();
                 walks(&ids, m.ui.selected_pr.as_ref())
             }
             (Screen::Review, Pane::Main) => {
@@ -1821,7 +1861,10 @@ fn watch_target(m: &Model) -> Option<PrId> {
         .runs
         .values()
         .filter(|r| r.status == RunStatus::Running)
-        .filter_map(|r| Some((!r.parked(), m.domain.prs.get(&r.pr_id)?.number, r.pr_id.clone())))
+        .filter_map(|r| {
+            let pr = m.domain.prs.get(&r.pr_id).filter(|p| !p.archived())?;
+            Some((!r.parked(), pr.number, r.pr_id.clone()))
+        })
         .collect();
     running.sort();
     running.dedup();
@@ -1895,6 +1938,38 @@ pub fn can_confirm(m: &Model) -> bool {
             matches!(publish, ConfirmState::Asking | ConfirmState::TimedOut) && publish_block(m, p).is_none()
         }
         _ => false,
+    }
+}
+
+/// e: the Review page shows a PR and the daemon grants archiving. Not on the Inbox list, where Enter opens the PR first.
+pub fn can_archive(m: &Model) -> bool {
+    m.ui.screen == Screen::Review
+        && m.top_modal().is_none()
+        && m.selected_pr().is_some()
+        && write_block(m, "pr.archive").is_none()
+}
+
+/// E: the PR list is on screen and there is an archived list to show, or the reader is on it and can go back.
+pub fn can_show_archived(m: &Model) -> bool {
+    matches!(m.ui.screen, Screen::Inbox | Screen::Review)
+        && m.top_modal().is_none()
+        && (m.ui.show_archived || m.domain.prs.values().any(|p| p.archived()))
+}
+
+/// e on the selected PR: `pr.archive`, or `pr.unarchive` for an archived one. No panel: archiving hides the PR and
+/// nothing else, and e on the archived list brings it back. The `pr.updated` that follows confirms it.
+fn archive(m: &mut Model, fx: &mut Vec<Effect>) {
+    let Some(p) = m.selected_pr().cloned() else { return notice(m, "Can't archive: no PR is selected") };
+    let params = PrParams { pr_id: p.id.clone() };
+    let command = if p.archived() { Command::Unarchive(params) } else { Command::Archive(params) };
+    if let Some(why) = write_block(m, command.name()) {
+        return notice(m, format!("Can't {} #{}: {why}", command.verb(), p.number));
+    }
+    let (idempotency_key, verb) = (command.idempotency_key(), command.verb());
+    if let Some(request_id) =
+        send(m, fx, |request_id| ClientMessage::Command(CommandRequest { request_id, idempotency_key, command }))
+    {
+        m.commands_sent.insert(request_id, verb);
     }
 }
 
@@ -2183,7 +2258,7 @@ fn move_by(m: &mut Model, delta: isize, fx: &mut Vec<Effect>) {
     }
     match (m.ui.screen, m.ui.focus) {
         (Screen::Inbox, _) | (Screen::Review, Pane::Sidebar) => {
-            let ids: Vec<PrId> = m.inbox().iter().map(|p| p.id.clone()).collect();
+            let ids: Vec<PrId> = m.pr_list().iter().map(|p| p.id.clone()).collect();
             let next = step(&ids, m.ui.selected_pr.as_ref(), delta);
             if next != m.ui.selected_pr {
                 m.ui.selected_pr = next;

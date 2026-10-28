@@ -1,5 +1,6 @@
 ---
 source: tests/golden.rs
+assertion_line: 288
 expression: text
 ---
   pr-review · ⣾ reviewing #184 verify found: Finding f-1                ● live
@@ -24,5 +25,5 @@ expression: text
     Enter      open selected
     A          GitHub accounts (Settings)
     w          watch the running review
-    … 47 more below, j scrolls
+    … 49 more below, j scrolls
    j/k scroll  Esc close  q quit                                      1 2 3 4 5

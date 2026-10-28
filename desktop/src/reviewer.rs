@@ -372,7 +372,7 @@ impl Shell {
             Ask::Start => self.reviewer.start(self.model.now_ms),
             Ask::Stop | Ask::Restart => {
                 let restart = ask == Ask::Restart;
-                let running = queue::running(&self.model).len();
+                let running = queue::at_work(&self.model);
                 let relaunches = self.reviewer.launcher.as_ref().is_ok_and(Launcher::relaunches);
                 if running > 0 || relaunches && !restart {
                     self.overlay = Some(Overlay::ConfirmStop { restart, running });
@@ -440,7 +440,7 @@ impl Shell {
                 // A review began after the app looked: ask, as the stop would have.
                 ConfirmState::Refused { code: Some(ErrorCode::Conflict), .. } if !p.pause_reviews => {
                     self.act(Action::Back, cx);
-                    let running = queue::running(&self.model).len().max(1);
+                    let running = queue::at_work(&self.model).max(1);
                     self.overlay = Some(Overlay::ConfirmStop { restart, running });
                     self.reviewer.control = Control::Idle;
                 }
@@ -509,7 +509,7 @@ pub fn stage(s: &mut Shell, state: crate::script::Staged) {
             s.reviewer.control = Control::StartFailed(why);
         }
         Staged::StopConfirm => {
-            s.overlay = Some(Overlay::ConfirmStop { restart: false, running: queue::running(&s.model).len() })
+            s.overlay = Some(Overlay::ConfirmStop { restart: false, running: queue::at_work(&s.model) })
         }
     }
 }
