@@ -33,7 +33,7 @@ also arrive unsolicited (`snapshot`, `resync.required`, `error`) have an optiona
 | `finding.detail` | `finding`: a `Finding` plus `explanation`, `reasoningSummary`, `suggestedFix?`, `evidence[]`, `history[]` (each entry a run, the finding state it ended in, and an optional `basis` for why) |
 | `publication.preview` | `runId`, `previewId` (the payload hash the approval must name), `headSha`, `body` (the exact review text, marker included), `comments[]` (`path`, `line`, `side: RIGHT`, `body`), `event: COMMENT`, `status` |
 | `timeline.page` | `events[]` (sequenced events), `nextBeforeSequence?` |
-| `settings` | `model` (`ref`, and `source`: `--model`, `PR_REVIEW_MODEL`, `config` or `default`), `models[]` (`ModelOption`: `ref`, `provider`, `name`, `contextWindow`, `authSource`, `preferred`; preferred first), `configPath` (the file `settings.set` writes), and from this version `summaryTemplate` (`value`: the review body template in force, `isDefault`, `default`: the built-in template, `variables[]`: `name`, `description`, `sample` for every `{{name}}` a template may use) |
+| `settings` | `model` (`ref`, and `source`: `--model`, `PR_REVIEW_MODEL`, `config` or `default`), `models[]` (`ModelOption`: `ref`, `provider`, `name`, `contextWindow`, `authSource`, `preferred`; preferred first), `configPath` (the file `settings.set` writes), and from this version `summaryTemplate` (`value`: the review body template in force, `isDefault`, `default`: the built-in template, `variables[]`: `name`, `description`, `sample` for every `{{name}}` a template may use), and from this version `publishMode` (`comment`, `dry_run`, `silent_no_findings` or `approval`) and `autoReview` (`enabled`, `intervalMinutes`: 5, 15 or 30, `includeTeamRequests`, `repos`: `include[]` and `exclude[]` of `owner/name`, and `lastPoll?`: `at`, `found`, `started`, `skipped`, `error?`) |
 | `usage.report` | `by`, `timeZone`, `currency: USD`, `priceSource: catalog`, `buckets[]` (`start`, `end`, `reviews`, `responses`, `input`, `output`, `cacheRead`, `cacheWrite`, `cost`), `totals` (the same counts for the range), `models[]` (the same counts per `model`, costliest first), `group?` (absent from older servers), `groups[]?` (unless `group` is `time`: `key`, `label`, `repository?`, `number?`, `title?`, `prId?`, `author?`, the same counts and `share`) |
 | `command.result` | `status: accepted` with `operationId` (and `prId`, `runId` from `review.add`), or `status: rejected` with `code` and `message` (and `prId` when `review.add` names a tracked PR) |
 | `error` | `code`, `message`, `supported?` |
@@ -70,7 +70,7 @@ the recorded `operationId` and does nothing again. A key in any other form is `I
 | `pr.archive` | `prId` | `pr.archive:<prId>` | `pr.archive:<journal seq>` |
 | `pr.unarchive` | `prId` | `pr.unarchive:<prId>` | `pr.unarchive:<journal seq>` |
 | `daemon.stop` | `pauseReviews` | `daemon.stop` | `daemon.stop` |
-| `settings.set` | `model?`, `summaryTemplate?` (string, or `null`) | `settings.set:<model>`, plus `:template:<hash>` when it sets the template | same as the key |
+| `settings.set` | `model?`, `summaryTemplate?` (string, or `null`), `autoReview?` (`enabled?`, `intervalMinutes?`, `includeTeamRequests?`, `repos?`: `include?`, `exclude?`) | `settings.set:<model>`, plus `:template:<hash>` when it sets the template, plus `:auto:<hash>` when it sets `autoReview` | same as the key |
 
 `welcome.capabilities` lists what this daemon grants. A daemon in `read-only` mode (the default, or another pr-review
 holds the data dir, or the engine failed to open; `welcome.readOnlyReason` says which) grants only the reader's own
@@ -128,6 +128,19 @@ Every command is checked by the server whatever the client showed:
   `summaryTemplate` or both (neither is `INVALID_REQUEST`); both are checked before either is saved. In the key,
   `<model>` is empty when absent, and `<hash>` is the FNV-1a 64-bit hash of the template's UTF-8 bytes as 16 lowercase
   hex digits, or `default` for a reset: `settings.set::template:default`.
+  `autoReview` changes only the fields it carries and saves the result under `review.auto_review`. An interval other
+  than 5, 15 or 30, or a repository that is not `owner/name`, is `INVALID_REQUEST`. Turning it on makes the daemon
+  poll GitHub at once; any other change to it restarts the interval. Its `<hash>` is the FNV-1a 64-bit hash of its
+  compact JSON with the keys in this order, absent ones left out: `enabled`, `intervalMinutes`,
+  `includeTeamRequests`, `repos` (`include`, `exclude`). `{"enabled":true}` gives
+  `settings.set::auto:` followed by that hash.
+- Automatic reviews (`settings.autoReview`). An `engine` daemon with `enabled` searches GitHub as its account, shortly
+  after it starts and then every `intervalMinutes`, for open, non-draft PRs that request that account's review (and
+  its teams' with `includeTeamRequests`). It starts at most 5 a poll, oldest first. A PR it does not track is added
+  as `review.add` adds one; a tracked PR is started only when its head has no run yet, and never while archived. A run
+  it starts carries a `tool.activity` line with `tool` `auto-review` and `summary` `started automatically: review
+  requested`. `lastPoll` is the daemon's last poll since it started; a failed one has `error` and is retried with a
+  doubling wait, up to an hour. A read-only daemon never polls.
 
 ## Accounts
 

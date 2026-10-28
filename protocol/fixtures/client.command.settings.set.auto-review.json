@@ -1,0 +1,18 @@
+{
+  "type": "command",
+  "requestId": "req-cmd",
+  "command": "settings.set",
+  "params": {
+    "autoReview": {
+      "enabled": true,
+      "intervalMinutes": 15,
+      "repos": {
+        "include": [
+          "acme/shop",
+          "acme/api"
+        ]
+      }
+    }
+  },
+  "idempotencyKey": "settings.set::auto:d5e2c3f1bd886bc9"
+}

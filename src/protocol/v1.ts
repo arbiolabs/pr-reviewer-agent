@@ -33,6 +33,8 @@ export const RUN_STATUSES = ["RUNNING", "COMPLETED", "FAILED", "SUPERSEDED"] as 
 export const DAEMON_MODES = ["engine", "read-only"] as const;
 /** The commands a daemon in engine mode can grant (`welcome.capabilities`), besides the reader's `account.select`, `pr.archive` and `pr.unarchive`. */
 export const REVIEW_COMMANDS = ["review.add", "review.start", "review.again", "review.retry", "review.cancel", "review.publish"] as const;
+/** `review.publish_mode`: `approval` parks each review until a human posts it. */
+export const PUBLISH_MODES = ["comment", "dry_run", "silent_no_findings", "approval"] as const;
 export const DIFF_FILE_STATUSES = ["added", "modified", "deleted", "renamed", "binary"] as const;
 export const CHECK_STATUSES = ["ok", "warn", "missing"] as const;
 export const EVIDENCE_KINDS = ["code_ref", "tool_summary", "test_result", "scenario", "link"] as const;
@@ -188,6 +190,20 @@ export const ModelOption = Type.Object({
   preferred: Type.Boolean({ description: "matched by models.preferred in the config; preferred models are listed first" }),
 });
 export type ModelOption = Static<typeof ModelOption>;
+
+const RepoName = Type.String({ pattern: "^[\\w.-]+/[\\w.-]+$", maxLength: 200, description: "owner/name" });
+const RepoList = Type.Array(RepoName, { maxItems: 200 });
+const IntervalMinutes = Type.Union([Type.Literal(5), Type.Literal(15), Type.Literal(30)]);
+
+/** What the daemon's last poll for review requests saw. `error` says why it failed; it is retried with backoff. */
+export const AutoReviewPoll = Type.Object({
+  at: Timestamp,
+  found: Type.Integer({ minimum: 0, description: "open, non-draft PRs requesting the account's review" }),
+  started: Type.Integer({ minimum: 0, description: "reviews it started; at most 5 a poll, the rest wait for the next" }),
+  skipped: Type.Integer({ minimum: 0, description: "found but not started: reviewed at their head, archived, excluded, closed, or past the cap" }),
+  error: Type.Optional(Type.String()),
+});
+export type AutoReviewPoll = Static<typeof AutoReviewPoll>;
 
 /** A `{{name}}` the review summary's template may use, and what it looks like filled in. */
 export const TemplateVariable = Type.Object({ name: Type.String({ minLength: 1 }), description: Type.String(), sample: Type.String() });
@@ -361,6 +377,17 @@ export const Command = Type.Union([
         description: "saved as review.summary_template and used for review bodies prepared after it; null or empty restores the default",
       }),
     ),
+    autoReview: Type.Optional(
+      Type.Object(
+        {
+          enabled: Type.Optional(Type.Boolean()),
+          intervalMinutes: Type.Optional(IntervalMinutes),
+          includeTeamRequests: Type.Optional(Type.Boolean()),
+          repos: Type.Optional(Type.Object({ include: Type.Optional(RepoList), exclude: Type.Optional(RepoList) }, { additionalProperties: false })),
+        },
+        { additionalProperties: false, description: "saved under review.auto_review; only the fields given change" },
+      ),
+    ),
   }),
   command("daemon.stop", {
     pauseReviews: Type.Boolean({ description: "stop even while reviews run: they pause and resume on the next engine start; without it a running review makes the stop CONFLICT" }),
@@ -369,13 +396,20 @@ export const Command = Type.Union([
 export type Command = Static<typeof Command>;
 export type ReviewCommand = Exclude<Command, { command: "account.select" | "pr.archive" | "pr.unarchive" | "daemon.stop" | "settings.set" }>;
 
+export type AutoReviewParams = NonNullable<Extract<Command, { command: "settings.set" }>["params"]["autoReview"]>;
+
 /**
  * `settings.set:<model>`, then `:template:<hash>` when it sets the template: different texts are different keys.
  * The hash is FNV-1a 64 of the template's UTF-8 bytes in hex, or `default` for a reset; a client computes it too.
+ * Then `:auto:<hash>` when it sets autoReview: FNV-1a 64 of its compact JSON with the keys in schema order (enabled,
+ * intervalMinutes, includeTeamRequests, repos: include, exclude) and absent ones left out.
  */
-export function settingsKey(p: { model?: string; summaryTemplate?: string | null }): string {
+export function settingsKey(p: { model?: string; summaryTemplate?: string | null; autoReview?: AutoReviewParams }): string {
   const template = p.summaryTemplate === undefined ? "" : `:template:${p.summaryTemplate ? fnv1a64(p.summaryTemplate) : "default"}`;
-  return `settings.set:${p.model ?? ""}${template}`;
+  const a = p.autoReview;
+  const canonical = a && { enabled: a.enabled, intervalMinutes: a.intervalMinutes, includeTeamRequests: a.includeTeamRequests, repos: a.repos && { include: a.repos.include, exclude: a.repos.exclude } };
+  const auto = canonical === undefined ? "" : `:auto:${fnv1a64(JSON.stringify(canonical))}`;
+  return `settings.set:${p.model ?? ""}${template}${auto}`;
 }
 
 export function fnv1a64(text: string): string {
@@ -508,6 +542,16 @@ export const ServerMessage = Type.Union([
         isDefault: Type.Boolean(),
         default: Type.String(),
         variables: Type.Array(TemplateVariable, { description: "every {{name}} a template may use; any other name is refused" }),
+      }),
+    ),
+    publishMode: Type.Optional(oneOf(PUBLISH_MODES)),
+    autoReview: Type.Optional(
+      Type.Object({
+        enabled: Type.Boolean(),
+        intervalMinutes: IntervalMinutes,
+        includeTeamRequests: Type.Boolean(),
+        repos: Type.Object({ include: RepoList, exclude: RepoList }, { description: "an empty include list means every repository" }),
+        lastPoll: Type.Optional(AutoReviewPoll),
       }),
     ),
   }),

@@ -1,0 +1,39 @@
+{
+  "type": "settings",
+  "requestId": "req-settings",
+  "model": {
+    "ref": "anthropic/claude-opus-5-5",
+    "source": "config"
+  },
+  "models": [
+    {
+      "ref": "anthropic/claude-opus-5-5",
+      "provider": "anthropic",
+      "name": "Claude Opus 5.5",
+      "contextWindow": 1000000,
+      "authSource": "oauth",
+      "preferred": true
+    }
+  ],
+  "configPath": "/Users/operator/.config/pr-review/pr-review.config.json",
+  "publishMode": "comment",
+  "autoReview": {
+    "enabled": true,
+    "intervalMinutes": 15,
+    "includeTeamRequests": false,
+    "repos": {
+      "include": [
+        "acme/shop",
+        "acme/api"
+      ],
+      "exclude": []
+    },
+    "lastPoll": {
+      "at": "2026-10-28T09:55:00Z",
+      "found": 0,
+      "started": 0,
+      "skipped": 0,
+      "error": "GET /search/issues: HTTP 403; rate limited for 120000 ms, over the 5000 ms cap"
+    }
+  }
+}
