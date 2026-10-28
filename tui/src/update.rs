@@ -242,12 +242,10 @@ fn prefetch_settings(m: &mut Model, fx: &mut Vec<Effect>) {
 fn prefetch_usage(m: &mut Model, fx: &mut Vec<Effect>) {
     let u = &m.usage;
     let Some(by) = u.by else { return };
-    let group = u.group;
-    let current = !u.stale && u.report.as_ref().is_some_and(|r| r.by == by && r.group.unwrap_or_default() == group);
-    if u.request.is_some() || u.error.is_some() || current {
+    if u.request.is_some() || u.error.is_some() || (!u.stale && u.current().is_some()) {
         return;
     }
-    let group = (group != UsageGroupBy::Time).then_some(group);
+    let group = (u.group != UsageGroupBy::Time).then_some(u.group);
     m.usage.request = send(m, fx, |request_id| ClientMessage::UsageGet { request_id, by, periods: None, group });
     if m.usage.request.is_some() {
         m.usage.stale = false;
@@ -583,7 +581,13 @@ fn server_message(m: &mut Model, msg: ServerMessage, fx: &mut Vec<Effect>) {
             // Another connection may be another daemon, with another model.
             m.agent = AgentSettings { wanted: m.agent.wanted, ..Default::default() };
             // The last report stays on screen until this daemon answers; a request sent to the last one is lost.
-            m.usage = UsageView { by: m.usage.by, report: m.usage.report.take(), stale: true, ..Default::default() };
+            m.usage = UsageView {
+                by: m.usage.by,
+                group: m.usage.group,
+                report: m.usage.report.take(),
+                stale: true,
+                ..Default::default()
+            };
             m.server = Some(ServerInfo {
                 protocol_version,
                 server_version,

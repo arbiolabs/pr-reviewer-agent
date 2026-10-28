@@ -201,12 +201,11 @@ pub fn view(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
     let controls = div().flex().flex_wrap().gap(space::S3).child(segments(t, by, cx)).child(breakdowns(t, u.group, cx));
     let mut body = div().flex().flex_col().gap(space::S6).child(controls);
     let warn = |e: &str| callout(t, t.warn, IconName::TriangleAlert, "Usage did not load", Some(e.to_string()));
-    body = match (&u.report, &u.error) {
+    body = match (u.current(), &u.error) {
         (Some(r), _) if r.totals.responses == 0 => {
             body.child(callout(t, t.muted, IconName::Info, "No usage yet", Some(EMPTY.into())))
         }
-        // The last answer stays until the next one comes, so a breakdown shows only once it is the one on screen.
-        (Some(r), e) if r.group.is_some_and(|g| g != UsageGroupBy::Time) => body
+        (Some(r), e) if u.group != UsageGroupBy::Time => body
             .children(e.as_ref().map(|e| warn(e.as_str())))
             .child(headline(t, r))
             .child(bars(t, r))
@@ -218,14 +217,41 @@ pub fn view(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
             .child(chart(s, t, r))
             .child(table(t, r))
             .child(models(t, r)),
-        (None, Some(e)) => body.child(warn(e.as_str())),
-        (None, None) => body.child(div().text_size(text::BODY).text_color(t.muted).child("Loading usage…")),
+        (None, Some(e)) => body.child(warn(e.as_str())).child(heading(t, title(by, u.group))),
+        // The last answer is another grouping or breakdown: its totals stay, dimmed, when its range is the one
+        // asked for, and its chart gives way to a placeholder under the selection's title.
+        (None, None) => {
+            body.children(u.report.as_ref().filter(|r| r.by == by).map(|r| headline(t, r).opacity(0.5))).child(
+                div().flex().flex_col().gap(space::S2).child(heading(t, title(by, u.group))).child(
+                    div()
+                        .h(px(PLOT_H))
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .rounded(radius::SM)
+                        .border_1()
+                        .border_color(t.border)
+                        .text_size(text::BODY)
+                        .text_color(t.muted)
+                        .child("Loading usage…"),
+                ),
+            )
+        }
     };
     let zone = u.report.as_ref().map(|r| format!("Dates follow the reviewer's time zone, {}.", r.time_zone));
     let body = body.child(
         div().flex().flex_col().gap(space::S1).text_size(text::SMALL).text_color(t.muted).child(NOTE).children(zone),
     );
     div().flex().flex_1().min_h_0().child(crate::detail::page("usage", body, None, t, false))
+}
+
+/// A chart's title: `Cost per week, USD` over time, `Cost by PR, USD` split.
+pub fn title(by: UsageBy, group: UsageGroupBy) -> String {
+    match group {
+        UsageGroupBy::Time => format!("Cost per {}, USD", label(by).0.to_lowercase()),
+        UsageGroupBy::Pr => "Cost by PR, USD".into(),
+        g => format!("Cost by {}, USD", breakdown_label(g).0.to_lowercase()),
+    }
 }
 
 /// One segmented control: each option's name and key, the one in use filled.
@@ -411,16 +437,11 @@ fn chart(s: &Shell, t: &Colors, r: &UsageReport) -> Div {
             .whitespace_nowrap()
             .when(named(i), |d| d.child(short(by, b)))
     }));
-    let unit = match by {
-        UsageBy::Day => "day",
-        UsageBy::Week => "week",
-        UsageBy::Month => "month",
-    };
     div()
         .flex()
         .flex_col()
         .gap(space::S2)
-        .child(heading(t, format!("Cost per {unit}, USD")))
+        .child(heading(t, title(by, UsageGroupBy::Time)))
         .child(
             div()
                 .flex()
@@ -532,16 +553,11 @@ fn bars(t: &Colors, r: &UsageReport) -> Div {
                 .child(money(top * frac as f64).trim_end_matches(".00").to_string()),
         )
     }));
-    let name = match r.group.unwrap_or_default() {
-        UsageGroupBy::Pr => "PR",
-        UsageGroupBy::Author => "author",
-        _ => "repository",
-    };
     div()
         .flex()
         .flex_col()
         .gap(space::S2)
-        .child(heading(t, format!("Cost by {name}, USD")))
+        .child(heading(t, title(r.by, r.group.unwrap_or_default())))
         .child(div().relative().flex().flex_col().pt(space::S1).child(ticks).children(rows))
         .child(axis)
 }

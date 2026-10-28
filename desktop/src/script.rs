@@ -342,6 +342,19 @@ mod tests {
     }
 
     #[test]
+    fn a_switch_still_on_its_way_shows_under_the_selection_s_title_never_the_last_breakdown() {
+        let mut m = model();
+        play(showcase(), &mut m, &parse("wait:1000,usage:week,breakdown:pr").unwrap(), 1_500).unwrap();
+        assert!(!pr_review_tui::update::update(&mut m, Msg::UsageGroup(UsageGroupBy::Time)).is_empty());
+        assert_eq!(m.usage.report.as_ref().and_then(|r| r.group), Some(UsageGroupBy::Pr), "the answer is on its way");
+        assert!(m.usage.current().is_none(), "the PR split is not the selected breakdown");
+        let shown = m.usage.by.map(|by| crate::usage::title(by, m.usage.group));
+        assert_eq!(shown.as_deref(), Some("Cost per week, USD"));
+        assert_eq!(crate::usage::title(UsageBy::Month, UsageGroupBy::Pr), "Cost by PR, USD");
+        assert_eq!(crate::usage::title(UsageBy::Day, UsageGroupBy::Repo), "Cost by repository, USD");
+    }
+
+    #[test]
     fn the_showcase_plays_in_virtual_time_and_steps_land_on_the_model() {
         let mut m = model();
         play(showcase(), &mut m, &parse("wait:20000,pr:1287,finding:2,open").unwrap(), 20_500).unwrap();
