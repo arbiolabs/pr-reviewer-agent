@@ -29,6 +29,14 @@ export class FakeGitHub {
   /** Answer this many PR reads with a secondary rate limit and `Retry-After: 120`. */
   rateLimitedPullReads = 0;
   onPost: (() => void) | undefined;
+  /**
+   * What `/search/issues` lists as requesting the token's review, in order, for the stored pulls they name. A team
+   * request is listed only for `review-requested:@me`, as GitHub lists it; GitHub's own draft filter is not applied.
+   */
+  requested: { pull: string; team?: boolean; draft?: boolean }[] = [];
+  searchQueries: string[] = [];
+  /** Answer this many searches with a primary rate limit and `Retry-After: 120`. */
+  rateLimitedSearches = 0;
   private nextId = 1000;
 
   constructor() {
@@ -74,6 +82,19 @@ export class FakeGitHub {
     if (req.method === "POST" && /^\/app\/installations\/\d+\/access_tokens$/.test(url.pathname)) {
       this.tokensMinted++;
       return json(201, { token: `ghs_install_${this.tokensMinted}`, expires_at: new Date(Date.now() + 3600_000).toISOString() });
+    }
+    if (req.method === "GET" && url.pathname === "/search/issues") {
+      const q = url.searchParams.get("q") ?? "";
+      this.searchQueries.push(q);
+      if (this.rateLimitedSearches > 0 && this.rateLimitedSearches--) return json(403, { message: "API rate limit exceeded" }, { "x-ratelimit-remaining": "0", "retry-after": "120" });
+      const teams = /(^|\s)review-requested:@me/.test(q);
+      const items = this.requested
+        .filter((r) => teams || !r.team)
+        .map((r) => {
+          const pull = this.pulls.get(r.pull)!;
+          return { number: pull.number, draft: r.draft ?? false, repository_url: `${this.url}/repos/${pull.fullName}`, pull_request: {} };
+        });
+      return json(200, { total_count: items.length, incomplete_results: false, items });
     }
     if ((m = /^\/repos\/([^/]+\/[^/]+)\/pulls\/(\d+)$/.exec(url.pathname)) && req.method === "GET") {
       const key = `${m[1]}#${m[2]}`;

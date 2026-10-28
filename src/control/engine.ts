@@ -1,12 +1,14 @@
 import type { Models } from "@earendil-works/pi-ai";
-import { type Config, configPath, saveConfig } from "../config/config.ts";
+import { type AutoReview, autoReviewProblem, type Config, configPath, saveConfig } from "../config/config.ts";
+import type { PullInfo } from "../domain/types.ts";
 import { type AvailableModel, listAvailableModels, matches } from "../models/select.ts";
 import type { MODEL_SOURCES } from "../protocol/v1.ts";
 import { reviewerVersion } from "../runtime/task.ts";
 import type { Env } from "../github/accounts.ts";
 import { type GitHubClient, GitHubError } from "../github/client.ts";
 import { parsePullRef, parsePullUrl, type PullRef, type PullSource } from "../github/pulls.ts";
-import { type ReviewCommand, settingsKey } from "../protocol/v1.ts";
+import { reviewRequests } from "../github/requests.ts";
+import { type AutoReviewPoll, type ReviewCommand, settingsKey } from "../protocol/v1.ts";
 import { DEFAULT_SUMMARY_TEMPLATE, effectiveTemplate, TEMPLATE_VARIABLES, templateProblem } from "../publish/template.ts";
 import { type App, finishReview, generationOf, recover, type StartedReview, startPolicy, startReview } from "../runtime/app.ts";
 import { StateConflict } from "../persistence/store.ts";
@@ -26,11 +28,21 @@ export type EngineOptions = {
   models: Models;
   /** The model new reviews get, as `chooseModel` picked it when the engine opened. */
   model: { ref: string; source: ModelSource };
+  /** Tests shorten the auto-review clock: the first poll after start, and the interval in place of the config's. */
+  autoReviewMs?: { first: number; interval?: number };
 };
 
 type ModelSource = (typeof MODEL_SOURCES)[number];
 
 const CANCEL_REASON = "cancelled from the TUI";
+
+/** Reviews one poll for review requests may start; the rest wait for the next poll, oldest first. */
+export const MAX_STARTS_PER_POLL = 5;
+/** The longest rate-limit wait a poll sits through; past it the poll fails and is retried later. */
+const POLL_MAX_SLEEP_MS = 5000;
+/** Failed polls back off by doubling the interval, up to this. */
+const POLL_BACKOFF_CAP_MS = 60 * 60_000;
+const message = (error: unknown) => (error instanceof Error ? error.message : String(error));
 
 /**
  * The daemon in engine mode (TUI_SPEC §2), which the daemon enters only with commands enabled: the app DB read side of
@@ -45,6 +57,11 @@ export class EngineSource extends AppDbSource {
   private readonly options: EngineOptions;
   private readonly running = new Set<Promise<unknown>>();
   private model: EngineOptions["model"];
+  private lastPoll: AutoReviewPoll | undefined;
+  private polling: Promise<AutoReviewPoll> | undefined;
+  private pollFailures = 0;
+  private pollTimer: NodeJS.Timeout | undefined;
+  private closed = false;
 
   private constructor(dataDir: string, app: App, options: EngineOptions) {
     super(dataDir, app.store, options.env ?? process.env);
@@ -66,6 +83,7 @@ export class EngineSource extends AppDbSource {
       await app.close();
       throw error;
     }
+    source.schedulePoll(options.autoReviewMs?.first ?? 10_000);
     return source;
   }
 
@@ -143,12 +161,84 @@ export class EngineSource extends AppDbSource {
       throw unreadable(error, `${ref.owner}/${ref.repo}#${ref.number}`, options.account);
     });
     if (pull.state !== "open") throw new ControlError("CONFLICT", `${pull.fullName}#${pull.number} is ${pull.merged ? "merged" : "closed"}; only open PRs are reviewed`);
-    const publish = options.config.review.publish_mode !== "dry_run";
-    const started = await startReview(app, pull, options.config.review.base_policy_version, { publish });
-    this.follow(started);
-    const result = accepted(started.revision.id);
+    const result = accepted((await this.start(pull)).revision.id);
     app.store.recordCommand(key, { command: "review.add", operationId: result.operationId, attempt: null });
     return result;
+  }
+
+  /** Start reviewing `pull` at its head under this daemon's config, as review.add does, and follow the review. */
+  private async start(pull: PullInfo): Promise<StartedReview> {
+    const { config } = this.options;
+    const started = await startReview(this.app, pull, config.review.base_policy_version, { publish: config.review.publish_mode !== "dry_run" });
+    this.follow(started);
+    return started;
+  }
+
+  /**
+   * One poll for the PRs that request the account's review (`review.auto_review`). Overlapping triggers share the poll
+   * in flight. It never throws: a failure is the poll's `error`, and the next one waits longer.
+   */
+  pollRequests(): Promise<AutoReviewPoll> {
+    this.polling ??= this.poll().finally(() => (this.polling = undefined));
+    return this.polling;
+  }
+
+  private async poll(): Promise<AutoReviewPoll> {
+    const at = new Date().toISOString();
+    let found = 0;
+    let started = 0;
+    let error: string | undefined;
+    try {
+      if (this.options.account === undefined) throw new Error("no GitHub account to search as; run gh auth login or set GITHUB_TOKEN, then restart the daemon");
+      const search = await reviewRequests(this.options.github(0), this.options.config.review.auto_review, POLL_MAX_SLEEP_MS);
+      found = search.found;
+      for (const ref of search.pulls) {
+        if (started >= MAX_STARTS_PER_POLL) break;
+        try {
+          if (await this.startRequested(ref)) started++;
+        } catch (failure) {
+          // A rate limit or an outage stops the poll; anything else is this PR's own problem.
+          if (failure instanceof GitHubError && failure.class === "retryable") throw failure;
+          this.options.report?.(failure);
+          error ??= `${ref.owner}/${ref.repo}#${ref.number}: ${message(failure)}`;
+        }
+      }
+      this.pollFailures = 0;
+    } catch (failure) {
+      this.pollFailures++;
+      error = message(failure);
+      this.options.report?.(new Error(`auto-review poll failed: ${error}`));
+    }
+    this.lastPoll = { at, found, started, skipped: found - started, ...(error === undefined ? {} : { error }) };
+    return this.lastPoll;
+  }
+
+  /**
+   * Start a requested PR at its live head, unless it is archived, no longer open, or that head has a review already
+   * (any state, any model). That last check is what keeps polls, restarts and a crash mid-poll from starting a head
+   * twice: a start creates the head's revision before anything else. True when it started one.
+   */
+  private async startRequested(ref: PullRef): Promise<boolean> {
+    const { store } = this.app;
+    if (store.pullByName(`${ref.owner}/${ref.repo}`, ref.number)?.archived_at) return false;
+    const pull = await this.options.pulls.getPull(ref, { maxSleepMs: POLL_MAX_SLEEP_MS });
+    if (pull.state !== "open") return false;
+    const prId = store.upsertPull(pull);
+    if (store.revisionsForPr(prId).some((r) => r.head_sha === pull.headSha)) return false;
+    const started = await this.start(pull);
+    store.appendActivity(started.revision.id, "auto-review", "started automatically: review requested");
+    return true;
+  }
+
+  /** Poll in `ms`, then each interval (doubling after failures), while auto-review is on. */
+  private schedulePoll(ms: number): void {
+    clearTimeout(this.pollTimer);
+    const auto = this.options.config.review.auto_review;
+    if (this.closed || !auto.enabled) return;
+    const every = this.options.autoReviewMs?.interval ?? auto.interval_minutes * 60_000;
+    const next = () => Math.min(every * 2 ** Math.max(0, this.pollFailures - 1), Math.max(every, POLL_BACKOFF_CAP_MS));
+    this.pollTimer = setTimeout(() => void this.pollRequests().then(() => this.schedulePoll(next())), ms);
+    this.pollTimer.unref();
   }
 
   private async runCommand(request: Exclude<ReviewCommand, { command: "review.add" }>): Promise<string> {
@@ -230,18 +320,30 @@ export class EngineSource extends AppDbSource {
     }));
     const saved = this.options.config.review.summary_template;
     const summaryTemplate = { value: effectiveTemplate(saved), isDefault: saved === "", default: DEFAULT_SUMMARY_TEMPLATE, variables: [...TEMPLATE_VARIABLES] };
-    return clean({ model: this.model, models, configPath: configPath(this.options.env ?? process.env), summaryTemplate });
+    const a = this.options.config.review.auto_review;
+    const autoReview = {
+      enabled: a.enabled,
+      intervalMinutes: a.interval_minutes as 5 | 15 | 30,
+      includeTeamRequests: a.include_team_requests,
+      repos: { include: [...a.repos.include], exclude: [...a.repos.exclude] },
+      ...(this.lastPoll ? { lastPoll: this.lastPoll } : {}),
+    };
+    const publishMode = this.options.config.review.publish_mode;
+    return clean({ model: this.model, models, configPath: configPath(this.options.env ?? process.env), summaryTemplate, publishMode, autoReview });
   }
 
   /**
-   * settings.set: save the model as `models.default` and the summary template as `review.summary_template` (other
-   * config keys kept), each checked before either is written. A review in flight keeps the model its revision names; a
-   * payload already stored keeps its text. The model is refused while the daemon's own `--model` or PR_REVIEW_MODEL
-   * outranks the config, since the saved choice would not survive a restart.
+   * settings.set: save the model as `models.default`, the summary template as `review.summary_template` and the
+   * auto-review fields given under `review.auto_review` (other config keys kept), each checked before any is written.
+   * A review in flight keeps the model its revision names; a payload already stored keeps its text. The model is
+   * refused while the daemon's own `--model` or PR_REVIEW_MODEL outranks the config, since the saved choice would not
+   * survive a restart. Turning auto-review on polls at once; any other change to it restarts the interval.
    */
   async setSettings(params: SettingsParams): Promise<string> {
-    const { model: ref, summaryTemplate } = params;
-    if (ref === undefined && summaryTemplate === undefined) throw new ControlError("INVALID_REQUEST", "settings.set needs model, summaryTemplate or both");
+    const { model: ref, summaryTemplate, autoReview } = params;
+    if (ref === undefined && summaryTemplate === undefined && autoReview === undefined) {
+      throw new ControlError("INVALID_REQUEST", "settings.set needs model, summaryTemplate or autoReview");
+    }
     if (ref !== undefined) {
       const { model } = this;
       if (model.source === "--model" || model.source === "PR_REVIEW_MODEL") {
@@ -253,22 +355,36 @@ export class EngineSource extends AppDbSource {
     const template = summaryTemplate ?? "";
     const problem = summaryTemplate === undefined ? undefined : templateProblem(template);
     if (problem) throw new ControlError("INVALID_REQUEST", problem);
+    const was = this.options.config.review.auto_review;
+    const auto: AutoReview | undefined = autoReview && {
+      enabled: autoReview.enabled ?? was.enabled,
+      interval_minutes: autoReview.intervalMinutes ?? was.interval_minutes,
+      include_team_requests: autoReview.includeTeamRequests ?? was.include_team_requests,
+      repos: { include: autoReview.repos?.include ?? was.repos.include, exclude: autoReview.repos?.exclude ?? was.repos.exclude },
+    };
+    const autoProblem = auto && autoReviewProblem(auto);
+    if (autoProblem) throw new ControlError("INVALID_REQUEST", `autoReview: ${autoProblem}`);
     // A reset removes the key, so the file says nothing rather than repeating the default.
-    saveConfig(
-      { ...(ref !== undefined ? { models: { default: ref } } : {}), ...(summaryTemplate !== undefined ? { review: { summary_template: template || undefined } } : {}) },
-      configPath(this.options.env ?? process.env),
-    );
+    const review = { ...(summaryTemplate !== undefined ? { summary_template: template || undefined } : {}), ...(auto ? { auto_review: auto } : {}) };
+    saveConfig({ ...(ref !== undefined ? { models: { default: ref } } : {}), ...(Object.keys(review).length > 0 ? { review } : {}) }, configPath(this.options.env ?? process.env));
     if (ref !== undefined) {
       this.model = { ref, source: "config" };
       this.app.reviewerVersion = reviewerVersion(ref);
     }
     // The review task reads this same config object when it prepares a payload.
     if (summaryTemplate !== undefined) this.options.config.review.summary_template = template;
+    if (auto) {
+      this.options.config.review.auto_review = auto;
+      this.schedulePoll(auto.enabled && !was.enabled ? 0 : this.options.autoReviewMs?.interval ?? auto.interval_minutes * 60_000);
+    }
     return settingsKey(params);
   }
 
   /** Suspends the reviews in flight (they resume on the next engine start) and releases the data-dir lock. */
   override async close(): Promise<void> {
+    this.closed = true;
+    clearTimeout(this.pollTimer);
+    await this.polling;
     this.db.close();
     await this.app.close();
     await Promise.allSettled(this.running);
