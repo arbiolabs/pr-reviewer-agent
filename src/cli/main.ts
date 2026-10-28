@@ -14,7 +14,8 @@ import { typeSafeKey } from "../jev/key.ts";
 import { PiAuthFileStore } from "../models/credential-store.ts";
 import { buildModels, detectModels } from "../models/detect.ts";
 import { type AvailableModel, chooseModel, listAvailableModels, type ModelChoice } from "../models/select.ts";
-import { AppStore, withStore } from "../persistence/store.ts";
+import { USAGE_BY, type UsageBy, type UsageTotals, usageReport, usageSince } from "../domain/usage.ts";
+import { AppStore, usageRows, withStore } from "../persistence/store.ts";
 import { reconcileOutbox } from "../publish/publisher.ts";
 import { finishReview, lockDataDir, openApp, startReview } from "../runtime/app.ts";
 import { approve as approvePublication, Refused, resumeApproved, reviewAgain } from "../runtime/commands.ts";
@@ -45,6 +46,7 @@ const USAGE = `usage:
   pr-review serve
   pr-review inspect --pr owner/repo#123 [--json]
   pr-review models [--json]
+  pr-review usage [--by day|week|month] [--json]
   pr-review accounts [--json]
   pr-review accounts use <host/login | login>
   pr-review login [provider] [--api-key]
@@ -81,6 +83,8 @@ export async function main(argv: string[], deps: CliDeps = {}): Promise<number> 
         return inspect(rest, dataDir, out);
       case "models":
         return await models(rest, out);
+      case "usage":
+        return await usage(rest, dataDir, out);
       case "accounts":
         return await accounts(rest, dataDir, out);
       case "login":
@@ -415,6 +419,40 @@ function inspect(args: string[], dataDir: string, out: Out): number {
   } finally {
     store.close();
   }
+}
+
+const compact = new Intl.NumberFormat("en-US", { notation: "compact", maximumFractionDigits: 1 });
+const COLUMNS = ["Reviews", "Responses", "Input", "Output", "Cache read", "Cache write", "Cost"];
+const cells = (t: UsageTotals) => [String(t.reviews), String(t.responses), ...[t.input, t.output, t.cacheRead, t.cacheWrite].map((n) => compact.format(n)), `$${t.cost.toFixed(2)}`];
+
+/** `pr-review usage`: recorded model usage from this data dir, the way the daemon's usage.get reports it. */
+async function usage(args: string[], dataDir: string, out: Out): Promise<number> {
+  const { values } = parseArgs({ args, options: { by: { type: "string", default: "day" }, json: { type: "boolean" } } });
+  if (!(USAGE_BY as readonly string[]).includes(values.by)) throw new Error(`--by must be one of ${USAGE_BY.join(", ")}`);
+  const options = { by: values.by as UsageBy, tz: Intl.DateTimeFormat().resolvedOptions().timeZone, now: Date.now() };
+  const report = usageReport(await withStore(dataDir, (store) => usageRows(store.db, usageSince(options))), options);
+  if (values.json) {
+    out.json({ ...report, currency: "USD", priceSource: "catalog" });
+    return 0;
+  }
+  out(`Usage by ${report.by}, ${report.timeZone}. Estimated at the model's list price in USD; a subscription login is billed differently.\n`);
+  if (report.totals.responses === 0) {
+    out("No usage recorded in this range. Usage is recorded from this version on.\n");
+    return 0;
+  }
+  const label = { day: "Day", week: "Week of", month: "Month" }[report.by];
+  const rows = [
+    [label, ...COLUMNS],
+    ...report.buckets.map((b) => [report.by === "month" ? b.start.slice(0, 7) : b.start, ...cells(b)]),
+    ["Total", ...cells(report.totals)],
+  ];
+  const widths = rows[0]!.map((_, i) => Math.max(...rows.map((r) => r[i]!.length)));
+  const line = (r: string[]) => `${r.map((c, i) => (i === 0 ? c.padEnd(widths[i]!) : c.padStart(widths[i]!))).join("  ")}\n`;
+  for (const r of rows) out(line(r));
+  out("\nBy model:\n");
+  const named = Math.max(...report.models.map((m) => m.model.length));
+  for (const m of report.models) out(`  ${m.model.padEnd(named)}  ${m.reviews} review(s)  ${m.responses} response(s)  $${m.cost.toFixed(2)}\n`);
+  return 0;
 }
 
 async function models(args: string[], out: Out): Promise<number> {

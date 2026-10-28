@@ -4,7 +4,8 @@ import { join } from "node:path";
 import { createModels, type FauxResponseStep, fauxAssistantMessage, fauxProvider } from "@earendil-works/pi-ai";
 import { describe, expect, it } from "vitest";
 import { type UsageRow, usageReport, usageSince, usageStart } from "../src/domain/usage.ts";
-import { usageRows } from "../src/persistence/store.ts";
+import { main } from "../src/cli/main.ts";
+import { AppStore, usageRows } from "../src/persistence/store.ts";
 import { DEFAULT_CONFIG } from "../src/config/config.ts";
 import { finishReview, openApp, startReview } from "../src/runtime/app.ts";
 import { createFixture } from "./fixture.ts";
@@ -229,4 +230,48 @@ describe("recording", () => {
       await second.close();
     }
   }, 30_000);
+});
+
+describe("pr-review usage", () => {
+  const run = async (args: string[], dataDir: string) => {
+    let out = "";
+    let err = "";
+    process.env.PR_REVIEW_DATA_DIR = dataDir;
+    try {
+      const code = await main(["usage", ...args], { out: (t) => (out += t), err: (t) => (err += t) });
+      return { code, out, err };
+    } finally {
+      delete process.env.PR_REVIEW_DATA_DIR;
+    }
+  };
+
+  it("prints a table with totals and the model split, or JSON, from the store", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "usage-cli-"));
+    const store = AppStore.open(join(dataDir, "app.sqlite"));
+    const prId = store.upsertPull(createFixture().pull);
+    const revision = store.ensureRevision({ prId, baseSha: "b".repeat(40), headSha: "h".repeat(40), policyVersion: "1", reviewerVersion: "m1" });
+    const cost = { input: 0, output: 0, cacheRead: 0, cacheWrite: 0, total: 1.234 };
+    store.recordUsage(revision.id, "anthropic/claude-x", { input: 1500, output: 2_500_000, cacheRead: 0, cacheWrite: 0, totalTokens: 0, cost });
+    store.close();
+
+    const text = await run(["--by", "week"], dataDir);
+    expect(text.code).toBe(0);
+    expect(text.out).toContain("Estimated at the model's list price in USD");
+    const lines = text.out.split("\n");
+    expect(lines[1]).toMatch(/^Week of\s+Reviews\s+Responses\s+Input\s+Output\s+Cache read\s+Cache write\s+Cost$/);
+    expect(lines.filter((l) => /^\d{4}-\d{2}-\d{2} /.test(l))).toHaveLength(12);
+    expect(lines.find((l) => l.startsWith("Total"))).toMatch(/^Total\s+1\s+1\s+1\.5K\s+2\.5M\s+0\s+0\s+\$1\.23$/);
+    expect(text.out).toContain("anthropic/claude-x  1 review(s)  1 response(s)  $1.23");
+
+    const json = await run(["--by", "month", "--json"], dataDir);
+    const parsed = JSON.parse(json.out);
+    expect(parsed).toMatchObject({ by: "month", currency: "USD", priceSource: "catalog", totals: { responses: 1, cost: 1.234 } });
+    expect(parsed.buckets).toHaveLength(12);
+  });
+
+  it("says when nothing is recorded, and refuses an unknown grouping", async () => {
+    const dataDir = mkdtempSync(join(tmpdir(), "usage-cli-"));
+    expect((await run([], dataDir)).out).toContain("No usage recorded in this range. Usage is recorded from this version on.");
+    expect(await run(["--by", "year"], dataDir)).toMatchObject({ code: 1, err: "pr-review: --by must be one of day, week, month\n" });
+  });
 });
