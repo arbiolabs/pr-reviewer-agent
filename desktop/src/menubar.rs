@@ -37,8 +37,7 @@ pub fn set_open_at_login(on: bool) -> Result<(), String> {
 /// The plist: `open` on the app bundle when the binary is in one, so the app starts as macOS starts apps, else the
 /// binary itself.
 fn login_agent(exe: &Path) -> String {
-    let bundle = exe.ancestors().nth(3).filter(|b| b.extension().is_some_and(|e| e == "app"));
-    let args: Vec<String> = match bundle {
+    let args: Vec<String> = match bundle(exe) {
         Some(app) => {
             vec![
                 "/usr/bin/open".into(),
@@ -69,6 +68,11 @@ fn login_agent(exe: &Path) -> String {
 </plist>
 "#
     )
+}
+
+/// The `.app` the binary runs from, when it runs from one.
+pub fn bundle(exe: &Path) -> Option<&Path> {
+    exe.ancestors().nth(3).filter(|b| b.extension().is_some_and(|e| e == "app"))
 }
 
 fn xml(s: &str) -> String {

@@ -192,7 +192,7 @@ for look in dark light; do
   snap 24a-settings-review-$look     $look 20000 "wait:19000,goto:settings,settings-tab:review"
   snap 24b-settings-reviewer-$look   $look 1000  "goto:settings" protocol/playback/setup.ndjson
   snap 24c-settings-accounts-$look   $look 20000 "wait:19000,goto:settings,settings-tab:accounts"
-  snap 24d-settings-appearance-$look $look 20000 "wait:19000,goto:settings,settings-tab:appearance"
+  snap 24d-settings-appearance-$look $look 20000 "wait:19000,goto:settings,settings-tab:general"
   snap 25a-auto-review-off-$look   $look 20000 "$auto_at" desktop/target/auto-off/playback/auto-off.ndjson
   snap 25b-auto-review-on-$look    $look 20000 "$auto_at" "$settings_script"
   snap 25c-auto-review-error-$look $look 20000 "$auto_at" desktop/target/auto-error/playback/auto-error.ndjson
@@ -215,4 +215,4 @@ snap 21c-nord-finding                 nord            20000 "wait:19000,pr:1287,
 snap 21e-dracula                      dracula         20000 ""
 snap 21e-dracula-finding              dracula         20000 "wait:19000,pr:1287,finding:1,finding:1"
 snap 21e-dracula-diff                 dracula         20000 "wait:19000,pr:1287,finding:1,open-diff"
-snap 21d-appearance-settings          nord            20000 "wait:19000,goto:settings,settings-tab:appearance"
+snap 21d-appearance-settings          nord            20000 "wait:19000,goto:settings,settings-tab:general"

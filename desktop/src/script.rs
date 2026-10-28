@@ -66,7 +66,7 @@ pub enum Desk {
     Repos(crate::auto::Field, String),
     /// `scroll:Y`: Settings scrolled Y points down.
     Scroll(u64),
-    /// `settings-tab:NAME`: Settings on its `review`, `reviewer`, `accounts` or `appearance` tab.
+    /// `settings-tab:NAME`: Settings on its `review`, `reviewer`, `accounts` or `general` tab.
     SettingsTab(crate::setup::Tab),
 }
 
@@ -137,7 +137,7 @@ pub fn parse(s: &str) -> Result<Vec<Step>, String> {
             }
             Some(("settings-tab", v)) => match crate::setup::Tab::ALL.into_iter().find(|tab| tab.id() == v) {
                 Some(tab) => steps.push(Step::Desk(Desk::SettingsTab(tab))),
-                None => return Err(format!("{t:?}: settings tabs are review, reviewer, accounts and appearance")),
+                None => return Err(format!("{t:?}: settings tabs are review, reviewer, accounts and general")),
             },
             Some(("tab", v)) => steps.push(Step::Desk(Desk::Tab(match v {
                 "queue" => List::Queue,

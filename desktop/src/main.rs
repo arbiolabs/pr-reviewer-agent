@@ -22,6 +22,7 @@ mod setup;
 mod timeline;
 mod tokens;
 mod ui;
+mod update;
 mod usage;
 mod waterfall;
 
@@ -376,7 +377,18 @@ fn run_app(
             if hide_dock {
                 cx.set_activation_policy(ActivationPolicy::Accessory);
             }
-            if background { cx.hide() } else { cx.activate(true) }
+            if background {
+                cx.hide()
+            } else {
+                cx.activate(true)
+            }
+            let checks = shell.downgrade();
+            cx.spawn(async move |cx| {
+                while checks.update(cx, |s, cx| s.check_update(cx)).is_ok() {
+                    cx.background_executor().timer(update::CHECK_EVERY).await;
+                }
+            })
+            .detach();
         }
         if let Some(mut msgs) = msgs {
             cx.spawn(async move |cx| {

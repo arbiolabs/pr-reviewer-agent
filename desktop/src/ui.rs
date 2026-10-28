@@ -235,6 +235,9 @@ pub struct Shell {
     pub hide_dock: bool,
     /// The login item is installed.
     pub open_at_login: bool,
+    pub update: crate::update::Update,
+    /// The install's update script; `None` in a snapshot or outside an install.
+    pub update_script: Option<std::path::PathBuf>,
 }
 
 /// A page the reader went into: a finding, the proof, the diff, Settings or Usage. The live strip steps aside there.
@@ -323,6 +326,8 @@ impl Shell {
             queued_add: None,
             hide_dock: false,
             open_at_login: !snapshot && crate::menubar::opens_at_login(),
+            update: crate::update::Update::Idle,
+            update_script: if snapshot { None } else { crate::update::script() },
         };
         for d in desk {
             match d {
@@ -1243,6 +1248,7 @@ fn titlebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                 )
             })
         })
+        .children(update_chip(s, t, cx))
         .when(read_only, |d| {
             d.child(tip(
                 div()
@@ -1272,6 +1278,43 @@ fn titlebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
             focusable("search", search, t, radius::SM, click(cx, |s, cx| s.toggle_palette(cx))),
             "Search PRs and findings, or run a command",
         ))
+}
+
+/// A release on offer, on its way or waiting for a restart, as a chip that opens Settings → General → Updates.
+fn update_chip(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Option<impl IntoElement> {
+    use crate::update::Update;
+    let (word, why) = match &s.update {
+        Update::Available(to) => (format!("Update to {to}"), format!("Version {to} is available. Click for Settings.")),
+        Update::Installing { to, .. } => {
+            (format!("Updating to {to}…"), "The update is running. Click for Settings.".into())
+        }
+        Update::Installed(to) => {
+            ("Restart to update".into(), format!("Version {to} is installed. Click for Settings."))
+        }
+        _ => return None,
+    };
+    Some(tip(
+        div()
+            .id("update")
+            .flex()
+            .flex_none()
+            .items_center()
+            .gap(px(5.))
+            .h(px(24.))
+            .px(space::S2)
+            .rounded(radius::SM)
+            .bg(t.accent.alpha(t.tint))
+            .border_1()
+            .border_color(t.accent.alpha(t.tint * 2.))
+            .text_size(text::SMALL)
+            .font_weight(FontWeight::MEDIUM)
+            .text_color(t.accent)
+            .child(icon(IconName::ArrowDown, px(12.), t.accent))
+            .child(word)
+            .cursor_pointer()
+            .on_click(cx.listener(|s, _: &ClickEvent, _, cx| s.settings_on(crate::setup::Tab::General, cx))),
+        why,
+    ))
 }
 
 /// The reviewer's state in a word, and the one action that changes it: Stop while it runs, Start while it doesn't.

@@ -33,7 +33,7 @@ fn check_name(id: &str) -> &str {
 }
 
 /// Settings: a tab row, then the tab's cards. Review holds the model, Jev and the review message; Reviewer the setup
-/// checks and the daemon; Accounts the GitHub accounts; Appearance the themes.
+/// checks and the daemon; Accounts the GitHub accounts; General updates, the themes, and the menu bar and Dock.
 pub fn settings(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
     div().flex().flex_1().min_h_0().child(tracked_page(
         "settings",
@@ -915,9 +915,11 @@ pub fn setup_body(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
             .child(card("Reviewer", conn))
             .child(crate::auto::section(s, t, cx)),
         Tab::Accounts => body.child(card("GitHub accounts", accounts)),
-        Tab::Appearance => {
-            body.child(card("Appearance", themes(s, t, cx))).child(card("Menu bar and Dock", app(s, t, cx)))
-        }
+        // Updates leads: the title bar's update chip opens this tab, and the card holds its action.
+        Tab::General => body
+            .child(card("Updates", crate::update::card(s, t, cx)))
+            .child(card("Appearance", themes(s, t, cx)))
+            .child(card("Menu bar and Dock", app(s, t, cx))),
     };
     div().flex().flex_col().gap(space::S6).child(tab_control(s, t, cx)).child(body)
 }
@@ -952,18 +954,18 @@ pub enum Tab {
     Review,
     Reviewer,
     Accounts,
-    Appearance,
+    General,
 }
 
 impl Tab {
-    pub const ALL: [Tab; 4] = [Tab::Review, Tab::Reviewer, Tab::Accounts, Tab::Appearance];
+    pub const ALL: [Tab; 4] = [Tab::Review, Tab::Reviewer, Tab::Accounts, Tab::General];
 
     pub fn name(self) -> &'static str {
         match self {
             Tab::Review => "Review",
             Tab::Reviewer => "Reviewer",
             Tab::Accounts => "Accounts",
-            Tab::Appearance => "Appearance",
+            Tab::General => "General",
         }
     }
 
@@ -973,7 +975,7 @@ impl Tab {
             Tab::Review => "review",
             Tab::Reviewer => "reviewer",
             Tab::Accounts => "accounts",
-            Tab::Appearance => "appearance",
+            Tab::General => "general",
         }
     }
 
@@ -983,7 +985,7 @@ impl Tab {
             Tab::Review => "1",
             Tab::Reviewer => "2",
             Tab::Accounts => "3",
-            Tab::Appearance => "4",
+            Tab::General => "4",
         }
     }
 }
@@ -1064,7 +1066,7 @@ pub fn badge(m: &pr_review_tui::model::Model, tab: Tab) -> Option<Badge> {
                 checks.filter(|c| matches!(c.id.as_str(), "model" | "jev") && c.status == CheckStatus::Missing).count();
             (n > 0).then_some(Badge { n })
         }
-        Tab::Accounts | Tab::Appearance => None,
+        Tab::Accounts | Tab::General => None,
     }
 }
 
@@ -1087,10 +1089,10 @@ mod tests {
         let mut tabs = Tabs::default();
         tabs.sync(true, &m);
         assert_eq!(tabs.tab, Tab::Review);
-        tabs.open_on(Tab::Appearance);
+        tabs.open_on(Tab::General);
         tabs.sync(false, &m);
         tabs.sync(true, &m);
-        assert_eq!(tabs.tab, Tab::Appearance, "⌘, reopens on the tab the reader left");
+        assert_eq!(tabs.tab, Tab::General, "⌘, reopens on the tab the reader left");
     }
 
     #[test]
@@ -1099,9 +1101,9 @@ mod tests {
         let mut tabs = Tabs::default();
         tabs.sync(true, &blocked);
         assert_eq!(tabs.tab, Tab::Reviewer);
-        tabs.open_on(Tab::Appearance);
+        tabs.open_on(Tab::General);
         tabs.sync(true, &blocked);
-        assert_eq!(tabs.tab, Tab::Appearance, "a pick while Settings is open stands");
+        assert_eq!(tabs.tab, Tab::General, "a pick while Settings is open stands");
         tabs.sync(false, &blocked);
         tabs.sync(true, &blocked);
         assert_eq!(tabs.tab, Tab::Reviewer, "coming back while it still blocks puts the checks in front again");
