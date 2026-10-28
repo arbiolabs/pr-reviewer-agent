@@ -58,6 +58,12 @@ pub enum Desk {
     AddPr(String),
     /// `reviewer:STATE`: the reviewer as a start or stop leaves it, since a playback never starts or stops one.
     Reviewer(Staged),
+    /// `message:TEXT`: the review message editor holding TEXT, `\n` for a line break.
+    Message(String),
+    /// `message-saved`: the editor's text as the daemon would have it after Save, since a playback refuses commands.
+    MessageSaved,
+    /// `scroll:Y`: Settings scrolled Y points down.
+    Scroll(u64),
 }
 
 /// The states `reviewer:` stages: `stopped`, `starting`, `start-failed` and `stop-confirm`.
@@ -97,7 +103,7 @@ const SCREENS: &[(&str, Screen)] = &[
 
 /// Comma-separated steps: an action name, `goto:<screen>`, `type:<text>`, `pr:<number>`, `finding:<n>`,
 /// `wait:<ms>`, `add:<url>`, or a desktop step (`tab:done`, `palette:<text>`, `keys`, `confirm-post`, `add-pr[:<url>]`,
-/// `scrub:<n>`, `span:<name>`, `reviewer:<state>`).
+/// `scrub:<n>`, `span:<name>`, `reviewer:<state>`, `message:<text>`, `message-saved`, `scroll:<points>`).
 pub fn parse(s: &str) -> Result<Vec<Step>, String> {
     let mut steps = Vec::new();
     for t in s.split(',').map(str::trim).filter(|t| !t.is_empty()) {
@@ -114,6 +120,9 @@ pub fn parse(s: &str) -> Result<Vec<Step>, String> {
                 n => steps.push(Step::Desk(Desk::Scrub(n as usize))),
             },
             Some(("span", v)) => steps.push(Step::Desk(Desk::Span(v.into()))),
+            Some(("message", v)) => steps.push(Step::Desk(Desk::Message(v.replace("\\n", "\n")))),
+            None if t == "message-saved" => steps.push(Step::Desk(Desk::MessageSaved)),
+            Some(("scroll", v)) => steps.push(Step::Desk(Desk::Scroll(number(v)?))),
             Some(("tab", v)) => steps.push(Step::Desk(Desk::Tab(match v {
                 "queue" => List::Queue,
                 "done" => List::Done,

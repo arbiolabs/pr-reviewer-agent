@@ -172,6 +172,7 @@ impl Shell {
             .into_iter()
             .flatten()
             .any(|i| i.read(cx).focus_handle(cx).is_focused(window))
+            || self.message.editor.as_ref().is_some_and(|e| e.read(cx).focus_handle(cx).is_focused(window))
     }
 }
 
