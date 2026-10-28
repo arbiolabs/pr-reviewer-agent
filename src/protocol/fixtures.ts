@@ -1,7 +1,8 @@
 // Source of protocol/fixtures and protocol/playback. Edit here, then run `pnpm protocol:emit`.
 import { sha256, stableId } from "../domain/types.ts";
 import { USAGE_BY, USAGE_GROUPS, type UsageBy, type UsageGroupBy, type UsagePr, type UsageRow, usageReport } from "../domain/usage.ts";
-import { type Account, type ActivitySpan, type ClientMessage, type DiffFile, type Evidence, type Finding, type FindingDetail, type Pr, type PublicationChange, REVIEW_COMMANDS, type Run, type ServerMessage, type SetupCheck } from "./v1.ts";
+import { DEFAULT_SUMMARY_TEMPLATE, TEMPLATE_VARIABLES } from "../publish/template.ts";
+import { type Account, type ActivitySpan, type ClientMessage, type DiffFile, type Evidence, type Finding, type FindingDetail, type Pr, type PublicationChange, REVIEW_COMMANDS, type Run, type ServerMessage, type SetupCheck, settingsKey } from "./v1.ts";
 
 const EPOCH = "epoch-1";
 const T0 = Date.parse("2026-10-20T13:00:00Z");
@@ -1552,6 +1553,9 @@ const usageFixture = (by: UsageBy, rows = usageRowsFixture, group: UsageGroupBy 
 
 const hostileTitle ="\u001b[31mred\u001b[0m \u001b]8;;https://evil.example\u0007click\u001b]8;;\u0007 \u009b2J\u0085done";
 
+/** A custom review summary, as an operator might write one: what the settings fixtures and the desktop show. */
+export const CUSTOM_TEMPLATE = "### Review of {{repo}} #{{pr_number}} at `{{short_sha}}`\n\n{{summary_line}}\n\n{{findings_list}}\n\n{{carried}}\n\nReviewed by {{model}}. A human still decides.\n";
+
 export const fixtures: Record<string, ClientMessage | ServerMessage | Record<string, unknown>> = {
   "client.hello": { type: "hello", requestId: "req-hello", protocolVersion: 1, client: "ratatui", capabilities: ["snapshots", "events"] },
   "client.hello.future-version": { type: "hello", requestId: "req-hello", protocolVersion: 2, client: "ratatui", capabilities: [] },
@@ -1618,6 +1622,20 @@ export const fixtures: Record<string, ClientMessage | ServerMessage | Record<str
     params: { model: "openai/gpt-5.5" },
     idempotencyKey: "settings.set:openai/gpt-5.5",
   },
+  "client.command.settings.set.template": {
+    type: "command",
+    requestId: "req-cmd",
+    command: "settings.set",
+    params: { summaryTemplate: CUSTOM_TEMPLATE },
+    idempotencyKey: settingsKey({ summaryTemplate: CUSTOM_TEMPLATE }),
+  },
+  "client.command.settings.set.reset": {
+    type: "command",
+    requestId: "req-cmd",
+    command: "settings.set",
+    params: { summaryTemplate: null },
+    idempotencyKey: "settings.set::template:default",
+  },
   "server.settings": {
     type: "settings",
     requestId: "req-settings",
@@ -1629,6 +1647,15 @@ export const fixtures: Record<string, ClientMessage | ServerMessage | Record<str
       { ref: "openrouter/google/gemini-3-pro", provider: "openrouter", name: "Gemini 3 Pro", contextWindow: 1_048_576, authSource: "OPENROUTER_API_KEY", preferred: false },
     ],
     configPath: "/Users/operator/.config/pr-review/pr-review.config.json",
+    summaryTemplate: { value: DEFAULT_SUMMARY_TEMPLATE, isDefault: true, default: DEFAULT_SUMMARY_TEMPLATE, variables: [...TEMPLATE_VARIABLES] },
+  },
+  "server.settings.custom-template": {
+    type: "settings",
+    requestId: "req-settings",
+    model: { ref: "anthropic/claude-opus-5-5", source: "config" },
+    models: [{ ref: "anthropic/claude-opus-5-5", provider: "anthropic", name: "Claude Opus 5.5", contextWindow: 1_000_000, authSource: "oauth", preferred: true }],
+    configPath: "/Users/operator/.config/pr-review/pr-review.config.json",
+    summaryTemplate: { value: CUSTOM_TEMPLATE, isDefault: false, default: DEFAULT_SUMMARY_TEMPLATE, variables: [...TEMPLATE_VARIABLES] },
   },
   "server.settings.env": {
     type: "settings",

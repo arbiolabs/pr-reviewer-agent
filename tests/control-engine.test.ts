@@ -13,7 +13,9 @@ import type { Env } from "../src/github/accounts.ts";
 import { GitHubClient } from "../src/github/client.ts";
 import { GitHubPullSource } from "../src/github/pulls.ts";
 import { AppStore } from "../src/persistence/store.ts";
-import { type Command, idempotencyKey, type ServerMessage } from "../src/protocol/v1.ts";
+import { type Command, idempotencyKey, type ServerMessage, settingsKey } from "../src/protocol/v1.ts";
+import { marker } from "../src/publish/publisher.ts";
+import { DEFAULT_SUMMARY_TEMPLATE, TEMPLATE_VARIABLES } from "../src/publish/template.ts";
 import { type App, openApp } from "../src/runtime/app.ts";
 import { REVIEW_TASK_NAME } from "../src/runtime/task.ts";
 import { produced, TestClient } from "./control-client.ts";
@@ -818,7 +820,7 @@ it("settings.get lists the models and the one in use; settings.set saves a liste
     return reply;
   };
   const option = (id: string, preferred: boolean) => ({ ref: `faux/${id}`, provider: "faux", name: id, contextWindow: expect.any(Number), authSource: expect.any(String), preferred });
-  expect(await settings()).toEqual({ model: { ref: "faux/reviewer", source: "config" }, models: [option("other", true), option("reviewer", false)], configPath });
+  expect(await settings()).toEqual({ model: { ref: "faux/reviewer", source: "config" }, models: [option("other", true), option("reviewer", false)], configPath, summaryTemplate: expect.objectContaining({ isDefault: true }) });
 
   expect(await command(c, { command: "settings.set", params: { model: "faux/missing" } })).toEqual(rejected("NOT_FOUND", "model faux/missing is not available; choose one of faux/other, faux/reviewer"));
   expect(JSON.parse(readFileSync(configPath, "utf8")).models).toEqual({ default: "faux/reviewer" });
@@ -832,6 +834,71 @@ it("settings.get lists the models and the one in use; settings.set saves a liste
   const revision = h.app.store.revisionsForPr(h.app.store.pullByName("acme/shop", 1)!.id)[0]!;
   expect([revision.reviewer_version, asked]).toEqual(["m1+faux/other", ["other", "other"]]);
 }, 30_000);
+
+it("settings.set saves a summary template that payloads prepared after it use, refuses an unknown variable, keeps a parked payload as stored, and resets", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "template-"));
+  const configPath = join(dir, "pr-review.config.json");
+  writeFileSync(configPath, JSON.stringify({ models: { default: "faux/reviewer" } }));
+  fake.setPull({ ...fixture.pull, author: "octocat" });
+  const config = structuredClone(approvalConfig);
+  const h = await host({ config, env: { PATH: "", PR_REVIEW_CONFIG: configPath }, responses: [readDiff(), submitDefect(fixture), readDiff(), submitDefect(fixture)] });
+  const { c } = await serve(h.source);
+  c.send({ type: "snapshot.get", requestId: "s" });
+  await c.waitFor((m) => m.type === "snapshot");
+  const template = async () => {
+    const requestId = `get-${++requests}`;
+    c.send({ type: "settings.get", requestId });
+    return (await c.waitFor<Extract<ServerMessage, { type: "settings" }>>((m) => m.type === "settings" && m.requestId === requestId)).summaryTemplate!;
+  };
+  const body = async (runId: string) => {
+    const requestId = `pub-${++requests}`;
+    c.send({ type: "publication.get", requestId, runId });
+    return (await c.waitFor<Extract<ServerMessage, { type: "publication.preview" }>>((m) => m.type === "publication.preview" && m.requestId === requestId)).body;
+  };
+  const parked = (from: number) => c.waitFor((m) => m.type === "event" && m.eventType === "review.phase_changed" && (m.data as { to: string }).to === "AWAITING_APPROVAL", from);
+
+  const initial = await template();
+  expect([initial.isDefault, initial.value, initial.value === initial.default]).toEqual([true, DEFAULT_SUMMARY_TEMPLATE, true]);
+  expect(initial.variables.map((v) => v.name)).toEqual(TEMPLATE_VARIABLES.map((v) => v.name));
+
+  let mark = c.messages.length;
+  await command(c, { command: "review.add", params: { url: "acme/shop#1" } });
+  await parked(mark);
+  const first = h.app.store.revisionsForPr(h.app.store.pullByName("acme/shop", 1)!.id)[0]!.id;
+  const stored = await body(first);
+  expect(stored.startsWith("## Automated PR review\n\nReviewed commit:")).toBe(true);
+
+  expect(await command(c, { command: "settings.set", params: { summaryTemplate: "Hi {{pr_author}} {{nope}} {{ repo }}" } })).toEqual(
+    rejected("INVALID_REQUEST", /^unknown variables \{\{nope\}\}, \{\{ repo \}\}; known: repo, pr_number/),
+  );
+  expect(await command(c, { command: "settings.set", params: {} })).toEqual(rejected("INVALID_REQUEST", "settings.set needs model, summaryTemplate or both"));
+
+  const custom = "### {{repo}} #{{pr_number}} by {{pr_author}}: {{pr_title}}\n\n{{summary_line}} ({{high_count}} high, {{unconfirmed_count}} unconfirmed)\n\n{{findings_list}}\n\n{{carried}}\n\n{{limitations}}\n\n{{model}} at {{short_sha}} <!-- sneaky -->\n";
+  expect(operation(await command(c, { command: "settings.set", params: { summaryTemplate: custom } }))).toEqual({
+    type: "command.result",
+    status: "accepted",
+    operationId: settingsKey({ summaryTemplate: custom }),
+  });
+  expect(JSON.parse(readFileSync(configPath, "utf8"))).toEqual({ models: { default: "faux/reviewer" }, review: { summary_template: custom } });
+  expect(await template()).toMatchObject({ value: custom, isDefault: false, default: DEFAULT_SUMMARY_TEMPLATE });
+  // The parked approval keeps the payload it stored: the proof shows what will be posted.
+  expect(await body(first)).toBe(stored);
+
+  mark = c.messages.length;
+  await command(c, { command: "review.again", params: { prId: h.app.store.pullByName("acme/shop", 1)!.id, expectedHeadSha: fixture.headSha } });
+  await parked(mark);
+  const second = h.app.store.revisionsForPr(h.app.store.pullByName("acme/shop", 1)!.id).find((r) => r.id !== first)!.id;
+  const outbox = h.app.store.outboxForRevision(second)!;
+  expect(await body(second)).toBe(
+    `### acme/shop #1 by octocat: ${fixture.pull.title}\n\nNo new actionable issues found in the reviewed scope. (0 high, 0 unconfirmed)\n\nStill present from an earlier commit:\n\n- High: Order deletion endpoint skips the admin check (\`src/routes/orders.ts:5\`, first reported on \`${fixture.headSha.slice(0, 7)}\`)\n\nfaux/reviewer at ${fixture.headSha.slice(0, 7)} &lt;!-- sneaky -->\n\n${marker(second, outbox.payload_hash)}\n`,
+  );
+
+  expect(operation(await command(c, { command: "settings.set", params: { summaryTemplate: null } }))).toMatchObject({ status: "accepted", operationId: "settings.set::template:default" });
+  expect(JSON.parse(readFileSync(configPath, "utf8"))).toEqual({ models: { default: "faux/reviewer" }, review: {} });
+  expect(await template()).toMatchObject({ value: DEFAULT_SUMMARY_TEMPLATE, isDefault: true });
+  expect(operation(await command(c, { command: "settings.set", params: { summaryTemplate: "" } }))).toMatchObject({ status: "accepted", operationId: "settings.set::template:default" });
+  expect(config.review.summary_template).toBe("");
+}, 60_000);
 
 it("refuses settings.set while the daemon's PR_REVIEW_MODEL outranks the config, and a read-only daemon grants neither settings request", async () => {
   const h = await host({ model: { ref: "faux/reviewer", source: "PR_REVIEW_MODEL" } });

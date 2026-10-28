@@ -5,7 +5,7 @@ import { describe, expect, it } from "vitest";
 import { GENERATED_DIRS, PROTOCOL_DIR, protocolFiles } from "../src/protocol/emit.ts";
 import type { Expect } from "../src/protocol/fixtures.ts";
 import { sanitize } from "../src/protocol/sanitize.ts";
-import { type Account, ClientMessage, KNOWN_EVENT_TYPES, ServerMessage, type Finding, type Pr, type Run } from "../src/protocol/v1.ts";
+import { type Account, ClientMessage, fnv1a64, KNOWN_EVENT_TYPES, ServerMessage, settingsKey, type Finding, type Pr, type Run } from "../src/protocol/v1.ts";
 
 const client = Compile(ClientMessage);
 const server = Compile(ServerMessage);
@@ -49,6 +49,13 @@ describe("fixtures", () => {
     expect(raw).toContain("\\u009b2J");
     expect(raw).not.toMatch(/[\u0000-\u0009\u000b-\u001f\u007f-\u009f]/);
   });
+});
+
+it("settings.set keys name the model and hash the template, so different texts are different keys", () => {
+  expect([fnv1a64(""), fnv1a64("a"), fnv1a64("é{{repo}}")]).toEqual(["cbf29ce484222325", "af63dc4c8601ec8c", "2ec616eb09cd6d39"]);
+  expect(settingsKey({ model: "openai/gpt-5.5" })).toBe("settings.set:openai/gpt-5.5");
+  expect(settingsKey({ model: "m/x", summaryTemplate: "t" })).toBe("settings.set:m/x:template:af63e94c860202a3");
+  expect([settingsKey({ summaryTemplate: null }), settingsKey({ summaryTemplate: "" })]).toEqual(["settings.set::template:default", "settings.set::template:default"]);
 });
 
 it("sanitize strips terminal control sequences and keeps text, newlines and tabs", () => {
