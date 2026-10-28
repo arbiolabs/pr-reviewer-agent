@@ -23,6 +23,7 @@ export function parsePullRef(ref: string): PullRef {
 type GitHubPull = {
   number: number;
   title: string;
+  user: { login: string } | null;
   body: string | null;
   state: "open" | "closed";
   merged: boolean;
@@ -59,6 +60,7 @@ export class GitHubPullSource implements PullSource {
       fullName: pull.base.repo.full_name,
       number: pull.number,
       title: pull.title,
+      author: pull.user?.login ?? null,
       body: pull.body ?? "",
       baseSha: pull.base.sha,
       headSha: pull.head.sha,

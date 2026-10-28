@@ -84,6 +84,7 @@ export class FakeGitHub {
       return json(200, {
         number: pull.number,
         title: pull.title,
+        user: pull.author === null ? null : { login: pull.author },
         body: pull.body,
         state: pull.state,
         merged: pull.merged,

@@ -348,6 +348,7 @@ export class AppDbSource implements ControlSource {
       repository: pull.repo_full_name,
       number: pull.number,
       title: pull.title ?? (latest ? (JSON.parse(latest.pr_json) as { title: string }).title : `${pull.repo_full_name}#${pull.number}`),
+      ...(pull.author ? { author: pull.author } : {}),
       headSha: at?.head_sha ?? pull.latest_head_sha,
       baseSha: at?.base_sha ?? pull.latest_base_sha,
       lifecycle: (COORDINATOR_STATES as readonly string[]).includes(pull.status) ? (pull.status as Pr["lifecycle"]) : "ACTIVE",

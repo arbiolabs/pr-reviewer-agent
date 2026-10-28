@@ -60,7 +60,7 @@ function loadCase(id: string) {
     return sha;
   };
   const headSha = commit("head", [], spec.title);
-  const pull = { installationId: 0, repositoryId: 1, fullName: `bench/${id}`, number: 1, title: spec.title, body: spec.body, baseSha, headSha, state: "open" as const, merged: false, private: false, cloneUrl: repoDir };
+  const pull = { installationId: 0, repositoryId: 1, fullName: `bench/${id}`, number: 1, title: spec.title, author: null, body: spec.body, baseSha, headSha, state: "open" as const, merged: false, private: false, cloneUrl: repoDir };
   return { spec, pulls: new FakePullSource(pull), commit };
 }
 
