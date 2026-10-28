@@ -691,7 +691,7 @@ pub fn setup_body(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                     CheckStatus::Unknown => (IconName::CircleAlert, t.muted, "Unknown"),
                 };
                 list = list.child(
-                    row().child(div().pt(px(1.)).child(icon(glyph, px(16.), hue))).child(
+                    row().items_center().child(icon(glyph, px(16.), hue)).child(
                         div()
                             .flex()
                             .flex_col()
