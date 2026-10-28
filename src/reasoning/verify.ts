@@ -146,6 +146,8 @@ const step = (path: CandidateState[], event: CandidateEvent): CandidateState[] =
 /**
  * Deterministic VERIFY (spec §7): every candidate walks the candidate submachine to VERIFIED or DISCARDED.
  * There is no LLM second-pass verifier in M1; a candidate passes on anchoring, evidence, and policy alone.
+ * Evidence discards only a candidate marked `unreproducible`; a `suspected` one is verified and published marked
+ * unconfirmed. A resolution claim still needs `confirmed_by_static_trace`, because a wrong resolution hides a real defect.
  * The candidates that pass are then linked to the PR's open findings one-to-one (track.ts): a linked candidate
  * takes that finding's ID, and any other gets a new one. Two candidates that get the same new ID are one defect
  * reported twice, so the second is a duplicate. Two that read as the same open finding are not: the second is new.
@@ -180,7 +182,7 @@ export async function verifyCandidates(
       discard(index, candidate, path, structural);
       continue;
     }
-    if (candidate.evidenceKind !== "confirmed_by_static_trace") {
+    if (candidate.evidenceKind === "unreproducible") {
       discard(index, candidate, step(path, "EVIDENCE_INSUFFICIENT"), `evidence is ${candidate.evidenceKind}`);
       continue;
     }

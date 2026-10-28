@@ -62,3 +62,20 @@ it("cuts a body that would exceed GitHub's limit at a line end and keeps the mar
   expect(notice).toBeGreaterThan(0);
   expect(payload.body.slice(0, notice).split("\n").at(-1)).toMatch(/^- High: Finding \d+ x+ \(`src\/x\.ts:\d+`\)$/);
 });
+
+it("marks a suspected finding unconfirmed in the body line and the inline comment, and leaves a confirmed one as it was", () => {
+  const files = parseDiff("diff --git a/src/x.ts b/src/x.ts\n--- a/src/x.ts\n+++ b/src/x.ts\n@@ -0,0 +1,2 @@\n+a\n+b\n");
+  const build = (kind: FindingView["candidate"]["evidenceKind"]) => {
+    const f = view(0, { carried: false, posted: false });
+    f.candidate = { ...f.candidate, title: "T", evidenceKind: kind };
+    return buildPayload({ revisionId: "rev-1", headSha: "h".repeat(40), findings: [f], limitations: [], files }).payload;
+  };
+  const suspected = build("suspected");
+  expect(suspected.body).toContain("- High (unconfirmed): T (`src/x.ts:1`)");
+  expect(suspected.comments[0]!.body).toBe(
+    "**High (unconfirmed): T**\n\nUnconfirmed: the reviewer suspects this defect but could not show it from the cited code alone.\n\ne",
+  );
+  const confirmed = build("confirmed_by_static_trace");
+  expect(confirmed.body).toContain("- High: T (`src/x.ts:1`)");
+  expect(confirmed.comments[0]!.body).toBe("**High: T**\n\ne");
+});
