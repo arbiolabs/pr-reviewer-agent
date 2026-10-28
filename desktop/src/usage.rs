@@ -17,7 +17,6 @@ pub const EMPTY: &str = "Usage is recorded from this version on.";
 
 const PLOT_H: f32 = 180.;
 const BAR_MAX: f32 = 24.;
-const TICKS: usize = 4;
 
 /// The page's name for a grouping, and the key that picks it.
 pub fn label(by: UsageBy) -> (&'static str, &'static str) {
@@ -121,14 +120,24 @@ pub fn tokens(n: u64) -> String {
     format!("{}{unit}", s.strip_suffix(".0").unwrap_or(&s))
 }
 
-/// The top of the axis: the smallest 1, 2, 4, 5, 6 or 8 times a power of ten at or over `max`, each of which splits
-/// into `TICKS` steps that read as whole cents.
-pub fn axis_top(max: f64) -> f64 {
-    if max <= 0. {
-        return 1.;
+/// The axis's ticks from zero: the fewest steps of 1, 2, 2.5 or 5 × 10ⁿ, three to five of them, that reach `max`,
+/// so the costliest mark ends near the far edge. A step is never under a cent, nor a fraction of one.
+pub fn axis(max: f64) -> Vec<f64> {
+    let max = max.max(0.03);
+    let mut e = max.log10().floor() as i32 - 1;
+    loop {
+        for m in [1., 2., 2.5, 5.] {
+            if m == 2.5 && e < -1 {
+                continue;
+            }
+            let step = m * 10f64.powi(e);
+            let steps = (max / step * (1. - 1e-9)).ceil() as usize;
+            if steps <= 5 {
+                return (0..=steps).map(|k| k as f64 * step).collect();
+            }
+        }
+        e += 1;
     }
-    let pow = 10f64.powf(max.log10().floor());
-    [1., 2., 4., 5., 6., 8., 10.].into_iter().map(|k| k * pow).find(|top| *top >= max).unwrap_or(10. * pow)
 }
 
 const MONTHS: [&str; 12] = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -357,7 +366,8 @@ fn headline(t: &Colors, r: &UsageReport) -> Div {
 /// Cost per bucket: columns from one baseline, the axis in USD on the left, a hover tooltip on every column and
 /// the costliest one labelled at its cap.
 fn chart(s: &Shell, t: &Colors, r: &UsageReport) -> Div {
-    let top = axis_top(r.buckets.iter().map(|b| b.counts.cost).fold(0., f64::max));
+    let marks = axis(r.buckets.iter().map(|b| b.counts.cost).fold(0., f64::max));
+    let (top, last) = (marks[marks.len() - 1], (marks.len() - 1) as f32);
     let peak = r
         .buckets
         .iter()
@@ -369,16 +379,16 @@ fn chart(s: &Shell, t: &Colors, r: &UsageReport) -> Div {
     // The page column is at most 760 wide less its insets; the plot takes what the axis leaves.
     let width = (f32::from(s.width) - f32::from(crate::tokens::layout::SIDEBAR) - 64.).clamp(240., 696.) - 52.;
     let named = labelled(r.buckets.len(), width);
-    let ticks = div().absolute().inset_0().children((0..=TICKS).map(|k| {
-        let frac = k as f32 / TICKS as f32;
+    let ticks = div().absolute().inset_0().children((0..marks.len()).map(|k| {
+        let frac = k as f32 / last;
         div().absolute().left_0().right_0().bottom(relative(frac)).h(px(1.)).bg(if k == 0 {
             t.border_strong
         } else {
             t.border
         })
     }));
-    let axis = div().relative().flex_none().w(axis_w).h(px(PLOT_H)).children((0..=TICKS).map(|k| {
-        let frac = k as f32 / TICKS as f32;
+    let axis = div().relative().flex_none().w(axis_w).h(px(PLOT_H)).children(marks.iter().enumerate().map(|(k, v)| {
+        let frac = k as f32 / last;
         tabular(
             div()
                 .absolute()
@@ -387,7 +397,7 @@ fn chart(s: &Shell, t: &Colors, r: &UsageReport) -> Div {
                 .mb(px(-7.))
                 .text_size(text::CAPTION)
                 .text_color(t.muted)
-                .child(money(top * frac as f64).trim_end_matches(".00").to_string()),
+                .child(money(*v).trim_end_matches(".00").to_string()),
         )
     }));
     let by = r.by;
@@ -486,10 +496,11 @@ fn bars(t: &Colors, r: &UsageReport) -> Div {
         items.push((format!("Other ({})", o.count), &o.counts, o.share));
     }
     let max = items.iter().map(|(_, c, _)| c.cost).fold(0., f64::max);
-    let top = axis_top(max);
+    let marks = axis(max);
+    let (top, last) = (marks[marks.len() - 1], (marks.len() - 1) as f32);
     let ticks =
-        div().absolute().top_0().bottom_0().left(px(LABEL_W)).right(px(VALUE_W)).children((0..=TICKS).map(|k| {
-            let frac = k as f32 / TICKS as f32;
+        div().absolute().top_0().bottom_0().left(px(LABEL_W)).right(px(VALUE_W)).children((0..marks.len()).map(|k| {
+            let frac = k as f32 / last;
             div().absolute().top_0().bottom_0().left(relative(frac)).w(px(1.)).bg(if k == 0 {
                 t.border_strong
             } else {
@@ -538,21 +549,22 @@ fn bars(t: &Colors, r: &UsageReport) -> Div {
             words,
         )
     });
-    let axis = div().relative().h(px(16.)).ml(px(LABEL_W)).mr(px(VALUE_W)).children((0..=TICKS).map(|k| {
-        let frac = k as f32 / TICKS as f32;
-        tabular(
-            div()
-                .absolute()
-                .left(relative(frac))
-                .ml(px(-20.))
-                .w(px(40.))
-                .flex()
-                .justify_center()
-                .text_size(text::CAPTION)
-                .text_color(t.muted)
-                .child(money(top * frac as f64).trim_end_matches(".00").to_string()),
-        )
-    }));
+    let axis =
+        div().relative().h(px(16.)).ml(px(LABEL_W)).mr(px(VALUE_W)).children(marks.iter().enumerate().map(|(k, v)| {
+            let frac = k as f32 / last;
+            tabular(
+                div()
+                    .absolute()
+                    .left(relative(frac))
+                    .ml(px(-20.))
+                    .w(px(40.))
+                    .flex()
+                    .justify_center()
+                    .text_size(text::CAPTION)
+                    .text_color(t.muted)
+                    .child(money(*v).trim_end_matches(".00").to_string()),
+            )
+        }));
     div()
         .flex()
         .flex_col()
@@ -658,7 +670,7 @@ fn models(t: &Colors, r: &UsageReport) -> Div {
 #[cfg(test)]
 mod tests {
     // Not `super::*`: gpui_kit's glob brings its own `test` attribute.
-    use super::{axis_top, fold_other, labelled, long, money, percent, range_words, row_name, short, tokens};
+    use super::{axis, fold_other, labelled, long, money, percent, range_words, row_name, short, tokens};
     use pr_review_tui::protocol::{
         PrId, Text, UsageBucket, UsageBy, UsageCounts, UsageGroup, UsageGroupBy, UsageReport,
     };
@@ -732,13 +744,25 @@ mod tests {
     }
 
     #[test]
-    fn the_axis_tops_out_at_a_round_number_in_four_even_steps() {
-        assert_eq!(axis_top(0.), 1.);
-        assert_eq!(axis_top(3.42), 4.);
-        assert_eq!(axis_top(13.92), 20.);
-        assert_eq!(axis_top(49.44), 50.);
-        assert_eq!(axis_top(0.3), 0.4);
-        assert_eq!(axis_top(8.1), 10.);
+    fn the_axis_ends_just_past_the_costliest_mark_in_three_to_five_round_steps() {
+        let cents = |v: f64| axis(v).iter().map(|t| (t * 100.).round() as u64).collect::<Vec<_>>();
+        assert_eq!(cents(0.), [0, 1, 2, 3]);
+        assert_eq!(cents(0.004), [0, 1, 2, 3]);
+        assert_eq!(cents(0.11), [0, 5, 10, 15], "never a step of a fraction of a cent");
+        assert_eq!(cents(22.), [0, 500, 1000, 1500, 2000, 2500]);
+        assert_eq!(cents(121.), [0, 2500, 5000, 7500, 10000, 12500]);
+        assert_eq!(cents(185.), [0, 5000, 10000, 15000, 20000]);
+        assert_eq!(cents(429.), [0, 10000, 20000, 30000, 40000, 50000]);
+        assert_eq!(cents(100.), [0, 2000, 4000, 6000, 8000, 10000], "an exact multiple is the top");
+        assert_eq!(cents(0.3), [0, 10, 20, 30]);
+        assert_eq!(cents(1000.), [0, 20000, 40000, 60000, 80000, 100000]);
+        for i in 1..100_000 {
+            let max = i as f64 / 100.;
+            let ticks = axis(max);
+            let top = ticks[ticks.len() - 1];
+            assert!((4..=6).contains(&ticks.len()) && top >= max, "{max}: {ticks:?}");
+            assert!(max < 1. || top / max <= 4. / 3. + 1e-9, "{max}: {ticks:?}");
+        }
     }
 
     fn bucket(start: &str, end: &str) -> UsageBucket {
