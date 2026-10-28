@@ -687,15 +687,24 @@
             },
             "params": {
               "type": "object",
-              "required": [
-                "model"
-              ],
               "properties": {
                 "model": {
                   "type": "string",
                   "minLength": 1,
                   "maxLength": 256,
                   "description": "one of settings.models; saved as models.default in the daemon's config and used for reviews started after it"
+                },
+                "summaryTemplate": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 4000
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "saved as review.summary_template and used for review bodies prepared after it; null or empty restores the default"
                 }
               },
               "additionalProperties": false

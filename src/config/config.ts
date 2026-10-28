@@ -1,5 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import type { ReviewMode, Severity } from "../domain/types.ts";
+import { templateProblem } from "../publish/template.ts";
 
 /** Spec §16, the parts M1 reads, plus the verification thresholds §7 asks to make configurable. */
 export type Config = {
@@ -18,6 +19,8 @@ export type Config = {
     /** A webhook delivery that keeps failing is retried with exponential backoff, then recorded dead. */
     webhook_max_attempts: number;
     webhook_backoff_ms: number;
+    /** The review summary's `{{variable}}` template (src/publish/template.ts); empty means the built-in default. */
+    summary_template: string;
   };
   /** §9.4 rate limits and retries. `max_retries` bounds each request; the client never retries an ambiguous write. */
   github: {
@@ -69,6 +72,7 @@ export const DEFAULT_CONFIG: Config = {
     debounce_seconds: 30,
     webhook_max_attempts: 6,
     webhook_backoff_ms: 5000,
+    summary_template: "",
   },
   github: { max_retries: 3, backoff_ms: 500, concurrency_per_installation: 2, timeout_ms: 15_000, max_rate_limit_sleep_ms: 30_000, bot_login: "" },
   routing: {
@@ -90,9 +94,13 @@ export const CONFIG_FILE = "pr-review.config.json";
 
 export const configPath = (env: Record<string, string | undefined> = process.env) => env.PR_REVIEW_CONFIG || CONFIG_FILE;
 
+/** A fresh copy each time: the daemon changes its own in place when settings.set saves a summary template. */
 export function loadConfig(path = configPath()): Config {
-  if (!existsSync(path)) return DEFAULT_CONFIG;
-  return mergeChecked(DEFAULT_CONFIG, JSON.parse(readFileSync(path, "utf8")), path) as Config;
+  if (!existsSync(path)) return structuredClone(DEFAULT_CONFIG);
+  const config = mergeChecked(structuredClone(DEFAULT_CONFIG), JSON.parse(readFileSync(path, "utf8")), path) as Config;
+  const problem = templateProblem(config.review.summary_template);
+  if (problem) throw new Error(`config ${path}.review.summary_template: ${problem}`);
+  return config;
 }
 
 function mergeChecked(base: unknown, override: unknown, at: string): unknown {

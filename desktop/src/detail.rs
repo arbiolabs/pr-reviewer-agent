@@ -27,6 +27,18 @@ use crate::ui::{Shell, on};
 /// The scrolling page and the action bar under it. The bar is a row of the layout, opaque, with a hairline on
 /// top; where the page scrolls on under it, a fade says so.
 pub fn page(id: &'static str, body: Div, footer: Option<Div>, t: &Colors, wide: bool) -> Div {
+    tracked_page(id, body, footer, t, wide, None)
+}
+
+/// A page whose scroll position `scroll` holds.
+pub fn tracked_page(
+    id: &'static str,
+    body: Div,
+    footer: Option<Div>,
+    t: &Colors,
+    wide: bool,
+    scroll: Option<&ScrollHandle>,
+) -> Div {
     div()
         .flex()
         .flex_col()
@@ -38,25 +50,26 @@ pub fn page(id: &'static str, body: Div, footer: Option<Div>, t: &Colors, wide: 
                 .relative()
                 .flex_1()
                 .min_h_0()
-                .child(
-                    div()
-                        .id(id)
-                        .size_full()
-                        .child(
-                            div()
-                                .flex()
-                                .flex_col()
-                                .min_h(relative(1.))
-                                .gap(space::S6)
-                                .px(space::S8)
-                                .pt(space::S6)
-                                .pb(space::S8 + space::S6)
-                                .when(!wide, |d| d.max_w(px(760.)))
-                                .child(body),
-                        )
-                        // The scrollbar stays in view, so a page that goes on under the bar says so before it scrolls.
-                        .overflow_y_scrollbar(),
-                )
+                .child({
+                    let column = div()
+                        .flex()
+                        .flex_col()
+                        .min_h(relative(1.))
+                        .gap(space::S6)
+                        .px(space::S8)
+                        .pt(space::S6)
+                        .pb(space::S8 + space::S6)
+                        .when(!wide, |d| d.max_w(px(760.)))
+                        .child(body);
+                    let area = div().id(id).size_full().child(column);
+                    // The scrollbar stays in view, so a page that goes on under the bar says so before it scrolls.
+                    // `overflow_y_scrollbar` keeps a handle of its own, so a page whose offset is set from outside
+                    // scrolls on the given handle and draws its bar from it.
+                    match scroll {
+                        Some(h) => area.track_scroll(h).overflow_y_scroll().vertical_scrollbar(h).into_any_element(),
+                        None => area.overflow_y_scrollbar().into_any_element(),
+                    }
+                })
                 .child(scroll_fade(t)),
         )
         .children(footer.map(|f| action_bar(t, f)))

@@ -3,7 +3,7 @@ import { join } from "node:path";
 import { PROTOCOL_DIR } from "../protocol/emit.ts";
 import { fixtures, type PlaybackLine } from "../protocol/fixtures.ts";
 import type { UsageBy, UsageGroupBy } from "../domain/usage.ts";
-import type { ClientMessage, ErrorCode, Finding, FindingDetail, PublicationPreview, ReviewCommand, SequencedEvent, ServerMessage, UsageAnswer } from "../protocol/v1.ts";
+import type { ClientMessage, Command, ErrorCode, Finding, FindingDetail, PublicationPreview, ReviewCommand, SequencedEvent, ServerMessage, UsageAnswer } from "../protocol/v1.ts";
 import type { DiffPage } from "./diff.ts";
 
 export class ControlError extends Error {
@@ -22,6 +22,7 @@ export class ControlError extends Error {
 export type Accepted = { operationId: string; prId?: string; runId?: string };
 
 export type Snapshot = Omit<Extract<ServerMessage, { type: "snapshot" }>, "type" | "requestId">;
+export type SettingsParams = Extract<Command, { command: "settings.set" }>["params"];
 export type Settings = Omit<Extract<ServerMessage, { type: "settings" }>, "type" | "requestId">;
 export type DiffRequest =Extract<ClientMessage, { type: "diff.get" }>;
 export type TimelineRequest = Extract<ClientMessage, { type: "timeline.get" }>;
@@ -57,8 +58,8 @@ export interface ControlSource {
   command?(request: ReviewCommand): Promise<Accepted>;
   /** settings.get: the model new reviews get and the ones to choose from. Present only on a source that can change it. */
   settings?(): Promise<Settings>;
-  /** settings.set: save `ref` as the model for reviews started from now on and return the operation, or throw ControlError. */
-  setModel?(ref: string): Promise<string>;
+  /** settings.set: save the model for reviews started from now on and the summary template for bodies prepared from now on; return the operation, or throw ControlError. */
+  setSettings?(params: SettingsParams): Promise<string>;
   /** The stored payload of a run, or throw ControlError NOT_FOUND. */
   publication?(runId: string): Promise<PublicationPreview>;
   /** usage.get: recorded model usage by day, week or month, split by `group`. A read, so read-only sources answer it too. */

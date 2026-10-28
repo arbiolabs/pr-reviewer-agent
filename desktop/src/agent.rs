@@ -124,7 +124,7 @@ pub fn section(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
     let pick = choice.to_string();
     let status = match &m.agent.save {
         SaveState::Idle => None,
-        SaveState::Sending { model, .. } => Some((t.muted, format!("Saving {model}…"))),
+        SaveState::Sending { value, .. } => Some((t.muted, format!("Saving {value}…"))),
         SaveState::Saved(model) => Some((t.ok, format!("Saved. Reviews started from now on use {model}."))),
         SaveState::Refused(why) => Some((t.danger, crate::kit::sentence(&format!("not saved: {why}")))),
         SaveState::TimedOut => Some((t.danger, "The reviewer did not answer in time. Try again.".into())),

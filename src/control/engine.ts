@@ -6,12 +6,13 @@ import { reviewerVersion } from "../runtime/task.ts";
 import type { Env } from "../github/accounts.ts";
 import { type GitHubClient, GitHubError } from "../github/client.ts";
 import { parsePullRef, parsePullUrl, type PullRef, type PullSource } from "../github/pulls.ts";
-import type { ReviewCommand } from "../protocol/v1.ts";
+import { type ReviewCommand, settingsKey } from "../protocol/v1.ts";
+import { DEFAULT_SUMMARY_TEMPLATE, effectiveTemplate, TEMPLATE_VARIABLES, templateProblem } from "../publish/template.ts";
 import { type App, finishReview, generationOf, recover, type StartedReview, startPolicy, startReview } from "../runtime/app.ts";
 import { StateConflict } from "../persistence/store.ts";
 import { againTarget, approve, cancel, livePull, Refused, retry, reviewAgain, startFromHead } from "../runtime/commands.ts";
 import { AppDbSource, clean } from "./appdb.ts";
-import { type Accepted, ControlError, type Settings } from "./source.ts";
+import { type Accepted, ControlError, type Settings, type SettingsParams } from "./source.ts";
 
 export type EngineOptions = {
   config: Config;
@@ -227,26 +228,43 @@ export class EngineSource extends AppDbSource {
       authSource: m.authSource,
       preferred: preferred.some((p) => matches(p, m.ref)),
     }));
-    return clean({ model: this.model, models, configPath: configPath(this.options.env ?? process.env) });
+    const saved = this.options.config.review.summary_template;
+    const summaryTemplate = { value: effectiveTemplate(saved), isDefault: saved === "", default: DEFAULT_SUMMARY_TEMPLATE, variables: [...TEMPLATE_VARIABLES] };
+    return clean({ model: this.model, models, configPath: configPath(this.options.env ?? process.env), summaryTemplate });
   }
 
   /**
-   * settings.set: save the model as `models.default` (other config keys kept) and give it to reviews started from now
-   * on. A review in flight keeps the model its revision names. Refused while the daemon's own `--model` or
-   * PR_REVIEW_MODEL outranks the config, since the saved choice would not survive a restart.
+   * settings.set: save the model as `models.default` and the summary template as `review.summary_template` (other
+   * config keys kept), each checked before either is written. A review in flight keeps the model its revision names; a
+   * payload already stored keeps its text. The model is refused while the daemon's own `--model` or PR_REVIEW_MODEL
+   * outranks the config, since the saved choice would not survive a restart.
    */
-  async setModel(ref: string): Promise<string> {
-    const { model } = this;
-    const { env } = this.options;
-    if (model.source === "--model" || model.source === "PR_REVIEW_MODEL") {
-      throw new ControlError("CONFLICT", `the daemon's ${model.source} (${model.ref}) overrides the config; remove it and restart the daemon to choose the model here`);
+  async setSettings(params: SettingsParams): Promise<string> {
+    const { model: ref, summaryTemplate } = params;
+    if (ref === undefined && summaryTemplate === undefined) throw new ControlError("INVALID_REQUEST", "settings.set needs model, summaryTemplate or both");
+    if (ref !== undefined) {
+      const { model } = this;
+      if (model.source === "--model" || model.source === "PR_REVIEW_MODEL") {
+        throw new ControlError("CONFLICT", `the daemon's ${model.source} (${model.ref}) overrides the config; remove it and restart the daemon to choose the model here`);
+      }
+      const available = await this.available();
+      if (!available.some((m) => m.ref === ref)) throw new ControlError("NOT_FOUND", `model ${ref} is not available; choose one of ${available.map((m) => m.ref).join(", ")}`);
     }
-    const available = await this.available();
-    if (!available.some((m) => m.ref === ref)) throw new ControlError("NOT_FOUND", `model ${ref} is not available; choose one of ${available.map((m) => m.ref).join(", ")}`);
-    saveConfig({ models: { default: ref } }, configPath(env ?? process.env));
-    this.model = { ref, source: "config" };
-    this.app.reviewerVersion = reviewerVersion(ref);
-    return `settings.set:${ref}`;
+    const template = summaryTemplate ?? "";
+    const problem = summaryTemplate === undefined ? undefined : templateProblem(template);
+    if (problem) throw new ControlError("INVALID_REQUEST", problem);
+    // A reset removes the key, so the file says nothing rather than repeating the default.
+    saveConfig(
+      { ...(ref !== undefined ? { models: { default: ref } } : {}), ...(summaryTemplate !== undefined ? { review: { summary_template: template || undefined } } : {}) },
+      configPath(this.options.env ?? process.env),
+    );
+    if (ref !== undefined) {
+      this.model = { ref, source: "config" };
+      this.app.reviewerVersion = reviewerVersion(ref);
+    }
+    // The review task reads this same config object when it prepares a payload.
+    if (summaryTemplate !== undefined) this.options.config.review.summary_template = template;
+    return settingsKey(params);
   }
 
   /** Suspends the reviews in flight (they resume on the next engine start) and releases the data-dir lock. */

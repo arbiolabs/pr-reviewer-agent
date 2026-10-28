@@ -2165,6 +2165,51 @@
         "configPath": {
           "type": "string",
           "description": "the config file settings.set writes"
+        },
+        "summaryTemplate": {
+          "type": "object",
+          "required": [
+            "value",
+            "isDefault",
+            "default",
+            "variables"
+          ],
+          "properties": {
+            "value": {
+              "type": "string",
+              "description": "the template in force: the saved one, or the default"
+            },
+            "isDefault": {
+              "type": "boolean"
+            },
+            "default": {
+              "type": "string"
+            },
+            "variables": {
+              "type": "array",
+              "items": {
+                "type": "object",
+                "required": [
+                  "name",
+                  "description",
+                  "sample"
+                ],
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1
+                  },
+                  "description": {
+                    "type": "string"
+                  },
+                  "sample": {
+                    "type": "string"
+                  }
+                }
+              },
+              "description": "every {{name}} a template may use; any other name is refused"
+            }
+          }
         }
       }
     },

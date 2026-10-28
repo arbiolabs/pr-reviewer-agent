@@ -10,6 +10,7 @@ mod diff;
 mod jev;
 mod kit;
 mod live;
+mod message;
 mod overlay;
 mod publish;
 mod queue;

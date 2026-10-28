@@ -1,0 +1,9 @@
+{
+  "type": "command",
+  "requestId": "req-cmd",
+  "command": "settings.set",
+  "params": {
+    "summaryTemplate": "### Review of {{repo}} #{{pr_number}} at `{{short_sha}}`\n\n{{summary_line}}\n\n{{findings_list}}\n\n{{carried}}\n\nReviewed by {{model}}. A human still decides.\n"
+  },
+  "idempotencyKey": "settings.set::template:799c9551bc7734ae"
+}

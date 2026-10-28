@@ -1,5 +1,5 @@
 import { sha256 } from "../domain/types.ts";
-import { findingLabel, renderSummary, unseen } from "../cli/report.ts";
+import { findingLabel, renderSummary, type SummaryFacts, unseen } from "../cli/report.ts";
 import { type GitHubClient, GitHubError } from "../github/client.ts";
 import type { AppStore, FindingView, OutboxRow } from "../persistence/store.ts";
 import type { FileDiff } from "../source/diff.ts";
@@ -46,6 +46,9 @@ export function buildPayload(input: {
   findings: FindingView[];
   limitations: string[];
   files: Map<string, FileDiff>;
+  /** The summary template; empty or absent is the default. */
+  template?: string;
+  facts?: SummaryFacts;
 }): { payload: ReviewPayload; hash: string; inlineFindingIds: string[] } {
   const inline = input.findings.filter((f) => !f.posted && f.anchored && f.candidate.newLine !== null && input.files.get(f.candidate.file)?.headLines.has(f.candidate.newLine));
   const comments: ReviewComment[] = inline.map(({ candidate: c }) => ({
@@ -54,7 +57,7 @@ export function buildPayload(input: {
     side: "RIGHT",
     body: inert([`**${findingLabel(c)}: ${c.title}**`, ...(c.evidenceKind === "suspected" ? ["", UNCONFIRMED_NOTE] : []), "", c.explanation, ...(c.suggestedFix ? ["", `Suggested fix: ${c.suggestedFix}`] : [])].join("\n")),
   }));
-  const body = fitBody(inert(renderSummary(input.headSha, input.findings, input.limitations)), input.revisionId);
+  const body = fitBody(inert(renderSummary(input.headSha, input.findings, input.limitations, undefined, { template: input.template, facts: input.facts })), input.revisionId);
   const hash = sha256(JSON.stringify({ body, commit_id: input.headSha, event: "COMMENT", comments }));
   return { payload: { commit_id: input.headSha, body: `${body}\n${marker(input.revisionId, hash)}\n`, event: "COMMENT", comments }, hash, inlineFindingIds: inline.map((f) => f.findingId) };
 }

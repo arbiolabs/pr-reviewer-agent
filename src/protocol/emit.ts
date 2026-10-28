@@ -3,6 +3,7 @@ import { mkdirSync, rmSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import type { TSchema } from "typebox";
+import { DEFAULT_SUMMARY_TEMPLATE, fillTemplate, templateSamples } from "../publish/template.ts";
 import { fixtures, invalidFixtures, playback } from "./fixtures.ts";
 import { ClientMessage, ENTITIES, ServerMessage } from "./v1.ts";
 
@@ -25,6 +26,8 @@ export function protocolFiles(): Map<string, string> {
   files.set("schema/v1/server-message.json", schema("server-message", ServerMessage));
   for (const [name, s] of Object.entries(ENTITIES)) files.set(`schema/v1/${name}.json`, schema(name, s));
   for (const [name, message] of Object.entries(fixtures)) files.set(`fixtures/${name}.json`, json(message, 2) + "\n");
+  // What a client's preview must show for the default template filled with the samples, byte for byte.
+  files.set("fixtures/summary-template.preview.md", fillTemplate(DEFAULT_SUMMARY_TEMPLATE, templateSamples()));
   for (const [name, [message, why]] of Object.entries(invalidFixtures)) {
     files.set(`fixtures/invalid/${name}.json`, json(message, 2) + "\n");
     files.set(`fixtures/invalid/${name}.why.txt`, why + "\n");

@@ -1,0 +1,111 @@
+{
+  "type": "settings",
+  "requestId": "req-settings",
+  "model": {
+    "ref": "anthropic/claude-opus-5-5",
+    "source": "config"
+  },
+  "models": [
+    {
+      "ref": "anthropic/claude-opus-5-5",
+      "provider": "anthropic",
+      "name": "Claude Opus 5.5",
+      "contextWindow": 1000000,
+      "authSource": "oauth",
+      "preferred": true
+    }
+  ],
+  "configPath": "/Users/operator/.config/pr-review/pr-review.config.json",
+  "summaryTemplate": {
+    "value": "### Review of {{repo}} #{{pr_number}} at `{{short_sha}}`\n\n{{summary_line}}\n\n{{findings_list}}\n\n{{carried}}\n\nReviewed by {{model}}. A human still decides.\n",
+    "isDefault": false,
+    "default": "## Automated PR review\n\nReviewed commit: `{{head_sha}}`\n\n{{summary_line}}\n\n{{findings_list}}\n\n{{carried}}\n\n{{limitations}}\n\nReview performed with isolated read-only tools. Human review is still required.\n",
+    "variables": [
+      {
+        "name": "repo",
+        "description": "The repository, owner/name.",
+        "sample": "acme/shop"
+      },
+      {
+        "name": "pr_number",
+        "description": "The pull request's number.",
+        "sample": "1291"
+      },
+      {
+        "name": "pr_title",
+        "description": "The pull request's title.",
+        "sample": "Capture payment after the order is confirmed"
+      },
+      {
+        "name": "pr_author",
+        "description": "The pull request's author; empty when GitHub did not say.",
+        "sample": "octocat"
+      },
+      {
+        "name": "head_sha",
+        "description": "The reviewed commit, in full.",
+        "sample": "f86859b1c2d3e4f5a6b7c8d9e0f1a2b3c4d5e6f7"
+      },
+      {
+        "name": "short_sha",
+        "description": "The reviewed commit, first 7 characters.",
+        "sample": "f86859b"
+      },
+      {
+        "name": "model",
+        "description": "The model that reviewed it, provider/id.",
+        "sample": "anthropic/claude-opus-5-5"
+      },
+      {
+        "name": "summary_line",
+        "description": "One sentence: how many new issues, none, or that the run did not complete.",
+        "sample": "Found 2 actionable issues."
+      },
+      {
+        "name": "findings_list",
+        "description": "One line per new finding: severity, title and file:line; empty when there are none.",
+        "sample": "- High: Payment captured before the order is confirmed (`src/checkout/capture.ts:42`)\n- Medium (unconfirmed): Retry loop has no upper bound (`src/checkout/retry.ts:17`)"
+      },
+      {
+        "name": "findings_count",
+        "description": "How many new findings this review lists.",
+        "sample": "2"
+      },
+      {
+        "name": "critical_count",
+        "description": "New critical findings.",
+        "sample": "0"
+      },
+      {
+        "name": "high_count",
+        "description": "New high findings.",
+        "sample": "1"
+      },
+      {
+        "name": "medium_count",
+        "description": "New medium findings.",
+        "sample": "1"
+      },
+      {
+        "name": "low_count",
+        "description": "New low findings.",
+        "sample": "0"
+      },
+      {
+        "name": "unconfirmed_count",
+        "description": "New findings the reviewer suspects but could not show from the code.",
+        "sample": "1"
+      },
+      {
+        "name": "carried",
+        "description": "Findings from earlier commits, under a heading per state; empty when there are none.",
+        "sample": "Still present from an earlier commit:\n\n- Low: Log line prints the card's last four digits (`src/checkout/log.ts:9`, first reported on `b131fd0`)"
+      },
+      {
+        "name": "limitations",
+        "description": "One “Scope limited: …” line per limit on what was reviewed; empty when none.",
+        "sample": ""
+      }
+    ]
+  }
+}

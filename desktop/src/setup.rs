@@ -30,7 +30,14 @@ fn check_name(id: &str) -> &str {
 /// Settings: the theme, then the setup checks (the daemon's checks, its mode and the GitHub accounts, with the fix
 /// for each gap).
 pub fn settings(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
-    div().flex().flex_1().min_h_0().child(page("settings", setup_body(s, t, cx), None, t, false))
+    div().flex().flex_1().min_h_0().child(tracked_page(
+        "settings",
+        setup_body(s, t, cx),
+        None,
+        t,
+        false,
+        Some(&s.settings_scroll),
+    ))
 }
 
 /// A theme in miniature, in its own colors: its window, a card with two lines of text, its accent and the four
@@ -853,6 +860,7 @@ pub fn setup_body(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         .child(card("Checks", list))
         .child(crate::jev::section(s, t, cx))
         .child(crate::agent::section(s, t, cx))
+        .child(crate::message::section(s, t, cx))
         .child(card("Reviewer", conn))
         .child(card("GitHub accounts", accounts))
 }

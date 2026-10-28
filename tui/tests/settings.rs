@@ -55,7 +55,7 @@ fn save_sends_settings_set_then_asks_again_once_accepted() {
     let fx = update(&mut m, Msg::SetModel("openai/gpt-5.5".into()));
     let [Effect::Send(ClientMessage::Command(c))] = fx.as_slice() else { panic!("{fx:?}") };
     assert_eq!(c.idempotency_key, "settings.set:openai/gpt-5.5");
-    assert!(matches!(&c.command, Command::SetModel(p) if p.model == "openai/gpt-5.5"));
+    assert!(matches!(&c.command, Command::SetSettings(p) if p.model.as_deref() == Some("openai/gpt-5.5")));
     let id = c.request_id.clone();
     let accepted = format!(
         r#"{{"type":"command.result","requestId":"{id}","status":"accepted","operationId":"settings.set:openai/gpt-5.5"}}"#
@@ -64,6 +64,40 @@ fn save_sends_settings_set_then_asks_again_once_accepted() {
     assert_eq!(m.agent.save, SaveState::Saved("openai/gpt-5.5".into()));
     assert!(matches!(fx.as_slice(), [Effect::Send(ClientMessage::SettingsGet { .. })]), "{fx:?}");
     assert!(m.agent.settings.is_some(), "the last answer stays until the new one");
+}
+
+#[test]
+fn the_review_message_saves_and_resets_under_its_own_state_and_the_keys_the_daemon_expects() {
+    let mut m = desktop();
+    let asked = m.agent.request.clone().unwrap();
+    send(&mut m, &settings_reply(&asked));
+    let t = m.agent.settings.as_ref().unwrap().summary_template.as_ref().expect("the daemon sends the template");
+    assert!(t.is_default && t.value == t.default && t.variables.iter().any(|v| v.name.as_str() == "findings_list"));
+
+    let fixture: serde_json::Value =
+        serde_json::from_str(&read("fixtures/client.command.settings.set.template.json")).unwrap();
+    let custom = fixture["params"]["summaryTemplate"].as_str().unwrap().to_string();
+    let fx = update(&mut m, Msg::SetSummaryTemplate(custom.clone()));
+    let [Effect::Send(ClientMessage::Command(c))] = fx.as_slice() else { panic!("{fx:?}") };
+    assert_eq!(c.idempotency_key, fixture["idempotencyKey"].as_str().unwrap(), "the same hash the daemon computes");
+    assert_eq!(m.agent.save, SaveState::Idle, "the model's save is not the message's");
+    let id = c.request_id.clone();
+    let fx = send(
+        &mut m,
+        &format!(r#"{{"type":"command.result","requestId":"{id}","status":"accepted","operationId":"x"}}"#),
+    );
+    assert_eq!(m.agent.template_save, SaveState::Saved(custom));
+    assert!(matches!(fx.as_slice(), [Effect::Send(ClientMessage::SettingsGet { .. })]), "{fx:?}");
+
+    let fx = update(&mut m, Msg::SetSummaryTemplate(String::new()));
+    let [Effect::Send(ClientMessage::Command(c))] = fx.as_slice() else { panic!("{fx:?}") };
+    assert_eq!(c.idempotency_key, "settings.set::template:default");
+    let refused = format!(
+        r#"{{"type":"command.result","requestId":"{}","status":"rejected","code":"INVALID_REQUEST","message":"unknown variable {{{{nope}}}}"}}"#,
+        c.request_id
+    );
+    send(&mut m, &refused);
+    assert_eq!(m.agent.template_save, SaveState::Refused(Text::new("unknown variable {{nope}}")));
 }
 
 #[test]

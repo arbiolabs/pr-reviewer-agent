@@ -33,7 +33,7 @@ also arrive unsolicited (`snapshot`, `resync.required`, `error`) have an optiona
 | `finding.detail` | `finding`: a `Finding` plus `explanation`, `reasoningSummary`, `suggestedFix?`, `evidence[]`, `history[]` (each entry a run, the finding state it ended in, and an optional `basis` for why) |
 | `publication.preview` | `runId`, `previewId` (the payload hash the approval must name), `headSha`, `body` (the exact review text, marker included), `comments[]` (`path`, `line`, `side: RIGHT`, `body`), `event: COMMENT`, `status` |
 | `timeline.page` | `events[]` (sequenced events), `nextBeforeSequence?` |
-| `settings` | `model` (`ref`, and `source`: `--model`, `PR_REVIEW_MODEL`, `config` or `default`), `models[]` (`ModelOption`: `ref`, `provider`, `name`, `contextWindow`, `authSource`, `preferred`; preferred first), `configPath` (the file `settings.set` writes) |
+| `settings` | `model` (`ref`, and `source`: `--model`, `PR_REVIEW_MODEL`, `config` or `default`), `models[]` (`ModelOption`: `ref`, `provider`, `name`, `contextWindow`, `authSource`, `preferred`; preferred first), `configPath` (the file `settings.set` writes), and from this version `summaryTemplate` (`value`: the review body template in force, `isDefault`, `default`: the built-in template, `variables[]`: `name`, `description`, `sample` for every `{{name}}` a template may use) |
 | `usage.report` | `by`, `timeZone`, `currency: USD`, `priceSource: catalog`, `buckets[]` (`start`, `end`, `reviews`, `responses`, `input`, `output`, `cacheRead`, `cacheWrite`, `cost`), `totals` (the same counts for the range), `models[]` (the same counts per `model`, costliest first), `group?` (absent from older servers), `groups[]?` (unless `group` is `time`: `key`, `label`, `repository?`, `number?`, `title?`, `prId?`, `author?`, the same counts and `share`) |
 | `command.result` | `status: accepted` with `operationId` (and `prId`, `runId` from `review.add`), or `status: rejected` with `code` and `message` (and `prId` when `review.add` names a tracked PR) |
 | `error` | `code`, `message`, `supported?` |
@@ -70,7 +70,7 @@ the recorded `operationId` and does nothing again. A key in any other form is `I
 | `pr.archive` | `prId` | `pr.archive:<prId>` | `pr.archive:<journal seq>` |
 | `pr.unarchive` | `prId` | `pr.unarchive:<prId>` | `pr.unarchive:<journal seq>` |
 | `daemon.stop` | `pauseReviews` | `daemon.stop` | `daemon.stop` |
-| `settings.set` | `model` | `settings.set:<model>` | `settings.set:<model>` |
+| `settings.set` | `model?`, `summaryTemplate?` (string, or `null`) | `settings.set:<model>`, plus `:template:<hash>` when it sets the template | same as the key |
 
 `welcome.capabilities` lists what this daemon grants. A daemon in `read-only` mode (the default, or another pr-review
 holds the data dir, or the engine failed to open; `welcome.readOnlyReason` says which) grants only the reader's own
@@ -120,6 +120,14 @@ Every command is checked by the server whatever the client showed:
   every review started afterwards uses it, with no restart. A run in flight keeps its model. The model is part of a
   run's identity, so a head reviewed again with another model gets a new run instead of the stored result.
   `settings.get` reports the change.
+  `summaryTemplate` sets the review body template, saved as `review.summary_template`; `null` or `""` restores the
+  default and removes the key. It may hold only `{{name}}` placeholders named in `settings.summaryTemplate.variables`
+  and at most 4000 characters: an unknown name is `INVALID_REQUEST` naming it. It applies to review bodies prepared
+  afterwards; a payload already stored, as a parked approval's, keeps its text, and `publication.get` shows that text.
+  The durable marker is always appended after the body, outside the template. A request may carry `model`,
+  `summaryTemplate` or both (neither is `INVALID_REQUEST`); both are checked before either is saved. In the key,
+  `<model>` is empty when absent, and `<hash>` is the FNV-1a 64-bit hash of the template's UTF-8 bytes as 16 lowercase
+  hex digits, or `default` for a reset: `settings.set::template:default`.
 
 ## Accounts
 

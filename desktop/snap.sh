@@ -74,6 +74,16 @@ rm -rf desktop/target/again/fixtures
 cp -R protocol/fixtures desktop/target/again/fixtures
 again_script=desktop/target/again/playback/again.ndjson
 sed '1s/"review.start",/"review.start","review.again",/' "$script" > "$again_script"
+# Settings on a daemon that grants settings.set, which the showcase doesn't script: the review message can be saved.
+mkdir -p desktop/target/settings/playback
+rm -rf desktop/target/settings/fixtures
+cp -R protocol/fixtures desktop/target/settings/fixtures
+settings_script=desktop/target/settings/playback/settings.ndjson
+sed '1s/"review.publish"\]/"review.publish","settings.set"]/' "$script" > "$settings_script"
+# The review message section, scrolled into view; a message: step's \n is a line break and it can't hold a comma.
+message_at="wait:19000,goto:settings,scroll:1170"
+message_custom='### {{repo}} #{{pr_number}} by {{pr_author}}\n\n{{summary_line}}\n\n{{findings_list}}\n\n{{carried}}\n\nReviewed by {{model}} at {{short_sha}}. A human still decides.\n'
+message_unknown='### {{repo}} #{{pr_number}} for {{reviewer_name}}\n\n{{summary_line}}\n\n{{findings_list}}\n\n{{carried}}\n\nSee {{dashboard_url}}.\n'
 
 # One capture, retried up to three times when the app exits without its PNG or never writes it within 60 s.
 capture() {
@@ -159,6 +169,9 @@ for look in dark light; do
   snap 22-review-again-$look   $look 20000 "wait:19000,pr:1287" "$again_script"
   snap 22b-again-confirm-$look $look 20000 "wait:19000,pr:1287,again" "$again_script"
   snap 22c-again-palette-$look $look 10000 "wait:9000,pr:1291,palette:again" "$again_script"
+  snap 23a-message-default-$look $look 20000 "$message_at" "$settings_script"
+  snap 23b-message-unknown-$look $look 20000 "$message_at,message:$message_unknown" "$settings_script"
+  snap 23c-message-saved-$look $look 20000 "wait:19000,goto:settings,scroll:1560,message:$message_custom,message-saved" "$settings_script"
 done
 snap 20b-footer-no-account     dark  20000 "" "$no_account_script"
 

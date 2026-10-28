@@ -1,0 +1,9 @@
+{
+  "type": "command",
+  "requestId": "req-cmd",
+  "command": "settings.set",
+  "params": {
+    "summaryTemplate": ""
+  },
+  "idempotencyKey": "settings.set::template:default"
+}

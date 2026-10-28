@@ -103,6 +103,52 @@ How the key is kept and why:
 | `silent_no_findings` | As `comment`, but posts only a review with something new: a new finding, a first inline comment on a carried finding, or a newly resolved finding. |
 | `approval` | Stores the payload and parks the run in `AWAITING_APPROVAL` until `pr-review approve` or the terminal client approves it. See [Publishing](publishing.md#approval-mode). |
 
+### Review message
+
+`review.summary_template` sets the review body that pr-review posts on a PR. It is the text before the inline comments. Leave it out, or set it to `""`, to keep the built-in message. The desktop app edits it under Settings → Review message, with a live preview.
+
+The template holds plain text and `{{name}}` placeholders, and nothing else: no conditions and no loops. A name not in the table below stops the config from loading, with an error that names it. The template is at most 4000 characters. An empty variable on a line of its own leaves no blank gap.
+
+| Variable | Value |
+|---|---|
+| `{{repo}}` | The repository, owner/name. |
+| `{{pr_number}}` | The pull request's number. |
+| `{{pr_title}}` | The pull request's title. |
+| `{{pr_author}}` | The pull request's author; empty when GitHub did not say. |
+| `{{head_sha}}` | The reviewed commit, in full. |
+| `{{short_sha}}` | The reviewed commit, first 7 characters. |
+| `{{model}}` | The model that reviewed it, provider/id. |
+| `{{summary_line}}` | One sentence: how many new issues, none, or that the run did not complete. |
+| `{{findings_list}}` | One line per new finding: severity, title and file:line; empty when there are none. |
+| `{{findings_count}}` | How many new findings this review lists. |
+| `{{critical_count}}` | New critical findings. |
+| `{{high_count}}` | New high findings. |
+| `{{medium_count}}` | New medium findings. |
+| `{{low_count}}` | New low findings. |
+| `{{unconfirmed_count}}` | New findings the reviewer suspects but could not show from the code. |
+| `{{carried}}` | Findings from earlier commits, under a heading per state; empty when there are none. |
+| `{{limitations}}` | One “Scope limited: …” line per limit on what was reviewed; empty when none. |
+
+The default template reproduces the body pr-review posted before this setting existed:
+
+```text
+## Automated PR review
+
+Reviewed commit: `{{head_sha}}`
+
+{{summary_line}}
+
+{{findings_list}}
+
+{{carried}}
+
+{{limitations}}
+
+Review performed with isolated read-only tools. Human review is still required.
+```
+
+pr-review always adds its hidden marker comment after the message, so a template cannot remove it, and an HTML comment in the template is posted as text. A review prepared before a change keeps its message: a review waiting for approval posts the text its proof shows. GitHub's size limit still applies, and a longer body is cut at a line end with a notice.
+
 ### Control commands
 
 `control.allow_commands` lets `pr-review daemon` accept the review commands (start, retry, cancel, publish) from the terminal client. The default is `false`: the daemon stays read-only, takes no lock on the data directory, runs no review, and grants only the account selector. `pr-review daemon --allow-commands` enables them for one daemon, which then hosts the review engine. The daemon grants `review.publish` only under `publish_mode: "approval"`. With an engine daemon running, add PRs from a client (`a` in the terminal client, ⌘N in the desktop app) rather than with `pr-review review`, which can't take the lock the daemon holds. See [Take actions](tui.md#take-actions).

@@ -163,7 +163,7 @@ async function review(args: string[], deps: CliDeps, dataDir: string, out: Out, 
     if (revision.state === "FAILED") err(`revision ${revision.id} FAILED: ${report.audit.at(-1)?.detail ?? "no reason recorded"}; rerun with --retry to try again\n`);
     if (revision.state === "AWAITING_APPROVAL") err(`revision ${revision.id} awaits approval: pr-review approve --revision ${revision.id} --preview ${report.outbox?.payload_hash}\n`);
     if (values.json) out.json(renderJson(report));
-    else out(renderMarkdown(report));
+    else out(renderMarkdown(report, config.review.summary_template));
     return revision.state === "COMPLETED" || revision.state === "AWAITING_APPROVAL" ? 0 : 1;
   } finally {
     await app.close();

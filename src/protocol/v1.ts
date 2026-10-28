@@ -1,6 +1,7 @@
 import Type, { type Static, type TSchema } from "typebox";
 import { CATEGORIES, SEVERITIES } from "../domain/types.ts";
 import { USAGE_BY, USAGE_GROUPS } from "../domain/usage.ts";
+import { MAX_TEMPLATE_CHARS } from "../publish/template.ts";
 import { COORDINATOR_STATES, FINDING_STATES, PUBLICATION_STATUSES, REVIEW_STATES } from "../domain/machines.ts";
 
 export const PROTOCOL_VERSION = 1;
@@ -188,6 +189,9 @@ export const ModelOption = Type.Object({
 });
 export type ModelOption = Static<typeof ModelOption>;
 
+/** A `{{name}}` the review summary's template may use, and what it looks like filled in. */
+export const TemplateVariable = Type.Object({ name: Type.String({ minLength: 1 }), description: Type.String(), sample: Type.String() });
+
 /** One inline comment of the stored review payload, exactly as it will be posted. */
 export const ReviewComment = Type.Object({ path: Type.String(), line: Type.Integer({ minimum: 1 }), side: Type.Literal("RIGHT"), body: Type.String() });
 
@@ -345,11 +349,18 @@ export const Command = Type.Union([
   command("pr.archive", { prId: Id }),
   command("pr.unarchive", { prId: Id }),
   command("settings.set", {
-    model: Type.String({
-      minLength: 1,
-      maxLength: 256,
-      description: "one of settings.models; saved as models.default in the daemon's config and used for reviews started after it",
-    }),
+    model: Type.Optional(
+      Type.String({
+        minLength: 1,
+        maxLength: 256,
+        description: "one of settings.models; saved as models.default in the daemon's config and used for reviews started after it",
+      }),
+    ),
+    summaryTemplate: Type.Optional(
+      Type.Union([Type.String({ maxLength: MAX_TEMPLATE_CHARS }), Type.Null()], {
+        description: "saved as review.summary_template and used for review bodies prepared after it; null or empty restores the default",
+      }),
+    ),
   }),
   command("daemon.stop", {
     pauseReviews: Type.Boolean({ description: "stop even while reviews run: they pause and resume on the next engine start; without it a running review makes the stop CONFLICT" }),
@@ -357,6 +368,21 @@ export const Command = Type.Union([
 ]);
 export type Command = Static<typeof Command>;
 export type ReviewCommand = Exclude<Command, { command: "account.select" | "pr.archive" | "pr.unarchive" | "daemon.stop" | "settings.set" }>;
+
+/**
+ * `settings.set:<model>`, then `:template:<hash>` when it sets the template: different texts are different keys.
+ * The hash is FNV-1a 64 of the template's UTF-8 bytes in hex, or `default` for a reset; a client computes it too.
+ */
+export function settingsKey(p: { model?: string; summaryTemplate?: string | null }): string {
+  const template = p.summaryTemplate === undefined ? "" : `:template:${p.summaryTemplate ? fnv1a64(p.summaryTemplate) : "default"}`;
+  return `settings.set:${p.model ?? ""}${template}`;
+}
+
+export function fnv1a64(text: string): string {
+  let h = 0xcbf29ce484222325n;
+  for (const byte of new TextEncoder().encode(text)) h = BigInt.asUintN(64, (h ^ BigInt(byte)) * 0x100000001b3n);
+  return h.toString(16).padStart(16, "0");
+}
 
 /** The one key a command may carry: it binds the key to the target, so a replayed key is the same request. */
 export function idempotencyKey(c: Command): string {
@@ -379,7 +405,7 @@ export function idempotencyKey(c: Command): string {
     case "pr.unarchive":
       return `${c.command}:${c.params.prId}`;
     case "settings.set":
-      return `settings.set:${c.params.model}`;
+      return settingsKey(c.params);
     case "daemon.stop":
       return "daemon.stop";
   }
@@ -476,6 +502,14 @@ export const ServerMessage = Type.Union([
     model: Type.Object({ ref: Type.String({ minLength: 1 }), source: oneOf(MODEL_SOURCES) }),
     models: Type.Array(ModelOption),
     configPath: Type.String({ description: "the config file settings.set writes" }),
+    summaryTemplate: Type.Optional(
+      Type.Object({
+        value: Type.String({ description: "the template in force: the saved one, or the default" }),
+        isDefault: Type.Boolean(),
+        default: Type.String(),
+        variables: Type.Array(TemplateVariable, { description: "every {{name}} a template may use; any other name is refused" }),
+      }),
+    ),
   }),
   // The answer to usage.get, which every daemon gives: recorded model usage, oldest bucket first, empty ones included.
   reply("usage.report", {

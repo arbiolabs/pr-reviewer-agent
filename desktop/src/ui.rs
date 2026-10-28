@@ -214,6 +214,13 @@ pub struct Shell {
     pub picker: crate::agent::Picker,
     /// Settings → Risk check (Jev): the TypeSafe key field and what the Keychain holds.
     pub jev: crate::jev::KeyField,
+    /// Settings → Review message: the template editor.
+    pub message: crate::message::MessageEditor,
+    /// Settings' scroll position, so a snapshot can show a section below the fold.
+    pub settings_scroll: ScrollHandle,
+    /// A scroll a snapshot asked for, held until Settings has been laid out once, since an offset set before that is
+    /// clamped to zero.
+    pub settings_scroll_to: Option<f32>,
     /// A sheet was open in the last frame.
     pub sheet_was_open: bool,
     /// The footer's avatar for the publishing account.
@@ -300,6 +307,9 @@ impl Shell {
             avatar: Default::default(),
             picker: crate::agent::Picker::default(),
             jev: crate::jev::KeyField::new(),
+            message: Default::default(),
+            settings_scroll: ScrollHandle::new(),
+            settings_scroll_to: None,
             queued_add: None,
         };
         for d in desk {
@@ -314,6 +324,9 @@ impl Shell {
                 Desk::Scrub(n) => s.scrub = Some(n.saturating_sub(1)),
                 Desk::Span(name) => s.span = Some(name.clone()),
                 Desk::Reviewer(state) => crate::reviewer::stage(&mut s, *state),
+                Desk::Message(text) => s.message.pending = Some(text.clone()),
+                Desk::MessageSaved => crate::message::stage_saved(&mut s),
+                Desk::Scroll(y) => s.settings_scroll_to = Some(*y as f32),
                 Desk::Flagged => s.diff_flagged_only = true,
                 Desk::Discards => {
                     s.open_discards =
@@ -837,6 +850,14 @@ impl Render for Shell {
         if self.model.ui.screen == Screen::Settings {
             self.key_input(window, cx);
             self.model_search(window, cx);
+            self.message_editor(window, cx);
+            if let Some(y) = self.settings_scroll_to {
+                if self.settings_scroll.max_offset().y > px(0.) {
+                    self.settings_scroll.set_offset(point(px(0.), -px(y)));
+                    self.settings_scroll_to = None;
+                }
+                cx.notify();
+            }
         }
         // The PR the sheet sent is selected: the sheet's work is done.
         if matches!(self.overlay, Some(Overlay::AddPr { sent: true, .. })) && self.model.adding.is_none() {
