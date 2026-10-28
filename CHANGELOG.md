@@ -12,6 +12,10 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 - **Desktop: the themes sit in four columns.** Settings → Appearance lays its theme tiles in a four-column grid that spans the card, with taller previews, instead of a row of small fixed tiles (#70).
 
+### Fixed
+
+- **Desktop: the setup checks' icons sit centred in their rows.** They were pinned to the top of each row; each status icon now centres on its row's height, however many lines the check holds.
+
 ## [1.5.0] - 2026-10-28
 
 ### Added
