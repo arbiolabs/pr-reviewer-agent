@@ -131,9 +131,10 @@ pub fn view(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         }
         (None, None) => body.child(div().text_size(text::BODY).text_color(t.muted).child("Loading usage…")),
     };
-    let zone = u.report.as_ref().map(|r| format!(" Dates follow the reviewer's time zone, {}.", r.time_zone));
-    let body = body
-        .child(div().text_size(text::SMALL).text_color(t.muted).child(format!("{NOTE}{}", zone.unwrap_or_default())));
+    let zone = u.report.as_ref().map(|r| format!("Dates follow the reviewer's time zone, {}.", r.time_zone));
+    let body = body.child(
+        div().flex().flex_col().gap(space::S1).text_size(text::SMALL).text_color(t.muted).child(NOTE).children(zone),
+    );
     div().flex().flex_1().min_h_0().child(crate::detail::page("usage", body, None, t, false))
 }
 
