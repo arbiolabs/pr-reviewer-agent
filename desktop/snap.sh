@@ -80,8 +80,8 @@ rm -rf desktop/target/settings/fixtures
 cp -R protocol/fixtures desktop/target/settings/fixtures
 settings_script=desktop/target/settings/playback/settings.ndjson
 sed '1s/"review.publish"\]/"review.publish","settings.set"]/' "$script" > "$settings_script"
-# The review message section, scrolled into view; a message: step's \n is a line break and it can't hold a comma.
-message_at="wait:19000,goto:settings,scroll:1170"
+# The review message section on the Review tab, scrolled into view; a message: step's \n is a line break and it can't hold a comma.
+message_at="wait:19000,goto:settings,settings-tab:review,scroll:840"
 message_custom='### {{repo}} #{{pr_number}} by {{pr_author}}\n\n{{summary_line}}\n\n{{findings_list}}\n\n{{carried}}\n\nReviewed by {{model}} at {{short_sha}}. A human still decides.\n'
 message_unknown='### {{repo}} #{{pr_number}} for {{reviewer_name}}\n\n{{summary_line}}\n\n{{findings_list}}\n\n{{carried}}\n\nSee {{dashboard_url}}.\n'
 
@@ -171,7 +171,11 @@ for look in dark light; do
   snap 22c-again-palette-$look $look 10000 "wait:9000,pr:1291,palette:again" "$again_script"
   snap 23a-message-default-$look $look 20000 "$message_at" "$settings_script"
   snap 23b-message-unknown-$look $look 20000 "$message_at,message:$message_unknown" "$settings_script"
-  snap 23c-message-saved-$look $look 20000 "wait:19000,goto:settings,scroll:1560,message:$message_custom,message-saved" "$settings_script"
+  snap 23c-message-saved-$look $look 20000 "wait:19000,goto:settings,settings-tab:review,scroll:1390,message:$message_custom,message-saved" "$settings_script"
+  snap 24a-settings-review-$look     $look 20000 "wait:19000,goto:settings,settings-tab:review"
+  snap 24b-settings-reviewer-$look   $look 1000  "goto:settings" protocol/playback/setup.ndjson
+  snap 24c-settings-accounts-$look   $look 20000 "wait:19000,goto:settings,settings-tab:accounts"
+  snap 24d-settings-appearance-$look $look 20000 "wait:19000,goto:settings,settings-tab:appearance"
 done
 snap 20b-footer-no-account     dark  20000 "" "$no_account_script"
 
@@ -182,4 +186,4 @@ snap 21b-solarized-dark               solarized-dark  20000 ""
 snap 21b-solarized-dark-finding       solarized-dark  20000 "wait:19000,pr:1287,finding:1,finding:1"
 snap 21c-nord                         nord            20000 ""
 snap 21c-nord-finding                 nord            20000 "wait:19000,pr:1287,finding:1,finding:1"
-snap 21d-appearance-settings          nord            20000 "wait:19000,goto:settings"
+snap 21d-appearance-settings          nord            20000 "wait:19000,goto:settings,settings-tab:appearance"

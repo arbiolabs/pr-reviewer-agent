@@ -216,6 +216,8 @@ pub struct Shell {
     pub jev: crate::jev::KeyField,
     /// Settings → Review message: the template editor.
     pub message: crate::message::MessageEditor,
+    /// The Settings tab in front, for this session.
+    pub settings_tab: crate::setup::Tabs,
     /// Settings' scroll position, so a snapshot can show a section below the fold.
     pub settings_scroll: ScrollHandle,
     /// A scroll a snapshot asked for, held until Settings has been laid out once, since an offset set before that is
@@ -308,6 +310,7 @@ impl Shell {
             picker: crate::agent::Picker::default(),
             jev: crate::jev::KeyField::new(),
             message: Default::default(),
+            settings_tab: Default::default(),
             settings_scroll: ScrollHandle::new(),
             settings_scroll_to: None,
             queued_add: None,
@@ -327,6 +330,7 @@ impl Shell {
                 Desk::Message(text) => s.message.pending = Some(text.clone()),
                 Desk::MessageSaved => crate::message::stage_saved(&mut s),
                 Desk::Scroll(y) => s.settings_scroll_to = Some(*y as f32),
+                Desk::SettingsTab(tab) => s.settings_tab.open_on(*tab),
                 Desk::Flagged => s.diff_flagged_only = true,
                 Desk::Discards => {
                     s.open_discards =
@@ -425,6 +429,16 @@ impl Shell {
         self.send(Msg::Action(a), cx);
     }
 
+    /// Settings on `tab`, scrolled to its top. Where the home already shows setup, the tab changes in place.
+    pub fn settings_on(&mut self, tab: crate::setup::Tab, cx: &mut Context<Self>) {
+        if !setup_shown(self) {
+            self.act(Action::Goto(Screen::Settings), cx);
+        }
+        self.settings_tab.open_on(tab);
+        self.settings_scroll.set_offset(Point::default());
+        cx.notify();
+    }
+
     /// Switches the theme at once and saves it in the config file's [desktop] section, so the next launch opens
     /// in it. A snapshot never writes the reader's config.
     pub fn set_theme(&mut self, choice: tokens::Choice, cx: &mut Context<Self>) {
@@ -469,7 +483,7 @@ impl Shell {
         let cards = queue::cards(&self.model);
         let Some(card) = cards.get(i) else { return };
         let (pr, approve) = match card {
-            Card::Setup { .. } => return self.act(Action::Goto(Screen::Settings), cx),
+            Card::Setup { .. } => return self.settings_on(crate::setup::Tab::Reviewer, cx),
             Card::Approve { pr, .. } => (pr.id.clone(), true),
             c => (c.pr().map(|p| p.id.clone()).unwrap_or_else(|| unreachable!("only setup has no PR")), false),
         };
@@ -797,6 +811,11 @@ impl Shell {
             (Some(Modal::Finding { .. }), _, _, "t") => Action::OpenTimeline,
             (Some(Modal::Help { .. }), _, _, _) => Action::Back,
             (_, _, "escape", _) => Action::Back,
+            (None, _, _, ch)
+                if let Some(tab) = crate::setup::tab_for_key(setup_shown(self), self.typing(window, cx), ch) =>
+            {
+                return self.settings_on(tab, cx);
+            }
             (None, Screen::Diff | Screen::Settings | Screen::Timeline, "down", _)
             | (None, Screen::Diff | Screen::Settings | Screen::Timeline, _, "j") => Action::Down,
             (None, Screen::Diff | Screen::Settings | Screen::Timeline, "up", _)
@@ -847,6 +866,9 @@ impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.width = window.viewport_size().width;
         self.sync_avatar(cx);
+        if self.settings_tab.sync(setup_shown(self), &self.model) {
+            self.settings_scroll.set_offset(Point::default());
+        }
         if self.model.ui.screen == Screen::Settings {
             self.key_input(window, cx);
             self.model_search(window, cx);
@@ -1198,7 +1220,7 @@ fn titlebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                     .child(icon(IconName::Lock, px(12.), t.warn))
                     .child("Read-only")
                     .cursor_pointer()
-                    .on_click(cx.listener(|s, _: &ClickEvent, _, cx| s.act(Action::Goto(Screen::Settings), cx))),
+                    .on_click(cx.listener(|s, _: &ClickEvent, _, cx| s.settings_on(crate::setup::Tab::Reviewer, cx))),
                 format!("{} Click for Settings.", crate::setup::read_only_sentence(m)),
             ))
         })

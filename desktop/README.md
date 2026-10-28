@@ -87,14 +87,21 @@ With that setting, Stop is a plain `daemon.stop` and Start is a `launchctl kicks
 
 ### Settings
 
-⌘, opens Settings: Appearance (see [Themes](#themes)), the daemon's setup checks, two sections that change how it reviews, the reviewer, and the GitHub accounts.
+⌘, opens Settings, on the tab you last used in this session. It has four tabs, and 1 to 4 switch between them while no text field has the keyboard:
+
+1. **Review**: the model (Agent), the risk check (Jev) and the review message. It is the default tab.
+2. **Reviewer**: the daemon's setup checks, then the reviewer with Start, Restart and Stop. Settings opens here while reviews can't run: a check blocks them, the daemon is read-only, or the window can't reach it.
+3. **Accounts**: the GitHub accounts.
+4. **Appearance**: the themes (see [Themes](#themes)).
+
+A tab with something to fix carries a count: Reviewer the blocking and limited checks, or a read-only or unreachable daemon, and Review the model and Jev checks. The count is red when reviews can't run. The palette has a row for each tab (type `settings`, `model`, `jev`, `accounts` or `themes`).
 
 - **Risk check (Jev)** saves your TypeSafe key in the login keychain, where the daemon reads it for the next review with no restart. The field is masked and the page says only whether a key is saved. Off macOS, set `TYPESAFE_API_KEY` in the daemon's environment instead. [Configuration](../docs/configuration.md#typesafe-key-in-the-macos-keychain) explains how the key is kept.
 - **Agent** lists the models the daemon can review with, grouped by provider and searchable, with the one in use and where each provider's credential comes from. Save makes the choice the daemon's `models.default`. Reviews started from then on use it, and a PR reviewed again with another model gets a new revision.
 
 ### Themes
 
-**Settings** (⌘,) opens on **Appearance**, with a tile for each theme: **System**, which follows macOS between Light and Dark and is the default, **Light**, **Dark**, **Solarized Light**, **Solarized Dark** and **Nord**. **View → Appearance** and the palette (type `theme`) offer the same list. A theme applies at once. The app saves it as `theme` in the `[desktop]` section of its config file, the one `--config` names, else `~/Library/Application Support/pr-review/config.toml`, and opens in it on the next launch. The app changes only that line and leaves the file's other keys and comments as they are. When the file holds `[desktop]` as an inline table it can't edit that way, the app says so in a toast and saves nothing. An unknown `theme` falls back to System with a warning on stderr. The terminal client's own `[ui] theme` is separate.
+**Settings → Appearance** has a tile for each theme: **System**, which follows macOS between Light and Dark and is the default, **Light**, **Dark**, **Solarized Light**, **Solarized Dark** and **Nord**. **View → Appearance** and the palette (type `theme`) offer the same list. A theme applies at once. The app saves it as `theme` in the `[desktop]` section of its config file, the one `--config` names, else `~/Library/Application Support/pr-review/config.toml`, and opens in it on the next launch. The app changes only that line and leaves the file's other keys and comments as they are. When the file holds `[desktop]` as an inline table it can't edit that way, the app says so in a toast and saves nothing. An unknown `theme` falls back to System with a warning on stderr. The terminal client's own `[ui] theme` is separate.
 
 The Solarized and Nord palettes keep their canonical colors where those pass the app's contrast test, and move the others in lightness only. [DESIGN.md](DESIGN.md#themes) lists each change.
 
@@ -163,6 +170,8 @@ With `--socket`, the capture happens `--snapshot-after-ms` milliseconds after la
 | `discards` | Open every "Verifier discarded" group on the timeline. |
 | `flagged` | List only the diff's files with findings. |
 | `reviewer:STATE` | Show the reviewer as a start or a stop leaves it: `stopped`, `starting`, `start-failed`, or `stop-confirm` (the sheet that asks before a stop pauses running reviews). The window then dials `/private/tmp/prdc/s.sock`, as `08-disconnected` does. |
+| `settings-tab:NAME` | Show Settings on its `review`, `reviewer`, `accounts` or `appearance` tab. |
+| `scroll:N` | Scroll the Settings tab N points down. |
 
 The fixture daemon (`node bin/pr-review.mjs daemon --fixture showcase`) answers `finding.get` with the same recorded detail the playback does, so a finding opened against it shows its real explanation, evidence and history. It grants no review command, so the window reads it as read-only.
 
@@ -179,7 +188,7 @@ desktop/snap.sh                      # every state, into desktop/snapshots/
 desktop/snap.sh /tmp/snaps diff help # two states, into /tmp/snaps
 ```
 
-The states are listed at the end of `snap.sh`, one per line: a name, the appearance, the capture time, the steps and, optionally, another playback script. `08-disconnected` dials a socket that doesn't exist and captures in real time. `00-connecting`, `11-empty-queue` and `12-readonly` play the sessions in `desktop/playback/` and a read-only rewrite of the showcase that `snap.sh` writes under `target/`. `15-tracking`, `15b-reopened` and `16-discards` play `protocol/playback/tracking.ndjson`, a PR reviewed on three heads, and `17-big-diff` plays `big-diff.ndjson`, a 60-file PR. `18a-add-pr-empty`, `18b-add-pr-valid` and `18c-add-pr-error` show the add-a-PR sheet empty, with a URL it read, and with the daemon's refusal. `19-reviewer-stopped`, `19b-starting` and `19c-stop-confirm` show the board after a stop, the offline screen while a start is on its way, and the sheet that asks before a stop pauses two running reviews. `20-footer-account` shows the account footer with the showcase's account, and `20b-footer-no-account` plays a rewrite of the showcase with every account list emptied, which `snap.sh` writes under `target/`. `21-theme-solarized-light`, `21b-solarized-dark` and `21c-nord` show each classic theme on the overview, and their `-finding` states on a finding. `21d-appearance-settings` shows the theme picker in Settings.
+The states are listed at the end of `snap.sh`, one per line: a name, the appearance, the capture time, the steps and, optionally, another playback script. `08-disconnected` dials a socket that doesn't exist and captures in real time. `00-connecting`, `11-empty-queue` and `12-readonly` play the sessions in `desktop/playback/` and a read-only rewrite of the showcase that `snap.sh` writes under `target/`. `15-tracking`, `15b-reopened` and `16-discards` play `protocol/playback/tracking.ndjson`, a PR reviewed on three heads, and `17-big-diff` plays `big-diff.ndjson`, a 60-file PR. `18a-add-pr-empty`, `18b-add-pr-valid` and `18c-add-pr-error` show the add-a-PR sheet empty, with a URL it read, and with the daemon's refusal. `19-reviewer-stopped`, `19b-starting` and `19c-stop-confirm` show the board after a stop, the offline screen while a start is on its way, and the sheet that asks before a stop pauses two running reviews. `20-footer-account` shows the account footer with the showcase's account, and `20b-footer-no-account` plays a rewrite of the showcase with every account list emptied, which `snap.sh` writes under `target/`. `21-theme-solarized-light`, `21b-solarized-dark` and `21c-nord` show each classic theme on the overview, and their `-finding` states on a finding. `21d-appearance-settings` shows the theme picker in Settings. `24a-settings-review`, `24c-settings-accounts` and `24d-settings-appearance` show those Settings tabs on the showcase, and `24b-settings-reviewer` shows the Reviewer tab on `setup.ndjson`, where reviews can't run.
 
 ## How the parts connect
 

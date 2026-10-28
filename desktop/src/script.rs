@@ -64,6 +64,8 @@ pub enum Desk {
     MessageSaved,
     /// `scroll:Y`: Settings scrolled Y points down.
     Scroll(u64),
+    /// `settings-tab:NAME`: Settings on its `review`, `reviewer`, `accounts` or `appearance` tab.
+    SettingsTab(crate::setup::Tab),
 }
 
 /// The states `reviewer:` stages: `stopped`, `starting`, `start-failed` and `stop-confirm`.
@@ -103,7 +105,8 @@ const SCREENS: &[(&str, Screen)] = &[
 
 /// Comma-separated steps: an action name, `goto:<screen>`, `type:<text>`, `pr:<number>`, `finding:<n>`,
 /// `wait:<ms>`, `add:<url>`, or a desktop step (`tab:done`, `palette:<text>`, `keys`, `confirm-post`, `add-pr[:<url>]`,
-/// `scrub:<n>`, `span:<name>`, `reviewer:<state>`, `message:<text>`, `message-saved`, `scroll:<points>`).
+/// `scrub:<n>`, `span:<name>`, `reviewer:<state>`, `message:<text>`, `message-saved`, `scroll:<points>`,
+/// `settings-tab:<name>`).
 pub fn parse(s: &str) -> Result<Vec<Step>, String> {
     let mut steps = Vec::new();
     for t in s.split(',').map(str::trim).filter(|t| !t.is_empty()) {
@@ -123,6 +126,10 @@ pub fn parse(s: &str) -> Result<Vec<Step>, String> {
             Some(("message", v)) => steps.push(Step::Desk(Desk::Message(v.replace("\\n", "\n")))),
             None if t == "message-saved" => steps.push(Step::Desk(Desk::MessageSaved)),
             Some(("scroll", v)) => steps.push(Step::Desk(Desk::Scroll(number(v)?))),
+            Some(("settings-tab", v)) => match crate::setup::Tab::ALL.into_iter().find(|tab| tab.id() == v) {
+                Some(tab) => steps.push(Step::Desk(Desk::SettingsTab(tab))),
+                None => return Err(format!("{t:?}: settings tabs are review, reviewer, accounts and appearance")),
+            },
             Some(("tab", v)) => steps.push(Step::Desk(Desk::Tab(match v {
                 "queue" => List::Queue,
                 "done" => List::Done,

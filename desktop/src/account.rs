@@ -256,7 +256,10 @@ pub fn footer(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Stateful<Div> {
         row,
         t,
         radius::SM,
-        Box::new(cx.listener(|s, _: &ClickEvent, _, cx| s.act(Action::Accounts, cx))),
+        Box::new(cx.listener(|s, _: &ClickEvent, _, cx| {
+            s.act(Action::Accounts, cx);
+            s.settings_on(crate::setup::Tab::Accounts, cx);
+        })),
     )
     .role(Role::Button)
     .aria_label(label);

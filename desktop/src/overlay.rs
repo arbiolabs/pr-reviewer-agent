@@ -14,6 +14,7 @@ use crate::detail::who;
 use crate::kit::{Tone, button, icon, keycap, overline, tip};
 use crate::queue::{self, Card, Stage};
 use crate::reviewer::{Ask, Reviewer};
+use crate::setup::Tab as SettingsTab;
 use crate::tokens::{Choice, Colors, layout, radius, space, text};
 use crate::ui::{List, Overlay, Shell, on};
 
@@ -31,6 +32,7 @@ enum Run {
     AddPr,
     Reviewer(Ask),
     Theme(Choice),
+    Settings(SettingsTab),
 }
 
 struct Entry {
@@ -187,7 +189,7 @@ fn entries(m: &Model, r: &Reviewer, theme: Choice) -> Vec<Entry> {
         },
         Entry {
             group: "View",
-            title: "Settings and accounts".into(),
+            title: "Settings".into(),
             key: Some("⌘,"),
             blocked: None,
             run: Run::Act(Action::Goto(Screen::Settings)),
@@ -201,6 +203,21 @@ fn entries(m: &Model, r: &Reviewer, theme: Choice) -> Vec<Entry> {
         },
         Entry { group: "App", title: "Keyboard shortcuts".into(), key: Some("?"), blocked: None, run: Run::Keys },
     ]);
+    out.extend(SettingsTab::ALL.map(|tab| {
+        Entry {
+            group: "Settings",
+            title: match tab {
+                SettingsTab::Review => "Settings: model, risk check (Jev) and review message",
+                SettingsTab::Reviewer => "Settings: reviewer and setup checks",
+                SettingsTab::Accounts => "Settings: GitHub accounts",
+                SettingsTab::Appearance => "Settings: appearance and themes",
+            }
+            .into(),
+            key: None,
+            blocked: None,
+            run: Run::Settings(tab),
+        }
+    }));
     out.extend([Ask::Start, Ask::Stop, Ask::Restart].map(|ask| Entry {
         group: "Reviewer",
         title: ask.title().into(),
@@ -317,6 +334,7 @@ fn run(s: &mut Shell, r: Run, cx: &mut Context<Shell>) {
         Run::AddPr => s.add_pr(cx),
         Run::Reviewer(ask) => s.ask(ask, cx),
         Run::Theme(c) => s.set_theme(c, cx),
+        Run::Settings(tab) => s.settings_on(tab, cx),
     }
     cx.notify();
 }
@@ -547,6 +565,7 @@ fn glyph(m: &Model, e: &Entry) -> IconName {
         Run::Reviewer(Ask::Stop) => IconName::CircleStop,
         Run::Reviewer(Ask::Restart) => IconName::RotateCcw,
         Run::Theme(_) => IconName::Palette,
+        Run::Settings(_) => IconName::Settings,
     }
 }
 
@@ -1306,7 +1325,8 @@ const KEYS: &[(&str, &[(&str, &str)])] = &[
             ("⌘1 ⌘2 ⌘3 ⌘4", "needs you, done, archived, usage"),
             ("D  W  M", "usage by day, week, month"),
             ("T  R  A  P", "usage over time, by repository, author, PR"),
-            ("⌘,", "settings and accounts"),
+            ("⌘,", "settings, on the tab you left"),
+            ("1 2 3 4", "settings: review, reviewer, accounts, appearance"),
             ("⌘⇧O", "open on GitHub"),
             ("⌘R", "refresh"),
             ("⌘W", "close the window"),
@@ -1357,6 +1377,28 @@ mod tests {
             Vec::<std::ops::Range<usize>>::new()
         );
         assert_eq!(super::matched("start", "Start a review of #1296"), vec![0..5]);
+    }
+
+    #[test]
+    fn a_search_for_a_setting_opens_settings_on_the_tab_that_holds_it() {
+        use super::{Run, SettingsTab as Tab};
+        let m =
+            pr_review_tui::model::Model::new("test", Default::default(), pr_review_tui::model::Screen::Review, None);
+        let r = crate::reviewer::Reviewer::new(None, Default::default(), "config.toml".into(), true);
+        for (query, tab) in [
+            ("model", Tab::Review),
+            ("jev", Tab::Review),
+            ("review message", Tab::Review),
+            ("setup checks", Tab::Reviewer),
+            ("accounts", Tab::Accounts),
+            ("themes", Tab::Appearance),
+        ] {
+            let best = super::matching(&m, &r, crate::tokens::Choice::System, query)
+                .into_iter()
+                .find(|e| matches!(e.run, Run::Settings(_)))
+                .unwrap_or_else(|| panic!("{query}: no Settings row"));
+            assert!(matches!(best.run, Run::Settings(t) if t == tab), "{query} opens {:?}: {}", tab, best.title);
+        }
     }
 
     #[test]
