@@ -305,12 +305,23 @@ pub fn decisions(cards: &[Card]) -> usize {
     cards.iter().filter(|c| !matches!(c, Card::Setup { .. })).count()
 }
 
-/// Reviews the reviewer is working on now, oldest first.
+/// Reviews the reviewer is working on now, oldest first, on the PRs the reader keeps: an archived PR's review runs
+/// on, out of sight, as `at_work` counts it.
 pub fn running(m: &Model) -> Vec<(&Pr, &Run)> {
-    let mut v: Vec<(&Pr, &Run)> =
-        m.domain.runs.values().filter(|r| r.active()).filter_map(|r| Some((m.domain.prs.get(&r.pr_id)?, r))).collect();
+    let mut v: Vec<(&Pr, &Run)> = m
+        .domain
+        .runs
+        .values()
+        .filter(|r| r.active())
+        .filter_map(|r| Some((m.domain.prs.get(&r.pr_id).filter(|p| !p.archived())?, r)))
+        .collect();
     v.sort_by(|a, b| (&a.1.started_at, &a.1.id).cmp(&(&b.1.started_at, &b.1.id)));
     v
+}
+
+/// Every review at work, archived PRs' included: what a stop would pause.
+pub fn at_work(m: &Model) -> usize {
+    m.domain.runs.values().filter(|r| r.active()).count()
 }
 
 /// How a run that stopped short ended: the reader cancelled it, the daemon refused it for size, or it broke.
@@ -669,6 +680,24 @@ mod tests {
         assert_eq!(running(&m).iter().map(|(p, _)| p.number).collect::<Vec<_>>(), [338]);
         assert_eq!(done(&m).iter().map(|(p, _)| p.number).collect::<Vec<_>>(), [341]);
         assert_eq!(summary(&m), "One review is waiting on you. #1287 has a critical finding.");
+    }
+
+    #[test]
+    fn an_archived_pr_leaves_the_queue_done_the_sidebar_and_the_strip_while_its_review_runs_on() {
+        let m = at(20_100, "wait:20000,pr:1287,archive,pr:338,archive,pr:341,archive");
+        let numbers = |prs: Vec<u64>| {
+            let mut prs = prs;
+            prs.sort();
+            prs
+        };
+        assert_eq!(numbers(m.archived().iter().map(|p| p.number).collect()), [338, 341, 1287]);
+        assert!(!shape(&m).iter().any(|(_, n)| [338, 341, 1287].contains(n)), "{:?}", shape(&m));
+        assert!(done(&m).is_empty());
+        let listed: Vec<u64> = rows(&m).iter().flat_map(|(_, r)| r.iter().map(|r| r.pr.number)).collect();
+        assert!(!listed.iter().any(|n| [338, 341, 1287].contains(n)), "{listed:?}");
+        assert!(running(&m).is_empty());
+        assert_eq!(super::at_work(&m), 1, "archiving never cancels the review at work");
+        assert!(m.selected_pr().is_some_and(|p| !p.archived()), "the selection moved on to a PR still listed");
     }
 
     #[test]

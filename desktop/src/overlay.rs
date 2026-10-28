@@ -15,7 +15,7 @@ use crate::kit::{Tone, button, icon, keycap, overline, tip};
 use crate::queue::{self, Card, Stage};
 use crate::reviewer::{Ask, Reviewer};
 use crate::tokens::{Choice, Colors, layout, radius, space, text};
-use crate::ui::{Overlay, Shell, on};
+use crate::ui::{List, Overlay, Shell, on};
 
 #[derive(Clone)]
 enum Run {
@@ -24,7 +24,8 @@ enum Run {
     Direct(Mutation),
     Act(Action),
     GitHub,
-    Tab(bool),
+    Archive,
+    Tab(List),
     Keys,
     AddPr,
     Reviewer(Ask),
@@ -128,6 +129,17 @@ fn entries(m: &Model, r: &Reviewer, theme: Choice) -> Vec<Entry> {
         blocked: add_block(m, r),
         run: Run::AddPr,
     });
+    let archived = m.selected_pr().is_some_and(|p| p.archived());
+    out.push(Entry {
+        group: "Review",
+        title: format!("{}{n}", if archived { "Unarchive" } else { "Archive" }),
+        key: Some("E"),
+        blocked: match (m.selected_pr(), write_block(m, "pr.archive")) {
+            (None, _) => Some("no PR is selected".into()),
+            (_, why) => why.map(String::from),
+        },
+        run: Run::Archive,
+    });
     out.push(Entry {
         group: "Review",
         title: format!("Open{n} on GitHub"),
@@ -146,8 +158,17 @@ fn entries(m: &Model, r: &Reviewer, theme: Choice) -> Vec<Entry> {
     }
     let selected = m.selected_pr().is_some();
     out.extend([
-        Entry { group: "View", title: "Needs you".into(), key: Some("⌘1"), blocked: None, run: Run::Tab(false) },
-        Entry { group: "View", title: "Done".into(), key: Some("⌘2"), blocked: None, run: Run::Tab(true) },
+        Entry {
+            group: "View", title: "Needs you".into(), key: Some("⌘1"), blocked: None, run: Run::Tab(List::Queue)
+        },
+        Entry { group: "View", title: "Done".into(), key: Some("⌘2"), blocked: None, run: Run::Tab(List::Done) },
+        Entry {
+            group: "View",
+            title: "Archived".into(),
+            key: Some("⌘3"),
+            blocked: None,
+            run: Run::Tab(List::Archived),
+        },
         Entry {
             group: "View",
             title: "Diff of the selected PR".into(),
@@ -281,12 +302,14 @@ fn run(s: &mut Shell, r: Run, cx: &mut Context<Shell>) {
         Run::Card(i) => s.select_card(i, cx),
         Run::Pr(id) => {
             s.done_tab = queue::done(&s.model).iter().any(|(p, _)| p.id == id);
+            s.model.ui.show_archived = false;
             s.select_pr(id, cx)
         }
         Run::Direct(mu) => s.direct(mu, cx),
         Run::Act(a) => s.act(a, cx),
         Run::GitHub => s.open_github(cx),
-        Run::Tab(done) => s.set_tab(done, cx),
+        Run::Archive => s.archive(cx),
+        Run::Tab(list) => s.set_tab(list, cx),
         Run::Keys => s.overlay = Some(Overlay::Keys),
         Run::AddPr => s.add_pr(cx),
         Run::Reviewer(ask) => s.ask(ask, cx),
@@ -511,8 +534,10 @@ fn glyph(m: &Model, e: &Entry) -> IconName {
         Run::Act(Action::Refresh) => IconName::RefreshCw,
         Run::Act(_) => IconName::Settings,
         Run::GitHub => IconName::ExternalLink,
-        Run::Tab(false) => IconName::Inbox,
-        Run::Tab(true) => IconName::CircleCheck,
+        Run::Archive => IconName::Archive,
+        Run::Tab(List::Queue) => IconName::Inbox,
+        Run::Tab(List::Done) => IconName::CircleCheck,
+        Run::Tab(List::Archived) => IconName::Archive,
         Run::Keys => IconName::Keyboard,
         Run::AddPr => IconName::Plus,
         Run::Reviewer(Ask::Start) => IconName::Power,
@@ -1267,6 +1292,7 @@ const KEYS: &[(&str, &[(&str, &str)])] = &[
             ("⇧R", "retry a failed review (no sheet)"),
             ("⇧S", "review the PR again from scratch"),
             ("C", "cancel a review (asks first)"),
+            ("E", "archive the PR, or unarchive it"),
         ],
     ),
     (
@@ -1274,7 +1300,7 @@ const KEYS: &[(&str, &[(&str, &str)])] = &[
         &[
             ("⌘K  /", "command palette"),
             ("⌘N", "review a PR by its URL"),
-            ("⌘1  ⌘2", "needs you, done"),
+            ("⌘1 ⌘2 ⌘3", "needs you, done, archived"),
             ("⌘,", "settings and accounts"),
             ("⌘⇧O", "open on GitHub"),
             ("⌘R", "refresh"),
@@ -1329,13 +1355,15 @@ mod tests {
     }
 
     #[test]
-    fn a_read_only_daemon_dims_every_command_row_with_its_reason() {
+    fn a_read_only_daemon_dims_every_command_row_with_its_reason_but_archiving_which_it_grants() {
         use pr_review_tui::model::{Look, Model, Screen};
         let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../protocol/playback/showcase.ndjson");
         let mut m = Model::new("test", Look::default(), Screen::Review, None);
         let steps = crate::script::parse("wait:19000,pr:1287").unwrap();
         crate::script::play(pr_review_tui::playback::load(&path).unwrap(), &mut m, &steps, 20_000).unwrap();
-        m.server.as_mut().unwrap().capabilities.clear();
+        // What a read-only daemon grants: the reader's own commands, none of the review ones.
+        m.server.as_mut().unwrap().capabilities =
+            ["account.select", "pr.archive", "pr.unarchive"].map(pr_review_tui::protocol::Text::new).to_vec();
         let r = crate::reviewer::Reviewer::new(None, Default::default(), "config.toml".into(), true);
         let rows: Vec<(String, Option<String>)> = super::entries(&m, &r, crate::tokens::Choice::System)
             .into_iter()
@@ -1352,6 +1380,7 @@ mod tests {
                 ("Retry the failed review of #1287".to_string(), locked.clone()),
                 ("Cancel the review of #1287".to_string(), locked.clone()),
                 ("Review a PR by its URL…".to_string(), locked),
+                ("Archive #1287".to_string(), None),
                 ("Open #1287 on GitHub".to_string(), None),
             ]
         );
