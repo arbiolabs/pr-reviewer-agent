@@ -6,11 +6,11 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 ### Added
 
-- **Updates to new releases.** `scripts/update.sh` updates an install from source to a release tag: it fast-forwards the checkout, runs `pnpm install` and builds the desktop app, and only then replaces the app's binary, re-signs the bundle and restarts the daemon's LaunchAgent when it is running. A failed step resets the source and leaves the app untouched; each step prints one line and the commands log to `~/Library/Logs/pr-review/update.log`. `--check` prints the newest `vX.Y.Z` tag on origin. The desktop app checks at launch and every six hours, shows **Update to X.Y.Z** in the title bar, and runs the update and a restart from Settings → General → Updates (#PR).
+- **Updates to new releases.** `scripts/update.sh` updates an install from source to a release tag: it fast-forwards the checkout, runs `pnpm install` and builds the desktop app, and only then replaces the app's binary, re-signs the bundle and restarts the daemon's LaunchAgent when it is running. A failed step resets the source and leaves the app untouched; each step prints one line and the commands log to `~/Library/Logs/pr-review/update.log`. `--check` prints the newest `vX.Y.Z` tag on origin. The desktop app checks at launch and every six hours, shows **Update to X.Y.Z** in the title bar, and runs the update and a restart from Settings → General → Updates (#77).
 
 ### Changed
 
-- **Desktop: Settings' Appearance tab is now General.** It holds Updates, the themes, and the menu bar and Dock options; the snapshot step is `settings-tab:general` (#PR).
+- **Desktop: Settings' Appearance tab is now General.** It holds Updates, the themes, and the menu bar and Dock options; the snapshot step is `settings-tab:general` (#77).
 
 ## [1.6.0] - 2026-10-28
 
