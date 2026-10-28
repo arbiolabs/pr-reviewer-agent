@@ -487,12 +487,18 @@ fn room_to_move(m: &Model) -> bool {
 
 /// Whether the daemon takes a start of the selected PR, from what it granted and what the client knows: it refuses
 /// for certain only a head parked under the same policy, and a daemon without review.publish runs another policy.
+/// It refuses a head whose latest run ended there whatever the policy, so the client does not offer it.
 fn daemon_takes_start(m: &Model) -> bool {
     let Some(p) = m.selected_pr().filter(|_| m.top_modal().is_none()) else { return false };
     let parked = m.domain.runs.values().any(|r| {
         r.pr_id == p.id && r.head_sha == p.head_sha && r.base_sha == p.base_sha && r.phase == Phase::AwaitingApproval
     });
+    let ended = m
+        .domain
+        .latest_run(&p.id)
+        .is_some_and(|r| r.head_sha == p.head_sha && r.status != pr_review_tui::protocol::RunStatus::Running);
     matches!(m.ui.screen, Screen::Inbox | Screen::Review)
+        && !ended
         && m.link == pr_review_tui::model::Link::Live
         && m.may_write("review.start")
         && !(parked && m.may_write("review.publish"))

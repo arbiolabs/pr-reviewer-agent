@@ -12,7 +12,7 @@ use pr_review_tui::protocol::{
     EvidenceKind, Finding, FindingId, FindingStatus, HistoryEntry, Lifecycle, LineKind, Pr, PublicationStatus, Run,
     RunStatus, Severity,
 };
-use pr_review_tui::update::{Msg, again_block, can_mutate, write_block};
+use pr_review_tui::update::{Msg, again_block, can_mutate, start_block, write_block};
 use pr_review_tui::view::Hit;
 
 use crate::code::{Inline, Lexer, Tok, clip, inline_markdown, wrap};
@@ -413,7 +413,7 @@ pub fn pr_sentence(m: &Model, pr: &Pr, run: Option<&Run>) -> String {
         // The reason itself sits in the run block below, once.
         return match queue::ending(r) {
             Some(Ending::TooLarge) => "Too large to review. Shrink the PR, then retry.".into(),
-            Some(Ending::Cancelled) => "Cancelled before it finished. Start again for a verdict.".into(),
+            Some(Ending::Cancelled) => "Cancelled before it finished. Review again for a verdict.".into(),
             _ => "The review did not finish. Retry for a verdict.".into(),
         };
     }
@@ -582,7 +582,7 @@ fn run_block(s: &Shell, t: &Colors, run: Option<&Run>, current: &[&Finding]) -> 
                     IconName::CircleSlash,
                     "Cancelled".to_string(),
                     format!(
-                        "Cancelled during {at}. Nothing was posted.\n\nNext step: start again (S) for a fresh review."
+                        "Cancelled during {at}. Nothing was posted.\n\nNext step: review again (⇧S) for a fresh review."
                     ),
                 ),
                 Ending::TooLarge => (
@@ -708,7 +708,7 @@ pub fn why_not(m: &Model, mu: Mutation, label: &str) -> String {
         return format!("Read-only daemon. Restart it with --allow-commands to {}.", label.to_lowercase());
     }
     let why = write_block(m, mu.capability()).map(String::from).unwrap_or_else(|| match mu {
-        Mutation::Start => "a review already holds this head".into(),
+        Mutation::Start => start_block(m).unwrap_or_default(),
         Mutation::Again => again_block(m).unwrap_or_default(),
         Mutation::Retry => "its latest run has not failed".into(),
         Mutation::Cancel => "no review is running on it".into(),
@@ -730,9 +730,7 @@ fn pr_actions(s: &Shell, pr: &Pr, run: Option<&Run>, cx: &Context<Shell>) -> Bar
             Tone::Primary,
             on(cx, |s, cx| s.send(Msg::Pick(Hit::Ready), cx)),
         )),
-        Some(r) if queue::ending(r) == Some(Ending::Cancelled) => {
-            bar.lead.push(mutation_item(s, "a-start", "Start again", "S", Tone::Primary, Mutation::Start, cx))
-        }
+        Some(r) if queue::ending(r) == Some(Ending::Cancelled) => {}
         Some(r) if r.status == RunStatus::Failed => {
             bar.lead.push(mutation_item(s, "a-retry", "Retry review", "⇧R", Tone::Primary, Mutation::Retry, cx))
         }
@@ -753,7 +751,9 @@ fn pr_actions(s: &Shell, pr: &Pr, run: Option<&Run>, cx: &Context<Shell>) -> Bar
     bar.lead.push(Item::new("a-diff", "Diff", "D", Tone::Secondary, on(cx, |s, cx| s.act(Action::OpenDiff, cx))));
     // A PR with a run can always be reviewed again, once nothing of it is at work: dimmed with the reason until then.
     if run.is_some() {
-        bar.lead.push(mutation_item(s, "a-again", "Review again", "⇧S", Tone::Secondary, Mutation::Again, cx));
+        let cancelled = run.is_some_and(|r| queue::ending(r) == Some(Ending::Cancelled));
+        let tone = if cancelled { Tone::Primary } else { Tone::Secondary };
+        bar.lead.push(mutation_item(s, "a-again", "Review again", "⇧S", tone, Mutation::Again, cx));
     }
     if pr.lifecycle == Lifecycle::Active && run.is_some_and(|r| r.parked()) {
         bar.lead.push(mutation_item(s, "a-cancel", "Cancel", "C", Tone::Ghost, Mutation::Cancel, cx));

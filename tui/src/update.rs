@@ -360,11 +360,35 @@ fn parked_head<'a>(m: &'a Model, pr: &Pr) -> Option<&'a Run> {
         .find(|r| r.pr_id == pr.id && r.base_sha == pr.base_sha && r.head_sha == pr.head_sha && r.parked())
 }
 
+/// The selected PR's latest run when it ended at the PR's current head: the daemon refuses a start there.
+fn ended_head<'a>(m: &'a Model, pr: &Pr) -> Option<&'a Run> {
+    m.domain.latest_run(&pr.id).filter(|r| {
+        r.head_sha == pr.head_sha
+            && matches!(r.status, RunStatus::Completed | RunStatus::Failed | RunStatus::Superseded)
+    })
+}
+
+/// Why S cannot start the selected PR, naming the key that works; `None` when it can. A parked head waits instead.
+pub fn start_block(m: &Model) -> Option<String> {
+    let p = m.selected_pr()?;
+    if parked_head(m, p).is_some() {
+        return Some("a review already holds this head".into());
+    }
+    let run = ended_head(m, p)?;
+    Some(match run.status {
+        RunStatus::Failed if run.cancelled() => "it was cancelled; review it again with S".into(),
+        RunStatus::Failed => "it failed its review; retry it with R".into(),
+        RunStatus::Superseded => "it is superseded by a newer head; review it again with S".into(),
+        _ => "it is already reviewed; review it again with S".into(),
+    })
+}
+
 /// The daemon's words for refusing a start at `run`'s head: `#184 at 4444444 is already being reviewed`.
 fn start_refusal(m: &Model, run: &Run) -> String {
     let why = match run.status {
         RunStatus::Running if run.parked() => "is waiting for your approval",
         RunStatus::Running => "is already being reviewed",
+        RunStatus::Failed if run.cancelled() => "was cancelled; review it again instead",
         RunStatus::Failed => "failed its review; retry it instead",
         RunStatus::Superseded => "is superseded by a newer head",
         _ => "is already reviewed",
@@ -1944,7 +1968,7 @@ pub fn can_mutate(m: &Model, mu: Mutation) -> bool {
     let run = m.domain.latest_run(&p.id);
     write_block(m, mu.capability()).is_none()
         && match mu {
-            Mutation::Start => parked_head(m, p).is_none(),
+            Mutation::Start => parked_head(m, p).is_none() && ended_head(m, p).is_none(),
             Mutation::Again => again_block(m).is_none(),
             Mutation::Retry => run.is_some_and(|r| r.status == RunStatus::Failed),
             Mutation::Cancel => run.is_some_and(|r| r.status == RunStatus::Running),
@@ -2159,6 +2183,7 @@ fn refuse(m: &mut Model, mu: Mutation) {
     notice(
         m,
         match mu {
+            Mutation::Start => format!("Can't start #{}: {}", p.number, start_block(m).unwrap_or_default()),
             Mutation::Again => format!("Can't review #{} again: {}", p.number, again_block(m).unwrap_or_default()),
             Mutation::Retry => format!("Can't retry #{}: its latest run has not failed", p.number),
             Mutation::Cancel => format!("Can't cancel #{}: no review is running on it", p.number),

@@ -329,6 +329,7 @@ impl Player {
                     operation_id: Text::new(&format!("review.start:{}", latest.id)),
                 });
             }
+            RunStatus::Failed if latest.cancelled() => "was cancelled; review it again instead",
             RunStatus::Failed => "failed its review; retry it instead",
             RunStatus::Superseded => "is superseded by a newer head",
             _ => "is already reviewed",

@@ -717,9 +717,9 @@ fn the_ascii_rail_keeps_the_head_sha_of_a_pr_with_findings_as_the_unicode_rail_d
     }
 }
 
-/// The showcase played whole, with PR `number` on the Review page.
+/// The showcase up to its snapshot, where #1296 has no review and a start is still offered, with PR `number` on the Review page.
 fn reading(number: u64) -> Sim {
-    let mut s = showcase(usize::MAX);
+    let mut s = showcase(2);
     s.m.ui.screen = pr_review_tui::model::Screen::Review;
     s.m.ui.selected_pr = s.m.domain.prs.values().find(|p| p.number == number).map(|p| p.id.clone());
     s
