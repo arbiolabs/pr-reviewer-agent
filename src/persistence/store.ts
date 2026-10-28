@@ -832,12 +832,20 @@ export class AppStore {
 
 /** The recorded model responses from `since` (an ISO instant) on; `db` may be a read-only connection. */
 export function usageRows(db: DatabaseSync, since: string): UsageRow[] {
-  return db
+  type Joined = Omit<UsageRow, "pr"> & { prId: string | null; repository: string; number: number; title: string | null; author: string | null };
+  const rows = db
     .prepare(
-      `SELECT revision_id AS revisionId, at, model, input, output, cache_read AS cacheRead, cache_write AS cacheWrite, cost_total AS cost
-       FROM model_usage WHERE at >= ? ORDER BY at, id`,
+      // A title from before migration 054 falls back to the one the run's context recorded, as the snapshot's does.
+      `SELECT u.revision_id AS revisionId, u.at, u.model, u.input, u.output, u.cache_read AS cacheRead, u.cache_write AS cacheWrite, u.cost_total AS cost,
+         p.id AS prId, p.repo_full_name AS repository, p.number,
+         coalesce(p.title, (SELECT json_extract(c.pr_json, '$.title') FROM context_snapshots c WHERE c.revision_id = u.revision_id)) AS title,
+         p.author
+       FROM model_usage u LEFT JOIN pull_requests p ON p.id = u.pr_id WHERE u.at >= ? ORDER BY u.at, u.id`,
     )
-    .all(since) as UsageRow[];
+    .all(since) as unknown as Joined[];
+  return rows.map(({ prId, repository, number, title, author, ...row }) =>
+    prId === null ? row : { ...row, pr: { id: prId, repository, number, title: title ?? `${repository}#${number}`, ...(author !== null && { author }) } },
+  );
 }
 
 /** Run `fn` on the data dir's app DB, creating the dir and DB if needed. Takes no data-dir lock: WAL lets it share the DB. */
