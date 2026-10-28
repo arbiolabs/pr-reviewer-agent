@@ -286,6 +286,25 @@ pub struct Settings {
     pub model: ModelInUse,
     pub models: Vec<ModelOption>,
     pub config_path: Text,
+    /// Absent from a daemon older than the summary template.
+    pub summary_template: Option<SummaryTemplate>,
+}
+
+/// The review body template the daemon uses now, its built-in default, and every `{{name}}` it may hold.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SummaryTemplate {
+    pub value: Text,
+    pub is_default: bool,
+    pub default: Text,
+    pub variables: Vec<TemplateVariable>,
+}
+
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct TemplateVariable {
+    pub name: Text,
+    pub description: Text,
+    pub sample: Text,
 }
 
 /// How `usage.get` groups model usage: by local day, ISO week (Monday first) or calendar month.
@@ -1027,8 +1046,9 @@ pub enum Command {
     Unarchive(PrParams),
     /// Granted only by a daemon in engine mode; the desktop sends it to stop the reviewer.
     StopDaemon(StopParams),
-    /// Granted only by a daemon in engine mode; the desktop's Settings sends it to change the review model.
-    SetModel(ModelParams),
+    /// Granted only by a daemon in engine mode; the desktop's Settings sends it to change the review model or the
+    /// review body template.
+    SetSettings(SettingsParams),
 }
 
 impl Command {
@@ -1045,7 +1065,7 @@ impl Command {
             Command::Archive(_) => "pr.archive",
             Command::Unarchive(_) => "pr.unarchive",
             Command::StopDaemon(_) => "daemon.stop",
-            Command::SetModel(_) => "settings.set",
+            Command::SetSettings(_) => "settings.set",
         }
     }
 
@@ -1062,7 +1082,8 @@ impl Command {
             Command::Archive(_) => "archive",
             Command::Unarchive(_) => "unarchive",
             Command::StopDaemon(_) => "stop the reviewer",
-            Command::SetModel(_) => "change the model",
+            Command::SetSettings(p) if p.summary_template.is_some() => "save the review message",
+            Command::SetSettings(_) => "change the model",
         }
     }
 
@@ -1079,7 +1100,14 @@ impl Command {
             Command::Archive(p) => format!("pr.archive:{}", p.pr_id),
             Command::Unarchive(p) => format!("pr.unarchive:{}", p.pr_id),
             Command::StopDaemon(_) => "daemon.stop".into(),
-            Command::SetModel(p) => format!("settings.set:{}", p.model),
+            Command::SetSettings(p) => {
+                let template = match p.summary_template.as_deref() {
+                    None => String::new(),
+                    Some("") => ":template:default".into(),
+                    Some(t) => format!(":template:{:016x}", fnv1a64(t)),
+                };
+                format!("settings.set:{}{template}", p.model.as_deref().unwrap_or_default())
+            }
         }
     }
 }
@@ -1132,11 +1160,21 @@ pub struct StopParams {
     pub pause_reviews: bool,
 }
 
-#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+/// One or both; an empty `summary_template` restores the default.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase", deny_unknown_fields)]
-pub struct ModelParams {
+pub struct SettingsParams {
     /// `provider/id`, one of `settings.models`.
-    pub model: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub model: Option<String>,
+    /// `""` restores the default; this client never sends the `null` the protocol also allows.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub summary_template: Option<String>,
+}
+
+/// FNV-1a 64 of the UTF-8 bytes: the template's part of the `settings.set` key, as the daemon computes it.
+pub fn fnv1a64(text: &str) -> u64 {
+    text.bytes().fold(0xcbf2_9ce4_8422_2325, |h, b| (h ^ u64::from(b)).wrapping_mul(0x0100_0000_01b3))
 }
 
 #[derive(Serialize, Deserialize)]
@@ -1162,7 +1200,7 @@ impl TryFrom<RawCommand> for CommandRequest {
             "pr.archive" => Command::Archive(from_value(raw.params)?),
             "pr.unarchive" => Command::Unarchive(from_value(raw.params)?),
             "daemon.stop" => Command::StopDaemon(from_value(raw.params)?),
-            "settings.set" => Command::SetModel(from_value(raw.params)?),
+            "settings.set" => Command::SetSettings(from_value(raw.params)?),
             other => return Err(format!("unknown command {other}")),
         };
         Ok(CommandRequest { request_id: raw.request_id, idempotency_key: raw.idempotency_key, command })
@@ -1183,7 +1221,7 @@ impl From<CommandRequest> for RawCommand {
             Command::Archive(p) => ("pr.archive", to(serde_json::to_value(p))),
             Command::Unarchive(p) => ("pr.unarchive", to(serde_json::to_value(p))),
             Command::StopDaemon(p) => ("daemon.stop", to(serde_json::to_value(p))),
-            Command::SetModel(p) => ("settings.set", to(serde_json::to_value(p))),
+            Command::SetSettings(p) => ("settings.set", to(serde_json::to_value(p))),
         };
         RawCommand { request_id: c.request_id, command: command.into(), params, idempotency_key: c.idempotency_key }
     }

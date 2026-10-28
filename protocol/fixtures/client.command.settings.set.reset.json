@@ -3,7 +3,7 @@
   "requestId": "req-cmd",
   "command": "settings.set",
   "params": {
-    "summaryTemplate": null
+    "summaryTemplate": ""
   },
   "idempotencyKey": "settings.set::template:default"
 }

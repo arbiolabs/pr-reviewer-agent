@@ -1633,7 +1633,7 @@ export const fixtures: Record<string, ClientMessage | ServerMessage | Record<str
     type: "command",
     requestId: "req-cmd",
     command: "settings.set",
-    params: { summaryTemplate: null },
+    params: { summaryTemplate: "" },
     idempotencyKey: "settings.set::template:default",
   },
   "server.settings": {

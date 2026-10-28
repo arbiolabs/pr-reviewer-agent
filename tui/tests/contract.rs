@@ -170,6 +170,21 @@ fn m3_messages_parse_into_the_client_enums() {
 }
 
 #[test]
+fn settings_set_keys_match_the_daemons_for_a_model_a_template_and_a_reset() {
+    let read = |name: &str| fs::read_to_string(protocol_dir().join(format!("fixtures/{name}.json"))).unwrap();
+    for name in
+        ["client.command.settings.set", "client.command.settings.set.template", "client.command.settings.set.reset"]
+    {
+        let ClientMessage::Command(c) = serde_json::from_str(&read(name)).unwrap() else { panic!() };
+        assert_eq!(c.idempotency_key, c.command.idempotency_key(), "{name}");
+    }
+    assert_eq!(
+        [pr_review_tui::protocol::fnv1a64(""), pr_review_tui::protocol::fnv1a64("é{{repo}}")],
+        [0xcbf29ce484222325, 0x2ec616eb09cd6d39]
+    );
+}
+
+#[test]
 fn archive_commands_round_trip_and_archived_at_is_optional_on_a_pr() {
     let read = |name: &str| fs::read_to_string(protocol_dir().join(format!("fixtures/{name}.json"))).unwrap();
     for (name, archive) in [("client.command.pr.archive", true), ("client.command.pr.unarchive", false)] {

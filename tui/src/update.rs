@@ -30,6 +30,8 @@ pub enum Msg {
     AddPr(String),
     /// Makes this `provider/id` the model for reviews started from now on: `settings.set`.
     SetModel(String),
+    /// Makes this the review body template for payloads prepared from now on, "" for the default: `settings.set`.
+    SetSummaryTemplate(String),
     /// Shows recorded model usage grouped this way, asking for it fresh (`usage.get`), or stops showing it.
     Usage(Option<UsageBy>),
     /// Splits usage on screen this way too, asking for it fresh.
@@ -162,7 +164,10 @@ pub fn update(m: &mut Model, msg: Msg) -> Vec<Effect> {
         }
         Msg::Net(e) => net(m, e, &mut fx),
         Msg::AddPr(text) => add_pr(m, &text, &mut fx),
-        Msg::SetModel(model) => set_model(m, model, &mut fx),
+        Msg::SetModel(model) => save_settings(m, SettingsParams { model: Some(model), ..Default::default() }, &mut fx),
+        Msg::SetSummaryTemplate(t) => {
+            save_settings(m, SettingsParams { summary_template: Some(t), ..Default::default() }, &mut fx)
+        }
         Msg::Usage(by) => {
             m.usage.by = by;
             if by.is_some() {
@@ -252,26 +257,39 @@ fn prefetch_usage(m: &mut Model, fx: &mut Vec<Effect>) {
     }
 }
 
-/// Save on Settings' model picker: `settings.set`, then the settings asked for again once it is accepted.
-fn set_model(m: &mut Model, model: String, fx: &mut Vec<Effect>) {
-    if matches!(m.agent.save, SaveState::Sending { .. }) {
+/// Save on Settings' model picker or review message: `settings.set` with that one field, then the settings asked for
+/// again once it is accepted. Each has its own save state, so one never shows the other's outcome.
+fn save_settings(m: &mut Model, params: SettingsParams, fx: &mut Vec<Effect>) {
+    let template = params.summary_template.is_some();
+    let value = params.summary_template.clone().or_else(|| params.model.clone()).unwrap_or_default();
+    fn slot(a: &mut AgentSettings, template: bool) -> &mut SaveState {
+        if template { &mut a.template_save } else { &mut a.save }
+    }
+    if matches!(slot(&mut m.agent, template), SaveState::Sending { .. }) {
         return;
     }
     if let Some(why) = write_block(m, "settings.set") {
-        m.agent.save = SaveState::Refused(Text::new(why));
+        *slot(&mut m.agent, template) = SaveState::Refused(Text::new(why));
         return;
     }
-    let command = Command::SetModel(ModelParams { model: model.clone() });
+    let command = Command::SetSettings(params);
     let (idempotency_key, verb) = (command.idempotency_key(), command.verb());
     let sent =
         send(m, fx, |request_id| ClientMessage::Command(CommandRequest { request_id, idempotency_key, command }));
-    m.agent.save = match sent {
+    *slot(&mut m.agent, template) = match sent {
         Some(request) => {
             m.commands_sent.insert(request.clone(), verb);
-            SaveState::Sending { request, model }
+            SaveState::Sending { request, value }
         }
         None => SaveState::Refused(Text::new(OFFLINE)),
     };
+}
+
+/// The save waiting on `id`, the model's or the review message's.
+fn saving<'a>(a: &'a mut AgentSettings, id: &RequestId) -> Option<&'a mut SaveState> {
+    [&mut a.save, &mut a.template_save]
+        .into_iter()
+        .find(|s| matches!(s, SaveState::Sending { request, .. } if request == id))
 }
 
 fn request(m: &mut Model) -> RequestId {
@@ -310,8 +328,8 @@ fn expire_requests(m: &mut Model) {
             a.state = AddState::TimedOut;
             let target = a.target.to_string();
             notice(m, format!("No reply to adding {target} in time; try again"));
-        } else if matches!(&m.agent.save, SaveState::Sending { request, .. } if *request == id) {
-            m.agent.save = SaveState::TimedOut;
+        } else if let Some(save) = saving(&mut m.agent, &id) {
+            *save = SaveState::TimedOut;
             m.dirty = true;
         } else if fail_request(m, &id, Text::new(TIMED_OUT)) {
             m.dirty = true;
@@ -432,8 +450,8 @@ fn fail_request(m: &mut Model, id: &RequestId, message: Text) -> bool {
     } else if m.usage.request.as_ref() == Some(id) {
         m.usage.request = None;
         m.usage.error = Some(message);
-    } else if matches!(&m.agent.save, SaveState::Sending { request, .. } if request == id) {
-        m.agent.save = SaveState::Refused(message);
+    } else if let Some(save) = saving(&mut m.agent, id) {
+        *save = SaveState::Refused(message);
     } else {
         return false;
     }
@@ -688,15 +706,14 @@ fn server_message(m: &mut Model, msg: ServerMessage, fx: &mut Vec<Effect>) {
             if m.adding.as_ref().is_some_and(|a| a.state == AddState::Sending(r.request_id.clone())) {
                 return added(m, r);
             }
-            if let SaveState::Sending { request, model } = &m.agent.save
-                && *request == r.request_id
-            {
-                m.agent.save = match r.outcome {
-                    CommandOutcome::Accepted { .. } => SaveState::Saved(model.clone()),
+            if let Some(save) = saving(&mut m.agent, &r.request_id) {
+                let SaveState::Sending { value, .. } = save else { return };
+                *save = match r.outcome {
+                    CommandOutcome::Accepted { .. } => SaveState::Saved(std::mem::take(value)),
                     CommandOutcome::Rejected { message, .. } => SaveState::Refused(message),
                 };
-                if matches!(m.agent.save, SaveState::Saved(_)) {
-                    // The model in use changed: ask again, keeping the last answer on screen until the new one comes.
+                if matches!(save, SaveState::Saved(_)) {
+                    // The settings changed: ask again, keeping the last answer on screen until the new one comes.
                     m.agent.request = send(m, fx, |request_id| ClientMessage::SettingsGet { request_id });
                 }
                 return;

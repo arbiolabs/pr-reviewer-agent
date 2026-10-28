@@ -613,7 +613,10 @@ pub struct AgentSettings {
     pub request: Option<RequestId>,
     pub settings: Option<Settings>,
     pub error: Option<Text>,
+    /// Save on the model picker.
     pub save: SaveState,
+    /// Save or Reset on the review message.
+    pub template_save: SaveState,
 }
 
 /// What the daemon said about recorded model usage. `by` is the grouping a client shows, `None` while none does (the
@@ -643,9 +646,10 @@ impl UsageView {
 pub enum SaveState {
     #[default]
     Idle,
+    /// `value` is the model, or the template ("" for the default).
     Sending {
         request: RequestId,
-        model: String,
+        value: String,
     },
     Saved(String),
     Refused(Text),
