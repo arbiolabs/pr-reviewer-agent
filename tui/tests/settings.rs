@@ -131,3 +131,45 @@ fn a_refusal_and_a_read_only_daemon_show_the_daemons_reason() {
     update(&mut ro, Msg::SetModel("openai/gpt-5.5".into()));
     assert!(matches!(ro.agent.save, SaveState::Refused(_)));
 }
+
+#[test]
+fn automatic_reviews_arrive_with_the_settings_and_save_under_their_own_state_with_the_daemons_key() {
+    let mut m = desktop();
+    let asked = m.agent.request.clone().unwrap();
+    send(&mut m, &settings_reply(&asked));
+    let s = m.agent.settings.as_ref().unwrap();
+    assert_eq!(s.publish_mode.as_ref().map(Text::as_str), Some("approval"));
+    let a = s.auto_review.as_ref().expect("the daemon sends automatic reviews");
+    assert_eq!((a.enabled, a.interval_minutes, a.last_poll.as_ref().map(|p| p.started)), (true, 15, Some(1)));
+
+    let fixture = read("fixtures/client.command.settings.set.auto-review.json");
+    let ClientMessage::Command(expected) = serde_json::from_str(&fixture).unwrap() else { panic!() };
+    let Command::SetSettings(params) = expected.command.clone() else { panic!() };
+    let fx = update(&mut m, Msg::SetAutoReview(params.auto_review.unwrap()));
+    let [Effect::Send(ClientMessage::Command(c))] = fx.as_slice() else { panic!("{fx:?}") };
+    assert_eq!(c.idempotency_key, expected.idempotency_key);
+    let id = c.request_id.clone();
+    send(
+        &mut m,
+        &format!(
+            r#"{{"type":"command.result","requestId":"{id}","status":"rejected","code":"INVALID_REQUEST","message":"no"}}"#
+        ),
+    );
+    assert_eq!(m.agent.auto_save, SaveState::Refused(Text::new("no")));
+    assert_eq!((m.agent.save.clone(), m.agent.template_save.clone()), (SaveState::Idle, SaveState::Idle));
+}
+
+#[test]
+fn open_settings_ask_again_for_the_last_poll_while_automatic_reviews_are_on() {
+    let mut m = desktop();
+    let asked = m.agent.request.clone().unwrap();
+    send(&mut m, &settings_reply(&asked));
+    assert_eq!(update(&mut m, Msg::Tick(29_000)), []);
+    let fx = update(&mut m, Msg::Tick(30_000));
+    assert!(matches!(fx.as_slice(), [Effect::Send(ClientMessage::SettingsGet { .. })]), "{fx:?}");
+
+    let mut off = desktop();
+    let asked = off.agent.request.clone().unwrap();
+    send(&mut off, &read("fixtures/server.settings.auto-review-off.json").replace("req-settings", asked.as_str()));
+    assert_eq!(update(&mut off, Msg::Tick(120_000)), [], "nothing moves while they are off");
+}
