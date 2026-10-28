@@ -156,6 +156,20 @@ pub fn button(
     tone: Tone,
     on: Option<OnClick>,
 ) -> Stateful<Div> {
+    button_with(t, id, label, key, tone, on, None)
+}
+
+/// A button whose label ends in an icon, such as a menu's chevron: drawn as an icon centred on the label, since a
+/// glyph like ⌄ sits on the text's baseline and reads as dropped below the word.
+pub fn button_with(
+    t: &Colors,
+    id: impl Into<ElementId>,
+    label: &str,
+    key: Option<&str>,
+    tone: Tone,
+    on: Option<OnClick>,
+    trailing: Option<IconName>,
+) -> Stateful<Div> {
     let (bg, fg, hover, press, border) = match (tone, on.is_some()) {
         // A control that can't act now is outlined grey, whatever its tone: 3:1 for the outline, AA for its words.
         (_, false) => {
@@ -186,6 +200,7 @@ pub fn button(
         .font_weight(FontWeight::MEDIUM)
         .text_color(fg)
         .child(label.to_string())
+        .children(trailing.map(|name| icon(name, px(12.), fg)))
         .children(key.map(|k| keycap(t, k, if filled { Some(fg) } else { None }, on.is_none())));
     match on {
         Some(on) => {

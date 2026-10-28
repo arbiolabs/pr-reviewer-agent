@@ -240,16 +240,17 @@ pub fn bar_view(s: &Shell, t: &Colors, bar: Bar, cx: &Context<Shell>) -> Div {
     row.children(first.map(|i| item_button(t, i, false))).child(div().flex_1()).child(
         div()
             .relative()
-            .child(button(
+            .child(crate::kit::button_with(
                 t,
                 "bar-more",
-                "More ⌄",
+                "More",
                 None,
                 Tone::Secondary,
                 crate::ui::on(cx, |s, cx| {
                     s.more_open = !s.more_open;
                     cx.notify();
                 }),
+                Some(if open { IconName::ChevronUp } else { IconName::ChevronDown }),
             ))
             .when(open, |d| d.child(menu)),
     )
