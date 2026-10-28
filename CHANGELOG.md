@@ -4,6 +4,10 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- **Automatic reviews of your review requests.** An engine-mode daemon can poll GitHub for the PRs that request its account's review and start them with no client command. It is off by default: `review.auto_review` in the config holds `enabled`, `interval_minutes` (5, 15 or 30), `include_team_requests` and `repos` (`include` and `exclude` lists of `owner/name`). Each poll, shortly after start and then every interval, searches `is:pr is:open draft:false archived:false user-review-requested:@me` (`review-requested:@me` with team requests), oldest first, and starts at most 5 PRs. A PR not tracked yet is added as `review.add` adds it; a tracked PR is started only for a head with no review yet, and an archived PR is never started or unarchived. Each automatic run's timeline carries "started automatically: review requested". A failed poll is recorded and retried with a doubling wait, up to an hour. A read-only daemon and `pr-review serve` never poll. Protocol v1 `settings` gains `publishMode` and `autoReview` (with `lastPoll`: `at`, `found`, `started`, `skipped`, `error`), and `settings.set` takes a partial `autoReview`, keyed with `:auto:<FNV-1a 64 hash>`. The desktop app adds Settings → Reviewer → Automatic reviews. The terminal client reads the new fields but has no screen for them.
+
 ### Changed
 
 - **Desktop: the themes sit in four columns.** Settings → Appearance lays its theme tiles in a four-column grid that spans the card, with taller previews, instead of a row of small fixed tiles (#70).
