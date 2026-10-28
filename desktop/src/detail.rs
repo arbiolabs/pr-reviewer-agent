@@ -324,7 +324,23 @@ pub fn who(m: &Model) -> String {
 }
 
 /// The kicker, the serif title, the meta line and the one-sentence state under every PR heading.
-pub fn pr_header(t: &Colors, pr: &Pr, kicker: Div, sentence: String) -> Div {
+/// `owner/repo #N`, opening the PR on GitHub when it makes a github.com URL.
+fn pr_link(t: &Colors, pr: &Pr, cx: &Context<Shell>) -> Stateful<Div> {
+    let text = div()
+        .id("pr-link")
+        .text_size(text::CAPTION)
+        .text_color(t.faint)
+        .child(format!("{} #{}", pr.repository, pr.number));
+    match crate::ui::github_pr_url(pr) {
+        Some(url) => crate::kit::tip(text, "Open on GitHub")
+            .cursor_pointer()
+            .hover(|h| h.text_color(t.accent).underline())
+            .on_click(cx.listener(move |_, _: &ClickEvent, _, cx| cx.open_url(&url))),
+        None => text,
+    }
+}
+
+pub fn pr_header(t: &Colors, pr: &Pr, kicker: Div, sentence: String, cx: &Context<Shell>) -> Div {
     let state = match pr.lifecycle {
         Lifecycle::Merged => Some(("Merged", t.accent)),
         Lifecycle::Closed => Some(("Closed", t.muted)),
@@ -341,12 +357,7 @@ pub fn pr_header(t: &Colors, pr: &Pr, kicker: Div, sentence: String) -> Div {
                 .gap(space::S2)
                 .child(kicker)
                 .child(div().text_size(text::CAPTION).text_color(t.faint).child("·"))
-                .child(
-                    div()
-                        .text_size(text::CAPTION)
-                        .text_color(t.faint)
-                        .child(format!("{} #{}", pr.repository, pr.number)),
-                )
+                .child(pr_link(t, pr, cx))
                 .child(div().text_size(text::CAPTION).text_color(t.faint).child("·"))
                 .child(
                     div()
@@ -507,6 +518,7 @@ fn pr_page(s: &Shell, t: &Colors, pr: &Pr, run: Option<&Run>, cx: &Context<Shell
         pr,
         overline(t, "Pull request"),
         pr_sentence(m, pr, run),
+        cx,
     ));
     body = body.child(tabs(t, current.len(), false, cx));
     body = body.child(run_block(s, t, run, &current));

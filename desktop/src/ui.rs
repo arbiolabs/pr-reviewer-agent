@@ -256,6 +256,14 @@ pub fn apply_theme(choice: tokens::Choice, cx: &mut App) {
     cx.set_menus(menus(choice));
 }
 
+/// The PR on GitHub, built from its repository and number. Only a plain `owner/repo` makes one, so the desktop opens
+/// nothing but github.com pull URLs.
+pub fn github_pr_url(p: &Pr) -> Option<String> {
+    let repo = p.repository.as_str();
+    (repo.split('/').count() == 2 && repo.chars().all(|c| c.is_ascii_alphanumeric() || "-_./".contains(c)))
+        .then(|| format!("https://github.com/{repo}/pull/{}", p.number))
+}
+
 /// The page-sized panel in front: a finding or the publication, under any sheet.
 pub fn front(m: &Model) -> Option<&Modal> {
     m.ui.modals.iter().rev().find(|x| matches!(x, Modal::Finding { .. } | Modal::Publication { .. }))
@@ -601,15 +609,12 @@ impl Shell {
         cx.notify();
     }
 
-    /// The PR on GitHub, built from its repository and number; the desktop opens only github.com URLs.
     pub fn open_github(&mut self, cx: &mut Context<Self>) {
         if matches!(self.model.top_modal(), Some(Modal::Publication { .. })) {
             return self.act(Action::OpenUrl, cx);
         }
-        let Some(p) = self.model.selected_pr() else { return };
-        let repo = p.repository.as_str();
-        if repo.split('/').count() == 2 && repo.chars().all(|c| c.is_ascii_alphanumeric() || "-_./".contains(c)) {
-            cx.open_url(&format!("https://github.com/{repo}/pull/{}", p.number));
+        if let Some(url) = self.model.selected_pr().and_then(github_pr_url) {
+            cx.open_url(&url);
         }
     }
 
@@ -1753,6 +1758,21 @@ fn pill(s: &Shell, t: &Colors, p: &Pr, r: &Run, cx: &Context<Shell>) -> Stateful
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn a_pr_links_to_github_only_for_a_plain_owner_and_repo() {
+        let pr = |repository: &str| -> pr_review_tui::protocol::Pr {
+            serde_json::from_value(serde_json::json!({
+                "id": "p", "repository": repository, "number": 7, "title": "t",
+                "headSha": "a".repeat(40), "baseSha": "b".repeat(40), "lifecycle": "OPEN"
+            }))
+            .unwrap()
+        };
+        assert_eq!(super::github_pr_url(&pr("acme/shop")).as_deref(), Some("https://github.com/acme/shop/pull/7"));
+        for bad in ["acme", "acme/shop/x", "acme/shop?x=1", "javascript:alert/x", "acme/sh op"] {
+            assert_eq!(super::github_pr_url(&pr(bad)), None, "{bad}");
+        }
+    }
+
     use super::Arm;
     use std::time::{Duration, Instant};
 
