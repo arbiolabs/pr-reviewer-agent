@@ -820,7 +820,7 @@ it("settings.get lists the models and the one in use; settings.set saves a liste
     return reply;
   };
   const option = (id: string, preferred: boolean) => ({ ref: `faux/${id}`, provider: "faux", name: id, contextWindow: expect.any(Number), authSource: expect.any(String), preferred });
-  expect(await settings()).toEqual({ model: { ref: "faux/reviewer", source: "config" }, models: [option("other", true), option("reviewer", false)], configPath, summaryTemplate: expect.objectContaining({ isDefault: true }) });
+  expect(await settings()).toEqual({ model: { ref: "faux/reviewer", source: "config" }, models: [option("other", true), option("reviewer", false)], configPath, summaryTemplate: expect.objectContaining({ isDefault: true }), publishMode: "dry_run", autoReview: expect.objectContaining({ enabled: false }) });
 
   expect(await command(c, { command: "settings.set", params: { model: "faux/missing" } })).toEqual(rejected("NOT_FOUND", "model faux/missing is not available; choose one of faux/other, faux/reviewer"));
   expect(JSON.parse(readFileSync(configPath, "utf8")).models).toEqual({ default: "faux/reviewer" });
@@ -871,7 +871,7 @@ it("settings.set saves a summary template that payloads prepared after it use, r
   expect(await command(c, { command: "settings.set", params: { summaryTemplate: "Hi {{pr_author}} {{nope}} {{ repo }}" } })).toEqual(
     rejected("INVALID_REQUEST", /^unknown variables \{\{nope\}\}, \{\{ repo \}\}; known: repo, pr_number/),
   );
-  expect(await command(c, { command: "settings.set", params: {} })).toEqual(rejected("INVALID_REQUEST", "settings.set needs model, summaryTemplate or both"));
+  expect(await command(c, { command: "settings.set", params: {} })).toEqual(rejected("INVALID_REQUEST", "settings.set needs model, summaryTemplate or autoReview"));
 
   const custom = "### {{repo}} #{{pr_number}} by {{pr_author}}: {{pr_title}}\n\n{{summary_line}} ({{high_count}} high, {{unconfirmed_count}} unconfirmed)\n\n{{findings_list}}\n\n{{carried}}\n\n{{limitations}}\n\n{{model}} at {{short_sha}} <!-- sneaky -->\n";
   expect(operation(await command(c, { command: "settings.set", params: { summaryTemplate: custom } }))).toEqual({

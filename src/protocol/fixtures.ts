@@ -2,7 +2,7 @@
 import { sha256, stableId } from "../domain/types.ts";
 import { USAGE_BY, USAGE_GROUPS, type UsageBy, type UsageGroupBy, type UsagePr, type UsageRow, usageReport } from "../domain/usage.ts";
 import { DEFAULT_SUMMARY_TEMPLATE, TEMPLATE_VARIABLES } from "../publish/template.ts";
-import { type Account, type ActivitySpan, type ClientMessage, type DiffFile, type Evidence, type Finding, type FindingDetail, type Pr, type PublicationChange, REVIEW_COMMANDS, type Run, type ServerMessage, type SetupCheck, settingsKey } from "./v1.ts";
+import { type Account, type ActivitySpan, type AutoReviewParams, type ClientMessage, type DiffFile, type Evidence, type Finding, type FindingDetail, type Pr, type PublicationChange, REVIEW_COMMANDS, type Run, type ServerMessage, type SetupCheck, settingsKey } from "./v1.ts";
 
 const EPOCH = "epoch-1";
 const T0 = Date.parse("2026-10-20T13:00:00Z");
@@ -1556,6 +1556,9 @@ const hostileTitle ="\u001b[31mred\u001b[0m \u001b]8;;https://evil.example\u0007
 /** A custom review summary, as an operator might write one: what the settings fixtures and the desktop show. */
 export const CUSTOM_TEMPLATE = "### Review of {{repo}} #{{pr_number}} at `{{short_sha}}`\n\n{{summary_line}}\n\n{{findings_list}}\n\n{{carried}}\n\nReviewed by {{model}}. A human still decides.\n";
 
+const autoReviewSet: AutoReviewParams = { enabled: true, intervalMinutes: 15, repos: { include: ["acme/shop", "acme/api"] } };
+const autoReviewOn = { enabled: true, intervalMinutes: 15, includeTeamRequests: false, repos: { include: ["acme/shop", "acme/api"], exclude: [] } } as const;
+
 export const fixtures: Record<string, ClientMessage | ServerMessage | Record<string, unknown>> = {
   "client.hello": { type: "hello", requestId: "req-hello", protocolVersion: 1, client: "ratatui", capabilities: ["snapshots", "events"] },
   "client.hello.future-version": { type: "hello", requestId: "req-hello", protocolVersion: 2, client: "ratatui", capabilities: [] },
@@ -1636,6 +1639,13 @@ export const fixtures: Record<string, ClientMessage | ServerMessage | Record<str
     params: { summaryTemplate: "" },
     idempotencyKey: "settings.set::template:default",
   },
+  "client.command.settings.set.auto-review": {
+    type: "command",
+    requestId: "req-cmd",
+    command: "settings.set",
+    params: { autoReview: autoReviewSet },
+    idempotencyKey: settingsKey({ autoReview: autoReviewSet }),
+  },
   "server.settings": {
     type: "settings",
     requestId: "req-settings",
@@ -1648,6 +1658,29 @@ export const fixtures: Record<string, ClientMessage | ServerMessage | Record<str
     ],
     configPath: "/Users/operator/.config/pr-review/pr-review.config.json",
     summaryTemplate: { value: DEFAULT_SUMMARY_TEMPLATE, isDefault: true, default: DEFAULT_SUMMARY_TEMPLATE, variables: [...TEMPLATE_VARIABLES] },
+    publishMode: "approval",
+    autoReview: { ...autoReviewOn, lastPoll: { at: "2026-10-28T09:55:00Z", found: 4, started: 1, skipped: 3 } },
+  },
+  "server.settings.auto-review-off": {
+    type: "settings",
+    requestId: "req-settings",
+    model: { ref: "anthropic/claude-opus-5-5", source: "config" },
+    models: [{ ref: "anthropic/claude-opus-5-5", provider: "anthropic", name: "Claude Opus 5.5", contextWindow: 1_000_000, authSource: "oauth", preferred: true }],
+    configPath: "/Users/operator/.config/pr-review/pr-review.config.json",
+    publishMode: "approval",
+    autoReview: { enabled: false, intervalMinutes: 5, includeTeamRequests: false, repos: { include: [], exclude: [] } },
+  },
+  "server.settings.auto-review-error": {
+    type: "settings",
+    requestId: "req-settings",
+    model: { ref: "anthropic/claude-opus-5-5", source: "config" },
+    models: [{ ref: "anthropic/claude-opus-5-5", provider: "anthropic", name: "Claude Opus 5.5", contextWindow: 1_000_000, authSource: "oauth", preferred: true }],
+    configPath: "/Users/operator/.config/pr-review/pr-review.config.json",
+    publishMode: "comment",
+    autoReview: {
+      ...autoReviewOn,
+      lastPoll: { at: "2026-10-28T09:55:00Z", found: 0, started: 0, skipped: 0, error: "GET /search/issues: HTTP 403; rate limited for 120000 ms, over the 5000 ms cap" },
+    },
   },
   "server.settings.custom-template": {
     type: "settings",

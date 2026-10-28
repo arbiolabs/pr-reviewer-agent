@@ -172,9 +172,12 @@ fn m3_messages_parse_into_the_client_enums() {
 #[test]
 fn settings_set_keys_match_the_daemons_for_a_model_a_template_and_a_reset() {
     let read = |name: &str| fs::read_to_string(protocol_dir().join(format!("fixtures/{name}.json"))).unwrap();
-    for name in
-        ["client.command.settings.set", "client.command.settings.set.template", "client.command.settings.set.reset"]
-    {
+    for name in [
+        "client.command.settings.set",
+        "client.command.settings.set.template",
+        "client.command.settings.set.reset",
+        "client.command.settings.set.auto-review",
+    ] {
         let ClientMessage::Command(c) = serde_json::from_str(&read(name)).unwrap() else { panic!() };
         assert_eq!(c.idempotency_key, c.command.idempotency_key(), "{name}");
     }

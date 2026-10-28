@@ -705,6 +705,61 @@
                     }
                   ],
                   "description": "saved as review.summary_template and used for review bodies prepared after it; null or empty restores the default"
+                },
+                "autoReview": {
+                  "type": "object",
+                  "properties": {
+                    "enabled": {
+                      "type": "boolean"
+                    },
+                    "intervalMinutes": {
+                      "anyOf": [
+                        {
+                          "type": "number",
+                          "const": 5
+                        },
+                        {
+                          "type": "number",
+                          "const": 15
+                        },
+                        {
+                          "type": "number",
+                          "const": 30
+                        }
+                      ]
+                    },
+                    "includeTeamRequests": {
+                      "type": "boolean"
+                    },
+                    "repos": {
+                      "type": "object",
+                      "properties": {
+                        "include": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "pattern": "^[\\w.-]+/[\\w.-]+$",
+                            "maxLength": 200,
+                            "description": "owner/name"
+                          },
+                          "maxItems": 200
+                        },
+                        "exclude": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "pattern": "^[\\w.-]+/[\\w.-]+$",
+                            "maxLength": 200,
+                            "description": "owner/name"
+                          },
+                          "maxItems": 200
+                        }
+                      },
+                      "additionalProperties": false
+                    }
+                  },
+                  "additionalProperties": false,
+                  "description": "saved under review.auto_review; only the fields given change"
                 }
               },
               "additionalProperties": false

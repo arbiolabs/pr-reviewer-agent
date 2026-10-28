@@ -21,6 +21,8 @@ export type Config = {
     webhook_backoff_ms: number;
     /** The review summary's `{{variable}}` template (src/publish/template.ts); empty means the built-in default. */
     summary_template: string;
+    /** The engine-mode daemon polls GitHub for PRs that request the selected account's review and starts them. */
+    auto_review: AutoReview;
   };
   /** §9.4 rate limits and retries. `max_retries` bounds each request; the client never retries an ambiguous write. */
   github: {
@@ -73,6 +75,7 @@ export const DEFAULT_CONFIG: Config = {
     webhook_max_attempts: 6,
     webhook_backoff_ms: 5000,
     summary_template: "",
+    auto_review: { enabled: false, interval_minutes: 5, include_team_requests: false, repos: { include: [], exclude: [] } },
   },
   github: { max_retries: 3, backoff_ms: 500, concurrency_per_installation: 2, timeout_ms: 15_000, max_rate_limit_sleep_ms: 30_000, bot_login: "" },
   routing: {
@@ -89,6 +92,24 @@ export const DEFAULT_CONFIG: Config = {
   control: { allow_commands: false },
 };
 
+export type AutoReview = {
+  enabled: boolean;
+  interval_minutes: number;
+  /** Also PRs that request a team the account is on, not only the account itself. */
+  include_team_requests: boolean;
+  /** `owner/name`, matched exactly but for case; an empty include list means every repository. */
+  repos: { include: string[]; exclude: string[] };
+};
+
+export const AUTO_REVIEW_INTERVALS = [5, 15, 30] as const;
+export const REPO_NAME = /^[\w.-]+\/[\w.-]+$/;
+
+export function autoReviewProblem(a: AutoReview): string | undefined {
+  if (!(AUTO_REVIEW_INTERVALS as readonly number[]).includes(a.interval_minutes)) return `interval_minutes must be 5, 15 or 30, not ${a.interval_minutes}`;
+  const bad = [...a.repos.include, ...a.repos.exclude].find((r) => !REPO_NAME.test(r));
+  return bad === undefined ? undefined : `repos must list owner/name, not ${JSON.stringify(bad)}`;
+}
+
 /** Overlay `pr-review.config.json` (or `PR_REVIEW_CONFIG`) onto the defaults; every key must exist in the defaults with the same JSON type. */
 export const CONFIG_FILE = "pr-review.config.json";
 
@@ -100,6 +121,8 @@ export function loadConfig(path = configPath()): Config {
   const config = mergeChecked(structuredClone(DEFAULT_CONFIG), JSON.parse(readFileSync(path, "utf8")), path) as Config;
   const problem = templateProblem(config.review.summary_template);
   if (problem) throw new Error(`config ${path}.review.summary_template: ${problem}`);
+  const auto = autoReviewProblem(config.review.auto_review);
+  if (auto) throw new Error(`config ${path}.review.auto_review: ${auto}`);
   return config;
 }
 

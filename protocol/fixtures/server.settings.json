@@ -131,5 +131,24 @@
         "sample": ""
       }
     ]
+  },
+  "publishMode": "approval",
+  "autoReview": {
+    "enabled": true,
+    "intervalMinutes": 15,
+    "includeTeamRequests": false,
+    "repos": {
+      "include": [
+        "acme/shop",
+        "acme/api"
+      ],
+      "exclude": []
+    },
+    "lastPoll": {
+      "at": "2026-10-28T09:55:00Z",
+      "found": 4,
+      "started": 1,
+      "skipped": 3
+    }
   }
 }

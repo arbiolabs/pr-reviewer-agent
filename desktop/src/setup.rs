@@ -862,7 +862,8 @@ pub fn setup_body(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                 })
             })
             .child(card("Checks", list))
-            .child(card("Reviewer", conn)),
+            .child(card("Reviewer", conn))
+            .child(crate::auto::section(s, t, cx)),
         Tab::Accounts => body.child(card("GitHub accounts", accounts)),
         Tab::Appearance => body.child(card("Appearance", themes(s, t, cx))),
     };

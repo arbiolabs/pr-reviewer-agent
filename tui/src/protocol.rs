@@ -288,6 +288,38 @@ pub struct Settings {
     pub config_path: Text,
     /// Absent from a daemon older than the summary template.
     pub summary_template: Option<SummaryTemplate>,
+    /// `review.publish_mode`: `approval` parks every review until a human posts it. Absent from older daemons.
+    pub publish_mode: Option<Text>,
+    /// Absent from a daemon older than automatic reviews.
+    pub auto_review: Option<AutoReview>,
+}
+
+/// Whether the daemon starts reviews on its own for the PRs that request its account's review, and its last poll.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct AutoReview {
+    pub enabled: bool,
+    pub interval_minutes: u32,
+    pub include_team_requests: bool,
+    pub repos: Repos,
+    pub last_poll: Option<AutoReviewPoll>,
+}
+
+/// `owner/name` lists; an empty `include` means every repository.
+#[derive(Clone, Debug, Default, PartialEq, Deserialize)]
+pub struct Repos {
+    pub include: Vec<Text>,
+    pub exclude: Vec<Text>,
+}
+
+/// What the daemon's last search for review requests found and started, or why it failed.
+#[derive(Clone, Debug, PartialEq, Deserialize)]
+pub struct AutoReviewPoll {
+    pub at: Text,
+    pub found: u32,
+    pub started: u32,
+    pub skipped: u32,
+    pub error: Option<Text>,
 }
 
 /// The review body template the daemon uses now, its built-in default, and every `{{name}}` it may hold.
@@ -1082,6 +1114,7 @@ impl Command {
             Command::Archive(_) => "archive",
             Command::Unarchive(_) => "unarchive",
             Command::StopDaemon(_) => "stop the reviewer",
+            Command::SetSettings(p) if p.auto_review.is_some() => "change automatic reviews",
             Command::SetSettings(p) if p.summary_template.is_some() => "save the review message",
             Command::SetSettings(_) => "change the model",
         }
@@ -1106,7 +1139,11 @@ impl Command {
                     Some("") => ":template:default".into(),
                     Some(t) => format!(":template:{:016x}", fnv1a64(t)),
                 };
-                format!("settings.set:{}{template}", p.model.as_deref().unwrap_or_default())
+                // Serialized in field order with absent fields left out: the daemon hashes the same bytes.
+                let auto = p.auto_review.as_ref().map_or(String::new(), |a| {
+                    format!(":auto:{:016x}", fnv1a64(&serde_json::to_string(a).unwrap_or_default()))
+                });
+                format!("settings.set:{}{template}{auto}", p.model.as_deref().unwrap_or_default())
             }
         }
     }
@@ -1170,6 +1207,32 @@ pub struct SettingsParams {
     /// `""` restores the default; this client never sends the `null` the protocol also allows.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub summary_template: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub auto_review: Option<AutoReviewParams>,
+}
+
+/// The automatic-review fields to change; the daemon keeps the others.
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase", deny_unknown_fields)]
+pub struct AutoReviewParams {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enabled: Option<bool>,
+    /// 5, 15 or 30.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub interval_minutes: Option<u32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include_team_requests: Option<bool>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub repos: Option<RepoParams>,
+}
+
+#[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct RepoParams {
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub include: Option<Vec<String>>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub exclude: Option<Vec<String>>,
 }
 
 /// FNV-1a 64 of the UTF-8 bytes: the template's part of the `settings.set` key, as the daemon computes it.

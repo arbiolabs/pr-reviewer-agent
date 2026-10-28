@@ -58,6 +58,13 @@ it("settings.set keys name the model and hash the template, so different texts a
   expect([settingsKey({ summaryTemplate: null }), settingsKey({ summaryTemplate: "" })]).toEqual(["settings.set::template:default", "settings.set::template:default"]);
 });
 
+it("settings.set keys hash autoReview's compact JSON in schema order, whatever order the request lists it in", () => {
+  expect(settingsKey({ autoReview: { enabled: true } })).toBe(`settings.set::auto:${fnv1a64('{"enabled":true}')}`);
+  expect(settingsKey({ model: "m/x", autoReview: { repos: { exclude: ["a/b"], include: [] }, intervalMinutes: 15 } })).toBe(
+    `settings.set:m/x:auto:${fnv1a64('{"intervalMinutes":15,"repos":{"include":[],"exclude":["a/b"]}}')}`,
+  );
+});
+
 it("sanitize strips terminal control sequences and keeps text, newlines and tabs", () => {
   expect(sanitize("\u001b[1;31mred\u001b[0m")).toBe("red");
   expect(sanitize("\u001b]8;;https://x\u0007link\u001b]8;;\u001b\\")).toBe("link");

@@ -32,6 +32,7 @@ pub enum Msg {
     SetModel(String),
     /// Makes this the review body template for payloads prepared from now on, "" for the default: `settings.set`.
     SetSummaryTemplate(String),
+    SetAutoReview(AutoReviewParams),
     /// Shows recorded model usage grouped this way, asking for it fresh (`usage.get`), or stops showing it.
     Usage(Option<UsageBy>),
     /// Splits usage on screen this way too, asking for it fresh.
@@ -132,6 +133,7 @@ pub fn update(m: &mut Model, msg: Msg) -> Vec<Effect> {
             if m.ui.screen == Screen::Settings || !m.link.accepts_events() || running || accepted {
                 m.dirty = true;
             }
+            prefetch_settings(m, &mut fx);
             return fx;
         }
         Msg::Resize(w, h) => m.size = (w, h),
@@ -167,6 +169,9 @@ pub fn update(m: &mut Model, msg: Msg) -> Vec<Effect> {
         Msg::SetModel(model) => save_settings(m, SettingsParams { model: Some(model), ..Default::default() }, &mut fx),
         Msg::SetSummaryTemplate(t) => {
             save_settings(m, SettingsParams { summary_template: Some(t), ..Default::default() }, &mut fx)
+        }
+        Msg::SetAutoReview(a) => {
+            save_settings(m, SettingsParams { auto_review: Some(a), ..Default::default() }, &mut fx)
         }
         Msg::Usage(by) => {
             m.usage.by = by;
@@ -233,14 +238,25 @@ fn prefetch(m: &mut Model, fx: &mut Vec<Effect>) {
     }
 }
 
-/// Settings shows the daemon's review model, so it is asked for once per connection while Settings is open.
+/// While automatic reviews are on, their last poll moves on its own, so open Settings asks again this often.
+pub const SETTINGS_REFRESH_MS: u64 = 30_000;
+
+/// Settings shows the daemon's review model, so it is asked for once per connection while Settings is open, and again
+/// every `SETTINGS_REFRESH_MS` while automatic reviews are on.
 fn prefetch_settings(m: &mut Model, fx: &mut Vec<Effect>) {
     let a = &m.agent;
-    if !a.wanted || m.ui.screen != Screen::Settings || a.request.is_some() || a.settings.is_some() || a.error.is_some()
+    let polling = a.settings.as_ref().and_then(|s| s.auto_review.as_ref()).is_some_and(|x| x.enabled);
+    let fresh = !polling || m.now_ms.saturating_sub(a.asked_at_ms) < SETTINGS_REFRESH_MS;
+    if !a.wanted
+        || m.ui.screen != Screen::Settings
+        || a.request.is_some()
+        || (a.settings.is_some() && fresh)
+        || a.error.is_some()
     {
         return;
     }
     m.agent.request = send(m, fx, |request_id| ClientMessage::SettingsGet { request_id });
+    m.agent.asked_at_ms = m.now_ms;
 }
 
 /// Usage on screen asks for its grouping when it has no answer for it, or when the one it has went stale.
@@ -257,26 +273,42 @@ fn prefetch_usage(m: &mut Model, fx: &mut Vec<Effect>) {
     }
 }
 
-/// Save on Settings' model picker or review message: `settings.set` with that one field, then the settings asked for
-/// again once it is accepted. Each has its own save state, so one never shows the other's outcome.
+/// Save on Settings' model picker, review message or automatic reviews: `settings.set` with that one field, then the
+/// settings asked for again once it is accepted. Each has its own save state, so one never shows another's outcome.
 fn save_settings(m: &mut Model, params: SettingsParams, fx: &mut Vec<Effect>) {
-    let template = params.summary_template.is_some();
-    let value = params.summary_template.clone().or_else(|| params.model.clone()).unwrap_or_default();
-    fn slot(a: &mut AgentSettings, template: bool) -> &mut SaveState {
-        if template { &mut a.template_save } else { &mut a.save }
+    #[derive(Clone, Copy)]
+    enum Slot {
+        Model,
+        Template,
+        Auto,
     }
-    if matches!(slot(&mut m.agent, template), SaveState::Sending { .. }) {
+    let which = if params.auto_review.is_some() {
+        Slot::Auto
+    } else if params.summary_template.is_some() {
+        Slot::Template
+    } else {
+        Slot::Model
+    };
+    let value = params.summary_template.clone().or_else(|| params.model.clone()).unwrap_or_default();
+    fn slot(a: &mut AgentSettings, which: Slot) -> &mut SaveState {
+        match which {
+            Slot::Model => &mut a.save,
+            Slot::Template => &mut a.template_save,
+            Slot::Auto => &mut a.auto_save,
+        }
+    }
+    if matches!(slot(&mut m.agent, which), SaveState::Sending { .. }) {
         return;
     }
     if let Some(why) = write_block(m, "settings.set") {
-        *slot(&mut m.agent, template) = SaveState::Refused(Text::new(why));
+        *slot(&mut m.agent, which) = SaveState::Refused(Text::new(why));
         return;
     }
     let command = Command::SetSettings(params);
     let (idempotency_key, verb) = (command.idempotency_key(), command.verb());
     let sent =
         send(m, fx, |request_id| ClientMessage::Command(CommandRequest { request_id, idempotency_key, command }));
-    *slot(&mut m.agent, template) = match sent {
+    *slot(&mut m.agent, which) = match sent {
         Some(request) => {
             m.commands_sent.insert(request.clone(), verb);
             SaveState::Sending { request, value }
@@ -287,7 +319,7 @@ fn save_settings(m: &mut Model, params: SettingsParams, fx: &mut Vec<Effect>) {
 
 /// The save waiting on `id`, the model's or the review message's.
 fn saving<'a>(a: &'a mut AgentSettings, id: &RequestId) -> Option<&'a mut SaveState> {
-    [&mut a.save, &mut a.template_save]
+    [&mut a.save, &mut a.template_save, &mut a.auto_save]
         .into_iter()
         .find(|s| matches!(s, SaveState::Sending { request, .. } if request == id))
 }
