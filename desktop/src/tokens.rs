@@ -17,12 +17,13 @@ pub struct Theme {
     pub colors: fn() -> Colors,
 }
 
-pub static THEMES: [Theme; 5] = [
+pub static THEMES: [Theme; 6] = [
     Theme { id: "light", name: "Light", dark: false, colors: light },
     Theme { id: "dark", name: "Dark", dark: true, colors: dark },
     Theme { id: "solarized-light", name: "Solarized Light", dark: false, colors: solarized_light },
     Theme { id: "solarized-dark", name: "Solarized Dark", dark: true, colors: solarized_dark },
     Theme { id: "nord", name: "Nord", dark: true, colors: nord },
+    Theme { id: "dracula", name: "Dracula", dark: true, colors: dracula },
 ];
 
 /// What the reader picked: a theme, or System, which is Light or Dark as macOS is.
@@ -384,6 +385,59 @@ pub fn nord() -> Colors {
     }
 }
 
+// Dracula (draculatheme.com): Background #282A36, Current Line #44475A, Foreground #F8F8F2, Comment #6272A4, Cyan
+// #8BE9FD, Green #50FA7B, Orange #FFB86C, Pink #FF79C6, Purple #BD93F9, Red #FF5555, Yellow #F1FA8C.
+
+/// Dracula: its Background and Current Line for the surfaces, Foreground ink, Purple for the accent and the classic
+/// hues for meaning and syntax (keywords pink, functions green, types cyan). Colors that fail the contrast test move
+/// in lightness only.
+pub fn dracula() -> Colors {
+    Colors {
+        bg: c(0x282A36),
+        sidebar: c(0x21222C),
+        surface: c(0x2D2F3D),
+        raised: c(0x2A2C39),
+        selected: c(0x36384A), // from Current Line
+        border: c(0x3D4053),
+        border_strong: c(0x51546B),
+        text: c(0xF8F8F2),
+        muted: c(0xD6D7E4),
+        faint: c(0xBFC4DF),  // from Comment
+        accent: c(0xC8A6FA), // from Purple
+        accent_hover: c(0xD4B9FB),
+        accent_press: c(0xBD93F9),
+        on_accent: c(0x282A36),
+        running: c(0x8BE9FD),
+        ok: c(0x50FA7B),
+        warn: c(0xF1FA8C),
+        danger: c(0xFF9494),   // from Red
+        critical: c(0xFF94D2), // from Pink
+        high: c(0xFFB86C),
+        medium: c(0xF1FA8C),
+        low: c(0xBFC4DF), // from Comment
+        add_bg: ca(0x50FA7B, 0.12),
+        del_bg: ca(0xFF5555, 0.13),
+        add_fg: c(0x50FA7B),
+        del_fg: c(0xFF9494),
+        code_bg: c(0x282A36),
+        syn_keyword: c(0xFF79C6),
+        syn_string: c(0xF1FA8C),
+        syn_number: c(0xBD93F9),
+        syn_comment: c(0x8E9AC9), // from Comment
+        syn_fn: c(0x50FA7B),
+        syn_type: c(0x8BE9FD),
+        on_danger: c(0x282A36),
+        disabled: c(0xAEB1C6),
+        tint: 0.10,
+        scrim: ca(0x191A21, 0.5),
+        shadow: ca(0x000000, 0.5),
+        sheet_edge: c(0x6272A4),
+        hover: ca(0xF8F8F2, 0.04),
+        press: ca(0xF8F8F2, 0.08),
+        focus: c(0xC8A6FA),
+    }
+}
+
 /// The alpha of `disabled` that outlines a control that can't act now: 3:1 on every surface, so the control reads
 /// as a control.
 pub const DISABLED_OUTLINE: f32 = 0.8;
@@ -586,7 +640,7 @@ mod tests {
     #[test]
     fn a_choice_reads_back_from_the_id_the_config_stores() {
         let ids: Vec<&str> = Choice::all().map(Choice::id).collect();
-        assert_eq!(ids, ["system", "light", "dark", "solarized-light", "solarized-dark", "nord"]);
+        assert_eq!(ids, ["system", "light", "dark", "solarized-light", "solarized-dark", "nord", "dracula"]);
         for c in Choice::all() {
             assert_eq!(Choice::parse(c.id()), Some(c));
         }
