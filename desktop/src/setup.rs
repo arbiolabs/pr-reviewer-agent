@@ -10,7 +10,10 @@ use pr_review_tui::model::Link;
 use pr_review_tui::protocol::{CheckStatus, DaemonMode, Finding};
 
 use crate::detail::*;
-use crate::kit::{OnClick, Tone, button, callout, chip, display, focusable, icon, icon_button, overline, summary};
+use crate::kit::{
+    OnClick, Tone, button, callout, chip, count_badge, display, focusable, icon, icon_button, overline, segmented,
+    summary,
+};
 use crate::queue;
 use crate::reviewer::{Ask, Control, shell_quote};
 use crate::tokens::{Choice, Colors, radius, space, text};
@@ -27,8 +30,8 @@ fn check_name(id: &str) -> &str {
     }
 }
 
-/// Settings: the theme, then the setup checks (the daemon's checks, its mode and the GitHub accounts, with the fix
-/// for each gap).
+/// Settings: a tab row, then the tab's cards. Review holds the model, Jev and the review message; Reviewer the setup
+/// checks and the daemon; Accounts the GitHub accounts; Appearance the themes.
 pub fn settings(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
     div().flex().flex_1().min_h_0().child(tracked_page(
         "settings",
@@ -146,7 +149,7 @@ fn plain(c: &pr_review_tui::protocol::SetupCheck) -> (String, Option<String>) {
             "Jev rates each change's risk so risky PRs get a deeper review. Without a key, every PR gets the \
              standard one."
                 .into(),
-            Some(if cfg!(target_os = "macos") { "Save a TypeSafe key under Risk check (Jev) below, or set `TYPESAFE_API_KEY` in the daemon's environment." } else { "Set `TYPESAFE_API_KEY` in the daemon's environment to turn it on." }.into()),
+            Some(if cfg!(target_os = "macos") { "Save a TypeSafe key under Risk check (Jev) on the Review tab, or set `TYPESAFE_API_KEY` in the daemon's environment." } else { "Set `TYPESAFE_API_KEY` in the daemon's environment to turn it on." }.into()),
         ),
         _ => (c.detail.to_string(), c.fix.as_ref().map(|f| f.to_string())),
     }
@@ -826,47 +829,267 @@ pub fn setup_body(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
     } else {
         callout(t, t.ok, IconName::CircleCheck, "Everything the reviewer needs is in place", None)
     };
-    div()
-        .flex()
-        .flex_col()
-        .gap(space::S5)
-        .child(card("Appearance", themes(s, t, cx)))
-        .child(
-            div()
-                .flex()
-                .flex_col()
-                .gap(space::S2)
-                .pt(space::S3)
-                .child(overline(t, "Setup checks"))
-                .child(display(t, "What the reviewer needs"))
-                .child(summary(t, "The checks pr-review setup --check runs, as the daemon reports them.")),
-        )
-        .child(lead)
-        .children({
-            let commands = all_commands(m).join("\n");
-            (!commands.is_empty()).then(|| {
-                div().flex().child(button(
-                    t,
-                    "copy-all",
-                    "Copy all commands",
-                    None,
-                    Tone::Secondary,
-                    Some(Box::new(move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
-                        cx.write_to_clipboard(ClipboardItem::new_string(commands.clone()))
-                    }) as OnClick),
-                ))
+    let body = div().flex().flex_col().gap(space::S5);
+    let body = match s.settings_tab.tab {
+        Tab::Review => body
+            .child(crate::agent::section(s, t, cx))
+            .child(crate::jev::section(s, t, cx))
+            .child(crate::message::section(s, t, cx)),
+        Tab::Reviewer => body
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(space::S2)
+                    .child(overline(t, "Setup checks"))
+                    .child(display(t, "What the reviewer needs"))
+                    .child(summary(t, "The checks pr-review setup --check runs, as the daemon reports them.")),
+            )
+            .child(lead)
+            .children({
+                let commands = all_commands(m).join("\n");
+                (!commands.is_empty()).then(|| {
+                    div().flex().child(button(
+                        t,
+                        "copy-all",
+                        "Copy all commands",
+                        None,
+                        Tone::Secondary,
+                        Some(Box::new(move |_: &ClickEvent, _: &mut Window, cx: &mut App| {
+                            cx.write_to_clipboard(ClipboardItem::new_string(commands.clone()))
+                        }) as OnClick),
+                    ))
+                })
             })
-        })
-        .child(card("Checks", list))
-        .child(crate::jev::section(s, t, cx))
-        .child(crate::agent::section(s, t, cx))
-        .child(crate::message::section(s, t, cx))
-        .child(card("Reviewer", conn))
-        .child(card("GitHub accounts", accounts))
+            .child(card("Checks", list))
+            .child(card("Reviewer", conn)),
+        Tab::Accounts => body.child(card("GitHub accounts", accounts)),
+        Tab::Appearance => body.child(card("Appearance", themes(s, t, cx))),
+    };
+    div().flex().flex_col().gap(space::S6).child(tab_control(s, t, cx)).child(body)
+}
+
+/// The tab row at the top of Settings: each tab's name and, when something in it stops reviews, a count. The keys
+/// (1–4) are in the tooltips and the ? sheet: a key cap beside a count read as two numbers.
+fn tab_control(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
+    segmented(
+        t,
+        Tab::ALL.map(|tab| {
+            let badge = badge(&s.model, tab);
+            let words = match badge {
+                Some(b) => format!("{} ({}): {} blocking reviews", tab.name(), tab.key(), b.n),
+                None => format!("{} ({})", tab.name(), tab.key()),
+            };
+            (
+                format!("settings-{}", tab.id()),
+                tab.name(),
+                "",
+                tab == s.settings_tab.tab,
+                words,
+                click(cx, move |s, cx| s.settings_on(tab, cx)),
+                badge.map(|b| count_badge(t, b.n, t.danger)),
+            )
+        }),
+    )
+}
+
+/// Settings' tabs, in the order the control shows them.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Tab {
+    Review,
+    Reviewer,
+    Accounts,
+    Appearance,
+}
+
+impl Tab {
+    pub const ALL: [Tab; 4] = [Tab::Review, Tab::Reviewer, Tab::Accounts, Tab::Appearance];
+
+    pub fn name(self) -> &'static str {
+        match self {
+            Tab::Review => "Review",
+            Tab::Reviewer => "Reviewer",
+            Tab::Accounts => "Accounts",
+            Tab::Appearance => "Appearance",
+        }
+    }
+
+    /// What a script and an element id call it.
+    pub fn id(self) -> &'static str {
+        match self {
+            Tab::Review => "review",
+            Tab::Reviewer => "reviewer",
+            Tab::Accounts => "accounts",
+            Tab::Appearance => "appearance",
+        }
+    }
+
+    /// 1 to 4 on the Settings page. Nothing else there takes a digit, and a focused field keeps its keys.
+    pub fn key(self) -> &'static str {
+        match self {
+            Tab::Review => "1",
+            Tab::Reviewer => "2",
+            Tab::Accounts => "3",
+            Tab::Appearance => "4",
+        }
+    }
+}
+
+/// The tab a typed character picks: only while setup is on screen and no field (model search, Jev key, the
+/// template editor) has the keyboard, since there a digit is text.
+pub fn tab_for_key(shown: bool, typing: bool, ch: &str) -> Option<Tab> {
+    Tab::ALL.into_iter().find(|t| shown && !typing && t.key() == ch)
+}
+
+/// The tab Settings shows. It lasts the session and is never saved.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Tabs {
+    pub tab: Tab,
+    /// Settings was on screen in the last frame.
+    shown: bool,
+}
+
+impl Default for Tabs {
+    fn default() -> Tabs {
+        Tabs { tab: Tab::Review, shown: false }
+    }
+}
+
+impl Tabs {
+    /// Each frame, with whether Settings is on screen. Arriving there while the reviewer isn't ready puts its checks
+    /// in front; otherwise the last tab stays. True when the tab changed.
+    pub fn sync(&mut self, shown: bool, m: &pr_review_tui::model::Model) -> bool {
+        let arrived = shown && !self.shown;
+        self.shown = shown;
+        let was = self.tab;
+        if arrived && !ready(m) {
+            self.tab = Tab::Reviewer;
+        }
+        self.tab != was
+    }
+
+    /// The control, a key, the palette or a script asked for `tab`, which stands even when Settings opens with it.
+    pub fn open_on(&mut self, tab: Tab) {
+        self.tab = tab;
+        self.shown = true;
+    }
+}
+
+/// Reviews can run: the window has the daemon's state, the link is up, and no check or read-only mode blocks them.
+pub fn ready(m: &pr_review_tui::model::Model) -> bool {
+    queue::stage(m) == queue::Stage::Ready && !link_down(m) && queue::setup_count(m).blocking == 0
+}
+
+/// The link is down and not on its way back up.
+fn link_down(m: &pr_review_tui::model::Model) -> bool {
+    matches!(
+        m.link,
+        Link::Disconnected { .. } | Link::Stalled { .. } | Link::Incompatible { .. } | Link::Unusable { .. }
+    )
+}
+
+/// A tab's count of what in it stops reviews.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Badge {
+    pub n: usize,
+}
+
+/// What a tab's badge says, so nothing that stops reviews hides behind a tab the reader isn't on. Reviewer counts the
+/// blocking checks, and a read-only or unreachable daemon; Review counts a missing model or Jev check.
+pub fn badge(m: &pr_review_tui::model::Model, tab: Tab) -> Option<Badge> {
+    match tab {
+        Tab::Reviewer => {
+            let c = queue::setup_count(m);
+            let down = link_down(m);
+            // Only what stops reviews: a limited check (no Jev key, a public-only token) is a choice that can last for
+            // good, and a badge that never clears stops being read. The tab itself still lists it.
+            (c.blocking > 0 || down).then_some(Badge { n: c.blocking.max(1) })
+        }
+        Tab::Review => {
+            let checks = m.server.as_ref().and_then(|s| s.checks.as_ref()).into_iter().flatten();
+            let n =
+                checks.filter(|c| matches!(c.id.as_str(), "model" | "jev") && c.status == CheckStatus::Missing).count();
+            (n > 0).then_some(Badge { n })
+        }
+        Tab::Accounts | Tab::Appearance => None,
+    }
 }
 
 #[cfg(test)]
 mod tests {
+    use super::{Badge, Tab, Tabs, badge, tab_for_key};
+    use pr_review_tui::model::{Link, Model, Screen};
+
+    /// The model a playback leaves at `ms`.
+    fn played(file: &str, ms: u64) -> Model {
+        let path = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../protocol/playback").join(file);
+        let mut m = Model::new("test", Default::default(), Screen::Review, None);
+        crate::script::play(pr_review_tui::playback::load(&path).unwrap(), &mut m, &[], ms).unwrap();
+        m
+    }
+
+    #[test]
+    fn settings_opens_on_review_and_keeps_the_last_tab_for_the_session() {
+        let m = played("showcase.ndjson", 20_000);
+        let mut tabs = Tabs::default();
+        tabs.sync(true, &m);
+        assert_eq!(tabs.tab, Tab::Review);
+        tabs.open_on(Tab::Appearance);
+        tabs.sync(false, &m);
+        tabs.sync(true, &m);
+        assert_eq!(tabs.tab, Tab::Appearance, "⌘, reopens on the tab the reader left");
+    }
+
+    #[test]
+    fn a_reviewer_that_is_not_ready_opens_settings_on_its_checks() {
+        let blocked = played("setup.ndjson", 1_000);
+        let mut tabs = Tabs::default();
+        tabs.sync(true, &blocked);
+        assert_eq!(tabs.tab, Tab::Reviewer);
+        tabs.open_on(Tab::Appearance);
+        tabs.sync(true, &blocked);
+        assert_eq!(tabs.tab, Tab::Appearance, "a pick while Settings is open stands");
+        tabs.sync(false, &blocked);
+        tabs.sync(true, &blocked);
+        assert_eq!(tabs.tab, Tab::Reviewer, "coming back while it still blocks puts the checks in front again");
+
+        let mut down = played("showcase.ndjson", 20_000);
+        down.link = Link::Disconnected { reason: pr_review_tui::protocol::Text::new("gone"), retry_in_ms: Some(1_000) };
+        let mut tabs = Tabs::default();
+        tabs.sync(true, &down);
+        assert_eq!(tabs.tab, Tab::Reviewer);
+    }
+
+    #[test]
+    fn a_tab_with_something_to_fix_carries_a_badge_and_the_others_none() {
+        let blocked = played("setup.ndjson", 1_000);
+        let on = |m: &Model| Tab::ALL.map(|tab| badge(m, tab));
+        // Model credentials missing, the GitHub token and Jev limited.
+        // Model credentials missing blocks; the GitHub token and Jev are only limited, so they carry no count.
+        assert_eq!(on(&blocked), [Some(Badge { n: 1 }), Some(Badge { n: 1 }), None, None]);
+
+        let fine = played("showcase.ndjson", 20_000);
+        assert_eq!(on(&fine), [None; 4]);
+
+        let mut read_only = played("showcase.ndjson", 20_000);
+        read_only.server.as_mut().unwrap().mode = Some(pr_review_tui::protocol::DaemonMode::ReadOnly);
+        assert_eq!(badge(&read_only, Tab::Reviewer), Some(Badge { n: 1 }));
+
+        let mut down = played("showcase.ndjson", 20_000);
+        down.link = Link::Disconnected { reason: pr_review_tui::protocol::Text::new("gone"), retry_in_ms: None };
+        assert_eq!(badge(&down, Tab::Reviewer), Some(Badge { n: 1 }));
+    }
+
+    #[test]
+    fn digits_pick_a_tab_only_while_setup_shows_and_no_field_has_the_keyboard() {
+        assert_eq!(Tab::ALL.map(|t| tab_for_key(true, false, t.key())), Tab::ALL.map(Some));
+        assert_eq!(tab_for_key(true, true, "3"), None, "a digit typed into the model search or the Jev key");
+        assert_eq!(tab_for_key(false, false, "3"), None, "the queue and a PR page keep their keys");
+        for taken in ["j", "k", "enter", "escape", "?", "/", "5"] {
+            assert_eq!(tab_for_key(true, false, taken), None, "{taken}");
+        }
+    }
+
     #[test]
     fn the_daemon_command_quotes_the_socket_path_for_the_shell() {
         let mut m = pr_review_tui::model::Model::new(

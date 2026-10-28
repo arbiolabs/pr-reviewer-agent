@@ -554,6 +554,43 @@ pub fn lead(s: &str, n: usize) -> String {
     s[..end].to_string()
 }
 
+/// One segmented control: each option's name and key, the one in use filled, and a badge after the name when an
+/// option wants attention.
+pub fn segmented(
+    t: &Colors,
+    options: impl IntoIterator<Item = (String, &'static str, &'static str, bool, String, OnClick, Option<Div>)>,
+) -> Div {
+    let mut row = div()
+        .flex()
+        .flex_none()
+        .gap(space::S1)
+        .p(px(3.))
+        .rounded(radius::SM)
+        .bg(t.surface)
+        .border_1()
+        .border_color(t.border);
+    for (id, name, key, on, words, on_click, badge) in options {
+        let face = div()
+            .id(SharedString::from(format!("{id}-face")))
+            .flex()
+            .items_center()
+            .gap(space::S2)
+            .h(px(26.))
+            .px(space::S3)
+            .rounded(px(5.))
+            .text_size(text::SMALL)
+            .font_weight(FontWeight::MEDIUM)
+            .text_color(if on { t.text } else { t.muted })
+            .when(on, |d| d.bg(t.selected))
+            .when(!on, |d| d.hover(move |d| d.bg(t.hover)))
+            .child(name)
+            .when(!key.is_empty(), |d| d.child(keycap(t, key, None, false)))
+            .children(badge);
+        row = row.child(tip(focusable(SharedString::from(id), face, t, px(5.), on_click), words));
+    }
+    div().flex().child(row)
+}
+
 #[cfg(test)]
 mod tests {
     #[test]
