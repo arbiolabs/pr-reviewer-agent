@@ -82,8 +82,9 @@ settings_script=desktop/target/settings/playback/settings.ndjson
 sed '1s/"review.publish"\]/"review.publish","settings.set"]/' "$script" > "$settings_script"
 # The review message section on the Review tab, scrolled into view; a message: step's \n is a line break and it can't hold a comma.
 message_at="wait:19000,goto:settings,settings-tab:review,scroll:840"
-# Automatic reviews off, and after a failed poll: the settings session answering settings.get from another fixture.
-for v in off error; do
+# Automatic reviews off, after a failed poll, and at the daily cap: the settings session answering settings.get from
+# another fixture.
+for v in off error capped; do
   mkdir -p desktop/target/auto-$v/playback
   rm -rf desktop/target/auto-$v/fixtures
   cp -R protocol/fixtures desktop/target/auto-$v/fixtures
@@ -189,6 +190,9 @@ for look in dark light; do
   snap 25a-auto-review-off-$look   $look 20000 "$auto_at" desktop/target/auto-off/playback/auto-off.ndjson
   snap 25b-auto-review-on-$look    $look 20000 "$auto_at" "$settings_script"
   snap 25c-auto-review-error-$look $look 20000 "$auto_at" desktop/target/auto-error/playback/auto-error.ndjson
+  snap 25d-auto-review-capped-$look $look 20000 "$auto_at" desktop/target/auto-capped/playback/auto-capped.ndjson
+  snap 25e-auto-review-dropdown-$look $look 20000 "$auto_at,repos:only:north" "$settings_script"
+  snap 25f-auto-review-taken-$look $look 20000 "$auto_at,repos:never:acme" "$settings_script"
 done
 snap 20b-footer-no-account     dark  20000 "" "$no_account_script"
 
