@@ -134,6 +134,10 @@ impl Player {
         if let crate::protocol::Command::Add(p) = &c.command {
             return vec![ServerMessage::CommandResult(self.add(c.request_id.clone(), &p.url))];
         }
+        if let crate::protocol::Command::Archive(p) | crate::protocol::Command::Unarchive(p) = &c.command {
+            let archive = matches!(c.command, crate::protocol::Command::Archive(_));
+            return vec![ServerMessage::CommandResult(self.archive(c, &p.pr_id, archive))];
+        }
         let key = c.idempotency_key.clone();
         let opened: Vec<String> = self.gates.iter().filter(|g| opens(g, &key)).cloned().collect();
         let replay = self.started.iter().find(|(k, _)| *k == key).map(|(_, op)| op.clone());
@@ -222,6 +226,61 @@ impl Player {
             pr_id,
             run_id: None,
         }
+    }
+
+    /// The PR as played so far: the newest `pr.updated` for it, else the latest snapshot's.
+    fn pr(&self, id: &crate::protocol::PrId) -> Option<crate::protocol::Pr> {
+        self.played.iter().rev().find_map(|m| match m {
+            ServerMessage::Snapshot(s) => s.prs.iter().find(|p| &p.id == id).cloned(),
+            ServerMessage::Event(Event::Sequenced(e)) => match &e.body {
+                EventBody::PrUpdated(p) if &p.id == id => Some(p.clone()),
+                _ => None,
+            },
+            _ => None,
+        })
+    }
+
+    /// `pr.archive` and `pr.unarchive` as the daemon answers them: accepted, then, when the state changes, the PR as
+    /// `pr.updated` with or without `archivedAt`, played next. A script without gates numbers its events from here
+    /// on, as one with gates always does, so the event slots into the chain.
+    fn archive(
+        &mut self,
+        c: &crate::protocol::CommandRequest,
+        id: &crate::protocol::PrId,
+        archive: bool,
+    ) -> crate::protocol::CommandResult {
+        use crate::protocol::{CommandOutcome, CommandResult, ErrorCode, Text};
+        let outcome = match self.pr(id) {
+            None => CommandOutcome::Rejected { code: ErrorCode::NotFound, message: Text::new(&format!("no PR {id}")) },
+            Some(mut pr) => {
+                let last = self.played.iter().rev().find_map(|m| match m {
+                    ServerMessage::Event(Event::Sequenced(e)) => Some(e.occurred_at.clone()),
+                    _ => None,
+                });
+                let epoch = self.played.iter().rev().find_map(|m| match m {
+                    ServerMessage::Snapshot(s) => Some(s.stream_epoch.clone()),
+                    _ => None,
+                });
+                if let Some(epoch) = epoch.filter(|_| pr.archived() != archive) {
+                    let at = last.unwrap_or_else(|| Text::new("2026-01-01T00:00:00Z"));
+                    pr.archived_at = archive.then(|| at.clone());
+                    self.renumber = true;
+                    let e = crate::protocol::SequencedEvent {
+                        stream_epoch: epoch,
+                        sequence: std::num::NonZeroU64::MIN,
+                        prev_sequence: 0,
+                        occurred_at: at,
+                        pr_id: Some(pr.id.clone()),
+                        run_id: None,
+                        body: EventBody::PrUpdated(pr),
+                    };
+                    let message = ServerMessage::Event(Event::Sequenced(e));
+                    self.steps.insert(0, Step { delay: Duration::ZERO, after: None, message });
+                }
+                CommandOutcome::Accepted { operation_id: Text::new(&c.idempotency_key) }
+            }
+        };
+        CommandResult { request_id: c.request_id.clone(), outcome, pr_id: None, run_id: None }
     }
 
     /// Every run as played so far: the snapshot's, then each run event's newer copy and each phase change.

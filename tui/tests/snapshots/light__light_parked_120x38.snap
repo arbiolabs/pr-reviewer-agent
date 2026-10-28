@@ -1,5 +1,6 @@
 ---
 source: tests/light.rs
+assertion_line: 51
 expression: frame
 ---
   pr-review · ◔ #184 waiting for you · p previews                                                               ● live
@@ -39,7 +40,7 @@ expression: frame
 
 
 
-   j/k move  Enter read  p publish  c cancel  d diff  h PRs  / search  t timeline  ? help  q quit             1 2 3 4 5
+   j/k move  Enter read  p publish  c cancel  d diff  e archive  h PRs  / search  t timeline  ? help  q quit  1 2 3 4 5
 
 aabbbbbbbbbacadaddddadddddddadddadddadadaddddddddaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaeaeeeeaa
 aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
@@ -78,7 +79,7 @@ ffffffffffffffffffffffffffffffffffaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 ffffffffffffffffffffffffffffffffffaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 ffffffffffffffffffffffffffffffffffaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 ffffffffffffffffffffffffffffffffffaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
-aaacccaccccaacccccaccccaacacccccccaacaccccccaacaccccaacacccaacaccccccaacaccccccccaacaccccaacaccccaaaaaaaaaaaaacahacacaca
+aaacccaccccaacccccaccccaacacccccccaacaccccccaacaccccaacacccccccaacacccaacaccccccaacaccccccccaacaccccaacaccccaacahacacaca
 
 a - on base
 b text on base

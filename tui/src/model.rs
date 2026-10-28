@@ -555,6 +555,8 @@ pub struct Ui {
     pub wanted_pr: Option<PrRef>,
     /// The Accounts cursor in Settings; an ID that vanished falls back to the first account.
     pub selected_account: Option<AccountId>,
+    /// The PR list shows the archived PRs instead of the tracked ones (`Model::pr_list`).
+    pub show_archived: bool,
 }
 
 /// Whose token the daemon uses for GitHub, in its precedence order (protocol/README.md "Accounts").
@@ -671,6 +673,7 @@ impl Model {
                 pr_filter: String::new(),
                 wanted_pr,
                 selected_account: None,
+                show_archived: false,
             },
             look,
             diag: Diagnostics { endpoint: endpoint.into(), ..Diagnostics::default() },
@@ -689,10 +692,35 @@ impl Model {
         }
     }
 
-    /// Tracked PRs matching the search filter, in an order that never moves under the cursor: grouped by repository
-    /// (alphabetically), newest number first. Activity shows in the row's glyph, not in its position.
+    /// Tracked PRs that are not archived and match the search filter, in an order that never moves under the cursor:
+    /// grouped by repository (alphabetically), newest number first. Activity shows in the row's glyph, not in its
+    /// position. Every list of PRs a reader works through (Needs you, Done, the PR rail) starts here.
     pub fn inbox(&self) -> Vec<&Pr> {
-        let mut v: Vec<_> = self.domain.prs.values().filter(|p| fuzzy(&self.ui.pr_filter, &pr_haystack(p))).collect();
+        self.prs_where(false)
+    }
+
+    /// The archived PRs matching the search filter, in the inbox's order.
+    pub fn archived(&self) -> Vec<&Pr> {
+        self.prs_where(true)
+    }
+
+    /// The list the PR rail shows: the inbox, or the archived PRs while `show_archived` is on.
+    pub fn pr_list(&self) -> Vec<&Pr> {
+        self.prs_where(self.ui.show_archived)
+    }
+
+    /// How many PRs the rail's list holds before the search filter.
+    pub fn pr_list_total(&self) -> usize {
+        self.domain.prs.values().filter(|p| p.archived() == self.ui.show_archived).count()
+    }
+
+    fn prs_where(&self, archived: bool) -> Vec<&Pr> {
+        let mut v: Vec<_> = self
+            .domain
+            .prs
+            .values()
+            .filter(|p| p.archived() == archived && fuzzy(&self.ui.pr_filter, &pr_haystack(p)))
+            .collect();
         v.sort_by(|a, b| {
             (&a.repository, std::cmp::Reverse(a.number), &a.id).cmp(&(
                 &b.repository,

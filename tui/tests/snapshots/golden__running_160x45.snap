@@ -1,5 +1,6 @@
 ---
 source: tests/golden.rs
+assertion_line: 31
 expression: text
 ---
   pr-review · ⣾ reviewing #1291 analyze read_file tests/auth/callback.test.ts:1-80  +1 more running                                                     ● live
@@ -46,4 +47,4 @@ expression: text
                                                 ■✓ read_file                      120ms│                                                    ██ tests/auth/…
 
 
-   s start another  c cancel review  d diff  h pull requests  / search  t timeline  w watch live  ? help  q quit                                      1 2 3 4 5
+   s start another  c cancel review  d diff  e archive  h pull requests  / search  t timeline  w watch live  ? help  q quit                           1 2 3 4 5

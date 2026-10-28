@@ -76,6 +76,10 @@ pub enum Action {
     Accounts,
     /// Asks for a PR's URL and sends `review.add`.
     AddPr,
+    /// Archives the selected PR, or unarchives it in the archived list.
+    Archive,
+    /// Switches the PR list between the tracked PRs and the archived ones.
+    ShowArchived,
     Mutation(Mutation),
     CycleScope,
     CycleCategory,
@@ -145,6 +149,9 @@ const TABLE: &[(Context, KeyCode, KeyModifiers, Action)] = &[
     (C::Diff, K::Char('R'), NONE, A::Mutation(Mutation::Retry)),
     (C::Review, K::Char('c'), NONE, A::Mutation(Mutation::Cancel)),
     (C::Review, K::Char('p'), NONE, A::Mutation(Mutation::Publish)),
+    (C::Review, K::Char('e'), NONE, A::Archive),
+    (C::Review, K::Char('E'), SHIFT, A::ShowArchived),
+    (C::Review, K::Char('E'), NONE, A::ShowArchived),
     (C::Screens, K::Char('w'), NONE, A::Watch),
     (C::Screens, K::Char('a'), NONE, A::AddPr),
     (C::Review, K::Char('J'), SHIFT, A::ScrollDown),
@@ -254,6 +261,8 @@ pub fn help_rows() -> Vec<(Context, String, &'static str, Option<&'static str>)>
             A::OpenTimeline => "timeline for selection",
             A::Watch => "watch the running review",
             A::AddPr => "add a PR to review",
+            A::Archive => "archive or unarchive the PR",
+            A::ShowArchived => "list archived PRs / tracked PRs",
             A::ScrollDown | A::ScrollUp => "scroll the explanation",
             A::Refresh => "refresh snapshot",
             A::Accounts => "GitHub accounts (Settings)",
@@ -288,6 +297,7 @@ pub fn help_rows() -> Vec<(Context, String, &'static str, Option<&'static str>)>
         let capability = match action {
             A::Mutation(mu) => Some(mu.capability()),
             A::AddPr => Some("review.add"),
+            A::Archive => Some("pr.archive"),
             _ => None,
         };
         match rows.iter_mut().find(|(c, _, t, _)| c == ctx && *t == text) {

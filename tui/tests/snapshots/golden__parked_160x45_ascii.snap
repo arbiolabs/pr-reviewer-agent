@@ -1,5 +1,6 @@
 ---
 source: tests/golden.rs
+assertion_line: 35
 expression: ascii_text
 ---
   pr-review | ~ #184 waiting for you | p previews                                                                                                       * live
@@ -46,4 +47,4 @@ expression: ascii_text
 
 
 
-   j/k move  Enter read  p preview & publish  c cancel review  d diff  h pull requests  / search  t timeline  ? help  q quit                          1 2 3 4 5
+   j/k move  Enter read  p preview & publish  c cancel review  d diff  e archive  h pull requests  / search  t timeline  ? help  q quit               1 2 3 4 5

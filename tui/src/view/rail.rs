@@ -31,6 +31,9 @@ pub fn empty_rail(c: &Ctx, total: usize) -> Vec<(String, Role)> {
     if total > 0 {
         return vec![("  no PR matches".into(), Role::Muted)];
     }
+    if c.m.ui.show_archived {
+        return vec![("  nothing archived; E shows the tracked PRs".into(), Role::Muted)];
+    }
     let reason = match &c.m.link {
         Link::Disconnected { reason, .. } => reason,
         Link::Unusable { message } | Link::Incompatible { message, .. } | Link::Stalled { reason: message } => {
@@ -69,22 +72,25 @@ fn nothing_tracked(c: &Ctx) -> Vec<(String, Role)> {
 
 /// Rows each PR takes; the spacer row goes when the list would not fit.
 pub fn row_h(c: &Ctx, height: u16) -> u16 {
-    if c.m.inbox().len() as u16 * 3 + rail_head(c) <= height { 3 } else { 2 }
+    if c.m.pr_list().len() as u16 * 3 + rail_head(c) <= height { 3 } else { 2 }
 }
 
 pub fn rail(c: &Ctx, f: &mut Frame, area: Rect, focused: bool) {
     let bg = c.t.bg(Bg::Surface);
     f.render_widget(Paragraph::new("").style(bg), area);
     let w = area.width as usize;
-    let prs = c.m.inbox();
-    let total = c.m.domain.prs.len();
+    let prs = c.m.pr_list();
+    let total = c.m.pr_list_total();
     let head_role = if focused { Role::Accent } else { Role::Muted };
     let typing = matches!(c.m.top_modal(), Some(Modal::Input { purpose: InputPurpose::Search, .. }));
     let count = if prs.len() == total { format!("{total}  ") } else { format!("{} of {total}  ", prs.len()) };
     let mut lines = vec![Line::from(filled(vec![], w, bg)); rail_head(c) as usize - 2];
     lines.extend([Line::from(filled(
         split_row(
-            vec![Span::raw("  "), Span::styled("PULL REQUESTS", c.s(head_role).patch(bg))],
+            vec![
+                Span::raw("  "),
+                Span::styled(if c.m.ui.show_archived { "ARCHIVED" } else { "PULL REQUESTS" }, c.s(head_role).patch(bg)),
+            ],
             vec![Span::styled(count, c.s(Role::Muted).patch(bg))],
             w,
         ),
@@ -148,7 +154,7 @@ fn visible(c: &Ctx, prs: &[&Pr], height: u16) -> (std::ops::Range<usize>, usize)
 
 /// The PR whose rows cover screen row `y` of a rail drawn in `area`.
 pub fn pr_at(c: &Ctx, area: Rect, y: u16) -> Option<crate::protocol::PrId> {
-    let prs = c.m.inbox();
+    let prs = c.m.pr_list();
     let (range, rh) = visible(c, &prs, area.height);
     let k = (y.checked_sub(area.y + rail_head(c))? as usize) / rh;
     let i = range.start + k;
