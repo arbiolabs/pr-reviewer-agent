@@ -4,6 +4,10 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 ## [Unreleased]
 
+### Changed
+
+- **Desktop: the themes sit in four columns.** Settings → Appearance lays its theme tiles in a four-column grid that spans the card, with taller previews, instead of a row of small fixed tiles.
+
 ## [1.5.0] - 2026-10-28
 
 ### Added
