@@ -869,24 +869,25 @@ pub fn setup_body(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
     div().flex().flex_col().gap(space::S6).child(tab_control(s, t, cx)).child(body)
 }
 
-/// The tab row at the top of Settings: each tab's name, its key and, when something in it wants attention, a count.
+/// The tab row at the top of Settings: each tab's name and, when something in it stops reviews, a count. The keys
+/// (1–4) are in the tooltips and the ? sheet: a key cap beside a count read as two numbers.
 fn tab_control(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
     segmented(
         t,
         Tab::ALL.map(|tab| {
-            let badge = badge(&s.model, &s.jev.stored, tab);
+            let badge = badge(&s.model, tab);
             let words = match badge {
-                Some(b) => format!("{}: {} to look at", tab.name(), b.n),
-                None => tab.name().to_string(),
+                Some(b) => format!("{} ({}): {} blocking reviews", tab.name(), tab.key(), b.n),
+                None => format!("{} ({})", tab.name(), tab.key()),
             };
             (
                 format!("settings-{}", tab.id()),
                 tab.name(),
-                tab.key(),
+                "",
                 tab == s.settings_tab.tab,
                 words,
                 click(cx, move |s, cx| s.settings_on(tab, cx)),
-                badge.map(|b| count_badge(t, b.n, if b.danger { t.danger } else { t.warn })),
+                badge.map(|b| count_badge(t, b.n, t.danger)),
             )
         }),
     )
@@ -987,33 +988,28 @@ fn link_down(m: &pr_review_tui::model::Model) -> bool {
     )
 }
 
-/// A tab's count of what wants attention in it, and whether any of it blocks reviews.
+/// A tab's count of what in it stops reviews.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Badge {
     pub n: usize,
-    pub danger: bool,
 }
 
-/// What a tab's badge says, so nothing that needs the reader hides behind a tab they aren't on. Reviewer counts the
-/// blocking and limited checks, and a read-only or unreachable daemon; Review counts the model and Jev checks and a
-/// Keychain that can't say whether a Jev key is saved.
-pub fn badge(m: &pr_review_tui::model::Model, jev: &crate::jev::Stored, tab: Tab) -> Option<Badge> {
+/// What a tab's badge says, so nothing that stops reviews hides behind a tab the reader isn't on. Reviewer counts the
+/// blocking checks, and a read-only or unreachable daemon; Review counts a missing model or Jev check.
+pub fn badge(m: &pr_review_tui::model::Model, tab: Tab) -> Option<Badge> {
     match tab {
         Tab::Reviewer => {
             let c = queue::setup_count(m);
             let down = link_down(m);
-            let n = c.blocking + c.limited;
-            (n > 0 || down).then_some(Badge { n: n.max(1), danger: c.blocking > 0 || down })
+            // Only what stops reviews: a limited check (no Jev key, a public-only token) is a choice that can last for
+            // good, and a badge that never clears stops being read. The tab itself still lists it.
+            (c.blocking > 0 || down).then_some(Badge { n: c.blocking.max(1) })
         }
         Tab::Review => {
             let checks = m.server.as_ref().and_then(|s| s.checks.as_ref()).into_iter().flatten();
-            let open: Vec<CheckStatus> = checks
-                .filter(|c| matches!(c.id.as_str(), "model" | "jev"))
-                .map(|c| c.status)
-                .filter(|s| matches!(s, CheckStatus::Missing | CheckStatus::Warn))
-                .collect();
-            let n = open.len() + usize::from(matches!(jev, crate::jev::Stored::Unknown(_)));
-            (n > 0).then_some(Badge { n, danger: open.contains(&CheckStatus::Missing) })
+            let n =
+                checks.filter(|c| matches!(c.id.as_str(), "model" | "jev") && c.status == CheckStatus::Missing).count();
+            (n > 0).then_some(Badge { n })
         }
         Tab::Accounts | Tab::Appearance => None,
     }
@@ -1022,7 +1018,6 @@ pub fn badge(m: &pr_review_tui::model::Model, jev: &crate::jev::Stored, tab: Tab
 #[cfg(test)]
 mod tests {
     use super::{Badge, Tab, Tabs, badge, tab_for_key};
-    use crate::jev::Stored;
     use pr_review_tui::model::{Link, Model, Screen};
 
     /// The model a playback leaves at `ms`.
@@ -1068,28 +1063,21 @@ mod tests {
     #[test]
     fn a_tab_with_something_to_fix_carries_a_badge_and_the_others_none() {
         let blocked = played("setup.ndjson", 1_000);
-        let on = |m: &Model, jev: &Stored| Tab::ALL.map(|tab| badge(m, jev, tab));
+        let on = |m: &Model| Tab::ALL.map(|tab| badge(m, tab));
         // Model credentials missing, the GitHub token and Jev limited.
-        assert_eq!(
-            on(&blocked, &Stored::NotSet),
-            [Some(Badge { n: 2, danger: true }), Some(Badge { n: 3, danger: true }), None, None]
-        );
+        // Model credentials missing blocks; the GitHub token and Jev are only limited, so they carry no count.
+        assert_eq!(on(&blocked), [Some(Badge { n: 1 }), Some(Badge { n: 1 }), None, None]);
 
         let fine = played("showcase.ndjson", 20_000);
-        assert_eq!(on(&fine, &Stored::NotSet), [None; 4]);
-        assert_eq!(
-            badge(&fine, &Stored::Unknown("locked".into()), Tab::Review),
-            Some(Badge { n: 1, danger: false }),
-            "a Keychain that can't answer about the Jev key"
-        );
+        assert_eq!(on(&fine), [None; 4]);
 
         let mut read_only = played("showcase.ndjson", 20_000);
         read_only.server.as_mut().unwrap().mode = Some(pr_review_tui::protocol::DaemonMode::ReadOnly);
-        assert_eq!(badge(&read_only, &Stored::NotSet, Tab::Reviewer), Some(Badge { n: 1, danger: true }));
+        assert_eq!(badge(&read_only, Tab::Reviewer), Some(Badge { n: 1 }));
 
         let mut down = played("showcase.ndjson", 20_000);
         down.link = Link::Disconnected { reason: pr_review_tui::protocol::Text::new("gone"), retry_in_ms: None };
-        assert_eq!(badge(&down, &Stored::NotSet, Tab::Reviewer), Some(Badge { n: 1, danger: true }));
+        assert_eq!(badge(&down, Tab::Reviewer), Some(Badge { n: 1 }));
     }
 
     #[test]

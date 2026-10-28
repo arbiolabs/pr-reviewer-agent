@@ -584,7 +584,7 @@ pub fn segmented(
             .when(on, |d| d.bg(t.selected))
             .when(!on, |d| d.hover(move |d| d.bg(t.hover)))
             .child(name)
-            .child(keycap(t, key, None, false))
+            .when(!key.is_empty(), |d| d.child(keycap(t, key, None, false)))
             .children(badge);
         row = row.child(tip(focusable(SharedString::from(id), face, t, px(5.), on_click), words));
     }
