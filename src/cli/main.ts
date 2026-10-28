@@ -442,7 +442,7 @@ async function usage(args: string[], dataDir: string, out: Out): Promise<number>
   }
   const first = report.buckets[0]!.start;
   const last = report.buckets.at(-1)!.end;
-  const split = report.groups ? `, split by ${GROUP_NAMES[report.group].toLowerCase()}` : "";
+  const split = report.groups ? `, split by ${report.group === "pr" ? "PR" : GROUP_NAMES[report.group].toLowerCase()}` : "";
   out(`Usage by ${report.by} from ${first} to ${last}${split}, ${report.timeZone}. Estimated at the model's list price in USD; a subscription login is billed differently.\n`);
   if (report.totals.responses === 0) {
     out("No usage recorded in this range. Usage is recorded from this version on.\n");

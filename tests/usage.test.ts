@@ -365,7 +365,9 @@ describe("pr-review usage", () => {
     expect(byAuthor[2]).toMatch(/^octocat\s+1\s+1\s+1K\s+100\s+0\s+0\s+\$0\.75\s+75\.0%$/);
     expect(byAuthor[3]).toMatch(/^Unknown author\s+1\s+1\s+1K\s+100\s+0\s+0\s+\$0\.25\s+25\.0%$/);
     expect(byAuthor[4]).toMatch(/^Total\s+2\s+2\s+2K\s+200\s+0\s+0\s+\$1\.00\s+100%$/);
-    expect((await run(["--group", "pr"], dataDir)).out).toContain("acme/shop#1 PR 1 ");
+    const byPr = (await run(["--group", "pr"], dataDir)).out;
+    expect(byPr).toContain(", split by PR, ");
+    expect(byPr).toContain("acme/shop#1 PR 1 ");
     const json = JSON.parse((await run(["--group", "repo", "--json"], dataDir)).out);
     expect(json).toMatchObject({ group: "repo", totals: { cost: 1 }, groups: [{ key: "acme/shop", label: "acme/shop", cost: 1, share: 1 }] });
     expect(await run(["--group", "model"], dataDir)).toMatchObject({ code: 1, err: "pr-review: --group must be one of time, repo, author, pr\n" });
