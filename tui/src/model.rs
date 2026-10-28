@@ -617,6 +617,8 @@ pub struct AgentSettings {
     pub save: SaveState,
     /// Save or Reset on the review message.
     pub template_save: SaveState,
+    /// A change to automatic reviews.
+    pub auto_save: SaveState,
 }
 
 /// What the daemon said about recorded model usage. `by` is the grouping a client shows, `None` while none does (the
