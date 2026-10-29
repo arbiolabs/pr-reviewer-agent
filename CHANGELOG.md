@@ -4,6 +4,8 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 ## [Unreleased]
 
+## [1.7.0] - 2026-10-29
+
 ### Added
 
 - **Desktop: the menu bar item shows the reviewer's state.** The eye is dimmed with no pupil while the reviewer doesn't answer, its pupil glances side to side while reviews run (still under Reduce motion), and the Needs you count sits beside it. The tooltip and a new first line in its menu say it in words, such as "Reviewer live · 2 reviewing · 3 need you" (#79).
@@ -174,7 +176,8 @@ This is the first release.
   - the PR is still open.
 - Command idempotency keys are bound to each run attempt, so a replayed command never has a second effect.
 
-[Unreleased]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.6.0...HEAD
+[Unreleased]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.7.0...HEAD
+[1.7.0]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.6.0...v1.7.0
 [1.6.0]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.5.0...v1.6.0
 [1.5.0]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.4.0...v1.5.0
 [1.4.0]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.3.0...v1.4.0
