@@ -4,6 +4,14 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 ## [Unreleased]
 
+### Changed
+
+- **Desktop: Settings → Reviewer shows only the controls that apply.** Restart and Stop (or Start, when the reviewer isn't running) sit in their own row at the bottom of the Reviewer card instead of beside the status, and the always-disabled Start is gone. The automatic reviews switch has a one-line description; the interval and the daily cap are the controls below it (#81).
+
+### Fixed
+
+- **Desktop: no stray line under the Checks, Reviewer and GitHub accounts cards.** The last row's divider no longer runs square past the card's rounded corners (#81).
+
 ## [1.7.0] - 2026-10-29
 
 ### Added

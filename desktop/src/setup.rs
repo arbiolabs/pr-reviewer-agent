@@ -623,7 +623,10 @@ pub fn setup_body(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         )
     };
     let row =
-        || div().flex().items_start().gap(space::S3).px(space::S4).py(px(10.)).border_b_1().border_color(t.border);
+        || div().flex().items_start().gap(space::S3).px(space::S4).py(px(10.)).border_t_1().border_color(t.border);
+    // Rows draw the rule above them; the list sits a point up so the card's edge clips the first, and the last
+    // leaves no rule square against the card's rounded bottom.
+    let rows = || div().mt(px(-1.));
     // Every row's mark sits in one slot, as wide as an icon and as tall as the row's first line, so the dot and the
     // icons share a column and each centres on the line beside it.
     let lead = |mark: AnyElement| {
@@ -663,40 +666,29 @@ pub fn setup_body(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         Ok(None) => "None: its LaunchAgent sets no StandardErrorPath".into(),
         Err(_) => crate::reviewer::spawn_log().display().to_string(),
     };
-    let mut conn = div()
+    let mut conn = rows()
         .child(
-            row()
-                .child(lead(div().size(px(8.)).rounded(radius::PILL).bg(hue).into_any_element()))
-                .child(
-                    div()
-                        .flex()
-                        .flex_col()
-                        .gap(px(2.))
-                        .flex_1()
-                        .min_w_0()
-                        .child(div().font_weight(FontWeight::SEMIBOLD).line_height(text::LINE_BODY).child(word))
-                        // The default socket sits under Application Support, long enough to push the buttons out of the
-                        // card; the path gives way and its tooltip keeps it whole.
-                        .child(crate::kit::tip(
-                            div()
-                                .id("reviewer-endpoint")
-                                .font_family(text::MONO)
-                                .text_size(px(11.))
-                                .text_color(t.muted)
-                                .truncate()
-                                .child(m.diag.endpoint.clone()),
-                            m.diag.endpoint.clone(),
-                        )),
-                )
-                .child(
-                    div()
-                        .flex()
-                        .flex_none()
-                        .gap(space::S2)
-                        .child(ask_button(s, t, Ask::Start, None, Tone::Secondary, cx))
-                        .child(ask_button(s, t, Ask::Restart, None, Tone::Secondary, cx))
-                        .child(ask_button(s, t, Ask::Stop, None, Tone::Danger, cx)),
-                ),
+            row().child(lead(div().size(px(8.)).rounded(radius::PILL).bg(hue).into_any_element())).child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(2.))
+                    .flex_1()
+                    .min_w_0()
+                    .child(div().font_weight(FontWeight::SEMIBOLD).line_height(text::LINE_BODY).child(word))
+                    // The default socket sits under Application Support, long enough to push the buttons out of the
+                    // card; the path gives way and its tooltip keeps it whole.
+                    .child(crate::kit::tip(
+                        div()
+                            .id("reviewer-endpoint")
+                            .font_family(text::MONO)
+                            .text_size(px(11.))
+                            .text_color(t.muted)
+                            .truncate()
+                            .child(m.diag.endpoint.clone()),
+                        m.diag.endpoint.clone(),
+                    )),
+            ),
         )
         .child(
             row().child(lead(icon(IconName::Cpu, px(15.), mode.1).into_any_element())).child(
@@ -723,8 +715,22 @@ pub fn setup_body(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
             ),
         );
     }
+    // Only what applies now: a live reviewer restarts or stops, and one that isn't starts.
+    let asks = if m.link.welcomed() {
+        div().child(ask_button(s, t, Ask::Restart, None, Tone::Secondary, cx)).child(ask_button(
+            s,
+            t,
+            Ask::Stop,
+            None,
+            Tone::Danger,
+            cx,
+        ))
+    } else {
+        div().child(ask_button(s, t, Ask::Start, None, Tone::Secondary, cx))
+    };
+    conn = conn.child(row().py(space::S3).child(asks.flex().gap(space::S2)));
     let checks = server.and_then(|s| s.checks.as_ref());
-    let mut list = div();
+    let mut list = rows();
     match checks {
         None => {
             list = list.child(row().child(
@@ -767,7 +773,7 @@ pub fn setup_body(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
             }
         }
     }
-    let mut accounts = div();
+    let mut accounts = rows();
     match &m.domain.accounts {
         None => {
             accounts =
