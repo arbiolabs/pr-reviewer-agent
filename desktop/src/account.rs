@@ -1,5 +1,7 @@
-//! The sidebar's footer: the GitHub account the daemon publishes as, its avatar, and the connection under it.
+//! The sidebar's footer: the GitHub account the daemon publishes as, its avatar, and the connection under it; and
+//! the avatars Settings shows beside each account.
 
+use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
@@ -15,7 +17,6 @@ use crate::ui::{Shell, link_word};
 
 /// A cached avatar older than this is fetched again; until the fetch lands the old one shows.
 const TTL: Duration = Duration::from_secs(24 * 60 * 60);
-const SIZE: Pixels = px(24.);
 
 /// The account `Model::identity` says the daemon publishes as, or the words for why there is none.
 fn account(m: &Model) -> Result<&Account, &'static str> {
@@ -70,12 +71,10 @@ fn fetch(login: &str, dest: &Path) -> std::io::Result<()> {
     std::fs::rename(&part, dest)
 }
 
-/// What the footer's avatar shows: the image file once it is on disk, for the login it was asked for.
+/// Each account's avatar by login: the image file once it is on disk. A login is here once it has been looked up, so
+/// each is fetched at most once a run.
 #[derive(Default)]
-pub struct Avatar {
-    login: Option<String>,
-    image: Option<PathBuf>,
-}
+pub struct Avatars(HashMap<String, Option<PathBuf>>);
 
 /// What the avatar does with the account's cache file, last modified at `modified` if it exists: the file to show
 /// now, and whether to fetch it. A snapshot shows the monogram and never touches the network or the cache.
@@ -95,38 +94,65 @@ fn plan(
 }
 
 impl Shell {
-    /// Points the avatar at the publishing account: a cached file shows at once, and a missing or stale one is
-    /// fetched in the background.
-    pub fn sync_avatar(&mut self, cx: &mut Context<Self>) {
-        let a = account(&self.model).ok();
-        let login = a.map(|a| a.login.to_string());
-        if self.avatar.login == login {
-            return;
-        }
-        let path = a.and_then(|a| cache_path(&cache_dir(), a));
-        let modified = path.as_ref().and_then(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok());
-        let (image, stale) = plan(self.snapshot, path.clone(), modified, SystemTime::now());
-        self.avatar = Avatar { login: login.clone(), image };
-        let (Some(path), Some(login), true) = (path, login, stale) else { return };
-        cx.spawn(async move |this, cx| {
-            let (dest, who) = (path.clone(), login.clone());
-            let got = cx.background_executor().spawn(async move { fetch(&who, &dest) }).await;
-            this.update(cx, |s, cx| {
-                if got.is_ok() && s.avatar.login.as_deref() == Some(login.as_str()) {
-                    s.avatar.image = Some(path);
-                    cx.notify();
-                }
+    /// Looks up the avatar of every account the daemon reports and the one it publishes as: a cached file shows at
+    /// once, and a missing or stale one is fetched in the background.
+    pub fn sync_avatars(&mut self, cx: &mut Context<Self>) {
+        let m = &self.model;
+        let new: Vec<(String, Option<PathBuf>)> = m
+            .domain
+            .accounts
+            .iter()
+            .flatten()
+            .chain(account(m).ok())
+            .filter(|a| !self.avatars.0.contains_key(a.login.as_str()))
+            .map(|a| (a.login.to_string(), cache_path(&cache_dir(), a)))
+            .collect();
+        for (login, path) in new {
+            if self.avatars.0.contains_key(&login) {
+                continue;
+            }
+            let modified = path.as_ref().and_then(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok());
+            let (image, stale) = plan(self.snapshot, path.clone(), modified, SystemTime::now());
+            self.avatars.0.insert(login.clone(), image);
+            let (Some(path), true) = (path, stale) else { continue };
+            cx.spawn(async move |this, cx| {
+                let (dest, who) = (path.clone(), login.clone());
+                let got = cx.background_executor().spawn(async move { fetch(&who, &dest) }).await;
+                this.update(cx, |s, cx| {
+                    if got.is_ok() {
+                        s.avatars.0.insert(login, Some(path));
+                        cx.notify();
+                    }
+                })
             })
-        })
-        .detach();
+            .detach();
+        }
     }
 }
 
-/// The monogram: the login's first letter in the accent over its wash, the avatar's size, so nothing moves when
-/// the image lands or fails.
-fn letter(t: &Colors, login: &str) -> Div {
+/// An account's avatar at `size`: its image once on disk, else its monogram, so nothing moves when the image lands
+/// or fails.
+pub fn face(s: &Shell, t: &Colors, a: &Account, size: Pixels) -> AnyElement {
+    let login = a.login.to_string();
+    match s.avatars.0.get(&login).cloned().flatten() {
+        Some(path) => {
+            let (t, t2, login2) = (*t, *t, login.clone());
+            img(path)
+                .size(size)
+                .flex_none()
+                .rounded(radius::PILL)
+                .with_loading(move || letter(&t, &login, size).into_any_element())
+                .with_fallback(move || letter(&t2, &login2, size).into_any_element())
+                .into_any_element()
+        }
+        None => letter(t, &login, size).into_any_element(),
+    }
+}
+
+/// The monogram: the login's first letter in the accent over its wash, the avatar's size.
+fn letter(t: &Colors, login: &str, size: Pixels) -> Div {
     div()
-        .size(SIZE)
+        .size(size)
         .flex_none()
         .flex()
         .items_center()
@@ -144,7 +170,7 @@ fn letter(t: &Colors, login: &str) -> Div {
 /// No account to show: a person glyph in the same circle, in the neutral ink.
 fn nobody(t: &Colors) -> Div {
     div()
-        .size(SIZE)
+        .size(px(24.))
         .flex_none()
         .flex()
         .items_center()
@@ -175,20 +201,9 @@ pub fn footer(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Stateful<Div> {
     .to_string();
     let read_only = crate::queue::read_only(m);
     let who = account(m);
-    let face = match (who, &s.avatar.image) {
-        (Ok(a), Some(path)) => {
-            let (t, login) = (*t, a.login.to_string());
-            let (t2, login2) = (t, login.clone());
-            img(path.clone())
-                .size(SIZE)
-                .flex_none()
-                .rounded(radius::PILL)
-                .with_loading(move || letter(&t, &login).into_any_element())
-                .with_fallback(move || letter(&t2, &login2).into_any_element())
-                .into_any_element()
-        }
-        (Ok(a), None) => letter(t, a.login.as_str()).into_any_element(),
-        (Err(_), _) => nobody(t).into_any_element(),
+    let face = match who {
+        Ok(a) => face(s, t, a, px(24.)),
+        Err(_) => nobody(t).into_any_element(),
     };
     let (name, name_hue) = match who {
         Ok(a) => (a.login.to_string(), t.text),
