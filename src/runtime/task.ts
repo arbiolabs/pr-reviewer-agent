@@ -15,7 +15,7 @@ import {
 import type { Config } from "../config/config.ts";
 import type { ReviewState } from "../domain/machines.ts";
 import { type ReviewCheckpoint, type ReviewMode, sha256 } from "../domain/types.ts";
-import type { PullSource } from "../github/pulls.ts";
+import { linkedIssueNumbers, type PullSource } from "../github/pulls.ts";
 import { askJev, type JevOutcome, type JevRoute, selectReviewMode, type TriageInput, type TriageResult } from "../jev/decision.ts";
 import type { AppStore, OpenFinding, RevisionRow } from "../persistence/store.ts";
 import { MAX_GUIDANCE_BYTES, loadGuidance } from "../reasoning/guidance.ts";
@@ -180,6 +180,19 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
       store.advance(revision.id, "COLLECT_CONTEXT", "NEWER_HEAD", `head moved to ${pull.headSha}`);
       return finished(revision.id, "SUPERSEDED");
     }
+    const [owner, name] = pr.repo_full_name.split("/") as [string, string];
+    const numbers = linkedIssueNumbers(pull.body, pr.repo_full_name, pr.number);
+    const getIssue = deps.pulls.getIssue?.bind(deps.pulls);
+    const issues =
+      numbers.length === 0 || !getIssue
+        ? []
+        : await span(
+            revision.id,
+            step("github", "issues", "collect"),
+            `reading linked issue${numbers.length === 1 ? "" : "s"} ${numbers.map((n) => `#${n}`).join(", ")}`,
+            async () => (await Promise.all(numbers.map((n) => getIssue({ owner, repo: name, number: n, installationId: pr.installation_id }, n)))).filter((i) => i !== undefined),
+            (found, t) => `read ${found.length} of ${numbers.length} linked issue${numbers.length === 1 ? "" : "s"} (${t})`,
+          );
     const cloned = existsSync(join(deps.cacheDir, `${pr.repo_full_name}.git`, "HEAD"));
     const token = await deps.gitToken?.(pr.installation_id);
     const dir = await span(
@@ -222,7 +235,7 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
     store.advance(revision.id, "COLLECT_CONTEXT", "CONTEXT_PERSISTED", `${changedFiles.length} changed file(s)`, () => {
       store.saveSnapshot({
         revisionId: revision.id,
-        pr: { title: pull.title, body: pull.body, fullName: pr.repo_full_name, number: pr.number, cloneUrl: pull.cloneUrl },
+        pr: { title: pull.title, body: pull.body, fullName: pr.repo_full_name, number: pr.number, cloneUrl: pull.cloneUrl, issues },
         changedFiles,
         diff,
         limitations,

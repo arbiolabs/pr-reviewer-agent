@@ -161,6 +161,15 @@ pr-review always adds its hidden marker comment after the message, so a template
 - **The files share a budget of 500 lines.** A file over 64 KB is skipped.
 - **The text is fenced as data.** The guidance can set conventions to check, but it cannot change what the reviewer submits or how it verifies findings.
 
+### Linked issues
+
+When the pull request's description closes issues with GitHub's keywords, such as `Fixes #12`, `closes owner/repo#12` or `resolves https://github.com/owner/repo/issues/12`, the reviewer reads up to three of them. It uses them to learn what the change is meant to do, and reports a defect when the changed code contradicts what an issue asks. There is no setting.
+
+- **Only issues in the pull request's own repository are read.** An issue in another repository could carry that repository's private text into this review.
+- **Each issue is read once, when the review collects its context, and stored with it.** A crash or a retry uses the same text.
+- **Each body is cut at 4,000 characters, and the text is fenced as untrusted data.** Anyone who can open an issue wrote it.
+- **A missing, deleted or unreadable issue is skipped,** as is a number that belongs to a pull request.
+
 ### Generated files
 
 `review.generated_paths` lists globs for lock files, generated code and vendored code, such as `**/pnpm-lock.yaml`, `**/*.generated.*` and `**/vendor/**`; `src/config/config.ts` has the full default list. The reviewer is told these files changed, in their own list, and is asked not to review them. It still reads one when a change elsewhere depends on it. Setting the key replaces the whole list, so copy the defaults you want to keep.
