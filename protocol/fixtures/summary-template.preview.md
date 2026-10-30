@@ -11,4 +11,8 @@ Still present from an earlier commit:
 
 - Low: Log line prints the card's last four digits (`src/checkout/log.ts:9`, first reported on `b131fd0`)
 
+Where to start reading:
+
+- `src/checkout/capture.ts`: the capture now runs before the order's state is saved
+
 Review performed with isolated read-only tools. Human review is still required.

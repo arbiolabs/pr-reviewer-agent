@@ -20,4 +20,6 @@ Each candidate must:
 - set `evidenceKind` to `confirmed_by_static_trace` only when the cited code alone demonstrates the defect, otherwise `suspected` or `unreproducible`;
 - set `confidence` honestly between 0 and 1.
 
+In `focus`, name up to three changed files a human reviewer should read first, most important first, each with one short sentence on what to check there. Pick the files where a mistake would cost the most, whether or not you report a defect in them. Leave out lock files and generated code. An empty list is fine for a small or obvious change.
+
 Finish by calling `submit_candidates` exactly once. An empty list is a valid and common result once you have read the diff or the code; without that read it is rejected.

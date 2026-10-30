@@ -37,7 +37,7 @@ it("derives the same revision id on reopen and applies migrations once", () => {
   store.close();
   const reopened = AppStore.open(path);
   expect(reopened.ensureRevision(key).id).toBe(first.id);
-  expect(reopened.db.prepare("SELECT name FROM schema_migrations").all()).toEqual([{ name: "001_init.sql" }, { name: "002_code_read.sql" }, { name: "003_publication.sql" }, { name: "004_coordinator.sql" }, { name: "005_webhook_retry.sql" }, { name: "006_meta.sql" }, { name: "050_stream_meta.sql" }, { name: "051_journal_without_revision.sql" }, { name: "052_control_commands.sql" }, { name: "053_control_command_attempt.sql" }, { name: "054_pull_title.sql" }, { name: "055_finding_tracking.sql" }, { name: "056_resolution_claims.sql" }, { name: "057_reopened_findings.sql" }, { name: "058_activity_span.sql" }, { name: "059_archive.sql" }, { name: "060_model_usage.sql" }, { name: "061_pull_author.sql" }]);
+  expect(reopened.db.prepare("SELECT name FROM schema_migrations").all()).toEqual([{ name: "001_init.sql" }, { name: "002_code_read.sql" }, { name: "003_publication.sql" }, { name: "004_coordinator.sql" }, { name: "005_webhook_retry.sql" }, { name: "006_meta.sql" }, { name: "050_stream_meta.sql" }, { name: "051_journal_without_revision.sql" }, { name: "052_control_commands.sql" }, { name: "053_control_command_attempt.sql" }, { name: "054_pull_title.sql" }, { name: "055_finding_tracking.sql" }, { name: "056_resolution_claims.sql" }, { name: "057_reopened_findings.sql" }, { name: "058_activity_span.sql" }, { name: "059_archive.sql" }, { name: "060_model_usage.sql" }, { name: "061_pull_author.sql" }, { name: "062_focus_files.sql" }]);
   expect(reopened.revisionsForPr(prId).length).toBe(1);
 });
 

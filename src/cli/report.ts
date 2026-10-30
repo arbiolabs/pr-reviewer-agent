@@ -1,4 +1,4 @@
-import { type CandidateFinding, type Disposition, type ResolutionVerdict, SEVERITIES } from "../domain/types.ts";
+import { type CandidateFinding, type Disposition, type FocusFile, type ResolutionVerdict, SEVERITIES } from "../domain/types.ts";
 import type { AppStore, AuditEvent, FindingView, OutboxRow, PullRow, RevisionRow, Snapshot } from "../persistence/store.ts";
 import { effectiveTemplate, fillTemplate, type TemplateValues } from "../publish/template.ts";
 
@@ -36,7 +36,7 @@ export function loadReport(store: AppStore, revisionId: string): ReviewReport {
     resolutions: store.candidateSet(revisionId)?.verdicts ?? [],
     audit: store.auditEvents(revisionId),
     outbox: store.outboxForRevision(revisionId),
-    facts: summaryFacts(revision, pr, snapshot),
+    facts: summaryFacts(revision, pr, snapshot, store.candidateSet(revisionId)?.focus),
   };
 }
 
@@ -76,17 +76,21 @@ const MAX_CARRIED_PER_SECTION = 20;
 export const unseen = (f: FindingView) => !f.carried || (f.reopens !== null && !f.listed);
 
 /** What the summary says about the PR beside its findings; a caller that does not know a part leaves it empty. */
-export type SummaryFacts = { repo: string; prNumber: number | null; prTitle: string; prAuthor: string; model: string };
+export type SummaryFacts = { repo: string; prNumber: number | null; prTitle: string; prAuthor: string; model: string; focus: FocusFile[] };
 
-const NO_FACTS: SummaryFacts = { repo: "", prNumber: null, prTitle: "", prAuthor: "", model: "" };
+const NO_FACTS: SummaryFacts = { repo: "", prNumber: null, prTitle: "", prAuthor: "", model: "", focus: [] };
 
-/** A revision's facts: the title its context recorded, else the PR's; the model is the part of its reviewer version after `m1+`. */
-export const summaryFacts = (revision: RevisionRow, pr: PullRow, snapshot: Snapshot | undefined): SummaryFacts => ({
+/**
+ * A revision's facts: the title its context recorded, else the PR's; the model is the part of its reviewer version
+ * after `m1+`; the files the reviewer said to read first.
+ */
+export const summaryFacts = (revision: RevisionRow, pr: PullRow, snapshot: Snapshot | undefined, focus: FocusFile[] = []): SummaryFacts => ({
   repo: pr.repo_full_name,
   prNumber: pr.number,
   prTitle: snapshot?.pr.title ?? pr.title ?? "",
   prAuthor: pr.author ?? "",
   model: revision.reviewer_version.slice(revision.reviewer_version.indexOf("+") + 1),
+  focus,
 });
 
 /**
@@ -135,6 +139,7 @@ function summaryValues(headSha: string, findings: FindingView[], limitations: st
     low_count: count((f) => f.candidate.severity === "low"),
     unconfirmed_count: count((f) => f.candidate.evidenceKind === "suspected"),
     carried: sections.join("\n\n"),
+    focus_files: incomplete !== undefined || facts.focus.length === 0 ? "" : ["Where to start reading:", "", ...facts.focus.map((f) => `- \`${f.file}\`: ${f.reason}`)].join("\n"),
     limitations: limitations.map((l) => `Scope limited: ${l}.`).join("\n\n"),
   };
 }

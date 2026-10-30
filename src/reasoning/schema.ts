@@ -46,6 +46,15 @@ export const ResolutionSchema = Type.Object({
 export const SubmitCandidatesSchema = Type.Object({
   candidates: Type.Array(CandidateSchema, { maxItems: 25 }),
   resolutions: Type.Optional(Type.Array(ResolutionSchema, { maxItems: 25, description: "Open findings from earlier reviews that this head's code shows fixed" })),
+  focus: Type.Optional(
+    Type.Array(
+      Type.Object({
+        file: Type.String({ description: "A changed file, as get_changed_files lists it" }),
+        reason: Type.String({ maxLength: 200, description: "One short sentence: what a person should check there" }),
+      }),
+      { maxItems: 3, description: "The changed files a human reviewer should read first, most important first" },
+    ),
+  ),
 });
 
 export type CandidateInput = Static<typeof CandidateSchema>;

@@ -1,6 +1,7 @@
 import { expect, it } from "vitest";
 import { DEFAULT_CONFIG } from "../src/config/config.ts";
 import { isGenerated, loadGuidance } from "../src/reasoning/guidance.ts";
+import { focusFiles } from "../src/reasoning/tools.ts";
 import { BlobTooLargeError } from "../src/source/git.ts";
 
 const files = (tree: Record<string, string>) => async (path: string) => {
@@ -34,4 +35,22 @@ it("treats lock files, generated and vendored code as generated, and leaves sour
   for (const path of ["src/lock.ts", "migrations/001_init.sql", "package.json", "src/vendors.ts", "docs/generated-code.md"]) {
     expect(isGenerated(path, globs), path).toBe(false);
   }
+});
+
+it("keeps only focus files the PR changes, not generated ones, each once, on one line, at most three", () => {
+  const changed = ["a.ts", "b.ts", "c.ts", "d.ts", "pnpm-lock.yaml"].map((path) => ({ path }));
+  const focus = [
+    { file: "pnpm-lock.yaml", reason: "lock" },
+    { file: "elsewhere.ts", reason: "not in the PR" },
+    { file: "a.ts", reason: "first\n  line" },
+    { file: "a.ts", reason: "again" },
+    { file: "b.ts", reason: "b" },
+    { file: "c.ts", reason: "c" },
+    { file: "d.ts", reason: "d" },
+  ];
+  expect(focusFiles(focus, changed, ["**/pnpm-lock.yaml"])).toEqual([
+    { file: "a.ts", reason: "first line" },
+    { file: "b.ts", reason: "b" },
+    { file: "c.ts", reason: "c" },
+  ]);
 });

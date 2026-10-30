@@ -127,11 +127,31 @@ The template holds plain text and `{{name}}` placeholders, and nothing else: no 
 | `{{low_count}}` | New low findings. |
 | `{{unconfirmed_count}}` | New findings the reviewer suspects but could not show from the code. |
 | `{{carried}}` | Findings from earlier commits, under a heading per state; empty when there are none. |
+| `{{focus_files}}` | Up to three changed files the reviewer says to read first, each with why; empty when it named none. |
 | `{{limitations}}` | One “Scope limited: …” line per limit on what was reviewed; empty when none. |
 
 The default template reproduces the body pr-review posted before this setting existed:
 
 ```text
+## Automated PR review
+
+Reviewed commit: `{{head_sha}}`
+
+{{summary_line}}
+
+{{findings_list}}
+
+{{carried}}
+
+{{focus_files}}
+
+{{limitations}}
+
+Review performed with isolated read-only tools. Human review is still required.
+```
+
+pr-review always adds its hidden marker comment after the message, so a template cannot remove it, and an HTML comment in the template is posted as text. A review prepared before a change keeps its message: a review waiting for approval posts the text its proof shows. GitHub's size limit still applies, and a longer body is cut at a line end with a notice.
+
 ### Repository guidance
 
 `review.guidance_files` lists files in the reviewed repository that tell people and agents how to work in it. The default is `["AGENTS.md", "CLAUDE.md", ".github/copilot-instructions.md"]`. The reviewer gets each file that exists, so it can hold the change to the project's own conventions. Set it to `[]` to send none.
@@ -144,22 +164,6 @@ The default template reproduces the body pr-review posted before this setting ex
 ### Generated files
 
 `review.generated_paths` lists globs for lock files, generated code and vendored code, such as `**/pnpm-lock.yaml`, `**/*.generated.*` and `**/vendor/**`; `src/config/config.ts` has the full default list. The reviewer is told these files changed, in their own list, and is asked not to review them. It still reads one when a change elsewhere depends on it. Setting the key replaces the whole list, so copy the defaults you want to keep.
-
-
-Reviewed commit: `{{head_sha}}`
-
-{{summary_line}}
-
-{{findings_list}}
-
-{{carried}}
-
-{{limitations}}
-
-Review performed with isolated read-only tools. Human review is still required.
-```
-
-pr-review always adds its hidden marker comment after the message, so a template cannot remove it, and an HTML comment in the template is posted as text. A review prepared before a change keeps its message: a review waiting for approval posts the text its proof shows. GitHub's size limit still applies, and a longer body is cut at a line end with a notice.
 
 ### Automatic reviews
 

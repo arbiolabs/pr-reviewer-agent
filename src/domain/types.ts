@@ -32,6 +32,9 @@ export type CandidateFinding = {
 };
 
 /** The model's claim that an open finding is fixed at the head, with the head-side code that shows it. Code checks it before it counts. */
+/** A changed file the reviewer says a person should read first, and why. */
+export type FocusFile = { file: string; reason: string };
+
 export type ResolutionClaim = { findingId: string; codeEvidence: CodeEvidence[]; reason: string; evidenceKind: EvidenceKind };
 
 /** How VERIFY judged one resolution claim. Only ACCEPTED moves a finding to RESOLVED. */

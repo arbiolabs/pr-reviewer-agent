@@ -384,7 +384,7 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
       limitations: snapshot.limitations,
       files: parseDiff(snapshot.diff),
       template: config.review.summary_template,
-      facts: summaryFacts(revision, store.pullById(revision.pr_id)!, snapshot),
+      facts: summaryFacts(revision, store.pullById(revision.pr_id)!, snapshot, store.candidateSet(revision.id)?.focus),
     });
     // silent_no_findings posts only a review that says something new: a new finding, a first comment on a carried one, or a newly resolved one.
     const publish = input.publish === true && !(config.review.publish_mode === "silent_no_findings" && !hasNews(findings, inlineFindingIds));

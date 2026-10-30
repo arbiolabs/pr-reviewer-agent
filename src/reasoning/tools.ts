@@ -14,7 +14,7 @@ import {
   type ToolExecutionApi,
   type ToolExecutionResult,
 } from "@earendil-works/pi-durable";
-import type { CandidateFinding, ResolutionClaim } from "../domain/types.ts";
+import type { CandidateFinding, FocusFile, ResolutionClaim } from "../domain/types.ts";
 import type { AppStore, RevisionRow, Snapshot } from "../persistence/store.ts";
 import type { FileDiff } from "../source/diff.ts";
 import { isGenerated } from "./guidance.ts";
@@ -69,6 +69,20 @@ export const took = (startedAt: string) => {
   const s = Math.max(0, (Date.now() - Date.parse(startedAt)) / 1000);
   return s < 60 ? `${s.toFixed(1)}s` : `${Math.floor(s / 60)}m ${Math.floor(s % 60)}s`;
 };
+
+/**
+ * The files the model says to read first, kept only when the pull request changes them and they aren't generated, each
+ * once, with the reason on one line: the list goes into the posted message, so it names nothing the diff doesn't.
+ */
+export function focusFiles(focus: FocusFile[], changed: { path: string }[], generatedPaths: string[]): FocusFile[] {
+  const files = new Set(changed.map((f) => f.path));
+  const kept: FocusFile[] = [];
+  for (const f of focus) {
+    if (!files.has(f.file) || isGenerated(f.file, generatedPaths) || kept.some((k) => k.file === f.file)) continue;
+    kept.push({ file: f.file, reason: f.reason.replace(/\s+/g, " ").trim() });
+  }
+  return kept.slice(0, 3);
+}
 
 export const REVIEW_TOOLS_NAME = "pr-review-tools";
 
@@ -261,7 +275,8 @@ export function createReviewTools(deps: ToolDeps): Extension {
             throw new Error("An empty submission needs a look at the code first: call read_diff, read_file or search_code, then submit again. Nothing was stored.");
           }
           const resolutions = (args.resolutions ?? []) as ResolutionClaim[];
-          const { stored } = deps.store.saveCandidateSet(ws.revision.id, args.candidates as CandidateFinding[], resolutions);
+          const focus = focusFiles(args.focus ?? [], ws.snapshot.changedFiles, deps.generatedPaths ?? []);
+          const { stored } = deps.store.saveCandidateSet(ws.revision.id, args.candidates as CandidateFinding[], resolutions, focus);
           log(ws, "submit_candidates", `${args.candidates.length} candidate(s), ${resolutions.length} resolution claim(s)`, startedAt);
           return {
             ...text(stored ? `Stored ${args.candidates.length} candidate(s) and ${resolutions.length} resolution claim(s) for verification.` : "Candidates were already submitted for this revision; this call changed nothing."),
