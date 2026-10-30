@@ -18,6 +18,7 @@ import { type ReviewCheckpoint, type ReviewMode, sha256 } from "../domain/types.
 import type { PullSource } from "../github/pulls.ts";
 import { askJev, type JevOutcome, type JevRoute, selectReviewMode, type TriageInput, type TriageResult } from "../jev/decision.ts";
 import type { AppStore, OpenFinding, RevisionRow } from "../persistence/store.ts";
+import { MAX_GUIDANCE_BYTES, loadGuidance } from "../reasoning/guidance.ts";
 import { buildReviewRequest } from "../reasoning/request.ts";
 import { TargetDoc, took, type Workspace } from "../reasoning/tools.ts";
 import { evidenceTexts, type HeadReader, headReader, locate, observe, type ObservedLocation, type PriorFinding, reopen } from "../reasoning/track.ts";
@@ -295,7 +296,9 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
     const conversation = (await runtime.conversation(child!, context))!;
     const decision = store.decision(revision.id)!;
     // The open findings are located here for the request and again in VERIFY: each phase stands alone after a crash.
-    const { prior } = await priorFindings(revision, await deps.workspace(revision.id));
+    const ws = await deps.workspace(revision.id);
+    const { prior } = await priorFindings(revision, ws);
+    const guidance = await loadGuidance((path) => ws.repo.show(revision.base_sha, path, { maxBytes: MAX_GUIDANCE_BYTES }), config.review.guidance_files);
     const content = buildReviewRequest({
       snapshot: store.snapshot(revision.id)!,
       baseSha: revision.base_sha,
@@ -303,6 +306,8 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
       mode: decision.selectedMode as ReviewMode,
       reasons: decision.reasons,
       prior,
+      guidance,
+      generatedPaths: config.review.generated_paths,
     });
     // The same request ID finds the same submission after a restart; a retry asks again under a new one.
     const requestId = cp.attempt ? `analyze:${revision.id}:${cp.attempt}` : `analyze:${revision.id}`;

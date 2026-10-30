@@ -4,6 +4,11 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- **The reviewer follows the repository's own guidance.** It gets `AGENTS.md`, `CLAUDE.md` and `.github/copilot-instructions.md` from the pull request's base commit, so a pull request can't rewrite the rules it is reviewed by; repeats and symlinks are sent once, within 500 lines. `review.guidance_files` changes the list (#87).
+- **Lock files, generated and vendored code are set apart.** The reviewer sees them in their own list and is asked not to review them, which saves tokens on PRs that bump dependencies. `review.generated_paths` holds the globs (#87).
+
 ## [1.8.1] - 2026-10-30
 
 ### Security

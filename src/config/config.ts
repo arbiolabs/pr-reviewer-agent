@@ -23,6 +23,10 @@ export type Config = {
     summary_template: string;
     /** The engine-mode daemon polls GitHub for PRs that request the selected account's review and starts them. */
     auto_review: AutoReview;
+    /** Repository files with instructions for the reviewer, read from the PR's base commit; [] reads none. */
+    guidance_files: string[];
+    /** Globs for lock files, generated and vendored code: the reviewer is told they changed and skips them. */
+    generated_paths: string[];
   };
   /** §9.4 rate limits and retries. `max_retries` bounds each request; the client never retries an ambiguous write. */
   github: {
@@ -76,6 +80,37 @@ export const DEFAULT_CONFIG: Config = {
     webhook_backoff_ms: 5000,
     summary_template: "",
     auto_review: { enabled: false, interval_minutes: 5, include_team_requests: false, repos: { include: [], exclude: [] }, daily_cap: 20 },
+    guidance_files: ["AGENTS.md", "CLAUDE.md", ".github/copilot-instructions.md"],
+    generated_paths: [
+      "**/package-lock.json",
+      "**/npm-shrinkwrap.json",
+      "**/pnpm-lock.yaml",
+      "**/yarn.lock",
+      "**/bun.lock",
+      "**/bun.lockb",
+      "**/Cargo.lock",
+      "**/go.sum",
+      "**/poetry.lock",
+      "**/uv.lock",
+      "**/Pipfile.lock",
+      "**/Gemfile.lock",
+      "**/composer.lock",
+      "**/Podfile.lock",
+      "**/pubspec.lock",
+      "**/mix.lock",
+      "**/*.pb.go",
+      "**/*_pb2.py",
+      "**/*_pb2.pyi",
+      "**/*.pb.swift",
+      "**/*.generated.*",
+      "**/__generated__/**",
+      "**/*.min.js",
+      "**/*.min.css",
+      "**/*.js.map",
+      "**/*.css.map",
+      "**/vendor/**",
+      "**/node_modules/**",
+    ],
   },
   github: { max_retries: 3, backoff_ms: 500, concurrency_per_installation: 2, timeout_ms: 15_000, max_rate_limit_sleep_ms: 30_000, bot_login: "" },
   routing: {

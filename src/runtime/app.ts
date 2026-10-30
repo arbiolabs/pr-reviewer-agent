@@ -85,7 +85,7 @@ async function openLocked(options: AppOptions, release: () => Promise<void>): Pr
     workspaces.set(revisionId, ws);
     return ws;
   }
-  const tools = createReviewTools({ store, workspace });
+  const tools = createReviewTools({ store, workspace, generatedPaths: options.config.review.generated_paths });
   const task = createReviewTask({ ...options, store, cacheDir, tools, workspace });
   const registry = createRegistry();
   registry.install(tools);

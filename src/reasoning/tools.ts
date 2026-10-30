@@ -17,6 +17,7 @@ import {
 import type { CandidateFinding, ResolutionClaim } from "../domain/types.ts";
 import type { AppStore, RevisionRow, Snapshot } from "../persistence/store.ts";
 import type { FileDiff } from "../source/diff.ts";
+import { isGenerated } from "./guidance.ts";
 import { assertSafePath, capBytes, type PinnedRepo } from "../source/git.ts";
 import { SubmitCandidatesSchema } from "./schema.ts";
 
@@ -34,7 +35,7 @@ export const TargetDoc = defineDoc<{ revisionId: string }>({
 
 export type Workspace = { revision: RevisionRow; snapshot: Snapshot; repo: PinnedRepo; files: Map<string, FileDiff> };
 
-export type ToolDeps = { store: AppStore; workspace(revisionId: string): Promise<Workspace> };
+export type ToolDeps = { store: AppStore; workspace(revisionId: string): Promise<Workspace>; generatedPaths?: string[] };
 
 /** How long one search_code may run before it answers "timed out" instead. */
 export const SEARCH_TIMEOUT_MS = 60_000;
@@ -157,13 +158,13 @@ export function createReviewTools(deps: ToolDeps): Extension {
     tools: [
       defineTool({
         name: "get_changed_files",
-        description: "List the files this pull request changes, with git status letters (A, M, D, R).",
+        description: "List the files this pull request changes, with git status letters (A, M, D, R). Lock files, generated and vendored code are marked (generated).",
         parameters: Type.Object({}),
         replay: "safe",
         execute: async (_args, api, context) => {
           const startedAt = new Date().toISOString();
           const ws = await workspace(api, context);
-          const lines = ws.snapshot.changedFiles.map((f) => `${f.status} ${f.path}`);
+          const lines = ws.snapshot.changedFiles.map((f) => `${f.status} ${f.path}${isGenerated(f.path, deps.generatedPaths ?? []) ? " (generated)" : ""}`);
           log(ws, "get_changed_files", `${lines.length} files`, startedAt);
           return text([...lines, ...ws.snapshot.limitations.map((l) => `note: ${l}`)].join("\n"));
         },

@@ -132,7 +132,19 @@ The template holds plain text and `{{name}}` placeholders, and nothing else: no 
 The default template reproduces the body pr-review posted before this setting existed:
 
 ```text
-## Automated PR review
+### Repository guidance
+
+`review.guidance_files` lists files in the reviewed repository that tell people and agents how to work in it. The default is `["AGENTS.md", "CLAUDE.md", ".github/copilot-instructions.md"]`. The reviewer gets each file that exists, so it can hold the change to the project's own conventions. Set it to `[]` to send none.
+
+- **Files come from the pull request's base commit, not its head.** A pull request that edits `AGENTS.md` is still reviewed by the rules it is trying to change.
+- **Repeats are sent once.** A file with the same text as an earlier one, or a one-line symlink such as a `CLAUDE.md` that points at `AGENTS.md`, is left out.
+- **The files share a budget of 500 lines.** A file over 64 KB is skipped.
+- **The text is fenced as data.** The guidance can set conventions to check, but it cannot change what the reviewer submits or how it verifies findings.
+
+### Generated files
+
+`review.generated_paths` lists globs for lock files, generated code and vendored code, such as `**/pnpm-lock.yaml`, `**/*.generated.*` and `**/vendor/**`; `src/config/config.ts` has the full default list. The reviewer is told these files changed, in their own list, and is asked not to review them. It still reads one when a change elsewhere depends on it. Setting the key replaces the whole list, so copy the defaults you want to keep.
+
 
 Reviewed commit: `{{head_sha}}`
 
