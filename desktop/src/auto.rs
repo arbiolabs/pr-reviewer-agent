@@ -522,10 +522,6 @@ pub fn section(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         |words: &'static str| div().w(px(180.)).flex_none().text_size(text::BODY).text_color(t.text).child(words);
     let row = || div().flex().items_center().gap(space::S3);
 
-    let per_day = match a.daily_cap {
-        Some(n) if n > 0 => format!(" and {n} a day"),
-        _ => String::new(),
-    };
     let head = div()
         .flex()
         .items_start()
@@ -552,12 +548,7 @@ pub fn section(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                         .child("Review PRs that request my review"),
                 )
                 .child(line(
-                    format!(
-                        "Every {} minutes the reviewer asks GitHub, as the account in use, for open PRs waiting on \
-                         your review, and starts each commit it hasn't reviewed, at most 5 at a time{per_day}. \
-                         Archived PRs stay archived. Each review costs model usage.",
-                        a.interval_minutes
-                    ),
+                    "Reviews each new commit on open PRs waiting on you. Each review costs model usage.".into(),
                     t.muted,
                 )),
         );
