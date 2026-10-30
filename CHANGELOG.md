@@ -4,6 +4,8 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 ## [Unreleased]
 
+## [1.10.0] - 2026-10-30
+
 ### Added
 
 - **Where to start reading.** The reviewer names up to three changed files a person should read first, each with what to check there, and the review message lists them under "Where to start reading:". Files the PR doesn't change, lock files and generated code are dropped. The default message includes it; a custom message gets it with `{{focus_files}}` (#89).
@@ -213,7 +215,8 @@ This is the first release.
   - the PR is still open.
 - Command idempotency keys are bound to each run attempt, so a replayed command never has a second effect.
 
-[Unreleased]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.9.0...HEAD
+[Unreleased]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.10.0...HEAD
+[1.10.0]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.9.0...v1.10.0
 [1.9.0]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.8.1...v1.9.0
 [1.8.1]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.8.0...v1.8.1
 [1.8.0]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.7.1...v1.8.0
