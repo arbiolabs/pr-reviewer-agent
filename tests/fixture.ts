@@ -3,7 +3,7 @@ import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import type { PullInfo } from "../src/domain/types.ts";
-import type { PullRef, PullSource } from "../src/github/pulls.ts";
+import type { LinkedIssue, PullRef, PullSource } from "../src/github/pulls.ts";
 
 const ROUTES_BASE = `import { requireAdmin } from "../auth/require-admin.ts";
 
@@ -36,6 +36,12 @@ export class FakePullSource implements PullSource {
   async getPull(_ref: PullRef): Promise<PullInfo> {
     this.calls++;
     return { ...this.pull };
+  }
+
+  issues = new Map<number, LinkedIssue>();
+
+  async getIssue(_ref: PullRef, number: number): Promise<LinkedIssue | undefined> {
+    return this.issues.get(number);
   }
 }
 

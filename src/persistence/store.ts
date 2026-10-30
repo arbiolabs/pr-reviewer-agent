@@ -17,6 +17,7 @@ import {
 import type { Usage } from "@earendil-works/pi-ai";
 import type { UsageRow } from "../domain/usage.ts";
 import { type CandidateFinding, type ChangedFile, type Disposition, type FocusFile, type PullInfo, type ResolutionClaim, type ResolutionVerdict, stableId } from "../domain/types.ts";
+import type { LinkedIssue } from "../github/pulls.ts";
 import { sanitize } from "../protocol/sanitize.ts";
 import type { ActivitySpan } from "../protocol/v1.ts";
 import type { Observation, ObservedLocation, Reopened } from "../reasoning/track.ts";
@@ -70,7 +71,8 @@ export type PullRow = {
 export type Snapshot = {
   id: string;
   revisionId: string;
-  pr: { title: string; body: string; fullName: string; number: number; cloneUrl: string };
+  /** `issues`: what the PR says it closes, read when the context was collected; absent before linked issues were read. */
+  pr: { title: string; body: string; fullName: string; number: number; cloneUrl: string; issues?: LinkedIssue[] };
   changedFiles: ChangedFile[];
   diff: string;
   limitations: string[];

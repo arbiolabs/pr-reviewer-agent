@@ -4,6 +4,10 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- **The reviewer reads the issues a PR closes.** A description with GitHub's closing keywords (`Fixes #12`, `closes owner/repo#12`, an issue URL) gets up to three of those issues read when the context is collected, from the PR's own repository only. They go to the reviewer fenced as untrusted data, so it can check the change against what the issue asks (#91).
+
 ## [1.10.0] - 2026-10-30
 
 ### Added
