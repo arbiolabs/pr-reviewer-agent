@@ -4,6 +4,10 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 ## [Unreleased]
 
+### Security
+
+- **Desktop: avatar downloads stay on HTTPS and are size-capped.** curl refuses any protocol or redirect but HTTPS and any file over 1 MB (#85).
+
 ## [1.8.0] - 2026-10-30
 
 ### Added
