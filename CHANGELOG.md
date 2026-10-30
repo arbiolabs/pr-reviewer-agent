@@ -4,6 +4,8 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 ## [Unreleased]
 
+## [1.8.1] - 2026-10-30
+
 ### Security
 
 - **Desktop: avatar downloads stay on HTTPS and are size-capped.** curl refuses any protocol or redirect but HTTPS and any file over 1 MB (#85).
@@ -196,7 +198,8 @@ This is the first release.
   - the PR is still open.
 - Command idempotency keys are bound to each run attempt, so a replayed command never has a second effect.
 
-[Unreleased]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.8.0...HEAD
+[Unreleased]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.8.1...HEAD
+[1.8.1]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.8.0...v1.8.1
 [1.8.0]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.7.1...v1.8.0
 [1.7.1]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.7.0...v1.7.1
 [1.7.0]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.6.0...v1.7.0
