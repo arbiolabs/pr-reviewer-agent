@@ -227,8 +227,8 @@ pub struct Shell {
     pub settings_scroll_to: Option<f32>,
     /// A sheet was open in the last frame.
     pub sheet_was_open: bool,
-    /// The footer's avatar for the publishing account.
-    pub avatar: crate::account::Avatar,
+    /// The accounts' avatars, for the footer and Settings.
+    pub avatars: crate::account::Avatars,
     /// A PR the add sheet sent while the reviewer was stopped: it goes to the daemon once the start brings it up.
     pub queued_add: Option<String>,
     /// The app runs from the menu bar alone, as `[desktop] hide_dock` saved it.
@@ -315,7 +315,7 @@ impl Shell {
             diff_flagged_only: false,
             diff_generated_open: false,
             sheet_was_open: false,
-            avatar: Default::default(),
+            avatars: Default::default(),
             picker: crate::agent::Picker::default(),
             jev: crate::jev::KeyField::new(),
             message: Default::default(),
@@ -911,7 +911,7 @@ impl Shell {
 impl Render for Shell {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         self.width = window.viewport_size().width;
-        self.sync_avatar(cx);
+        self.sync_avatars(cx);
         if self.settings_tab.sync(setup_shown(self), &self.model) {
             self.settings_scroll.set_offset(Point::default());
         }

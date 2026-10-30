@@ -798,7 +798,7 @@ pub fn setup_body(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                 accounts = accounts.child(
                     row()
                         .items_center()
-                        .child(icon(IconName::User, px(15.), t.muted))
+                        .child(crate::account::face(s, t, a, px(32.)))
                         .child(
                             div()
                                 .flex()

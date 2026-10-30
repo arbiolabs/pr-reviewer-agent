@@ -4,6 +4,10 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- **Desktop: avatars in Settings → Accounts.** Each GitHub account shows its avatar, fetched once into `~/Library/Caches/pr-review/avatars` and refreshed after a day, with the login's first letter until it lands (#83).
+
 ## [1.7.1] - 2026-10-30
 
 ### Changed
