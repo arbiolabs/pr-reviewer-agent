@@ -4,6 +4,8 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 ## [Unreleased]
 
+## [1.11.0] - 2026-10-30
+
 ### Added
 
 - **The reviewer reads the issues a PR closes.** A description with GitHub's closing keywords (`Fixes #12`, `closes owner/repo#12`, an issue URL) gets up to three of those issues read when the context is collected, from the PR's own repository only. They go to the reviewer fenced as untrusted data, so it can check the change against what the issue asks (#91).
@@ -219,7 +221,8 @@ This is the first release.
   - the PR is still open.
 - Command idempotency keys are bound to each run attempt, so a replayed command never has a second effect.
 
-[Unreleased]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.10.0...HEAD
+[Unreleased]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.11.0...HEAD
+[1.11.0]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.10.0...v1.11.0
 [1.10.0]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.9.0...v1.10.0
 [1.9.0]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.8.1...v1.9.0
 [1.8.1]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.8.0...v1.8.1
