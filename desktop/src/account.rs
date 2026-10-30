@@ -59,7 +59,9 @@ fn fetch(login: &str, dest: &Path) -> std::io::Result<()> {
     let part = dest.with_extension("part");
     let url = format!("https://avatars.githubusercontent.com/{login}?s=64");
     let ok = std::process::Command::new("/usr/bin/curl")
-        .args(["-fsSL", "--max-time", "15", "-o"])
+        // HTTPS only, redirects included, and a cap far above a 64 px avatar so a bad answer can't fill the disk.
+        .args(["-fsSL", "--proto", "=https", "--proto-redir", "=https", "--max-filesize", "1048576"])
+        .args(["--max-time", "15", "-o"])
         .arg(&part)
         .arg(&url)
         .status()?
