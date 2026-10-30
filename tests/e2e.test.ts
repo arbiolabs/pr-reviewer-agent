@@ -115,3 +115,21 @@ it("gives the reviewer the base commit's AGENTS.md, not the PR's edit of it, and
     await app.close();
   }
 }, 30_000);
+
+it("puts the files the reviewer says to read first into the review message, dropping ones the PR doesn't change", async () => {
+  const fixture = createFixture();
+  const focus = [
+    { file: "src/routes/orders.ts", reason: "the new DELETE route has no requireAdmin" },
+    { file: "src/somewhere/else.ts", reason: "not part of this PR" },
+  ];
+  const app = await open(mkdtempSync(join(tmpdir(), "e2e-")), fixture, [readDiff(), fauxAssistantMessage([fauxToolCall("submit_candidates", { candidates: [], focus })], { stopReason: "toolUse" })]);
+  try {
+    const revision = await finishReview(app, await startReview(app, fixture.pull, "1"));
+    expect(revision.state).toBe("COMPLETED");
+    const body = renderMarkdown(loadReport(app.store, revision.id));
+    expect(body).toContain("Where to start reading:\n\n- `src/routes/orders.ts`: the new DELETE route has no requireAdmin\n\nReview performed");
+    expect(body).not.toContain("else.ts");
+  } finally {
+    await app.close();
+  }
+}, 30_000);

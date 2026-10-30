@@ -41,9 +41,9 @@
   ],
   "configPath": "/Users/operator/.config/pr-review/pr-review.config.json",
   "summaryTemplate": {
-    "value": "## Automated PR review\n\nReviewed commit: `{{head_sha}}`\n\n{{summary_line}}\n\n{{findings_list}}\n\n{{carried}}\n\n{{limitations}}\n\nReview performed with isolated read-only tools. Human review is still required.\n",
+    "value": "## Automated PR review\n\nReviewed commit: `{{head_sha}}`\n\n{{summary_line}}\n\n{{findings_list}}\n\n{{carried}}\n\n{{focus_files}}\n\n{{limitations}}\n\nReview performed with isolated read-only tools. Human review is still required.\n",
     "isDefault": true,
-    "default": "## Automated PR review\n\nReviewed commit: `{{head_sha}}`\n\n{{summary_line}}\n\n{{findings_list}}\n\n{{carried}}\n\n{{limitations}}\n\nReview performed with isolated read-only tools. Human review is still required.\n",
+    "default": "## Automated PR review\n\nReviewed commit: `{{head_sha}}`\n\n{{summary_line}}\n\n{{findings_list}}\n\n{{carried}}\n\n{{focus_files}}\n\n{{limitations}}\n\nReview performed with isolated read-only tools. Human review is still required.\n",
     "variables": [
       {
         "name": "repo",
@@ -124,6 +124,11 @@
         "name": "carried",
         "description": "Findings from earlier commits, under a heading per state; empty when there are none.",
         "sample": "Still present from an earlier commit:\n\n- Low: Log line prints the card's last four digits (`src/checkout/log.ts:9`, first reported on `b131fd0`)"
+      },
+      {
+        "name": "focus_files",
+        "description": "Up to three changed files the reviewer says to read first, each with why; empty when it named none.",
+        "sample": "Where to start reading:\n\n- `src/checkout/capture.ts`: the capture now runs before the order's state is saved"
       },
       {
         "name": "limitations",

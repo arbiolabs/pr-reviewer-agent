@@ -4,6 +4,14 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- **Where to start reading.** The reviewer names up to three changed files a person should read first, each with what to check there, and the review message lists them under "Where to start reading:". Files the PR doesn't change, lock files and generated code are dropped. The default message includes it; a custom message gets it with `{{focus_files}}` (#89).
+
+### Fixed
+
+- **docs/configuration.md:** the Repository guidance and Generated files sections from 1.9.0 had landed inside the default template's code block, which also lost its first line (#89).
+
 ## [1.9.0] - 2026-10-30
 
 ### Added

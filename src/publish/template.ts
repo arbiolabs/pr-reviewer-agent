@@ -27,6 +27,11 @@ export const TEMPLATE_VARIABLES = [
     description: "Findings from earlier commits, under a heading per state; empty when there are none.",
     sample: "Still present from an earlier commit:\n\n- Low: Log line prints the card's last four digits (`src/checkout/log.ts:9`, first reported on `b131fd0`)",
   },
+  {
+    name: "focus_files",
+    description: "Up to three changed files the reviewer says to read first, each with why; empty when it named none.",
+    sample: "Where to start reading:\n\n- `src/checkout/capture.ts`: the capture now runs before the order's state is saved",
+  },
   { name: "limitations", description: "One “Scope limited: …” line per limit on what was reviewed; empty when none.", sample: "" },
 ] as const;
 
@@ -43,6 +48,8 @@ Reviewed commit: \`{{head_sha}}\`
 {{findings_list}}
 
 {{carried}}
+
+{{focus_files}}
 
 {{limitations}}
 

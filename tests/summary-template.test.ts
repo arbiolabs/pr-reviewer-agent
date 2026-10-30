@@ -82,7 +82,7 @@ it("the default template builds the same payload hashes as the renderer before i
   });
 });
 
-const facts = { repo: "acme/shop", prNumber: 7, prTitle: "Fix {{repo}} parsing", prAuthor: "", model: "faux/reviewer" };
+const facts = { repo: "acme/shop", prNumber: 7, prTitle: "Fix {{repo}} parsing", prAuthor: "", model: "faux/reviewer", focus: [] };
 
 it("fills a custom template from the same values, drops an empty variable's line, and never expands a placeholder inside a value", () => {
   const template =
@@ -137,3 +137,15 @@ it("a dry-run CLI review prints the body through the configured template", async
   }
   expect(out.join("")).toBe("acme/shop#1 (faux/reviewer): Found 1 actionable issue.\n\n- High: Order deletion endpoint skips the admin check (`src/routes/orders.ts:5`)\n");
 }, 60_000);
+
+it("lists the files to read first under the findings, and nothing for a run that did not complete", () => {
+  const focus = [
+    { file: "src/checkout/capture.ts", reason: "the capture now runs before the order is saved" },
+    { file: "src/checkout/retry.ts", reason: "the retry has no upper bound" },
+  ];
+  const body = renderSummary(sha("h"), CASES.clean!.findings, [], undefined, { facts: { ...facts, focus } });
+  expect(body).toContain(
+    "\n\nWhere to start reading:\n\n- `src/checkout/capture.ts`: the capture now runs before the order is saved\n- `src/checkout/retry.ts`: the retry has no upper bound\n\nReview performed with isolated read-only tools.",
+  );
+  expect(renderSummary(sha("h"), CASES.clean!.findings, [], "Review did not complete (FAILED).", { facts: { ...facts, focus } })).not.toContain("Where to start reading");
+});
