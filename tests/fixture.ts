@@ -64,13 +64,15 @@ export function pushCommit(fixture: Fixture, files: Record<string, string | null
   return fixture.pulls.pull;
 }
 
-export function createFixture(root = mkdtempSync(join(tmpdir(), "fixture-"))): Fixture {
+/** The fixture PR; `baseFiles` are written into the base commit too. */
+export function createFixture(root = mkdtempSync(join(tmpdir(), "fixture-")), baseFiles: Record<string, string> = {}): Fixture {
   const repoDir = join(root, "origin");
   mkdirSync(repoDir);
   const git = gitIn(repoDir);
   git("init", "-q", "-b", "main");
   write(repoDir, "src/auth/require-admin.ts", "export function requireAdmin(req: Req, res: Res, next: Next) {\n  if (!req.user?.isAdmin) return res.status(403).end();\n  next();\n}\n");
   write(repoDir, "src/routes/orders.ts", ROUTES_BASE);
+  for (const [path, text] of Object.entries(baseFiles)) write(repoDir, path, text);
   git("add", ".");
   git("commit", "-q", "-m", "Add order routes");
   const baseSha = git("rev-parse", "HEAD");
