@@ -4,6 +4,11 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 ## [Unreleased]
 
+### Fixed
+
+- **Times show in your time zone.** The desktop app and the terminal client printed the daemon's UTC timestamps as they were, so a check at 12:01 in Madrid read "Last checked at 11:01". Both now show local time (#93).
+- **No "database is not open" error at shutdown.** A `gh` account check still running when the daemon closed tried to write to the closed database. It now drops the answer (#93).
+
 ## [1.11.0] - 2026-10-30
 
 ### Added
