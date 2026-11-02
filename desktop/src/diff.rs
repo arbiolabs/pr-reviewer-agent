@@ -314,7 +314,9 @@ pub fn view(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                 let wash = worst.map(|s| t.severity_wash(s)).or(wash);
                 let mark = worst.map(|s| t.severity(s)).or(cursor.then_some(t.accent));
                 let mut block = div().flex().flex_col();
-                for (k, (run, cont)) in runs(t, &mut lx, l.text.as_str(), layout::COLS_DIFF).into_iter().enumerate() {
+                for (k, (run, cont)) in
+                    runs(t, &mut lx, l.text.as_str(), s.cols(layout::COLS_DIFF)).into_iter().enumerate()
+                {
                     block = block.child(
                         div()
                             .flex()

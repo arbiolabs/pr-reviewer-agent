@@ -168,6 +168,7 @@ fn start(opts: Opts) -> Result<(), String> {
     });
     let theme = opts.appearance.or(saved).unwrap_or(tokens::Choice::System);
     let hide_dock = settings.desktop.hide_dock;
+    let sidebar_hidden = settings.desktop.sidebar_hidden;
     let reviewer = reviewer::Reviewer::new(socket, settings.desktop, settings.config_path, opts.snapshot.is_some());
     let mut model = Model::new(endpoint, settings.look, settings.start, settings.wanted_pr);
     model.agent.wanted = true;
@@ -186,6 +187,7 @@ fn start(opts: Opts) -> Result<(), String> {
             still: true,
             snapshot: true,
             hide_dock: false,
+            sidebar_hidden: false,
             background: false,
         };
         run_app(view, None, snapshot, opts.window, theme);
@@ -218,6 +220,7 @@ fn start(opts: Opts) -> Result<(), String> {
         still: is_snapshot || reduce_motion(),
         snapshot: is_snapshot,
         hide_dock,
+        sidebar_hidden,
         background: opts.background,
     };
     run_app(view, Some(msgs), snapshot, opts.window, theme);
@@ -234,6 +237,7 @@ struct View {
     still: bool,
     snapshot: bool,
     hide_dock: bool,
+    sidebar_hidden: bool,
     background: bool,
 }
 
@@ -333,14 +337,15 @@ fn run_app(
             window_min_size: Some(size(px(960.), px(600.))),
             ..Default::default()
         };
-        let View { model, cmds, reviewer, desk, still, snapshot: is_snapshot, hide_dock, background } = view;
+        let View { model, cmds, reviewer, desk, still, snapshot: is_snapshot, hide_dock, sidebar_hidden, background } =
+            view;
         if !is_snapshot && let Some(c) = system_accent() {
             let _ = kit::SYSTEM_ACCENT.set(c);
         }
         let built = gpui_kit::open_window(options, cx, |window, cx| {
-            let shell = cx.new(|cx| ui::Shell {
-                hide_dock,
-                ..ui::Shell::new(model, cmds, reviewer, still, is_snapshot, &desk, cx)
+            let shell = cx.new(|cx| {
+                let s = ui::Shell::new(model, cmds, reviewer, still, is_snapshot, &desk, cx);
+                ui::Shell { hide_dock, sidebar_hidden: sidebar_hidden || s.sidebar_hidden, ..s }
             });
             let focus = shell.read(cx).focus.clone();
             window.focus(&focus, cx);

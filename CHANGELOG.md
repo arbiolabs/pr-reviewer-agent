@@ -4,6 +4,14 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- **Collapse the sidebar.** ⌘B, the title bar's button, the View menu or the palette hides the sidebar, and the app remembers it (#95).
+
+### Fixed
+
+- **The window holds together when it is narrow.** Down to the smallest window, the panes share the width: the queue narrows before the detail does, and the waterfall, finding rows, code and the shortcuts sheet stay inside their edges (#95).
+
 ## [1.11.1] - 2026-11-02
 
 ### Fixed

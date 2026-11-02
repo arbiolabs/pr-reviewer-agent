@@ -152,11 +152,7 @@ pub fn fit(items: &[(&str, Option<&str>)], note: Option<&str>, room: f32) -> Fit
 /// The width the detail pane's bar has: the window, less the sidebar, the queue column where it shows, and the
 /// bar's own insets.
 pub fn bar_room(s: &Shell) -> f32 {
-    let m = &s.model;
-    let queue = queue::stage(m) == Stage::Ready
-        && !matches!(m.ui.screen, pr_review_tui::model::Screen::Diff | pr_review_tui::model::Screen::Settings)
-        && !matches!(crate::ui::front(m), Some(Modal::Finding { .. }));
-    f32::from(s.width) - f32::from(layout::SIDEBAR) - if queue { f32::from(layout::QUEUE) } else { 0. } - 64.
+    s.pane_w() - 64.
 }
 
 fn item_button(t: &Colors, it: Item, keys: bool) -> Stateful<Div> {
@@ -367,6 +363,7 @@ pub fn pr_header(t: &Colors, pr: &Pr, kicker: Div, sentence: String, cx: &Contex
         .child(
             div()
                 .flex()
+                .flex_wrap()
                 .items_center()
                 .gap(space::S2)
                 .child(kicker)
@@ -486,7 +483,7 @@ fn tab(t: &Colors, id: &'static str, label: &str, count: Option<usize>, active: 
     crate::kit::focusable(id, row, t, px(0.), on)
 }
 
-pub fn tabs(t: &Colors, findings: usize, timeline: bool, cx: &Context<Shell>) -> Div {
+pub fn tabs(s: &Shell, t: &Colors, findings: usize, timeline: bool, cx: &Context<Shell>) -> Div {
     div()
         .flex()
         .items_center()
@@ -517,7 +514,7 @@ pub fn tabs(t: &Colors, findings: usize, timeline: bool, cx: &Context<Shell>) ->
                 }
             }),
         ))
-        .when(!timeline && findings > 1, |d| {
+        .when(!timeline && findings > 1 && s.page_w() >= 480., |d| {
             d.child(div().flex_1())
                 .child(div().text_size(text::SMALL).text_color(t.muted).child("N / ⇧N next / previous · ⏎ opens"))
         })
@@ -534,7 +531,7 @@ fn pr_page(s: &Shell, t: &Colors, pr: &Pr, run: Option<&Run>, cx: &Context<Shell
         pr_sentence(m, pr, run),
         cx,
     ));
-    body = body.child(tabs(t, current.len(), false, cx));
+    body = body.child(tabs(s, t, current.len(), false, cx));
     body = body.child(run_block(s, t, run, &current));
     body = body.child(
         div()
@@ -652,19 +649,19 @@ fn run_block(s: &Shell, t: &Colors, run: Option<&Run>, current: &[&Finding]) -> 
                 div().flex().flex_col().gap(space::S3).child(progress(t, queue::marks(m, r), hue, Gauge::Full)).child(
                     div()
                         .flex()
+                        .flex_wrap()
                         .items_center()
-                        .gap(space::S2)
+                        .gap_x(space::S2)
                         .text_size(text::SMALL)
                         .text_color(t.muted)
                         .child(div().font_weight(FontWeight::SEMIBOLD).text_color(hue).child(word))
-                        .child("·")
-                        .child(format!(
+                        .child(div().min_w_0().child(format!(
                             "{} at {} · {} · run {}",
                             phase_word(r.phase),
                             r.completed_at.as_ref().map_or(clock(r.started_at.as_str()), |c| clock(c.as_str())),
                             r.model,
                             r.id.short()
-                        )),
+                        ))),
                 ),
             )
         }
@@ -906,13 +903,13 @@ pub fn finding_row(s: &Shell, t: &Colors, f: &Finding, cx: &Context<Shell>) -> S
                 .pl(px(88.))
                 .text_size(text::SMALL)
                 .text_color(t.muted)
-                .child(div().font_family(text::MONO).text_size(px(11.)).child(place))
-                .child(format!(
+                .child(div().min_w_0().font_family(text::MONO).text_size(px(11.)).child(place))
+                .child(div().min_w_0().child(format!(
                     "{} · {} · {} evidence",
                     f.category.label(),
                     queue::sure(f),
                     queue::evidence_count(m, f)
-                )),
+                ))),
         )
         .when(selected, |d| {
             d.children(detail.map(|x| {
@@ -1057,7 +1054,7 @@ fn finding_page(s: &Shell, t: &Colors, id: &FindingId, cx: &Context<Shell>) -> D
             right = right.child(section(
                 t,
                 &format!("Evidence · {}", queue::evidence_count(m, f)),
-                if d.evidence.is_empty() { no_evidence(t) } else { evidence_blocks(t, f, d) },
+                if d.evidence.is_empty() { no_evidence(t) } else { evidence_blocks(s, t, f, d) },
             ));
             right = right.child(in_the_diff(s, t, f, cx));
         }
@@ -1218,7 +1215,7 @@ fn reopened_link(t: &Colors, m: &Model, f: &Finding, cx: &Context<Shell>) -> Opt
 }
 
 /// The cited code, each block pinned to its path, lines and commit, and the tool summaries between them.
-fn evidence_blocks(t: &Colors, f: &Finding, d: &pr_review_tui::protocol::FindingDetail) -> Div {
+fn evidence_blocks(s: &Shell, t: &Colors, f: &Finding, d: &pr_review_tui::protocol::FindingDetail) -> Div {
     let mut blocks = div().flex().flex_col().gap(space::S3);
     for e in &d.evidence {
         blocks = blocks.child(match (e.kind, &e.path) {
@@ -1237,7 +1234,7 @@ fn evidence_blocks(t: &Colors, f: &Finding, d: &pr_review_tui::protocol::Finding
                     anchor,
                     f.severity,
                     path.as_str(),
-                    layout::COLS_EVIDENCE,
+                    s.cols(layout::COLS_EVIDENCE),
                 )
                 .into_any_element()
             }
@@ -1320,7 +1317,7 @@ fn in_the_diff(s: &Shell, t: &Colors, f: &Finding, cx: &Context<Shell>) -> Div {
                     t,
                     &mut lx,
                     l.text.as_str(),
-                    layout::COLS_HUNK,
+                    s.cols(layout::COLS_HUNK),
                     l.new.or(l.old),
                     Some(sign),
                     wash,

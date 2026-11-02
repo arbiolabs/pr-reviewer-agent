@@ -9,15 +9,15 @@ use pr_review_tui::protocol::PublicationStatus;
 
 use crate::kit::{Tone, button, icon, overline};
 use crate::queue::{self, Card, Ending, Tier};
-use crate::tokens::{Colors, layout, radius, severity_mark, space, text};
+use crate::tokens::{Colors, radius, severity_mark, space, text};
 use crate::ui::*;
 
 /// The column, with a bottom inset so the last card clears the edge, and a fade where more cards scroll under.
-fn column(t: &Colors, id: &'static str, inner: Div) -> Div {
+fn column(s: &Shell, t: &Colors, id: &'static str, inner: Div) -> Div {
     div()
         .relative()
         .flex_none()
-        .w(layout::QUEUE)
+        .w(s.queue_w())
         .h_full()
         .border_r_1()
         .border_color(t.border)
@@ -37,8 +37,8 @@ fn column(t: &Colors, id: &'static str, inner: Div) -> Div {
 }
 
 /// Grey shapes where cards will be, while the first snapshot loads.
-pub fn skeleton_column(t: &Colors) -> Div {
-    let bone = |w: Pixels, h: Pixels| div().w(w).h(h).rounded(px(4.)).bg(t.border.alpha(0.7));
+pub fn skeleton_column(s: &Shell, t: &Colors) -> Div {
+    let bone = |w: Pixels, h: Pixels| div().w(w).max_w_full().h(h).rounded(px(4.)).bg(t.border.alpha(0.7));
     let card = || {
         div()
             .flex()
@@ -53,6 +53,7 @@ pub fn skeleton_column(t: &Colors) -> Div {
             .child(bone(px(220.), px(10.)))
     };
     column(
+        s,
         t,
         "skeleton",
         div()
@@ -87,7 +88,7 @@ pub fn queue_column(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         }
         col = col.child(card(s, t, c, i, selected == Some(i), cx));
     }
-    column(t, "column", col)
+    column(s, t, "column", col)
 }
 
 struct Face {
@@ -326,7 +327,8 @@ fn card(s: &Shell, t: &Colors, c: &Card, i: usize, selected: bool, cx: &Context<
                         .text_color(hue)
                         .child(f.kicker.to_uppercase()),
                 )
-                // A long repository name gives way before the kicker or the PR number does: it truncates, #N stays.
+                // A long repository name gives way before the kicker or the PR number does: it truncates, and in a
+                // narrow column, where a stub would say nothing, it goes. The sidebar groups by it anyway.
                 .children(place.map(|(repo, number)| {
                     div()
                         .flex()
@@ -336,7 +338,7 @@ fn card(s: &Shell, t: &Colors, c: &Card, i: usize, selected: bool, cx: &Context<
                         .gap(px(4.))
                         .text_size(text::CAPTION)
                         .text_color(t.faint)
-                        .child(div().min_w_0().truncate().child(repo))
+                        .when(s.queue_w() >= px(340.), |d| d.child(div().min_w_0().truncate().child(repo)))
                         .child(div().flex_none().child(number))
                 })),
         )
@@ -467,7 +469,7 @@ pub fn archived_column(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
             .text_size(text::BODY)
             .text_color(t.muted)
             .child("Archived PRs collect here. E archives the PR you are reading.");
-        return column(t, "archived", div().child(empty));
+        return column(s, t, "archived", div().child(empty));
     }
     let why = pr_review_tui::update::write_block(m, "pr.unarchive");
     let mut col = div().child(overline(t, "Out of your lists"));
@@ -531,7 +533,7 @@ pub fn archived_column(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                 .child(unarchive),
         );
     }
-    column(t, "archived", col)
+    column(s, t, "archived", col)
 }
 
 pub fn done_column(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
@@ -543,6 +545,7 @@ pub fn done_column(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
     }
     if done.is_empty() {
         return column(
+            s,
             t,
             "column",
             col.child(
@@ -597,5 +600,5 @@ pub fn done_column(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                 ),
         );
     }
-    column(t, "column", col)
+    column(s, t, "column", col)
 }

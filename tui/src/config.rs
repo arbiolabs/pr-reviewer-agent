@@ -80,6 +80,8 @@ pub struct Desktop {
     pub theme: Option<String>,
     /// The app runs without a Dock icon, from its menu bar item alone.
     pub hide_dock: bool,
+    /// The window opens with its sidebar collapsed, as the reader left it.
+    pub sidebar_hidden: bool,
 }
 
 impl Default for Desktop {
@@ -89,6 +91,7 @@ impl Default for Desktop {
             launch_agent: "io.github.diego-arbio-dev.pr-review.daemon".into(),
             theme: None,
             hide_dock: false,
+            sidebar_hidden: false,
         }
     }
 }
@@ -445,6 +448,10 @@ mod tests {
         let desktop =
             resolve(Args { config: Some(path.clone()), ..Args::default() }, false, || Palette::Dark).unwrap().desktop;
         assert!(!desktop.hide_dock);
+        assert!(!desktop.sidebar_hidden);
+        set_desktop(&path, "sidebar_hidden", true.into()).unwrap();
+        let saved = resolve(Args { config: Some(path.clone()), ..Args::default() }, false, || Palette::Dark).unwrap();
+        assert!(saved.desktop.sidebar_hidden, "the next launch reads what the toggle saved");
     }
 
     #[test]

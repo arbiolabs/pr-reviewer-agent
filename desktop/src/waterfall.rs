@@ -18,9 +18,11 @@ const ROW_H: f32 = 26.;
 const BAR_H: f32 = 12.;
 const AXIS_H: f32 = 22.;
 const NAME_W: f32 = 240.;
+/// In a narrow pane the names give way down to this, so the bars keep what is left.
+const NAME_MIN: f32 = 120.;
+/// The room the bars keep before the names start giving way.
+const BARS_W: f32 = 300.;
 const INDENT: f32 = 14.;
-/// The timeline's width on a page at its reading width; ticks are spaced for it, bars sit at fractions of it.
-const TL_W: f64 = 430.;
 /// A long review keeps its newest rows: each turn's tool calls fold into it once the next turn starts.
 const MAX_ROWS: usize = 28;
 
@@ -50,8 +52,12 @@ pub fn waterfall(s: &Shell, t: &Colors, run: &Run, cx: &Context<Shell>) -> Optio
     // A run that is not working stops at its last line: a span it never closed does not grow.
     let last = spans.iter().map(|x| x.ended_ms.unwrap_or(x.started_ms)).max()?;
     let now = if live { m.domain.journal_now(m.now_ms)? } else { last };
-    let vp = fit(spans, now, TL_W)?;
-    let frac = |ms: i64| (vp.col_of(ms) / TL_W).clamp(0., 1.) as f32;
+    // The card's insets and border come off the page.
+    let room = s.page_w() - 18.;
+    let name_w = (room - BARS_W).clamp(NAME_MIN, NAME_W);
+    let tl_w = f64::from(room - name_w);
+    let vp = fit(spans, now, tl_w)?;
+    let frac = |ms: i64| (vp.col_of(ms) / tl_w).clamp(0., 1.) as f32;
     let selected = |sp: &Span| s.span.as_deref().is_some_and(|k| k == sp.id.as_str() || k == sp.name());
 
     // A phase that is over, and a turn that is over but the newest, fold what ran inside them into a `+N` chip,
@@ -77,7 +83,7 @@ pub fn waterfall(s: &Shell, t: &Colors, run: &Run, cx: &Context<Shell>) -> Optio
     let shown = &shown[shown.len().saturating_sub(MAX_ROWS)..];
 
     let tick_row =
-        div().relative().h(px(AXIS_H)).flex_1().children(ticks(&vp, TL_W, 70.).into_iter().map(|(at, l)| {
+        div().relative().h(px(AXIS_H)).flex_1().children(ticks(&vp, tl_w, 70.).into_iter().map(|(at, l)| {
             tabular(div())
                 .absolute()
                 .left(relative(frac(at)))
@@ -90,7 +96,7 @@ pub fn waterfall(s: &Shell, t: &Colors, run: &Run, cx: &Context<Shell>) -> Optio
         .flex()
         .border_b_1()
         .border_color(t.border)
-        .child(div().w(px(NAME_W)).flex_none().pl(space::S2).pt(px(4.)).child(overline(t, "Waterfall")))
+        .child(div().w(px(name_w)).flex_none().pl(space::S2).pt(px(4.)).child(overline(t, "Waterfall")))
         .child(tick_row);
 
     let body = div().flex().flex_col().children(shown.iter().flat_map(|r| {
@@ -105,7 +111,7 @@ pub fn waterfall(s: &Shell, t: &Colors, run: &Run, cx: &Context<Shell>) -> Optio
         }
         let hidden = if folded(sp) { spans.iter().filter(|k| k.parent.as_ref() == Some(&sp.id)).count() } else { 0 };
         let name = div()
-            .w(px(NAME_W))
+            .w(px(name_w))
             .flex_none()
             .h_full()
             .flex()
@@ -187,7 +193,7 @@ pub fn waterfall(s: &Shell, t: &Colors, run: &Run, cx: &Context<Shell>) -> Optio
             .absolute()
             .top(px(AXIS_H))
             .bottom_0()
-            .left(px(NAME_W))
+            .left(px(name_w))
             .right_0()
             .child(div().absolute().top_0().bottom_0().left(relative(frac(now))).w(px(1.)).bg(t.running.alpha(0.7)))
     });

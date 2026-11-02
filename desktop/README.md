@@ -169,6 +169,7 @@ With `--socket`, the capture happens `--snapshot-after-ms` milliseconds after la
 | `tab:done`, `tab:queue`, `tab:archived` | Show the done list, the queue or the archived list. |
 | `palette:TEXT` | Open the command palette with TEXT typed. |
 | `keys` | Open the shortcut sheet. |
+| `sidebar-hidden` | Collapse the sidebar. |
 | `confirm-post` | Open the sheet that asks before posting the proof in front. |
 | `add-pr`, `add-pr:TEXT` | Open the sheet that adds a PR, with TEXT in its field. |
 | `add:TEXT` | Send what ⏎ in that sheet sends for TEXT. The playback refuses a PR it doesn't track as GitHub would. |
