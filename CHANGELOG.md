@@ -4,6 +4,8 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 ## [Unreleased]
 
+## [1.11.1] - 2026-11-02
+
 ### Fixed
 
 - **Times show in your time zone.** The desktop app and the terminal client printed the daemon's UTC timestamps as they were, so a check at 12:01 in Madrid read "Last checked at 11:01". Both now show local time (#93).
@@ -226,7 +228,8 @@ This is the first release.
   - the PR is still open.
 - Command idempotency keys are bound to each run attempt, so a replayed command never has a second effect.
 
-[Unreleased]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.11.0...HEAD
+[Unreleased]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.11.1...HEAD
+[1.11.1]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.11.0...v1.11.1
 [1.11.0]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.10.0...v1.11.0
 [1.10.0]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.9.0...v1.10.0
 [1.9.0]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.8.1...v1.9.0
