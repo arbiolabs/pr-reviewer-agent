@@ -63,8 +63,8 @@ pub fn phase_label(p: Phase) -> &'static str {
     }
 }
 
-pub fn time_of(at: &str) -> &str {
-    at.get(11..19).unwrap_or(at)
+pub fn time_of(at: &str) -> String {
+    crate::waterfall::local_time(at).map_or_else(|| at.to_string(), |t| t[11..].to_string())
 }
 
 pub(crate) fn spans_w(spans: &[Span]) -> usize {
@@ -538,7 +538,7 @@ fn live(c: &Ctx, pr: &Pr, w: usize, log: usize, lines: &mut Vec<Line<'static>>) 
     let shown = &items[items.len().saturating_sub(log)..];
     for (i, a) in shown.iter().enumerate() {
         let newest = i + 1 == shown.len();
-        let at = time_of(a.at.as_str()).to_string();
+        let at = time_of(a.at.as_str());
         let (tool, text, role) = match &a.kind {
             ActivityKind::Tool { tool, summary } => (tool.to_string(), summary.to_string(), Role::Normal),
             ActivityKind::Phase { to, .. } => {

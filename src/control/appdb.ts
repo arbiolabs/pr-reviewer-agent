@@ -120,6 +120,8 @@ export class AppDbSource implements ControlSource {
   async refreshAccounts(maxAgeMs: number): Promise<void> {
     if (this.gh && Date.now() - this.gh.at < maxAgeMs) return;
     const detection = await detectGh(this.env);
+    // The daemon can close while gh answers; there is nothing left to record it in.
+    if (!this.db.isOpen) return;
     this.gh = { at: Date.now(), detection };
     const seen = JSON.stringify(detection.installed ? detection.accounts : null);
     if ((this.writer.getMeta(SEEN_KEY) ?? "null") === seen) return;

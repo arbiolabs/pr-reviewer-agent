@@ -6,6 +6,7 @@ use gpui_kit::component::tooltip::Tooltip;
 use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use pr_review_tui::protocol::{Phase, Severity};
+use pr_review_tui::waterfall::local_time;
 
 use crate::queue::Mark;
 use crate::tokens::{Colors, DISABLED_OUTLINE, radius, severity_mark, space, text};
@@ -551,14 +552,19 @@ pub fn middle(s: &str, max: usize) -> String {
     format!("{} … {}", head.trim_end_matches([',', ' ']), tail.trim_start_matches([',', ' ']))
 }
 
-/// `14:30` from an ISO timestamp, the wall-clock time the daemon reported.
-pub fn clock(iso: &str) -> String {
-    iso.split('T').nth(1).map(|t| t.chars().take(5).collect()).unwrap_or_default()
+/// `2026-11-02` from a daemon timestamp, in this machine's time zone.
+pub fn date(iso: &str) -> String {
+    local_time(iso).map(|t| t[..10].to_string()).unwrap_or_default()
 }
 
-/// `14:30:05` from an ISO timestamp.
+/// `14:30` from a daemon timestamp, in this machine's time zone.
+pub fn clock(iso: &str) -> String {
+    local_time(iso).map(|t| t[11..16].to_string()).unwrap_or_default()
+}
+
+/// `14:30:05` from a daemon timestamp, in this machine's time zone.
 pub fn clock_s(iso: &str) -> String {
-    iso.split('T').nth(1).map(|t| t.chars().take(8).collect()).unwrap_or_default()
+    local_time(iso).map(|t| t[11..19].to_string()).unwrap_or_default()
 }
 
 /// The first `n` sentences of `s`: a preview that ends on a full stop instead of a clipped word.
@@ -612,6 +618,15 @@ pub fn segmented(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn dates_and_times_come_from_the_local_reading() {
+        let at = "2026-11-02T11:01:07.444Z";
+        let local = pr_review_tui::waterfall::local_time(at).unwrap();
+        assert_eq!(format!("{} {}", super::date(at), super::clock_s(at)), local);
+        assert_eq!(super::clock(at), local[11..16]);
+        assert_eq!(super::clock("not a time"), "");
+    }
+
     #[test]
     fn sentence_capitalizes_and_ends_with_a_full_stop() {
         assert_eq!(

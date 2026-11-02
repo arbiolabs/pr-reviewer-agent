@@ -506,6 +506,15 @@ describe("account.select", () => {
     return { dataDir, source, c, select, raw: () => raw, dbDump };
   }
 
+  it("a gh detection still running when the daemon closes drops its answer", async () => {
+    const dir = mkdtempSync(join(tmpdir(), "slow-gh-"));
+    writeFileSync(join(dir, "gh"), `#!/bin/sh\n/bin/sleep 0.2\necho '${JSON.stringify(GH_STATUS)}'\n`, { mode: 0o755 });
+    const source = AppDbSource.open(mkdtempSync(join(tmpdir(), "ctl-accounts-")), { PATH: dir });
+    const detecting = source.refreshAccounts(0);
+    await source.close();
+    await expect(detecting).resolves.toBeUndefined();
+  });
+
   it("rejects before streaming, then selects through the journal; the client sees the selection only in accounts.updated", async () => {
     const gh = fakeGh();
     const d = await accountsDaemon({ PATH: gh.dir });
