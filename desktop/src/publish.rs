@@ -257,7 +257,7 @@ pub fn publication(
                     t,
                     &mut lx,
                     &l,
-                    layout::COLS_WIDE,
+                    s.cols(layout::COLS_WIDE),
                     Some(n),
                     None,
                     hit.then(|| t.accent.alpha(0.12)),

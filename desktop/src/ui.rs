@@ -33,6 +33,7 @@ gpui_kit::actions!(
         Palette,
         Refresh,
         OpenGitHub,
+        ToggleSidebar,
         Settings,
         Shortcuts,
         Post,
@@ -69,6 +70,7 @@ pub fn bindings() -> Vec<KeyBinding> {
         KeyBinding::new("cmd-3", ArchivedList, None),
         KeyBinding::new("cmd-4", UsageView, None),
         KeyBinding::new("cmd-n", AddPr, None),
+        KeyBinding::new("cmd-b", ToggleSidebar, None),
         KeyBinding::new("cmd-v", Paste, None),
         // Ours, not the kit root's: the window records that the keyboard owns focus, so the ring shows.
         KeyBinding::new("tab", FocusNext, Some("pr-review")),
@@ -99,6 +101,7 @@ pub fn menus(chosen: tokens::Choice) -> Vec<Menu> {
             MenuItem::action("Archived", ArchivedList),
             MenuItem::action("Usage", UsageView),
             MenuItem::action("Back", GoBack),
+            MenuItem::action("Show or Hide Sidebar", ToggleSidebar),
             MenuItem::separator(),
             MenuItem::action("Command Palette", Palette),
             MenuItem::action("Settings", Settings),
@@ -233,6 +236,8 @@ pub struct Shell {
     pub queued_add: Option<String>,
     /// The app runs from the menu bar alone, as `[desktop] hide_dock` saved it.
     pub hide_dock: bool,
+    /// The reader collapsed the sidebar, as `[desktop] sidebar_hidden` saved it.
+    pub sidebar_hidden: bool,
     /// The login item is installed.
     pub open_at_login: bool,
     pub update: crate::update::Update,
@@ -325,6 +330,7 @@ impl Shell {
             settings_scroll_to: None,
             queued_add: None,
             hide_dock: false,
+            sidebar_hidden: false,
             open_at_login: !snapshot && crate::menubar::opens_at_login(),
             update: crate::update::Update::Idle,
             update_script: if snapshot { None } else { crate::update::script() },
@@ -334,6 +340,7 @@ impl Shell {
                 Desk::Tab(list) => s.set_tab(*list, cx),
                 Desk::Palette(q) => s.overlay = Some(Overlay::Palette { query: q.clone(), selected: 0 }),
                 Desk::Keys => s.overlay = Some(Overlay::Keys),
+                Desk::SidebarHidden => s.sidebar_hidden = true,
                 Desk::ConfirmPost => s.post(false, cx),
                 Desk::AddPr(url) => {
                     s.overlay = Some(Overlay::AddPr { url: url.clone(), sent: s.model.adding.is_some() })
@@ -464,6 +471,55 @@ impl Shell {
             self.notice(format!("Theme not saved: {e}"));
         }
         cx.notify();
+    }
+
+    /// ⌘B, the title bar and the palette: collapses the sidebar or brings it back, and saves it as
+    /// [desktop] sidebar_hidden.
+    pub fn toggle_sidebar(&mut self, cx: &mut Context<Self>) {
+        self.sidebar_hidden = !self.sidebar_hidden;
+        if !self.snapshot
+            && let Err(e) = pr_review_tui::config::set_desktop(
+                &self.reviewer.config_path,
+                "sidebar_hidden",
+                self.sidebar_hidden.into(),
+            )
+        {
+            self.notice(format!("Sidebar setting not saved: {e}"));
+        }
+        cx.notify();
+    }
+
+    pub fn sidebar_w(&self) -> Pixels {
+        if self.sidebar_hidden { px(0.) } else { layout::SIDEBAR }
+    }
+
+    /// The queue column's width; none on a page that fills the window.
+    pub fn queue_w(&self) -> Pixels {
+        let m = &self.model;
+        let stage = queue::stage(m);
+        let page = matches!(m.ui.screen, Screen::Diff | Screen::Settings) || self.usage_open();
+        let finding = matches!(front(m), Some(Modal::Finding { .. }));
+        if !page && (stage == Stage::Connecting || stage == Stage::Ready && !finding) {
+            queue_width(self.width - self.sidebar_w())
+        } else {
+            px(0.)
+        }
+    }
+
+    /// The detail pane's width, or the page's where a page fills the window.
+    pub fn pane_w(&self) -> f32 {
+        f32::from(self.width - self.sidebar_w() - self.queue_w())
+    }
+
+    /// The width a pane's page lays its content in: at most its 760-point column, less the insets.
+    pub fn page_w(&self) -> f32 {
+        self.pane_w().min(760.) - 64.
+    }
+
+    /// `at_1280` code columns, less what this window takes from the pane compared with the 1280-point grid.
+    pub fn cols(&self, at_1280: usize) -> usize {
+        let queue = if self.queue_w() > px(0.) { layout::QUEUE } else { px(0.) };
+        code_cols(at_1280, f32::from(px(1280.) - layout::SIDEBAR - queue) - self.pane_w())
     }
 
     /// Takes the Dock icon away or brings it back at once, and saves it as [desktop] hide_dock. The menu bar item
@@ -980,7 +1036,7 @@ impl Render for Shell {
                         List::Queue => crate::cards::queue_column(self, &t, cx),
                     })
                 })
-                .when(stage == Stage::Connecting, |d| d.child(crate::cards::skeleton_column(&t)))
+                .when(stage == Stage::Connecting, |d| d.child(crate::cards::skeleton_column(self, &t)))
                 .child(detail::pane(self, &t, window, cx))
                 .into_any_element(),
         };
@@ -1048,6 +1104,7 @@ impl Render for Shell {
             .on_action(cx.listener(|s, _: &DoneList, _, cx| s.set_tab(List::Done, cx)))
             .on_action(cx.listener(|s, _: &ArchivedList, _, cx| s.set_tab(List::Archived, cx)))
             .on_action(cx.listener(|s, _: &UsageView, _, cx| s.open_usage(None, cx)))
+            .on_action(cx.listener(|s, _: &ToggleSidebar, _, cx| s.toggle_sidebar(cx)))
             // ⌘W hides the app as the close button does, so reviews keep running in the menu bar.
             .on_action(cx.listener(|_, _: &CloseWindow, _, cx| cx.hide()))
             .relative()
@@ -1059,7 +1116,7 @@ impl Render for Shell {
             .text_color(t.text)
             .child(titlebar(self, &t, cx))
             .child(
-                div().flex().flex_1().min_h_0().child(sidebar(self, &t, cx)).child(
+                div().flex().flex_1().min_h_0().when(!self.sidebar_hidden, |d| d.child(sidebar(self, &t, cx))).child(
                     div()
                         .flex()
                         .flex_col()
@@ -1087,7 +1144,7 @@ pub fn on(cx: &Context<Shell>, f: impl Fn(&mut Shell, &mut Context<Shell>) + 'st
 }
 
 /// The app's mark and name, set off from the page title by a hairline.
-fn brand(t: &Colors) -> Div {
+fn brand(t: &Colors, named: bool) -> Div {
     let mark = div()
         .relative()
         .size(px(22.))
@@ -1103,7 +1160,9 @@ fn brand(t: &Colors) -> Div {
         .border_r_1()
         .border_color(t.border)
         .child(mark)
-        .child(div().text_size(text::SMALL).font_weight(FontWeight::SEMIBOLD).text_color(t.text).child(APP_NAME))
+        .when(named, |d| {
+            d.child(div().text_size(text::SMALL).font_weight(FontWeight::SEMIBOLD).text_color(t.text).child(APP_NAME))
+        })
 }
 
 /// The title bar: the traffic lights, the app's mark and name, the page title with its one-sentence state, and the ⌘K field.
@@ -1186,7 +1245,16 @@ fn titlebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         .border_b_1()
         .border_color(t.border)
         .window_control_area(WindowControlArea::Drag)
-        .child(brand(t))
+        .child(crate::kit::icon_button(
+            t,
+            "toggle-sidebar",
+            if s.sidebar_hidden { IconName::PanelLeftOpen } else { IconName::PanelLeftClose },
+            if s.sidebar_hidden { "Show sidebar (⌘B)" } else { "Hide sidebar (⌘B)" },
+            px(28.),
+            Some(click(cx, |s, cx| s.toggle_sidebar(cx))),
+        ))
+        // A narrow window keeps the mark and gives the name's room to the page title.
+        .child(brand(t, s.width >= px(1120.)))
         // Back as a macOS toolbar button: a chevron in a square that lights on hover, its shortcut in the tooltip.
         .when(away, |d| {
             d.child(crate::kit::icon_button(
@@ -1205,8 +1273,9 @@ fn titlebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                 .gap(space::S3)
                 .flex_1()
                 .min_w_0()
-                .child(div().flex_none().text_size(text::LEAD).font_weight(FontWeight::SEMIBOLD).child(title))
-                .child(div().min_w_0().truncate().text_size(text::SMALL).text_color(t.muted).child(sub)),
+                .child(div().min_w_0().truncate().text_size(text::LEAD).font_weight(FontWeight::SEMIBOLD).child(title))
+                // The sentence takes only what the title leaves, so it gives way first.
+                .child(div().flex_1().min_w_0().truncate().text_size(text::SMALL).text_color(t.muted).child(sub)),
         )
         // The live strip belongs to the home; on a deep page the title bar keeps the one fact: reviews are at work.
         .children({
@@ -1429,6 +1498,16 @@ pub fn setup_shown(s: &Shell) -> bool {
             && queue::setup_count(m).blocking > 0
 }
 
+/// The queue column in `room` points shared with the detail pane: its full width while the pane keeps its minimum.
+fn queue_width(room: Pixels) -> Pixels {
+    (room - layout::DETAIL_MIN).clamp(layout::QUEUE_MIN, layout::QUEUE)
+}
+
+/// Code columns after a pane lost `lost` points at Menlo 12's 7.22 a character, down to a readable least.
+fn code_cols(at_1280: usize, lost: f32) -> usize {
+    at_1280.saturating_sub((lost.max(0.) / 7.22).ceil() as usize).max(20)
+}
+
 /// The sidebar: the smart lists, then every PR grouped by repository with its state, then the connection.
 fn sidebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
     let m = &s.model;
@@ -1535,6 +1614,7 @@ fn sidebar(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         .flex_none()
         .w(layout::SIDEBAR)
         .h_full()
+        .min_w_0()
         .bg(s.glass(t.sidebar))
         .border_r_1()
         .border_color(t.border)
@@ -1896,6 +1976,23 @@ fn pill(s: &Shell, t: &Colors, p: &Pr, r: &Run, cx: &Context<Shell>) -> Stateful
 
 #[cfg(test)]
 mod tests {
+    use gpui_kit::px;
+
+    #[test]
+    fn the_queue_gives_way_before_the_detail_pane_does() {
+        assert_eq!(super::queue_width(px(1280.) - super::layout::SIDEBAR), px(400.), "the 1280-point grid");
+        assert_eq!(super::queue_width(px(960.)), px(400.), "the smallest window, sidebar collapsed");
+        assert_eq!(super::queue_width(px(960.) - super::layout::SIDEBAR), px(300.), "the smallest window");
+    }
+
+    #[test]
+    fn code_wraps_earlier_only_when_the_pane_lost_room() {
+        assert_eq!(super::code_cols(71, 0.), 71);
+        assert_eq!(super::code_cols(71, -400.), 71, "a wider pane keeps the grid's measure");
+        assert_eq!(super::code_cols(71, 72.2), 61);
+        assert_eq!(super::code_cols(71, 900.), 20, "never below a readable least");
+    }
+
     #[test]
     fn a_pr_links_to_github_only_for_a_plain_owner_and_repo() {
         let pr = |repository: &str| -> pr_review_tui::protocol::Pr {

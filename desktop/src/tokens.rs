@@ -557,6 +557,9 @@ pub mod layout {
     use super::{Pixels, px};
     pub const SIDEBAR: Pixels = px(232.);
     pub const QUEUE: Pixels = px(400.);
+    /// In a narrow window the queue gives way down to this, so the detail pane keeps `DETAIL_MIN`.
+    pub const QUEUE_MIN: Pixels = px(300.);
+    pub const DETAIL_MIN: Pixels = px(428.);
     pub const TOOLBAR: Pixels = px(52.);
     pub const STRIP: Pixels = px(44.);
     /// The pinned action bar under a page.
@@ -570,8 +573,7 @@ pub mod layout {
     pub const ARGUMENT: Pixels = px(360.);
     /// Code never clips and never scrolls sideways: every block soft-wraps at these columns, the most Menlo 12
     /// (7.22 points a character) fits beside the gutter on each surface at 1280 points, less a few for safety.
-    /// ponytail: fixed counts instead of measuring the pane, so a narrower window wraps late; measure the pane if
-    /// the window gets resizable below 1280.
+    /// `Shell::cols` takes off what a narrower window loses.
     pub const COLS_EVIDENCE: usize = 71;
     /// The finding's hunk, beside its sign column.
     pub const COLS_HUNK: usize = 68;

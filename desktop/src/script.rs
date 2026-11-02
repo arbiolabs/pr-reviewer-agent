@@ -44,6 +44,8 @@ pub enum Desk {
     Palette(String),
     /// `keys`: the shortcut sheet.
     Keys,
+    /// `sidebar-hidden`: the sidebar collapsed, as ⌘B leaves it.
+    SidebarHidden,
     /// `confirm-post`: the sheet that asks before posting the proof in front.
     ConfirmPost,
     /// `flagged`: the diff lists only the files with findings.
@@ -165,6 +167,7 @@ pub fn parse(s: &str) -> Result<Vec<Step>, String> {
             }))),
             None if t == "palette" => steps.push(Step::Desk(Desk::Palette(String::new()))),
             None if t == "keys" => steps.push(Step::Desk(Desk::Keys)),
+            None if t == "sidebar-hidden" => steps.push(Step::Desk(Desk::SidebarHidden)),
             None if t == "confirm-post" => steps.push(Step::Desk(Desk::ConfirmPost)),
             None if t == "add-pr" => steps.push(Step::Desk(Desk::AddPr(String::new()))),
             Some(("add-pr", v)) => steps.push(Step::Desk(Desk::AddPr(v.into()))),

@@ -12,7 +12,7 @@ use std::ops::Range;
 
 use crate::detail::who;
 use crate::kit::{Tone, button, icon, keycap, overline, tip};
-use crate::queue::{self, Card, Stage};
+use crate::queue::{self, Card};
 use crate::reviewer::{Ask, Reviewer};
 use crate::setup::Tab as SettingsTab;
 use crate::tokens::{Choice, Colors, layout, radius, space, text};
@@ -28,6 +28,7 @@ enum Run {
     Archive,
     Tab(List),
     Usage,
+    Sidebar,
     Keys,
     AddPr,
     Reviewer(Ask),
@@ -173,6 +174,13 @@ fn entries(m: &Model, r: &Reviewer, theme: Choice) -> Vec<Entry> {
             run: Run::Tab(List::Archived),
         },
         Entry { group: "View", title: "Usage".into(), key: Some("⌘4"), blocked: None, run: Run::Usage },
+        Entry {
+            group: "View",
+            title: "Show or hide the sidebar".into(),
+            key: Some("⌘B"),
+            blocked: None,
+            run: Run::Sidebar,
+        },
         Entry {
             group: "View",
             title: "Diff of the selected PR".into(),
@@ -330,6 +338,7 @@ fn run(s: &mut Shell, r: Run, cx: &mut Context<Shell>) {
         Run::Archive => s.archive(cx),
         Run::Tab(list) => s.set_tab(list, cx),
         Run::Usage => s.open_usage(None, cx),
+        Run::Sidebar => s.toggle_sidebar(cx),
         Run::Keys => s.overlay = Some(Overlay::Keys),
         Run::AddPr => s.add_pr(cx),
         Run::Reviewer(ask) => s.ask(ask, cx),
@@ -432,10 +441,7 @@ pub fn layer(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Vec<AnyElement> {
     let m = &s.model;
     let mut out = Vec::new();
     // A toast floats over the detail pane, above its action bar, so it never covers a card's button in the queue.
-    let queue_shown = queue::stage(m) == Stage::Ready
-        && matches!(m.ui.screen, Screen::Inbox | Screen::Review)
-        && !matches!(crate::ui::front(m), Some(Modal::Finding { .. }));
-    let left = layout::SIDEBAR + if queue_shown { layout::QUEUE } else { px(0.) };
+    let left = s.sidebar_w() + s.queue_w();
     // The add-a-PR sheet says its own outcome in place; the same words in a toast under it would only repeat them.
     let adding = matches!(s.overlay, Some(Overlay::AddPr { .. }));
     if let Some(n) = m.notice.as_ref().filter(|_| !adding) {
@@ -559,6 +565,7 @@ fn glyph(m: &Model, e: &Entry) -> IconName {
         Run::Tab(List::Done) => IconName::CircleCheck,
         Run::Tab(List::Archived) => IconName::Archive,
         Run::Usage => IconName::ChartColumn,
+        Run::Sidebar => IconName::PanelLeft,
         Run::Keys => IconName::Keyboard,
         Run::AddPr => IconName::Plus,
         Run::Reviewer(Ask::Start) => IconName::Power,
@@ -1322,6 +1329,7 @@ const KEYS: &[(&str, &[(&str, &str)])] = &[
         &[
             ("⌘K  /", "command palette"),
             ("⌘N", "review a PR by its URL"),
+            ("⌘B", "show or hide the sidebar"),
             ("⌘1 ⌘2 ⌘3 ⌘4", "needs you, done, archived, usage"),
             ("D  W  M", "usage by day, week, month"),
             ("T  R  A  P", "usage over time, by repository, author, PR"),
@@ -1337,14 +1345,16 @@ const KEYS: &[(&str, &[(&str, &str)])] = &[
 
 fn keys(t: &Colors, cx: &Context<Shell>, reducer: bool) -> AnyElement {
     let groups = div().flex().gap(space::S6).children(KEYS.iter().map(|(g, rows)| {
-        div().flex().flex_col().gap(space::S2).flex_1().child(overline(t, *g)).children(rows.iter().map(|(k, what)| {
-            div()
-                .flex()
-                .items_center()
-                .gap(space::S3)
-                .child(div().w(px(64.)).flex().child(keycap(t, k, None, false)))
-                .child(div().text_size(text::SMALL).text_color(t.muted).child(what.to_string()))
-        }))
+        div().flex().flex_col().gap(space::S2).flex_1().min_w_0().child(overline(t, *g)).children(rows.iter().map(
+            |(k, what)| {
+                div()
+                    .flex()
+                    .items_start()
+                    .gap(space::S3)
+                    .child(div().w(px(92.)).flex_none().flex().child(keycap(t, k, None, false)))
+                    .child(div().flex_1().min_w_0().text_size(text::SMALL).text_color(t.muted).child(what.to_string()))
+            },
+        ))
     }));
     let s = scrim(t, "keys-scrim", cx, !reducer);
     let s = if reducer { s.on_click(cx.listener(|s, _: &ClickEvent, _, cx| s.act(Action::Back, cx))) } else { s };
@@ -1352,7 +1362,7 @@ fn keys(t: &Colors, cx: &Context<Shell>, reducer: bool) -> AnyElement {
         .items_center()
         .justify_center()
         .child(
-            sheet(t, px(780.))
+            sheet(t, px(900.))
                 .p(space::S6)
                 .gap(space::S5)
                 .child(div().text_size(text::TITLE).font_weight(FontWeight::SEMIBOLD).child("Keyboard shortcuts"))

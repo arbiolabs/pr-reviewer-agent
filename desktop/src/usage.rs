@@ -343,7 +343,7 @@ fn chart(s: &Shell, t: &Colors, r: &UsageReport) -> Div {
         .map(|(i, _)| i);
     let axis_w = px(52.);
     // The page column is at most 760 wide less its insets; the plot takes what the axis leaves.
-    let width = (f32::from(s.width) - f32::from(crate::tokens::layout::SIDEBAR) - 64.).clamp(240., 696.) - 52.;
+    let width = (f32::from(s.width - s.sidebar_w()) - 64.).clamp(240., 696.) - 52.;
     let named = labelled(r.buckets.len(), width);
     let ticks = div().absolute().inset_0().children((0..marks.len()).map(|k| {
         let frac = k as f32 / last;
