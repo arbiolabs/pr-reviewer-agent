@@ -1153,7 +1153,7 @@ fn history_rows(t: &Colors, m: &Model, f: &Finding, history: &[HistoryEntry]) ->
                             format!(
                                 "{}{} {} · run {}",
                                 sha.unwrap_or_default(),
-                                h.at.as_str().get(..10).unwrap_or(""),
+                                crate::kit::date(h.at.as_str()),
                                 clock(h.at.as_str()),
                                 h.run_id.short()
                             ),

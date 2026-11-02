@@ -217,6 +217,25 @@ pub fn epoch_ms(at: &str) -> Option<i64> {
     Some(((days * 24 + h) * 60 + mi) * 60_000 + s * 1000 + frac)
 }
 
+/// A daemon timestamp, always UTC, in this machine's time zone: `YYYY-MM-DD HH:MM:SS`.
+pub fn local_time(at: &str) -> Option<String> {
+    let secs = epoch_ms(at)?.div_euclid(1000) as libc::time_t;
+    // SAFETY: `tm` is plain data and localtime_r only writes through the pointers it is given.
+    let tm = unsafe {
+        let mut tm = std::mem::zeroed::<libc::tm>();
+        (!libc::localtime_r(&secs, &mut tm).is_null()).then_some(tm)
+    }?;
+    Some(format!(
+        "{:04}-{:02}-{:02} {:02}:{:02}:{:02}",
+        tm.tm_year + 1900,
+        tm.tm_mon + 1,
+        tm.tm_mday,
+        tm.tm_hour,
+        tm.tm_min,
+        tm.tm_sec
+    ))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

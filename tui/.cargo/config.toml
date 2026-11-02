@@ -1,0 +1,3 @@
+# The golden snapshots print times, and those read in the local time zone.
+[env]
+TZ = "UTC"
