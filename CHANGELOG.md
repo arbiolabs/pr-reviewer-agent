@@ -4,6 +4,8 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 ## [Unreleased]
 
+## [1.11.2] - 2026-11-02
+
 ### Added
 
 - **Collapse the sidebar.** ⌘B, the title bar's button, the View menu or the palette hides the sidebar, and the app remembers it (#95).
@@ -236,7 +238,8 @@ This is the first release.
   - the PR is still open.
 - Command idempotency keys are bound to each run attempt, so a replayed command never has a second effect.
 
-[Unreleased]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.11.1...HEAD
+[Unreleased]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.11.2...HEAD
+[1.11.2]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.11.1...v1.11.2
 [1.11.1]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.11.0...v1.11.1
 [1.11.0]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.10.0...v1.11.0
 [1.10.0]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.9.0...v1.10.0
