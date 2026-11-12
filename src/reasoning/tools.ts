@@ -14,7 +14,7 @@ import {
   type ToolExecutionApi,
   type ToolExecutionResult,
 } from "@earendil-works/pi-durable";
-import type { CandidateFinding, FocusFile, ResolutionClaim } from "../domain/types.ts";
+import { type CandidateFinding, type FocusFile, RISK_ASPECTS, type ResolutionClaim, type RiskNote } from "../domain/types.ts";
 import type { AppStore, RevisionRow, Snapshot } from "../persistence/store.ts";
 import type { FileDiff } from "../source/diff.ts";
 import { isGenerated } from "./guidance.ts";
@@ -83,6 +83,10 @@ export function focusFiles(focus: FocusFile[], changed: { path: string }[], gene
   }
   return kept.slice(0, 3);
 }
+
+/** The model's risk notes, each aspect once in a fixed order, with the reason on one line: they go into the posted message. */
+export const riskNotes = (risk: RiskNote[]): RiskNote[] =>
+  RISK_ASPECTS.flatMap((aspect) => risk.find((r) => r.aspect === aspect) ?? []).map((r) => ({ ...r, reason: r.reason.replace(/\s+/g, " ").trim() }));
 
 export const REVIEW_TOOLS_NAME = "pr-review-tools";
 
@@ -276,7 +280,7 @@ export function createReviewTools(deps: ToolDeps): Extension {
           }
           const resolutions = (args.resolutions ?? []) as ResolutionClaim[];
           const focus = focusFiles(args.focus ?? [], ws.snapshot.changedFiles, deps.generatedPaths ?? []);
-          const { stored } = deps.store.saveCandidateSet(ws.revision.id, args.candidates as CandidateFinding[], resolutions, focus);
+          const { stored } = deps.store.saveCandidateSet(ws.revision.id, args.candidates as CandidateFinding[], resolutions, focus, riskNotes(args.risk ?? []));
           log(ws, "submit_candidates", `${args.candidates.length} candidate(s), ${resolutions.length} resolution claim(s)`, startedAt);
           return {
             ...text(stored ? `Stored ${args.candidates.length} candidate(s) and ${resolutions.length} resolution claim(s) for verification.` : "Candidates were already submitted for this revision; this call changed nothing."),

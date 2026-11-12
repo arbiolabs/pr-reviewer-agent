@@ -22,4 +22,14 @@ Each candidate must:
 
 In `focus`, name up to three changed files a human reviewer should read first, most important first, each with one short sentence on what to check there. Pick the files where a mistake would cost the most, whether or not you report a defect in them. Leave out lock files and generated code. An empty list is fine for a small or obvious change.
 
+In `risk`, rate the merge risk of the whole pull request, one entry for each aspect, each `low`, `medium` or `high` with one short sentence on what in this change sets the level:
+
+- `alignment`: does the change do only what its title, description and linked issues say, or does it carry unrelated edits and side effects?
+- `impact`: how far does a mistake here reach? Authentication, permissions, payments, data that other code reads, and shared code with many callers rate higher.
+- `rollback`: how hard is it to undo after it ships? A destructive migration, a changed stored format or a public API change is hard to undo; a code-only change is easy.
+- `errors`: if the new code fails in production, would anyone see it? Swallowed errors and silent fallbacks rate higher than errors that are raised, logged or reported.
+- `tests`: do the changed tests cover the new behavior, including its failure paths?
+
+Rate what the code shows, not what the description claims. A small, contained change is low on most aspects, and that is a useful answer.
+
 Finish by calling `submit_candidates` exactly once. An empty list is a valid and common result once you have read the diff or the code; without that read it is rejected.

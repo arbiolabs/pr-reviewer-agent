@@ -128,6 +128,7 @@ The template holds plain text and `{{name}}` placeholders, and nothing else: no 
 | `{{unconfirmed_count}}` | New findings the reviewer suspects but could not show from the code. |
 | `{{carried}}` | Findings from earlier commits, under a heading per state; empty when there are none. |
 | `{{focus_files}}` | Up to three changed files the reviewer says to read first, each with why; empty when it named none. |
+| `{{merge_risk}}` | The reviewer's merge risk: the highest level, then each medium or high aspect with why; empty when it gave none. |
 | `{{limitations}}` | One “Scope limited: …” line per limit on what was reviewed; empty when none. |
 
 The default template reproduces the body pr-review posted before this setting existed:
@@ -142,6 +143,8 @@ Reviewed commit: `{{head_sha}}`
 {{findings_list}}
 
 {{carried}}
+
+{{merge_risk}}
 
 {{focus_files}}
 

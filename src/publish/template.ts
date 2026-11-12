@@ -32,6 +32,12 @@ export const TEMPLATE_VARIABLES = [
     description: "Up to three changed files the reviewer says to read first, each with why; empty when it named none.",
     sample: "Where to start reading:\n\n- `src/checkout/capture.ts`: the capture now runs before the order's state is saved",
   },
+  {
+    name: "merge_risk",
+    description: "The reviewer's merge risk: the highest level, then each medium or high aspect with why; empty when it gave none.",
+    sample:
+      "Merge risk: high.\n\n- Rollback (high): the migration drops `orders.legacy_id` and has no way back\n- Impact (medium): every checkout goes through the changed capture path",
+  },
   { name: "limitations", description: "One “Scope limited: …” line per limit on what was reviewed; empty when none.", sample: "" },
 ] as const;
 
@@ -48,6 +54,8 @@ Reviewed commit: \`{{head_sha}}\`
 {{findings_list}}
 
 {{carried}}
+
+{{merge_risk}}
 
 {{focus_files}}
 

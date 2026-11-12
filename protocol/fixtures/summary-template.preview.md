@@ -11,6 +11,11 @@ Still present from an earlier commit:
 
 - Low: Log line prints the card's last four digits (`src/checkout/log.ts:9`, first reported on `b131fd0`)
 
+Merge risk: high.
+
+- Rollback (high): the migration drops `orders.legacy_id` and has no way back
+- Impact (medium): every checkout goes through the changed capture path
+
 Where to start reading:
 
 - `src/checkout/capture.ts`: the capture now runs before the order's state is saved

@@ -4,6 +4,10 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- **Merge risk in the review message.** The reviewer rates the pull request low, medium or high on five aspects: whether it does only what it says, how far a mistake reaches, how hard it is to undo, whether a failure would be seen, and whether tests cover it. The message leads with the highest level and lists each medium or high aspect with why, so a person knows where to look before reading the diff. Custom templates get it as `{{merge_risk}}` (#97).
+
 ## [1.11.2] - 2026-11-02
 
 ### Added

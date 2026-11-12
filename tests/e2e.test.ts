@@ -133,3 +133,19 @@ it("puts the files the reviewer says to read first into the review message, drop
     await app.close();
   }
 }, 30_000);
+
+it("puts the reviewer's merge risk into the review message", async () => {
+  const fixture = createFixture();
+  const risk = [
+    { aspect: "impact", level: "high", reason: "a new route deletes orders" },
+    { aspect: "rollback", level: "low", reason: "code only" },
+  ];
+  const app = await open(mkdtempSync(join(tmpdir(), "e2e-")), fixture, [readDiff(), fauxAssistantMessage([fauxToolCall("submit_candidates", { candidates: [], risk })], { stopReason: "toolUse" })]);
+  try {
+    const revision = await finishReview(app, await startReview(app, fixture.pull, "1"));
+    expect(revision.state).toBe("COMPLETED");
+    expect(renderMarkdown(loadReport(app.store, revision.id))).toContain("Merge risk: high.\n\n- Impact (high): a new route deletes orders\n\nReview performed");
+  } finally {
+    await app.close();
+  }
+}, 30_000);
