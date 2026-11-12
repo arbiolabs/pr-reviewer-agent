@@ -4,6 +4,8 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 ## [Unreleased]
 
+## [1.12.0] - 2026-11-12
+
 ### Added
 
 - **Merge risk in the review message.** The reviewer rates the pull request low, medium or high on five aspects: whether it does only what it says, how far a mistake reaches, how hard it is to undo, whether a failure would be seen, and whether tests cover it. The message leads with the highest level and lists each medium or high aspect with why, so a person knows where to look before reading the diff. Custom templates get it as `{{merge_risk}}` (#97).
@@ -242,7 +244,8 @@ This is the first release.
   - the PR is still open.
 - Command idempotency keys are bound to each run attempt, so a replayed command never has a second effect.
 
-[Unreleased]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.11.2...HEAD
+[Unreleased]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.12.0...HEAD
+[1.12.0]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.11.2...v1.12.0
 [1.11.2]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.11.1...v1.11.2
 [1.11.1]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.11.0...v1.11.1
 [1.11.0]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.10.0...v1.11.0
