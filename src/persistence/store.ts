@@ -16,7 +16,7 @@ import {
 } from "../domain/machines.ts";
 import type { Usage } from "@earendil-works/pi-ai";
 import type { UsageRow } from "../domain/usage.ts";
-import { type CandidateFinding, type ChangedFile, type Disposition, type FocusFile, type PullInfo, type ResolutionClaim, type ResolutionVerdict, stableId } from "../domain/types.ts";
+import { type CandidateFinding, type ChangedFile, type Disposition, type FocusFile, type PullInfo, type ResolutionClaim, type ResolutionVerdict, type RiskNote, stableId } from "../domain/types.ts";
 import type { LinkedIssue } from "../github/pulls.ts";
 import { sanitize } from "../protocol/sanitize.ts";
 import type { ActivitySpan } from "../protocol/v1.ts";
@@ -589,17 +589,17 @@ export class AppStore {
   }
 
   /** First submission wins: a replayed or repeated submit_candidates call cannot replace the stored set. */
-  saveCandidateSet(revisionId: string, candidates: CandidateFinding[], resolutions: ResolutionClaim[] = [], focus: FocusFile[] = []): { id: string; stored: boolean } {
+  saveCandidateSet(revisionId: string, candidates: CandidateFinding[], resolutions: ResolutionClaim[] = [], focus: FocusFile[] = [], risk: RiskNote[] = []): { id: string; stored: boolean } {
     const id = stableId("candidates", revisionId);
     const info = this.db
-      .prepare("INSERT INTO candidate_sets (id, revision_id, candidates_json, resolutions_json, focus_json, created_at) VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING")
-      .run(id, revisionId, JSON.stringify(candidates), JSON.stringify(resolutions), JSON.stringify(focus), now());
+      .prepare("INSERT INTO candidate_sets (id, revision_id, candidates_json, resolutions_json, focus_json, risk_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT (id) DO NOTHING")
+      .run(id, revisionId, JSON.stringify(candidates), JSON.stringify(resolutions), JSON.stringify(focus), JSON.stringify(risk), now());
     return { id, stored: info.changes === 1 };
   }
 
   candidateSet(
     revisionId: string,
-  ): { id: string; candidates: CandidateFinding[]; resolutions: ResolutionClaim[]; focus: FocusFile[]; dispositions: Disposition[] | null; verdicts: ResolutionVerdict[] | null } | undefined {
+  ): { id: string; candidates: CandidateFinding[]; resolutions: ResolutionClaim[]; focus: FocusFile[]; risk: RiskNote[]; dispositions: Disposition[] | null; verdicts: ResolutionVerdict[] | null } | undefined {
     const row = this.db.prepare("SELECT * FROM candidate_sets WHERE revision_id = ?").get(revisionId) as Record<string, string | null> | undefined;
     if (!row) return undefined;
     return {
@@ -607,6 +607,7 @@ export class AppStore {
       candidates: JSON.parse(row.candidates_json!),
       resolutions: row.resolutions_json ? JSON.parse(row.resolutions_json) : [],
       focus: row.focus_json ? JSON.parse(row.focus_json) : [],
+      risk: row.risk_json ? JSON.parse(row.risk_json) : [],
       dispositions: row.dispositions_json ? JSON.parse(row.dispositions_json) : null,
       verdicts: row.resolution_verdicts_json ? JSON.parse(row.resolution_verdicts_json) : null,
     };

@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { expect, it } from "vitest";
 import { main } from "../src/cli/main.ts";
 import { renderSummary } from "../src/cli/report.ts";
+import type { RiskNote } from "../src/domain/types.ts";
 import { loadConfig } from "../src/config/config.ts";
 import type { FindingView } from "../src/persistence/store.ts";
 import { buildPayload, MAX_BODY_CHARS, marker } from "../src/publish/publisher.ts";
@@ -82,7 +83,7 @@ it("the default template builds the same payload hashes as the renderer before i
   });
 });
 
-const facts = { repo: "acme/shop", prNumber: 7, prTitle: "Fix {{repo}} parsing", prAuthor: "", model: "faux/reviewer", focus: [] };
+const facts = { repo: "acme/shop", prNumber: 7, prTitle: "Fix {{repo}} parsing", prAuthor: "", model: "faux/reviewer", focus: [], risk: [] };
 
 it("fills a custom template from the same values, drops an empty variable's line, and never expands a placeholder inside a value", () => {
   const template =
@@ -148,4 +149,20 @@ it("lists the files to read first under the findings, and nothing for a run that
     "\n\nWhere to start reading:\n\n- `src/checkout/capture.ts`: the capture now runs before the order is saved\n- `src/checkout/retry.ts`: the retry has no upper bound\n\nReview performed with isolated read-only tools.",
   );
   expect(renderSummary(sha("h"), CASES.clean!.findings, [], "Review did not complete (FAILED).", { facts: { ...facts, focus } })).not.toContain("Where to start reading");
+});
+
+it("leads the merge risk with its highest level, lists the aspects worth a look, and says nothing when there is none", () => {
+  const risk = [
+    { aspect: "alignment", level: "low", reason: "does what the issue asks" },
+    { aspect: "impact", level: "medium", reason: "every checkout goes through the changed path" },
+    { aspect: "rollback", level: "high", reason: "the migration drops `orders.legacy_id`" },
+  ] as const;
+  const body = (r: readonly RiskNote[], incomplete?: string) => renderSummary(sha("h"), CASES.clean!.findings, [], incomplete, { facts: { ...facts, risk: [...r] } });
+  expect(body(risk)).toContain(
+    "\n\nMerge risk: high.\n\n- Rollback (high): the migration drops `orders.legacy_id`\n- Impact (medium): every checkout goes through the changed path\n\nReview performed",
+  );
+  expect(body(risk)).not.toContain("Alignment");
+  expect(body([risk[0]])).toContain("\n\nMerge risk: low.\n\nReview performed");
+  expect(body([])).not.toContain("Merge risk");
+  expect(body(risk, "Review did not complete (FAILED).")).not.toContain("Merge risk");
 });

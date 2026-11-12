@@ -1,5 +1,5 @@
 import { type Static, Type } from "@earendil-works/pi-ai";
-import { CATEGORIES, EVIDENCE_KINDS, SEVERITIES } from "../domain/types.ts";
+import { CATEGORIES, EVIDENCE_KINDS, RISK_ASPECTS, RISK_LEVELS, SEVERITIES } from "../domain/types.ts";
 
 const literals = <T extends readonly string[]>(values: T) => Type.Union(values.map((v) => Type.Literal(v)));
 
@@ -53,6 +53,16 @@ export const SubmitCandidatesSchema = Type.Object({
         reason: Type.String({ maxLength: 200, description: "One short sentence: what a person should check there" }),
       }),
       { maxItems: 3, description: "The changed files a human reviewer should read first, most important first" },
+    ),
+  ),
+  risk: Type.Optional(
+    Type.Array(
+      Type.Object({
+        aspect: literals(RISK_ASPECTS),
+        level: literals(RISK_LEVELS),
+        reason: Type.String({ maxLength: 200, description: "One short sentence on what in this change sets the level" }),
+      }),
+      { maxItems: RISK_ASPECTS.length, description: "The merge risk of this pull request, one entry per aspect" },
     ),
   ),
 });

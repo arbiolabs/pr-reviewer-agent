@@ -1,4 +1,4 @@
-import { type CandidateFinding, type Disposition, type FocusFile, type ResolutionVerdict, SEVERITIES } from "../domain/types.ts";
+import { type CandidateFinding, type Disposition, type FocusFile, RISK_LEVELS, type ResolutionVerdict, type RiskAspect, type RiskNote, SEVERITIES } from "../domain/types.ts";
 import type { AppStore, AuditEvent, FindingView, OutboxRow, PullRow, RevisionRow, Snapshot } from "../persistence/store.ts";
 import { effectiveTemplate, fillTemplate, type TemplateValues } from "../publish/template.ts";
 
@@ -36,7 +36,7 @@ export function loadReport(store: AppStore, revisionId: string): ReviewReport {
     resolutions: store.candidateSet(revisionId)?.verdicts ?? [],
     audit: store.auditEvents(revisionId),
     outbox: store.outboxForRevision(revisionId),
-    facts: summaryFacts(revision, pr, snapshot, store.candidateSet(revisionId)?.focus),
+    facts: summaryFacts(revision, pr, snapshot, store.candidateSet(revisionId)),
   };
 }
 
@@ -76,21 +76,27 @@ const MAX_CARRIED_PER_SECTION = 20;
 export const unseen = (f: FindingView) => !f.carried || (f.reopens !== null && !f.listed);
 
 /** What the summary says about the PR beside its findings; a caller that does not know a part leaves it empty. */
-export type SummaryFacts = { repo: string; prNumber: number | null; prTitle: string; prAuthor: string; model: string; focus: FocusFile[] };
+export type SummaryFacts = { repo: string; prNumber: number | null; prTitle: string; prAuthor: string; model: string; focus: FocusFile[]; risk: RiskNote[] };
 
-const NO_FACTS: SummaryFacts = { repo: "", prNumber: null, prTitle: "", prAuthor: "", model: "", focus: [] };
+const NO_FACTS: SummaryFacts = { repo: "", prNumber: null, prTitle: "", prAuthor: "", model: "", focus: [], risk: [] };
 
 /**
  * A revision's facts: the title its context recorded, else the PR's; the model is the part of its reviewer version
- * after `m1+`; the files the reviewer said to read first.
+ * after `m1+`; the files the reviewer said to read first and its merge risk.
  */
-export const summaryFacts = (revision: RevisionRow, pr: PullRow, snapshot: Snapshot | undefined, focus: FocusFile[] = []): SummaryFacts => ({
+export const summaryFacts = (
+  revision: RevisionRow,
+  pr: PullRow,
+  snapshot: Snapshot | undefined,
+  { focus, risk }: { focus: FocusFile[]; risk: RiskNote[] } = { focus: [], risk: [] },
+): SummaryFacts => ({
   repo: pr.repo_full_name,
   prNumber: pr.number,
   prTitle: snapshot?.pr.title ?? pr.title ?? "",
   prAuthor: pr.author ?? "",
   model: revision.reviewer_version.slice(revision.reviewer_version.indexOf("+") + 1),
   focus,
+  risk,
 });
 
 /**
@@ -140,8 +146,23 @@ function summaryValues(headSha: string, findings: FindingView[], limitations: st
     unconfirmed_count: count((f) => f.candidate.evidenceKind === "suspected"),
     carried: sections.join("\n\n"),
     focus_files: incomplete !== undefined || facts.focus.length === 0 ? "" : ["Where to start reading:", "", ...facts.focus.map((f) => `- \`${f.file}\`: ${f.reason}`)].join("\n"),
+    merge_risk: incomplete !== undefined ? "" : mergeRisk(facts.risk),
     limitations: limitations.map((l) => `Scope limited: ${l}.`).join("\n\n"),
   };
+}
+
+const RISK_LABELS: Record<RiskAspect, string> = { alignment: "Alignment", impact: "Impact", rollback: "Rollback", errors: "Error visibility", tests: "Tests" };
+
+/**
+ * The highest level any aspect reached, then the aspects at medium or high, highest first, each with why. Low aspects
+ * add nothing a reviewer acts on, so a pull request that is low throughout gets the one line.
+ */
+function mergeRisk(risk: RiskNote[]): string {
+  if (risk.length === 0) return "";
+  const rank = (r: RiskNote) => RISK_LEVELS.indexOf(r.level);
+  const worth = risk.filter((r) => r.level !== "low").sort((a, b) => rank(a) - rank(b));
+  const overall = worth[0]?.level ?? "low";
+  return [`Merge risk: ${overall}.`, ...(worth.length === 0 ? [] : ["", ...worth.map((r) => `- ${RISK_LABELS[r.aspect]} (${r.level}): ${r.reason}`)])].join("\n");
 }
 
 export function renderJson(report: ReviewReport) {

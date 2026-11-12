@@ -31,10 +31,20 @@ export type CandidateFinding = {
   priorFindingId?: string;
 };
 
-/** The model's claim that an open finding is fixed at the head, with the head-side code that shows it. Code checks it before it counts. */
 /** A changed file the reviewer says a person should read first, and why. */
 export type FocusFile = { file: string; reason: string };
 
+/** What could go wrong once a pull request merges, aspect by aspect: whether it does only what it says, how far a mistake reaches, how hard it is to undo, whether a failure would be seen, and whether tests cover it. */
+export const RISK_ASPECTS = ["alignment", "impact", "rollback", "errors", "tests"] as const;
+export type RiskAspect = (typeof RISK_ASPECTS)[number];
+
+export const RISK_LEVELS = ["high", "medium", "low"] as const;
+export type RiskLevel = (typeof RISK_LEVELS)[number];
+
+/** The reviewer's read of one aspect of a pull request's merge risk, and why. */
+export type RiskNote = { aspect: RiskAspect; level: RiskLevel; reason: string };
+
+/** The model's claim that an open finding is fixed at the head, with the head-side code that shows it. Code checks it before it counts. */
 export type ResolutionClaim = { findingId: string; codeEvidence: CodeEvidence[]; reason: string; evidenceKind: EvidenceKind };
 
 /** How VERIFY judged one resolution claim. Only ACCEPTED moves a finding to RESOLVED. */

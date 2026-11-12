@@ -1,7 +1,7 @@
 import { expect, it } from "vitest";
 import { DEFAULT_CONFIG } from "../src/config/config.ts";
 import { isGenerated, loadGuidance } from "../src/reasoning/guidance.ts";
-import { focusFiles } from "../src/reasoning/tools.ts";
+import { focusFiles, riskNotes } from "../src/reasoning/tools.ts";
 import { BlobTooLargeError } from "../src/source/git.ts";
 
 const files = (tree: Record<string, string>) => async (path: string) => {
@@ -52,5 +52,18 @@ it("keeps only focus files the PR changes, not generated ones, each once, on one
     { file: "a.ts", reason: "first line" },
     { file: "b.ts", reason: "b" },
     { file: "c.ts", reason: "c" },
+  ]);
+});
+
+it("keeps each risk aspect once, in a fixed order, with its reason on one line", () => {
+  expect(
+    riskNotes([
+      { aspect: "tests", level: "medium", reason: "no test\n  for the failure path" },
+      { aspect: "impact", level: "high", reason: "auth" },
+      { aspect: "tests", level: "low", reason: "a second answer" },
+    ]),
+  ).toEqual([
+    { aspect: "impact", level: "high", reason: "auth" },
+    { aspect: "tests", level: "medium", reason: "no test for the failure path" },
   ]);
 });
