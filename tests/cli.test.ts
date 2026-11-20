@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { createModels, fauxAssistantMessage, fauxProvider, fauxToolCall, type Models } from "@earendil-works/pi-ai";
+import { createModels, fauxAssistantMessage, fauxProvider, fauxToolCall, type AuthInteraction, type Models } from "@earendil-works/pi-ai";
 import { expect, it, vi } from "vitest";
 import { jevRoute, main } from "../src/cli/main.ts";
 import { DEFAULT_CONFIG } from "../src/config/config.ts";
@@ -143,4 +143,26 @@ it("logs in with an API key when asked, and with OAuth by default where the prov
   expect(await main(["login", "anthropic", "--api-key"], deps)).toBe(0);
   expect(await main(["login", "anthropic"], deps)).toBe(0);
   expect(logins).toEqual(["anthropic api_key", "anthropic oauth"]);
+});
+
+it("logs in with --browser and no terminal: it takes the browser method, opens the page, and never answers the code prompt", async () => {
+  const opened: string[] = [];
+  let pasted = false;
+  const models = {
+    getProvider: () => ({ auth: { oauth: {} } }),
+    login: async (_provider: string, _type: string, i: AuthInteraction) => {
+      expect(await i.prompt({ type: "select", message: "method", options: [{ id: "browser", label: "Browser" }, { id: "copy_code", label: "Copy" }] })).toBe("browser");
+      i.notify({ type: "auth_url", url: "https://claude.ai/oauth/authorize?x=1" });
+      const manual = new AbortController();
+      void i.prompt({ type: "manual_code", message: "paste", signal: manual.signal }).then(() => (pasted = true), () => {});
+      await new Promise((r) => setTimeout(r, 20));
+      manual.abort();
+      return {};
+    },
+  } as unknown as Models;
+  const out: string[] = [];
+  expect(await main(["login", "anthropic", "--browser"], { models, openUrl: (u) => opened.push(u), out: (t) => out.push(t), err: () => {} })).toBe(0);
+  expect(opened).toEqual(["https://claude.ai/oauth/authorize?x=1"]);
+  expect(pasted).toBe(false);
+  expect(out.join("")).toContain("Logged in to anthropic (oauth)");
 });

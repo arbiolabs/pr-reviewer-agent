@@ -126,3 +126,13 @@ export class ReadOnlyCredentialStore implements CredentialStore {
     throw new Error(`refusing to delete credential for ${providerId}: read-only credential store`);
   }
 }
+
+/**
+ * The failure reason for an OAuth login whose refresh token the provider rejected (`invalid_grant`), which no retry
+ * can fix; undefined for any other error. The desktop app keys its "Log in again" button on "login expired".
+ */
+export function expiredLogin(message: string): string | undefined {
+  const provider = /OAuth refresh failed for (\S+?):/.exec(message)?.[1];
+  if (!provider || !message.includes("invalid_grant")) return undefined;
+  return `The ${provider} login expired. Log in again with pr-review login ${provider}, then retry.`;
+}

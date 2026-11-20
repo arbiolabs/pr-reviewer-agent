@@ -241,6 +241,7 @@ pub struct Shell {
     /// The login item is installed.
     pub open_at_login: bool,
     pub update: crate::update::Update,
+    pub login: crate::reviewer::Login,
     /// The install's update script; `None` in a snapshot or outside an install.
     pub update_script: Option<std::path::PathBuf>,
 }
@@ -333,6 +334,7 @@ impl Shell {
             sidebar_hidden: false,
             open_at_login: !snapshot && crate::menubar::opens_at_login(),
             update: crate::update::Update::Idle,
+            login: crate::reviewer::Login::Idle,
             update_script: if snapshot { None } else { crate::update::script() },
         };
         for d in desk {

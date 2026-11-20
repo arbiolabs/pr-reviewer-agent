@@ -60,3 +60,23 @@ it("keeps a FAILED revision failed until --retry, which is an audited override w
     store.close();
   }
 }, 60_000);
+
+it("fails an expired model login at once with the step that fixes it, since no retry can", async () => {
+  const fixture = createFixture();
+  const dataDir = mkdtempSync(join(tmpdir(), "retry-"));
+  const rejected = `OAuth refresh failed for anthropic: Anthropic token refresh request failed. details=Error: HTTP request failed. status=400; body={"error": "invalid_grant", "error_description": "Refresh token expired"}; stack=Error: HTTP request failed.\n    at postJson (anthropic.js:81:15)`;
+  const throws = () => {
+    throw new Error(rejected);
+  };
+  const app = await open(dataDir, fixture, [throws, throws, throws, throws]);
+  const failed = await finishReview(app, await startReview(app, fixture.pull, "1"));
+  await app.close();
+  expect(DEFAULT_CONFIG.review.max_retries_per_phase).toBeGreaterThan(0);
+  expect(failed.state).toBe("FAILED");
+  const store = AppStore.open(join(dataDir, "app.sqlite"));
+  try {
+    expect(store.auditEvents(failed.id).at(-1)!.detail).toBe("analyze failed after 1 attempts: The anthropic login expired. Log in again with pr-review login anthropic, then retry.");
+  } finally {
+    store.close();
+  }
+});

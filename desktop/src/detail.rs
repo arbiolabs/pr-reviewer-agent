@@ -435,6 +435,7 @@ pub fn pr_sentence(m: &Model, pr: &Pr, run: Option<&Run>) -> String {
         // The reason itself sits in the run block below, once.
         return match queue::ending(r) {
             Some(Ending::TooLarge) => "Too large to review. Shrink the PR, then retry.".into(),
+            Some(Ending::LoggedOut) => "The model login expired. Log in again, then retry.".into(),
             Some(Ending::Cancelled) => "Cancelled before it finished. Review again for a verdict.".into(),
             _ => "The review did not finish. Retry for a verdict.".into(),
         };
@@ -532,7 +533,7 @@ fn pr_page(s: &Shell, t: &Colors, pr: &Pr, run: Option<&Run>, cx: &Context<Shell
         cx,
     ));
     body = body.child(tabs(s, t, current.len(), false, cx));
-    body = body.child(run_block(s, t, run, &current));
+    body = body.child(run_block(s, t, run, &current, cx));
     body = body.child(
         div()
             .flex()
@@ -560,7 +561,7 @@ fn pr_page(s: &Shell, t: &Colors, pr: &Pr, run: Option<&Run>, cx: &Context<Shell
 }
 
 /// The run's gauge and its state, or what stands in its way.
-fn run_block(s: &Shell, t: &Colors, run: Option<&Run>, current: &[&Finding]) -> Div {
+fn run_block(s: &Shell, t: &Colors, run: Option<&Run>, current: &[&Finding], cx: &Context<Shell>) -> Div {
     let m = &s.model;
     let frame = |inner: Div| {
         div()
@@ -619,6 +620,12 @@ fn run_block(s: &Shell, t: &Colors, run: Option<&Run>, current: &[&Finding]) -> 
                         format!("{reason}\n\nNext step: exclude generated files or split the PR, then retry (⇧R).")
                     },
                 ),
+                Ending::LoggedOut => (
+                    t.danger,
+                    IconName::CircleX,
+                    "Model login expired".to_string(),
+                    format!("{reason}\n\nNext step: log in again, then retry (⇧R). No retry works until then."),
+                ),
                 Ending::Failed => (
                     t.danger,
                     IconName::CircleX,
@@ -632,7 +639,8 @@ fn run_block(s: &Shell, t: &Colors, run: Option<&Run>, current: &[&Finding]) -> 
                     .flex_col()
                     .gap(space::S3)
                     .child(progress(t, queue::marks(m, r), hue, Gauge::Full))
-                    .child(callout(t, hue, glyph, title, Some(body))),
+                    .child(callout(t, hue, glyph, title, Some(body)))
+                    .children(queue::expired_login(r).map(|provider| login_row(s, t, provider, cx))),
             )
         }
         Some(r) => {
@@ -666,6 +674,35 @@ fn run_block(s: &Shell, t: &Colors, run: Option<&Run>, current: &[&Finding]) -> 
             )
         }
     }
+}
+
+/// Log in again, for a run whose model login expired: the button, then how the login the reader started stands.
+fn login_row(s: &Shell, t: &Colors, provider: String, cx: &Context<Shell>) -> Div {
+    use crate::reviewer::Login;
+    let ask = |label: &str| {
+        let provider = provider.clone();
+        button(t, "log-in-again", label, None, Tone::Primary, on(cx, move |s, cx| s.log_in(provider.clone(), cx)))
+    };
+    let (action, note, hue) = match &s.login {
+        Login::Idle => {
+            let name: String =
+                provider.chars().take(1).flat_map(char::to_uppercase).chain(provider.chars().skip(1)).collect();
+            (Some(ask("Log in again")), format!("Opens {name}'s sign-in page in your browser."), t.muted)
+        }
+        Login::Waiting => (
+            Some(button(t, "log-in-again", "Waiting for the browser", None, Tone::Secondary, None)),
+            "Finish signing in in your browser. This gives up after five minutes.".into(),
+            t.muted,
+        ),
+        Login::Done => (None, "Logged in. Retry (⇧R) to resume the review.".into(), t.ok),
+        Login::Failed(why) => (Some(ask("Try again")), why.clone(), t.danger),
+    };
+    div()
+        .flex()
+        .items_center()
+        .gap(space::S3)
+        .children(action)
+        .child(div().min_w_0().text_size(text::SMALL).line_height(text::LINE_BODY).text_color(hue).child(note))
 }
 
 /// A reviewed PR with nothing to judge: a designed state, not a blank. A failed run says why in its run block, so
@@ -1615,7 +1652,7 @@ pub fn fix_block(t: &Colors, fix: &str, path: &str) -> Div {
 }
 
 /// A line of GitHub markdown: `**bold**` and `` `code` ``.
-pub fn md_line(t: &Colors, src: &str) -> StyledText {
+pub fn md_line(t: &Colors, src: &str) -> crate::kit::Selectable {
     let (plain, spans) = inline_markdown(src);
     let marks: Vec<_> = spans
         .into_iter()
@@ -1633,7 +1670,7 @@ pub fn md_line(t: &Colors, src: &str) -> StyledText {
             )
         })
         .collect();
-    StyledText::new(plain).with_highlights(marks)
+    crate::kit::selectable(plain, marks)
 }
 
 #[cfg(test)]

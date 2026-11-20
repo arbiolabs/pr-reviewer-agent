@@ -438,9 +438,13 @@ pub fn callout(t: &Colors, hue: Hsla, glyph: IconName, title: impl Into<SharedSt
                         .text_color(t.text)
                         .child(title.into()),
                 )
-                .children(
-                    body.map(|b| div().text_size(text::BODY).line_height(text::LINE_BODY).text_color(t.muted).child(b)),
-                ),
+                .children(body.map(|b| {
+                    div()
+                        .text_size(text::BODY)
+                        .line_height(text::LINE_BODY)
+                        .text_color(t.muted)
+                        .child(selectable(b, vec![]))
+                })),
         )
 }
 
@@ -614,6 +618,125 @@ pub fn segmented(
         row = row.child(tip(focusable(SharedString::from(id), face, t, px(5.), on_click), words));
     }
     div().flex().child(row)
+}
+
+/// Text the reader can drag across and copy with ⌘C. It is gpui-kit's `SelectableText`, kept with the highlights
+/// a `StyledText` carries (bold, inline code), which that element drops. The kit's root draws the selection layer
+/// and binds the copy.
+pub struct Selectable {
+    id: ElementId,
+    text: SharedString,
+    styled: StyledText,
+}
+
+/// The id is the text's hash: stable across renders, so a selection outlives the next frame.
+pub fn selectable(
+    text: impl Into<SharedString>,
+    highlights: Vec<(std::ops::Range<usize>, HighlightStyle)>,
+) -> Selectable {
+    use std::hash::{Hash, Hasher};
+    let text = text.into();
+    let mut h = std::collections::hash_map::DefaultHasher::new();
+    text.hash(&mut h);
+    Selectable {
+        id: ElementId::Name(format!("sel-{:x}", h.finish()).into()),
+        styled: StyledText::new(text.clone()).with_highlights(highlights),
+        text,
+    }
+}
+
+impl IntoElement for Selectable {
+    type Element = Self;
+
+    fn into_element(self) -> Self {
+        self
+    }
+}
+
+impl Element for Selectable {
+    type RequestLayoutState = base::TextSelectionHandle;
+    type PrepaintState = ();
+
+    fn id(&self) -> Option<ElementId> {
+        Some(self.id.clone())
+    }
+
+    fn source_location(&self) -> Option<&'static std::panic::Location<'static>> {
+        None
+    }
+
+    fn request_layout(
+        &mut self,
+        id: Option<&GlobalElementId>,
+        inspector_id: Option<&InspectorElementId>,
+        window: &mut Window,
+        cx: &mut App,
+    ) -> (LayoutId, base::TextSelectionHandle) {
+        let handle = window.with_element_state(id.expect("Selectable has an id"), |kept, _| {
+            let handle = kept.unwrap_or_else(|| base::TextSelectionHandle::new(self.text.clone(), cx));
+            (handle.clone(), handle)
+        });
+        (self.styled.request_layout(id, inspector_id, window, cx).0, handle)
+    }
+
+    fn prepaint(
+        &mut self,
+        id: Option<&GlobalElementId>,
+        inspector_id: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        handle: &mut base::TextSelectionHandle,
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        self.styled.prepaint(id, inspector_id, bounds, &mut (), window, cx);
+        let hitbox = window.insert_hitbox(bounds, HitboxBehavior::Normal);
+        let registration = base::TextSelectionRegistration::new(hitbox, bounds)
+            .with_text_bounds(vec![bounds])
+            .with_rendered_element(handle, window, cx);
+        handle.register(registration, window, cx);
+    }
+
+    fn paint(
+        &mut self,
+        id: Option<&GlobalElementId>,
+        inspector_id: Option<&InspectorElementId>,
+        bounds: Bounds<Pixels>,
+        handle: &mut base::TextSelectionHandle,
+        _: &mut (),
+        window: &mut Window,
+        cx: &mut App,
+    ) {
+        let layout = self.styled.layout().clone();
+        let before = base::TextSelection::selected_text(window, cx);
+        let projection =
+            handle.update_runs(&[base::TextSelectionRun::new(self.text.clone(), layout.clone(), bounds)], cx);
+        if before != base::TextSelection::selected_text(window, cx) {
+            window.refresh();
+        }
+        let color = base::Theme::global(cx).tokens.colors.selection;
+        let line = layout.line_height();
+        for range in projection.ranges().iter().flatten() {
+            let (Some(a), Some(b)) = (layout.position_for_index(range.start), layout.position_for_index(range.end))
+            else {
+                continue;
+            };
+            // One band per line the range touches: from the start to the edge, full lines, then to the end.
+            let quads = if a.y == b.y {
+                vec![Bounds::from_corners(a, point(b.x, b.y + line))]
+            } else {
+                let mut q = vec![Bounds::from_corners(a, point(bounds.right(), a.y + line))];
+                if b.y > a.y + line {
+                    q.push(Bounds::from_corners(point(bounds.left(), a.y + line), point(bounds.right(), b.y)));
+                }
+                q.push(Bounds::from_corners(point(bounds.left(), b.y), point(b.x, b.y + line)));
+                q
+            };
+            for q in quads {
+                window.paint_quad(fill(q, color));
+            }
+        }
+        self.styled.paint(id, inspector_id, bounds, &mut (), &mut (), window, cx);
+    }
 }
 
 #[cfg(test)]

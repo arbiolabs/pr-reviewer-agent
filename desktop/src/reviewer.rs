@@ -25,8 +25,9 @@ pub const NOTICE_MS: u64 = 4_000;
 #[derive(Clone, Debug, PartialEq)]
 pub enum Launcher {
     /// A LaunchAgent in ~/Library/LaunchAgents that serves the socket this window dials. `relaunches` is its
-    /// `KeepAlive: true`: launchd starts it again even after a clean exit. `log` is its StandardErrorPath.
-    LaunchAgent { label: String, plist: PathBuf, relaunches: bool, log: Option<PathBuf> },
+    /// `KeepAlive: true`: launchd starts it again even after a clean exit. `log` is its StandardErrorPath. `program`
+    /// is its ProgramArguments before `daemon`: the pr-review it runs, for the app to run other commands with.
+    LaunchAgent { label: String, plist: PathBuf, relaunches: bool, log: Option<PathBuf>, program: Vec<String> },
     /// `pr-review daemon` started by the app, detached. `command` runs pr-review, in shell syntax.
     Spawn { command: String },
 }
@@ -105,7 +106,9 @@ pub fn parse_agent(label: &str, plist: PathBuf, json: &serde_json::Value, defaul
     let relaunches = json["KeepAlive"] == serde_json::Value::Bool(true);
     let log = json["StandardErrorPath"].as_str().map(PathBuf::from);
     let socket = socket.map_or_else(|| default.to_path_buf(), PathBuf::from);
-    (Launcher::LaunchAgent { label: label.into(), plist, relaunches, log }, socket)
+    let program =
+        args.iter().position(|a| *a == "daemon").map_or(vec![], |i| args[..i].iter().map(|a| a.to_string()).collect());
+    (Launcher::LaunchAgent { label: label.into(), plist, relaunches, log, program }, socket)
 }
 
 /// Which way to start the daemon on `socket`: its LaunchAgent when one serves that socket, else the configured
@@ -183,6 +186,28 @@ impl Launcher {
     pub fn relaunches(&self) -> bool {
         matches!(self, Launcher::LaunchAgent { relaunches: true, .. })
     }
+
+    /// `pr-review <args>` run the way the daemon is; `None` for a LaunchAgent that does not run `pr-review daemon`.
+    pub fn cli_argv(&self, args: &[&str]) -> Option<Vec<String>> {
+        let program = match self {
+            Launcher::LaunchAgent { program, .. } if !program.is_empty() => program.clone(),
+            Launcher::LaunchAgent { .. } => return None,
+            Launcher::Spawn { command } => {
+                vec!["/bin/sh".into(), "-c".into(), format!("exec {command} \"$@\""), "sh".into()]
+            }
+        };
+        Some(program.into_iter().chain(args.iter().map(|a| a.to_string())).collect())
+    }
+}
+
+/// Where a "Log in again" the reader asked for stands.
+#[derive(Clone, Debug, PartialEq)]
+pub enum Login {
+    Idle,
+    /// The browser is open on the provider's login page.
+    Waiting,
+    Done,
+    Failed(String),
 }
 
 /// What the ask becomes given the link now: a start settles when the daemon welcomes the window or the timeout
@@ -203,6 +228,12 @@ fn which(name: &str) -> Option<PathBuf> {
     std::env::split_paths(&path)
         .map(|d| d.join(name))
         .find(|p| std::fs::metadata(p).is_ok_and(|m| m.is_file() && m.permissions().mode() & 0o111 != 0))
+}
+
+/// The CLI's last word on stderr, as a sentence: `pr-review: <why>` from a failed command.
+fn login_failure(stderr: &str) -> String {
+    let last = stderr.lines().map(str::trim).rfind(|l| !l.is_empty()).unwrap_or("The login did not finish.");
+    crate::kit::sentence(last.strip_prefix("pr-review: ").unwrap_or(last))
 }
 
 fn uid() -> u32 {
@@ -384,6 +415,40 @@ impl Shell {
         cx.notify();
     }
 
+    /// Runs `pr-review login <provider> --browser` the way the daemon runs pr-review: the browser opens on the
+    /// provider's page, and the command exits once the credential is stored, or gives up after five minutes.
+    pub fn log_in(&mut self, provider: String, cx: &mut Context<Self>) {
+        if self.login == Login::Waiting {
+            return;
+        }
+        if !self.snapshot {
+            self.reviewer.detect();
+        }
+        let argv = self.reviewer.launcher.as_ref().ok().and_then(|l| l.cli_argv(&["login", &provider, "--browser"]));
+        let Some(argv) = argv else {
+            self.login =
+                Login::Failed(format!("This app can't find pr-review. Run pr-review login {provider} in a terminal."));
+            return cx.notify();
+        };
+        self.login = Login::Waiting;
+        cx.notify();
+        cx.spawn(async move |this, cx| {
+            let run = cx.background_executor().spawn(async move {
+                match Proc::new(&argv[0]).args(&argv[1..]).stdin(Stdio::null()).output() {
+                    Ok(o) if o.status.success() => Login::Done,
+                    Ok(o) => Login::Failed(login_failure(&String::from_utf8_lossy(&o.stderr))),
+                    Err(e) => Login::Failed(format!("Could not run {}: {e}", argv[0])),
+                }
+            });
+            let done = run.await;
+            let _ = this.update(cx, |s, cx| {
+                s.login = done;
+                cx.notify();
+            });
+        })
+        .detach();
+    }
+
     /// ⌘R: starts the reviewer when nothing is listening, else asks the daemon for a fresh snapshot.
     pub fn refresh(&mut self, cx: &mut Context<Self>) {
         if matches!(self.model.link, Link::Disconnected { .. })
@@ -550,7 +615,8 @@ mod tests {
                 label: "io.test.daemon".into(),
                 plist: "/L/io.test.daemon.plist".into(),
                 relaunches: true,
-                log: Some("/logs/d.log".into())
+                log: Some("/logs/d.log".into()),
+                program: vec!["/bin/pr-review".into()],
             }
         );
         let (l, socket) = agent(
@@ -587,6 +653,7 @@ mod tests {
             plist: "/Users/d/Library/LaunchAgents/io.test.daemon.plist".into(),
             relaunches: false,
             log: None,
+            program: vec!["/bin/pr-review".into()],
         };
         assert_eq!(agent.start_argv(501, true, socket), ["launchctl", "kickstart", "gui/501/io.test.daemon"]);
         assert_eq!(
@@ -620,6 +687,13 @@ mod tests {
             "daemon|--allow-commands|--socket|/Users/d/Library/Application Support/pr-review/reviewer.sock|"
         );
         assert!(spawn.bootout_argv(501).is_none());
+        assert_eq!(agent.cli_argv(&["login", "anthropic"]).unwrap(), ["/bin/pr-review", "login", "anthropic"]);
+        assert_eq!(
+            spawn.cli_argv(&["login", "anthropic"]).unwrap(),
+            ["/bin/sh", "-c", "exec '/My Tools/pr-review' \"$@\"", "sh", "login", "anthropic"]
+        );
+        let foreign = self::agent(r#"{"ProgramArguments":["/usr/bin/open","-a","Other.app"]}"#).0;
+        assert_eq!(foreign.cli_argv(&["login"]), None, "a LaunchAgent that runs no pr-review daemon gives no command");
     }
 
     #[test]

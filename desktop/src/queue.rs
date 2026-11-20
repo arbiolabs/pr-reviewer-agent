@@ -329,6 +329,8 @@ pub fn at_work(m: &Model) -> usize {
 pub enum Ending {
     Cancelled,
     TooLarge,
+    /// The model login expired; `expired_login` names the provider.
+    LoggedOut,
     Failed,
 }
 
@@ -343,9 +345,19 @@ pub fn ending(r: &Run) -> Option<Ending> {
         Ending::Cancelled
     } else if reason.contains("too large") {
         Ending::TooLarge
+    } else if expired_login(r).is_some() {
+        Ending::LoggedOut
     } else {
         Ending::Failed
     })
+}
+
+/// The provider whose login expired, from the daemon's "The <provider> login expired. Log in again with pr-review
+/// login <provider>, then retry."
+pub fn expired_login(r: &Run) -> Option<String> {
+    let reason = r.failure_reason.as_ref()?.as_str();
+    let provider = reason.split("pr-review login ").nth(1)?.split([' ', ',']).next()?;
+    (reason.contains("login expired") && !provider.is_empty()).then(|| provider.to_string())
 }
 
 /// What gets a stopped run going again: a cancel was the reader's choice, so it reviews the head afresh (the daemon
@@ -838,6 +850,21 @@ mod tests {
         assert!(!summary(&m).contains("#338"), "a cancel is not a failure: {}", summary(&m));
         let failed = at(20_000, "");
         assert_eq!(super::ending(&run_of(&failed, 345)), Some(super::Ending::TooLarge));
+    }
+
+    #[test]
+    fn an_expired_login_names_its_provider_and_anything_else_stays_a_failure() {
+        let mut r = run_of(&at(20_000, ""), 345);
+        r.failure_reason = Some(pr_review_tui::protocol::Text::new(
+            "analyze failed after 1 attempts: The anthropic login expired. Log in again with pr-review login \
+             anthropic, then retry.",
+        ));
+        assert_eq!(
+            (super::ending(&r), super::expired_login(&r).as_deref()),
+            (Some(super::Ending::LoggedOut), Some("anthropic"))
+        );
+        r.failure_reason = Some(pr_review_tui::protocol::Text::new("analyze failed after 4 attempts: socket hang up"));
+        assert_eq!((super::ending(&r), super::expired_login(&r)), (Some(super::Ending::Failed), None));
     }
 
     #[test]
