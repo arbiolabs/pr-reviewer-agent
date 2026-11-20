@@ -4,6 +4,8 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 ## [Unreleased]
 
+## [1.13.0] - 2026-11-20
+
 ### Added
 
 - **Log in again from the app.** When a review fails because the model login expired, the review shows a Log in again button. It opens the provider's sign-in page in the browser and says when the login is done, so a retry can resume the review. `pr-review login <provider> --browser` is the same login without a terminal (#99).
@@ -253,7 +255,8 @@ This is the first release.
   - the PR is still open.
 - Command idempotency keys are bound to each run attempt, so a replayed command never has a second effect.
 
-[Unreleased]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.12.0...HEAD
+[Unreleased]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.13.0...HEAD
+[1.13.0]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.12.0...v1.13.0
 [1.12.0]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.11.2...v1.12.0
 [1.11.2]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.11.1...v1.11.2
 [1.11.1]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.11.0...v1.11.1
