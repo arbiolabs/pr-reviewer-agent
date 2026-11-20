@@ -4,6 +4,15 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- **Log in again from the app.** When a review fails because the model login expired, the review shows a Log in again button. It opens the provider's sign-in page in the browser and says when the login is done, so a retry can resume the review. `pr-review login <provider> --browser` is the same login without a terminal (#99).
+- **Select and copy text in the app.** Failure reasons, finding explanations, card summaries and the review message preview can be selected with the mouse and copied with ⌘C (#99).
+
+### Fixed
+
+- **An expired model login fails the review at once, in one sentence.** The reason names the provider and the command that fixes it, instead of a stack trace. The reviewer no longer retries a phase three more times when no retry can succeed (#99).
+
 ## [1.12.0] - 2026-11-12
 
 ### Added
