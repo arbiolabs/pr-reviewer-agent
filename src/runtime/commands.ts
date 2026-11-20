@@ -3,6 +3,7 @@ import type { TaskId } from "@earendil-works/pi-durable";
 import { IDLE_REVIEW_STATES, TERMINAL_REVIEW_STATES } from "../domain/machines.ts";
 import type { PullSource } from "../github/pulls.ts";
 import type { RevisionRow } from "../persistence/store.ts";
+import { type ReviewPayload, withBody } from "../publish/publisher.ts";
 import { type App, ensureTask, generationOf, retryReview, type StartedReview, startPolicy, startReview } from "./app.ts";
 
 /**
@@ -10,7 +11,7 @@ import { type App, ensureTask, generationOf, retryReview, type StartedReview, st
  * state and GitHub's live head itself, whatever the caller showed; a refusal names the protocol error code.
  */
 export class Refused extends Error {
-  readonly code: "NOT_FOUND" | "INVALID_TRANSITION" | "REVISION_STALE" | "CONFLICT";
+  readonly code: "NOT_FOUND" | "INVALID_TRANSITION" | "REVISION_STALE" | "CONFLICT" | "INVALID_REQUEST";
 
   constructor(code: Refused["code"], message: string) {
     super(message);
@@ -139,12 +140,13 @@ export async function cancel(app: App, revisionId: string, reason: string): Prom
 /**
  * review.publish: approve exactly the stored payload (`previewId` is its hash) for exactly the head the caller saw,
  * which must still be GitHub's open head. Then the audited APPROVED edge opens the attempt that runs the existing
- * exactly-once publisher. `onCommit` runs in APPROVED's transaction.
+ * exactly-once publisher. `onCommit` runs in APPROVED's transaction. A `body` is the person's edit of the summary they
+ * saw: it replaces the stored one, with a new hash, in the same transaction.
  */
 export async function approve(
   app: App,
   pulls: PullSource,
-  params: { revisionId: string; previewId: string; expectedHeadSha?: string },
+  params: { revisionId: string; previewId: string; expectedHeadSha?: string; body?: string },
   source: string,
   onCommit?: () => void,
 ): Promise<StartedReview> {
@@ -164,7 +166,13 @@ export async function approve(
     app.store.advance(revision.id, "AWAITING_APPROVAL", "NEWER_HEAD", `head moved to ${live.headSha}`);
     throw new Refused("REVISION_STALE", `the head of ${live.fullName}#${live.number} is now ${live.headSha}; revision ${revision.id} is superseded`);
   }
-  app.store.advance(revision.id, "AWAITING_APPROVAL", "APPROVED", `approved by ${source} (preview ${outbox.payload_hash})`, onCommit);
+  if (params.body !== undefined && params.body.trim() === "") throw new Refused("INVALID_REQUEST", "the review message can't be empty");
+  const edited = params.body === undefined ? undefined : withBody(JSON.parse(outbox.payload_json) as ReviewPayload, revision.id, params.body);
+  const detail = `approved by ${source} (preview ${outbox.payload_hash}${edited ? `, message edited to ${edited.hash}` : ""})`;
+  app.store.advance(revision.id, "AWAITING_APPROVAL", "APPROVED", detail, () => {
+    if (edited) app.store.replaceOutboxPayload(outbox.id, edited.hash, JSON.stringify(edited.payload));
+    onCommit?.();
+  });
   const approved = app.store.revision(revision.id)!;
   return { revision: approved, taskId: await ensureTask(app, approved, true) };
 }

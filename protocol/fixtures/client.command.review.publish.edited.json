@@ -1,0 +1,12 @@
+{
+  "type": "command",
+  "requestId": "req-cmd",
+  "command": "review.publish",
+  "params": {
+    "runId": "rev-184-a",
+    "previewId": "8984214f9b29fcaf2ced0509cf489c6b44205df8bf23ee27c492494f5a09a956",
+    "expectedHeadSha": "4444444444444444444444444444444444444444",
+    "body": "Reviewed by hand as well: the open redirect is real, the rest is fine."
+  },
+  "idempotencyKey": "review.publish:rev-184-a:8984214f9b29fcaf2ced0509cf489c6b44205df8bf23ee27c492494f5a09a956:body:948c5ed5f69388ba"
+}

@@ -401,6 +401,7 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
       limitations: snapshot.limitations,
       files: parseDiff(snapshot.diff),
       template: config.review.summary_template,
+      noFindingsTemplate: config.review.no_findings_template,
       facts: summaryFacts(revision, store.pullById(revision.pr_id)!, snapshot, store.candidateSet(revision.id)),
     });
     // silent_no_findings posts only a review that says something new: a new finding, a first comment on a carried one, or a newly resolved one.

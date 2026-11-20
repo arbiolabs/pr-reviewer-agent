@@ -46,10 +46,10 @@ export const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 export const findingLabel = (c: CandidateFinding) => capitalize(c.severity) + (c.evidenceKind === "suspected" ? " (unconfirmed)" : "");
 
 /** Spec §12 summary format. A run that did not complete says so; it is never reported as a clean review. */
-export function renderMarkdown(report: ReviewReport, template = ""): string {
+export function renderMarkdown(report: ReviewReport, template = "", noFindingsTemplate = ""): string {
   const last = report.audit.at(-1);
   const incomplete = report.revision.state === "COMPLETED" ? undefined : `Review did not complete (${report.revision.state})${last?.detail ? `: ${last.detail}` : ""}.`;
-  return renderSummary(report.revision.head_sha, report.findings, report.limitations, incomplete, { template, facts: report.facts });
+  return renderSummary(report.revision.head_sha, report.findings, report.limitations, incomplete, { template, noFindingsTemplate, facts: report.facts });
 }
 
 /**
@@ -101,10 +101,17 @@ export const summaryFacts = (
 
 /**
  * The §12 body for a head, through `template` (the default when empty); `incomplete` replaces the findings line for a
- * run that did not finish.
+ * run that did not finish. A finished review with no findings, new or carried, uses `noFindingsTemplate` when one is set.
  */
-export function renderSummary(headSha: string, findings: FindingView[], limitations: string[], incomplete?: string, options: { template?: string; facts?: SummaryFacts } = {}): string {
-  return fillTemplate(effectiveTemplate(options.template ?? ""), summaryValues(headSha, findings, limitations, incomplete, options.facts ?? NO_FACTS));
+export function renderSummary(
+  headSha: string,
+  findings: FindingView[],
+  limitations: string[],
+  incomplete?: string,
+  options: { template?: string; noFindingsTemplate?: string; facts?: SummaryFacts } = {},
+): string {
+  const nothing = incomplete === undefined && findings.length === 0 && options.noFindingsTemplate;
+  return fillTemplate(nothing || effectiveTemplate(options.template ?? ""), summaryValues(headSha, findings, limitations, incomplete, options.facts ?? NO_FACTS));
 }
 
 function summaryValues(headSha: string, findings: FindingView[], limitations: string[], incomplete: string | undefined, facts: SummaryFacts): TemplateValues {

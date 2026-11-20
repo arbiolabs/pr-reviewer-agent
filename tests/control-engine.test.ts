@@ -247,6 +247,30 @@ it("is read-only by default: no lock, no engine, the reader commands only; the r
   );
 }, 30_000);
 
+it("posts a person's edit of the review message: the inline comments stay, the marker follows it, and an empty edit is refused", async () => {
+  const h = await host();
+  const { c } = await serve(h.source);
+  const prId = h.app.store.upsertPull(fixture.pull);
+  c.send({ type: "snapshot.get", requestId: "s" });
+  await c.waitFor((m) => m.type === "snapshot");
+  const started = (await command(c, { command: "review.start", params: { prId, expectedHeadSha: fixture.headSha } })) as { operationId: string };
+  const runId = started.operationId.slice("review.start:".length);
+  await c.waitFor((m) => m.type === "event" && m.eventType === "review.phase_changed" && (m.data as { to: string }).to === "AWAITING_APPROVAL");
+  const stored = h.app.store.outboxForRevision(runId)!;
+  const comments = (JSON.parse(stored.payload_json) as { comments: unknown[] }).comments;
+  const publish = (body: string) => command(c, { command: "review.publish", params: { runId, previewId: stored.payload_hash, expectedHeadSha: fixture.headSha, body } });
+
+  expect(await publish("  \n")).toEqual(rejected("INVALID_REQUEST", "the review message can't be empty"));
+  const edited = "One real issue: the delete route skips the admin check. <!-- not a marker -->";
+  expect(await publish(edited)).toMatchObject({ status: "accepted", operationId: `review.publish:${runId}` });
+  await c.waitFor((m) => m.type === "event" && m.eventType === "review.completed");
+
+  const outbox = h.app.store.outboxForRevision(runId)!;
+  expect(outbox.payload_hash).not.toBe(stored.payload_hash);
+  expect(fake.reviews.map((r) => [r.body, r.comments])).toEqual([[`One real issue: the delete route skips the admin check. &lt;!-- not a marker -->\n${marker(runId, outbox.payload_hash)}\n`, comments]]);
+  expect(h.app.store.auditEvents(runId).find((e) => e.event === "APPROVED")!.detail).toBe(`approved by tui via daemon (preview ${stored.payload_hash}, message edited to ${outbox.payload_hash})`);
+}, 30_000);
+
 it("approves a review end to end over the socket: parked, previewed, published once, replay-safe, streamed without gaps", async () => {
   const h = await host();
   const { c } = await serve(h.source);
@@ -820,7 +844,7 @@ it("settings.get lists the models and the one in use; settings.set saves a liste
     return reply;
   };
   const option = (id: string, preferred: boolean) => ({ ref: `faux/${id}`, provider: "faux", name: id, contextWindow: expect.any(Number), authSource: expect.any(String), preferred });
-  expect(await settings()).toEqual({ model: { ref: "faux/reviewer", source: "config" }, models: [option("other", true), option("reviewer", false)], configPath, summaryTemplate: expect.objectContaining({ isDefault: true }), publishMode: "dry_run", autoReview: expect.objectContaining({ enabled: false }) });
+  expect(await settings()).toEqual({ model: { ref: "faux/reviewer", source: "config" }, models: [option("other", true), option("reviewer", false)], configPath, summaryTemplate: expect.objectContaining({ isDefault: true }), noFindingsTemplate: expect.objectContaining({ isDefault: true }), publishMode: "dry_run", autoReview: expect.objectContaining({ enabled: false }) });
 
   expect(await command(c, { command: "settings.set", params: { model: "faux/missing" } })).toEqual(rejected("NOT_FOUND", "model faux/missing is not available; choose one of faux/other, faux/reviewer"));
   expect(JSON.parse(readFileSync(configPath, "utf8")).models).toEqual({ default: "faux/reviewer" });
@@ -871,7 +895,7 @@ it("settings.set saves a summary template that payloads prepared after it use, r
   expect(await command(c, { command: "settings.set", params: { summaryTemplate: "Hi {{pr_author}} {{nope}} {{ repo }}" } })).toEqual(
     rejected("INVALID_REQUEST", /^unknown variables \{\{nope\}\}, \{\{ repo \}\}; known: repo, pr_number/),
   );
-  expect(await command(c, { command: "settings.set", params: {} })).toEqual(rejected("INVALID_REQUEST", "settings.set needs model, summaryTemplate or autoReview"));
+  expect(await command(c, { command: "settings.set", params: {} })).toEqual(rejected("INVALID_REQUEST", "settings.set needs model, summaryTemplate, noFindingsTemplate or autoReview"));
 
   const custom = "### {{repo}} #{{pr_number}} by {{pr_author}}: {{pr_title}}\n\n{{summary_line}} ({{high_count}} high, {{unconfirmed_count}} unconfirmed)\n\n{{findings_list}}\n\n{{carried}}\n\n{{limitations}}\n\n{{model}} at {{short_sha}} <!-- sneaky -->\n";
   expect(operation(await command(c, { command: "settings.set", params: { summaryTemplate: custom } }))).toEqual({
@@ -898,6 +922,22 @@ it("settings.set saves a summary template that payloads prepared after it use, r
   expect(await template()).toMatchObject({ value: DEFAULT_SUMMARY_TEMPLATE, isDefault: true });
   expect(operation(await command(c, { command: "settings.set", params: { summaryTemplate: "" } }))).toMatchObject({ status: "accepted", operationId: "settings.set::template:default" });
   expect(config.review.summary_template).toBe("");
+
+  // The no-findings template defaults to the summary template in force, and saves beside it.
+  const empty = async () => {
+    const requestId = `get-${++requests}`;
+    c.send({ type: "settings.get", requestId });
+    return (await c.waitFor<Extract<ServerMessage, { type: "settings" }>>((m) => m.type === "settings" && m.requestId === requestId)).noFindingsTemplate!;
+  };
+  expect(await empty()).toMatchObject({ value: DEFAULT_SUMMARY_TEMPLATE, isDefault: true, default: DEFAULT_SUMMARY_TEMPLATE });
+  expect(await command(c, { command: "settings.set", params: { noFindingsTemplate: "{{nope}}" } })).toEqual(rejected("INVALID_REQUEST", /^unknown variable \{\{nope\}\}/));
+  const clear = "Nothing to fix at {{short_sha}}.\n";
+  expect(operation(await command(c, { command: "settings.set", params: { noFindingsTemplate: clear } }))).toEqual({ type: "command.result", status: "accepted", operationId: settingsKey({ noFindingsTemplate: clear }) });
+  expect(settingsKey({ noFindingsTemplate: clear })).toMatch(/^settings\.set::nofindings:[0-9a-f]{16}$/);
+  expect(JSON.parse(readFileSync(configPath, "utf8"))).toEqual({ models: { default: "faux/reviewer" }, review: { no_findings_template: clear } });
+  expect([config.review.no_findings_template, (await empty()).value, (await empty()).isDefault]).toEqual([clear, clear, false]);
+  expect(operation(await command(c, { command: "settings.set", params: { noFindingsTemplate: "" } }))).toMatchObject({ status: "accepted", operationId: "settings.set::nofindings:default" });
+  expect(JSON.parse(readFileSync(configPath, "utf8"))).toEqual({ models: { default: "faux/reviewer" }, review: {} });
 }, 60_000);
 
 it("refuses settings.set while the daemon's PR_REVIEW_MODEL outranks the config, and a read-only daemon grants neither settings request", async () => {

@@ -344,6 +344,12 @@ export class AppStore {
     return this.db.prepare("SELECT * FROM publication_outbox WHERE idempotency_key = ?").get(row.idempotencyKey) as OutboxRow;
   }
 
+  /** A person's edit of a payload still waiting for approval: the new payload and its hash replace the stored ones. */
+  replaceOutboxPayload(id: string, payloadHash: string, payloadJson: string): void {
+    const { changes } = this.db.prepare("UPDATE publication_outbox SET payload_hash = ?, payload_json = ?, updated_at = ? WHERE id = ? AND status = 'pending'").run(payloadHash, payloadJson, now(), id);
+    if (changes !== 1) throw new Error(`outbox ${id} is not pending; its payload can't change`);
+  }
+
   outbox(id: string): OutboxRow | undefined {
     return this.db.prepare("SELECT * FROM publication_outbox WHERE id = ?").get(id) as OutboxRow | undefined;
   }
