@@ -543,6 +543,12 @@
                 "expectedHeadSha": {
                   "type": "string",
                   "minLength": 1
+                },
+                "body": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 65000,
+                  "description": "the person's edit of the summary in the preview: it is posted instead, with the marker after it; inline comments stay"
                 }
               },
               "additionalProperties": false
@@ -722,6 +728,18 @@
                     }
                   ],
                   "description": "saved as review.summary_template and used for review bodies prepared after it; null or empty restores the default"
+                },
+                "noFindingsTemplate": {
+                  "anyOf": [
+                    {
+                      "type": "string",
+                      "maxLength": 4000
+                    },
+                    {
+                      "type": "null"
+                    }
+                  ],
+                  "description": "saved as review.no_findings_template and used for bodies of reviews with no findings; null or empty uses summaryTemplate"
                 },
                 "autoReview": {
                   "type": "object",

@@ -150,7 +150,7 @@ To post the review to the PR, add `--publish`. pr-review posts one `COMMENT` rev
 - `comment` posts it to the PR.
 - `approval` holds it until you approve it in the terminal client or with `pr-review approve`.
 
-`review.summary_template` changes the review message that pr-review posts, with `{{variables}}` such as `{{summary_line}}` and `{{findings_list}}`. The desktop app edits it under Settings → Review message. See [Review message](docs/configuration.md#review-message).
+`review.summary_template` changes the review message that pr-review posts, with `{{variables}}` such as `{{summary_line}}` and `{{findings_list}}`. `review.no_findings_template` is the message for a review that finds nothing. The desktop app edits both under Settings, and in approval mode you can edit one review's message before you post it. See [Review message](docs/configuration.md#review-message).
 
 To run the terminal client against your own reviews, build it, then start the daemon and the client in two terminals:
 

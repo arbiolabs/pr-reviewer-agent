@@ -288,6 +288,9 @@ pub struct Settings {
     pub config_path: Text,
     /// Absent from a daemon older than the summary template.
     pub summary_template: Option<SummaryTemplate>,
+    /// The template for a review with no findings; its default is the summary template in force. Absent from older daemons.
+    #[serde(default)]
+    pub no_findings_template: Option<SummaryTemplate>,
     /// `review.publish_mode`: `approval` parks every review until a human posts it. Absent from older daemons.
     pub publish_mode: Option<Text>,
     /// Absent from a daemon older than automatic reviews.
@@ -1160,17 +1163,24 @@ impl Command {
             Command::Again(p) => format!("review.again:{}:{}", p.pr_id, p.expected_head_sha),
             Command::Cancel(p) => format!("review.cancel:{}", p.run_id),
             Command::Retry(p) => format!("review.retry:{}", p.run_id),
-            Command::Publish(p) => format!("review.publish:{}:{}", p.run_id, p.preview_id),
+            Command::Publish(p) => format!(
+                "review.publish:{}:{}{}",
+                p.run_id,
+                p.preview_id,
+                p.body.as_deref().map_or(String::new(), |b| format!(":body:{:016x}", fnv1a64(b)))
+            ),
             Command::SelectAccount(p) => format!("account.select:{}", p.account_id),
             Command::Archive(p) => format!("pr.archive:{}", p.pr_id),
             Command::Unarchive(p) => format!("pr.unarchive:{}", p.pr_id),
             Command::StopDaemon(_) => "daemon.stop".into(),
             Command::SetSettings(p) => {
-                let template = match p.summary_template.as_deref() {
+                let hashed = |tag: &str, t: Option<&str>| match t {
                     None => String::new(),
-                    Some("") => ":template:default".into(),
-                    Some(t) => format!(":template:{:016x}", fnv1a64(t)),
+                    Some("") => format!(":{tag}:default"),
+                    Some(t) => format!(":{tag}:{:016x}", fnv1a64(t)),
                 };
+                let template = hashed("template", p.summary_template.as_deref())
+                    + &hashed("nofindings", p.no_findings_template.as_deref());
                 // Serialized in field order with absent fields left out: the daemon hashes the same bytes.
                 let auto = p.auto_review.as_ref().map_or(String::new(), |a| {
                     format!(":auto:{:016x}", fnv1a64(&serde_json::to_string(a).unwrap_or_default()))
@@ -1207,6 +1217,9 @@ pub struct PublishParams {
     pub run_id: RunId,
     pub preview_id: Text,
     pub expected_head_sha: Sha,
+    /// The person's edit of the preview's summary, posted instead of it; the inline comments stay.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -1239,6 +1252,9 @@ pub struct SettingsParams {
     /// `""` restores the default; this client never sends the `null` the protocol also allows.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub summary_template: Option<String>,
+    /// The template for a review with no findings; `""` falls back to the summary template.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub no_findings_template: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub auto_review: Option<AutoReviewParams>,
 }

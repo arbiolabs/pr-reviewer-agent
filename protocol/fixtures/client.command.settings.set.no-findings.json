@@ -1,0 +1,9 @@
+{
+  "type": "command",
+  "requestId": "req-cmd",
+  "command": "settings.set",
+  "params": {
+    "noFindingsTemplate": "Nothing to fix in {{repo}} #{{pr_number}} at `{{short_sha}}`.\n\n{{merge_risk}}\n"
+  },
+  "idempotencyKey": "settings.set::nofindings:5d0c52b550fde38c"
+}

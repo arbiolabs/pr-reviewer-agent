@@ -340,7 +340,8 @@ export class EngineSource extends AppDbSource {
         }
         case "review.publish": {
           const operationId = `review.publish:${request.params.runId}`;
-          const params = { revisionId: request.params.runId, previewId: request.params.previewId, expectedHeadSha: request.params.expectedHeadSha };
+          const { runId, previewId, expectedHeadSha, body } = request.params;
+          const params = { revisionId: runId, previewId, expectedHeadSha, ...(body !== undefined ? { body } : {}) };
           this.follow(await approve(app, options.pulls, params, "tui via daemon", record(operationId)));
           return operationId;
         }
@@ -367,8 +368,9 @@ export class EngineSource extends AppDbSource {
       authSource: m.authSource,
       preferred: preferred.some((p) => matches(p, m.ref)),
     }));
-    const saved = this.options.config.review.summary_template;
+    const { summary_template: saved, no_findings_template: savedEmpty } = this.options.config.review;
     const summaryTemplate = { value: effectiveTemplate(saved), isDefault: saved === "", default: DEFAULT_SUMMARY_TEMPLATE, variables: [...TEMPLATE_VARIABLES] };
+    const noFindingsTemplate = { value: savedEmpty || effectiveTemplate(saved), isDefault: savedEmpty === "", default: effectiveTemplate(saved), variables: [...TEMPLATE_VARIABLES] };
     const a = this.options.config.review.auto_review;
     const autoReview = {
       enabled: a.enabled,
@@ -379,20 +381,21 @@ export class EngineSource extends AppDbSource {
       ...(this.lastPoll ? { lastPoll: this.lastPoll } : {}),
     };
     const publishMode = this.options.config.review.publish_mode;
-    return clean({ model: this.model, models, configPath: configPath(this.options.env ?? process.env), summaryTemplate, publishMode, autoReview });
+    return clean({ model: this.model, models, configPath: configPath(this.options.env ?? process.env), summaryTemplate, noFindingsTemplate, publishMode, autoReview });
   }
 
   /**
-   * settings.set: save the model as `models.default`, the summary template as `review.summary_template` and the
+   * settings.set: save the model as `models.default`, the summary template as `review.summary_template`, the
+   * no-findings template as `review.no_findings_template` and the
    * auto-review fields given under `review.auto_review` (other config keys kept), each checked before any is written.
    * A review in flight keeps the model its revision names; a payload already stored keeps its text. The model is
    * refused while the daemon's own `--model` or PR_REVIEW_MODEL outranks the config, since the saved choice would not
    * survive a restart. Turning auto-review on polls at once; any other change to it restarts the interval.
    */
   async setSettings(params: SettingsParams): Promise<string> {
-    const { model: ref, summaryTemplate, autoReview } = params;
-    if (ref === undefined && summaryTemplate === undefined && autoReview === undefined) {
-      throw new ControlError("INVALID_REQUEST", "settings.set needs model, summaryTemplate or autoReview");
+    const { model: ref, summaryTemplate, noFindingsTemplate, autoReview } = params;
+    if (ref === undefined && summaryTemplate === undefined && noFindingsTemplate === undefined && autoReview === undefined) {
+      throw new ControlError("INVALID_REQUEST", "settings.set needs model, summaryTemplate, noFindingsTemplate or autoReview");
     }
     if (ref !== undefined) {
       const { model } = this;
@@ -403,7 +406,8 @@ export class EngineSource extends AppDbSource {
       if (!available.some((m) => m.ref === ref)) throw new ControlError("NOT_FOUND", `model ${ref} is not available; choose one of ${available.map((m) => m.ref).join(", ")}`);
     }
     const template = summaryTemplate ?? "";
-    const problem = summaryTemplate === undefined ? undefined : templateProblem(template);
+    const empty = noFindingsTemplate ?? "";
+    const problem = (summaryTemplate === undefined ? undefined : templateProblem(template)) ?? (noFindingsTemplate === undefined ? undefined : templateProblem(empty));
     if (problem) throw new ControlError("INVALID_REQUEST", problem);
     const was = this.options.config.review.auto_review;
     const auto: AutoReview | undefined = autoReview && {
@@ -416,7 +420,11 @@ export class EngineSource extends AppDbSource {
     const autoProblem = auto && autoReviewProblem(auto);
     if (autoProblem) throw new ControlError("INVALID_REQUEST", `autoReview: ${autoProblem}`);
     // A reset removes the key, so the file says nothing rather than repeating the default.
-    const review = { ...(summaryTemplate !== undefined ? { summary_template: template || undefined } : {}), ...(auto ? { auto_review: auto } : {}) };
+    const review = {
+      ...(summaryTemplate !== undefined ? { summary_template: template || undefined } : {}),
+      ...(noFindingsTemplate !== undefined ? { no_findings_template: empty || undefined } : {}),
+      ...(auto ? { auto_review: auto } : {}),
+    };
     saveConfig({ ...(ref !== undefined ? { models: { default: ref } } : {}), ...(Object.keys(review).length > 0 ? { review } : {}) }, configPath(this.options.env ?? process.env));
     if (ref !== undefined) {
       this.model = { ref, source: "config" };
@@ -424,6 +432,7 @@ export class EngineSource extends AppDbSource {
     }
     // The review task reads this same config object when it prepares a payload.
     if (summaryTemplate !== undefined) this.options.config.review.summary_template = template;
+    if (noFindingsTemplate !== undefined) this.options.config.review.no_findings_template = empty;
     if (auto) {
       this.options.config.review.auto_review = auto;
       this.schedulePoll(auto.enabled && !was.enabled ? 0 : this.options.autoReviewMs?.interval ?? auto.interval_minutes * 60_000);

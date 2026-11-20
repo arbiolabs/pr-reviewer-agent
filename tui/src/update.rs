@@ -32,6 +32,10 @@ pub enum Msg {
     SetModel(String),
     /// Makes this the review body template for payloads prepared from now on, "" for the default: `settings.set`.
     SetSummaryTemplate(String),
+    /// The same for a review with no findings, "" to use the review body template.
+    SetNoFindingsTemplate(String),
+    /// The summary the open publication posts instead of the stored one; `None` posts it as stored.
+    EditPublication(Option<String>),
     SetAutoReview(AutoReviewParams),
     /// Shows recorded model usage grouped this way, asking for it fresh (`usage.get`), or stops showing it.
     Usage(Option<UsageBy>),
@@ -170,6 +174,14 @@ pub fn update(m: &mut Model, msg: Msg) -> Vec<Effect> {
         Msg::SetSummaryTemplate(t) => {
             save_settings(m, SettingsParams { summary_template: Some(t), ..Default::default() }, &mut fx)
         }
+        Msg::SetNoFindingsTemplate(t) => {
+            save_settings(m, SettingsParams { no_findings_template: Some(t), ..Default::default() }, &mut fx)
+        }
+        Msg::EditPublication(edit) => {
+            if let Some(Modal::Publication { body, publish: ConfirmState::Asking, .. }) = m.ui.modals.last_mut() {
+                *body = edit;
+            }
+        }
         Msg::SetAutoReview(a) => {
             save_settings(m, SettingsParams { auto_review: Some(a), ..Default::default() }, &mut fx)
         }
@@ -292,20 +304,26 @@ fn save_settings(m: &mut Model, params: SettingsParams, fx: &mut Vec<Effect>) {
     enum Slot {
         Model,
         Template,
+        NoFindings,
         Auto,
     }
     let which = if params.auto_review.is_some() {
         Slot::Auto
     } else if params.summary_template.is_some() {
         Slot::Template
+    } else if params.no_findings_template.is_some() {
+        Slot::NoFindings
     } else {
         Slot::Model
     };
-    let value = params.summary_template.clone().or_else(|| params.model.clone()).unwrap_or_default();
+    let value = (params.summary_template.clone().or_else(|| params.no_findings_template.clone()))
+        .or_else(|| params.model.clone())
+        .unwrap_or_default();
     fn slot(a: &mut AgentSettings, which: Slot) -> &mut SaveState {
         match which {
             Slot::Model => &mut a.save,
             Slot::Template => &mut a.template_save,
+            Slot::NoFindings => &mut a.no_findings_save,
             Slot::Auto => &mut a.auto_save,
         }
     }
@@ -331,7 +349,7 @@ fn save_settings(m: &mut Model, params: SettingsParams, fx: &mut Vec<Effect>) {
 
 /// The save waiting on `id`, the model's or the review message's.
 fn saving<'a>(a: &'a mut AgentSettings, id: &RequestId) -> Option<&'a mut SaveState> {
-    [&mut a.save, &mut a.template_save, &mut a.auto_save]
+    [&mut a.save, &mut a.template_save, &mut a.no_findings_save, &mut a.auto_save]
         .into_iter()
         .find(|s| matches!(s, SaveState::Sending { request, .. } if request == id))
 }
@@ -2290,6 +2308,7 @@ fn open_publication(m: &mut Model, r: Run, fx: &mut Vec<Effect>) {
         preview: Preview::Failed(Text::new(OFFLINE)),
         publish: ConfirmState::Asking,
         raw: false,
+        body: None,
     });
     fetch_preview(m, r.id, fx);
     load_diff(m, DiffKey { pr: r.pr_id, base: r.base_sha, head: r.head_sha }, None, fx);
@@ -2332,10 +2351,11 @@ fn send_confirmed(m: &mut Model, fx: &mut Vec<Effect>) {
     }
     let command = match m.top_modal().cloned() {
         Some(Modal::Confirm { command, .. }) => command,
-        Some(Modal::Publication { run_id, preview: Preview::Ready(p), .. }) => Command::Publish(PublishParams {
+        Some(Modal::Publication { run_id, preview: Preview::Ready(p), body, .. }) => Command::Publish(PublishParams {
             run_id,
             preview_id: p.preview_id.clone(),
             expected_head_sha: p.head_sha.clone(),
+            body,
         }),
         _ => return,
     };

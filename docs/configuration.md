@@ -107,6 +107,10 @@ How the key is kept and why:
 
 `review.summary_template` sets the review body that pr-review posts on a PR. It is the text before the inline comments. Leave it out, or set it to `""`, to keep the built-in message. The desktop app edits it under Settings → Review message, with a live preview.
 
+`review.no_findings_template` is the message for a review that found nothing: no new findings and none carried from an earlier commit. It takes the same variables. Leave it out, or set it to `""`, and such a review uses `review.summary_template`. The desktop app edits it under Settings → When the review finds nothing.
+
+In approval mode, the desktop app can also edit the message of one review before it posts: Edit message on its proof page. That edit applies to that review only. The inline comments post as they are.
+
 The template holds plain text and `{{name}}` placeholders, and nothing else: no conditions and no loops. A name not in the table below stops the config from loading, with an error that names it. The template is at most 4000 characters. An empty variable on a line of its own leaves no blank gap.
 
 | Variable | Value |

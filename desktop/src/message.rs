@@ -94,11 +94,49 @@ pub fn fill(template: &str, values: &[(&str, &str)]) -> String {
     replace(&collapsed, &|name| value(name).map(str::to_string))
 }
 
+/// The two templates Settings edits: the review message, and the one for a review that finds nothing.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Kind {
+    Summary,
+    NoFindings,
+}
+
+impl Kind {
+    const ALL: [Kind; 2] = [Kind::Summary, Kind::NoFindings];
+
+    fn id(self, part: &str) -> SharedString {
+        SharedString::from(match self {
+            Kind::Summary => format!("message-{part}"),
+            Kind::NoFindings => format!("nofindings-{part}"),
+        })
+    }
+}
+
 impl Shell {
-    /// Makes the editor the first time Settings draws, loads the daemon's text when it is new and the reader has not
+    pub fn template_editor(&self, kind: Kind) -> &MessageEditor {
+        match kind {
+            Kind::Summary => &self.message,
+            Kind::NoFindings => &self.no_findings,
+        }
+    }
+
+    fn template_editor_mut(&mut self, kind: Kind) -> &mut MessageEditor {
+        match kind {
+            Kind::Summary => &mut self.message,
+            Kind::NoFindings => &mut self.no_findings,
+        }
+    }
+
+    /// Makes the editors the first time Settings draws, loads the daemon's text when it is new and the reader has not
     /// edited, and colours the placeholders: known in the accent, unknown in the danger hue.
     pub fn message_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        let editor = match &self.message.editor {
+        for kind in Kind::ALL {
+            self.sync_template(kind, window, cx);
+        }
+    }
+
+    fn sync_template(&mut self, kind: Kind, window: &mut Window, cx: &mut Context<Self>) {
+        let editor = match &self.template_editor(kind).editor {
             Some(e) => e.clone(),
             None => {
                 let editor = cx.new(|cx| {
@@ -111,25 +149,27 @@ impl Shell {
                         cx.notify();
                     }
                 });
-                self.message = MessageEditor {
+                let slot = self.template_editor_mut(kind);
+                *slot = MessageEditor {
                     editor: Some(editor.clone()),
                     colors: Some(colors),
-                    pending: self.message.pending.take(),
+                    pending: slot.pending.take(),
                     _changes: Some(changes),
                     loaded: None,
                 };
                 editor
             }
         };
-        let daemon = template(self).map(|t| t.value.to_string());
+        let daemon = template(self, kind).map(|t| t.value.to_string());
         let text = editor.read(cx).value().to_string();
-        if let Some(value) = daemon.filter(|v| self.message.loaded.as_ref() != Some(v))
-            && (self.message.loaded.is_none() || self.message.loaded.as_ref() == Some(&text))
+        let loaded = self.template_editor(kind).loaded.clone();
+        if let Some(value) = daemon.filter(|v| loaded.as_ref() != Some(v))
+            && (loaded.is_none() || loaded.as_ref() == Some(&text))
         {
             editor.update(cx, |e, cx| e.set_value(value.clone(), window, cx));
-            self.message.loaded = Some(value);
+            self.template_editor_mut(kind).loaded = Some(value);
         }
-        if let Some(staged) = self.message.pending.take() {
+        if let Some(staged) = self.template_editor_mut(kind).pending.take() {
             editor.update(cx, |e, cx| e.set_value(staged, window, cx));
         }
         let t = crate::ui::colors(cx);
@@ -145,14 +185,14 @@ impl Shell {
                 )
             })
             .collect();
-        if let Some(c) = &self.message.colors {
+        if let Some(c) = &self.template_editor(kind).colors {
             c.set(marks, cx);
         }
     }
 
     /// Puts `{{name}}` at the caret and gives the editor the keyboard back.
-    fn insert_variable(&mut self, name: &str, window: &mut Window, cx: &mut Context<Self>) {
-        if let Some(e) = &self.message.editor {
+    fn insert_variable(&mut self, kind: Kind, name: &str, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(e) = &self.template_editor(kind).editor {
             e.update(cx, |e, cx| {
                 e.insert(format!("{{{{{name}}}}}"), window, cx);
                 e.focus(window, cx);
@@ -173,20 +213,38 @@ pub fn stage_saved(s: &mut Shell) {
     s.model.agent.template_save = SaveState::Saved(text);
 }
 
-fn template(s: &Shell) -> Option<&SummaryTemplate> {
-    s.model.agent.settings.as_ref()?.summary_template.as_ref()
+fn template(s: &Shell, kind: Kind) -> Option<&SummaryTemplate> {
+    let settings = s.model.agent.settings.as_ref()?;
+    match kind {
+        Kind::Summary => settings.summary_template.as_ref(),
+        Kind::NoFindings => settings.no_findings_template.as_ref(),
+    }
 }
 
 fn known(s: &Shell) -> Vec<&str> {
-    template(s).map(|t| t.variables.iter().map(|v| v.name.as_str()).collect()).unwrap_or_default()
+    template(s, Kind::Summary).map(|t| t.variables.iter().map(|v| v.name.as_str()).collect()).unwrap_or_default()
+}
+
+fn save_state(s: &Shell, kind: Kind) -> &SaveState {
+    match kind {
+        Kind::Summary => &s.model.agent.template_save,
+        Kind::NoFindings => &s.model.agent.no_findings_save,
+    }
+}
+
+fn save_msg(kind: Kind, text: String) -> Msg {
+    match kind {
+        Kind::Summary => Msg::SetSummaryTemplate(text),
+        Kind::NoFindings => Msg::SetNoFindingsTemplate(text),
+    }
 }
 
 /// Why Save can't act now, or `None` when it can.
-fn save_block(s: &Shell, t: &SummaryTemplate, text: &str, unknown: &[&str]) -> Option<String> {
+fn save_block(s: &Shell, kind: Kind, t: &SummaryTemplate, text: &str, unknown: &[&str]) -> Option<String> {
     if let Some(why) = write_block(&s.model, "settings.set") {
         return Some(crate::kit::sentence(&format!("can't save here: {why}")));
     }
-    if matches!(s.model.agent.template_save, SaveState::Sending { .. }) {
+    if matches!(save_state(s, kind), SaveState::Sending { .. }) {
         return Some("Saving…".into());
     }
     if !unknown.is_empty() {
@@ -200,24 +258,30 @@ fn save_block(s: &Shell, t: &SummaryTemplate, text: &str, unknown: &[&str]) -> O
     (typed == saved).then(|| "Nothing changed since the last save.".into())
 }
 
+/// Both templates, each in its own card: the review message, then the one for a review that finds nothing.
 pub fn section(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
+    div().flex().flex_col().gap(space::S6).children(Kind::ALL.map(|kind| template_card(s, t, kind, cx)))
+}
+
+fn template_card(s: &Shell, t: &Colors, kind: Kind, cx: &Context<Shell>) -> Div {
     let say = |words: String| div().p(space::S4).text_size(text::BODY).text_color(t.muted).child(words);
-    let (Some(tpl), Some(editor)) = (template(s), s.message.editor.as_ref()) else {
+    let (Some(tpl), Some(editor)) = (template(s, kind), s.template_editor(kind).editor.as_ref()) else {
         let words = match &s.model.agent.error {
             Some(why) => crate::kit::sentence(&format!("this reviewer can't change its review message: {why}")),
             None if s.model.agent.settings.is_some() => {
-                "This reviewer is older than the review message setting. Update it to change the message.".into()
+                "This reviewer is older than this setting. Update it to change the message.".into()
             }
             None if !s.model.link.accepts_events() => "Connect to the reviewer to change its review message.".into(),
             None => "Asking the reviewer for its review message…".into(),
         };
-        return card(t, div().child(say(words)));
+        return card(t, kind, div().child(say(words)));
     };
     let text = editor.read(cx).value().to_string();
-    let known: Vec<&str> = tpl.variables.iter().map(|v| v.name.as_str()).collect();
+    let known = known(s);
     let unknown = unknown(&text, &known);
     let length = text.chars().count();
-    let samples: Vec<(&str, &str)> = tpl.variables.iter().map(|v| (v.name.as_str(), v.sample.as_str())).collect();
+    let variables_of = template(s, Kind::Summary).map_or(&tpl.variables, |x| &x.variables);
+    let samples: Vec<(&str, &str)> = variables_of.iter().map(|v| (v.name.as_str(), v.sample.as_str())).collect();
     let preview = fill(if text.is_empty() { tpl.default.as_str() } else { &text }, &samples);
 
     let check = if !unknown.is_empty() {
@@ -227,41 +291,58 @@ pub fn section(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
     } else if length > MAX_CHARS {
         Some((t.danger, format!("{length} characters; the reviewer takes at most {MAX_CHARS}.")))
     } else if text.is_empty() {
-        Some((t.muted, "Empty: saving restores the default message.".to_string()))
+        Some((
+            t.muted,
+            match kind {
+                Kind::Summary => "Empty: saving restores the default message.",
+                Kind::NoFindings => "Empty: saving uses the review message above.",
+            }
+            .to_string(),
+        ))
     } else {
         None
     };
-    let block = save_block(s, tpl, &text, &unknown);
-    let status = match &s.model.agent.template_save {
+    let block = save_block(s, kind, tpl, &text, &unknown);
+    let saved_words = match kind {
+        Kind::Summary => "Saved. Reviews prepared from now on use this message.",
+        Kind::NoFindings => "Saved. Reviews that find nothing use this message from now on.",
+    };
+    let status = match save_state(s, kind) {
         SaveState::Idle => None,
         SaveState::Sending { .. } => Some((t.muted, "Saving…".to_string())),
-        SaveState::Saved(v) if v.is_empty() => {
-            Some((t.ok, "Restored the default. Reviews prepared from now on use it.".into()))
-        }
-        SaveState::Saved(_) => Some((t.ok, "Saved. Reviews prepared from now on use this message.".into())),
+        SaveState::Saved(v) if v.is_empty() => Some((
+            t.ok,
+            match kind {
+                Kind::Summary => "Restored the default. Reviews prepared from now on use it.",
+                Kind::NoFindings => "Reviews that find nothing use the review message again.",
+            }
+            .into(),
+        )),
+        SaveState::Saved(_) => Some((t.ok, saved_words.into())),
         SaveState::Refused(why) => Some((t.danger, crate::kit::sentence(&format!("not saved: {why}")))),
         SaveState::TimedOut => Some((t.danger, "The reviewer did not answer in time. Try again.".into())),
     };
     let save = block.is_none().then(|| {
         let typed = if text == tpl.default.as_str() { String::new() } else { text.clone() };
-        crate::ui::on(cx, move |s, cx| s.send(Msg::SetSummaryTemplate(typed.clone()), cx))
+        crate::ui::on(cx, move |s, cx| s.send(save_msg(kind, typed.clone()), cx))
     });
     let may_reset = !tpl.is_default && write_block(&s.model, "settings.set").is_none();
     let reset = may_reset.then(|| {
         let default = tpl.default.to_string();
         crate::ui::on(cx, move |s, cx| {
-            s.message.pending = Some(default.clone());
-            s.message.loaded = Some(default.clone());
-            s.send(Msg::SetSummaryTemplate(String::new()), cx)
+            let slot = s.template_editor_mut(kind);
+            slot.pending = Some(default.clone());
+            slot.loaded = Some(default.clone());
+            s.send(save_msg(kind, String::new()), cx)
         })
     });
 
     let mut variables = div().flex().flex_col().py(space::S1);
-    for v in &tpl.variables {
+    for v in variables_of {
         let name = v.name.to_string();
         variables = variables.child(
             div()
-                .id(SharedString::from(format!("var-{name}")))
+                .id(kind.id(&format!("var-{name}")))
                 .flex()
                 .items_baseline()
                 .gap(space::S3)
@@ -269,7 +350,7 @@ pub fn section(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                 .py(px(5.))
                 .cursor_pointer()
                 .hover(|h| h.bg(t.hover))
-                .on_click(cx.listener(move |s, _: &ClickEvent, window, cx| s.insert_variable(&name, window, cx)))
+                .on_click(cx.listener(move |s, _: &ClickEvent, window, cx| s.insert_variable(kind, &name, window, cx)))
                 .child(
                     div()
                         .flex_none()
@@ -297,7 +378,13 @@ pub fn section(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
     let body = div()
         .flex()
         .flex_col()
-        .child(label("The summary the reviewer posts on each PR. Inline comments are not part of it."))
+        .child(label(match kind {
+            Kind::Summary => "The summary the reviewer posts on each PR. Inline comments are not part of it.",
+            Kind::NoFindings => {
+                "The summary for a review with no findings, new or carried. Until you save one, it is the review \
+                 message above."
+            }
+        }))
         .child(div().px(space::S4).child(Editor::new(editor).h(EDITOR_HEIGHT).small()))
         .child(
             div()
@@ -317,7 +404,7 @@ pub fn section(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
         .child(label("Variables. Click one to put it at the caret."))
         .child(
             div()
-                .id("message-variables")
+                .id(kind.id("variables"))
                 .flex_none()
                 .h(VARIABLES_HEIGHT)
                 .border_t_1()
@@ -355,12 +442,22 @@ pub fn section(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                         .flex()
                         .items_center()
                         .gap(space::S3)
-                        .child(button(t, "message-save", "Save", None, Tone::Primary, save.flatten()))
-                        .child(button(t, "message-reset", "Reset to default", None, Tone::Secondary, reset.flatten()))
+                        .child(button(t, kind.id("save"), "Save", None, Tone::Primary, save.flatten()))
+                        .child(button(
+                            t,
+                            kind.id("reset"),
+                            match kind {
+                                Kind::Summary => "Reset to default",
+                                Kind::NoFindings => "Use the review message",
+                            },
+                            None,
+                            Tone::Secondary,
+                            reset.flatten(),
+                        ))
                         .children(status.map(|(hue, words)| div().text_size(text::SMALL).text_color(hue).child(words)))
                         .children(
                             block
-                                .filter(|why| !why.is_empty() && status_is_idle(s))
+                                .filter(|why| !why.is_empty() && matches!(save_state(s, kind), SaveState::Idle))
                                 .map(|why| div().text_size(text::SMALL).text_color(t.muted).child(why)),
                         ),
                 )
@@ -369,17 +466,16 @@ pub fn section(s: &Shell, t: &Colors, cx: &Context<Shell>) -> Div {
                      hidden marker is always added after the message.",
                 )),
         );
-    card(t, body)
+    card(t, kind, body)
 }
 
-fn status_is_idle(s: &Shell) -> bool {
-    matches!(s.model.agent.template_save, SaveState::Idle)
-}
-
-fn card(t: &Colors, content: Div) -> Div {
+fn card(t: &Colors, kind: Kind, content: Div) -> Div {
     crate::jev::titled(
         t,
-        "Review message",
+        match kind {
+            Kind::Summary => "Review message",
+            Kind::NoFindings => "When the review finds nothing",
+        },
         div()
             .flex()
             .flex_col()

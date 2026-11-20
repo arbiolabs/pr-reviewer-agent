@@ -100,6 +100,8 @@ cp "$settings_script" desktop/target/repos-error/playback/repos-error.ndjson
 # The Automatic reviews card, at the foot of the Reviewer tab.
 auto_at="wait:19000,goto:settings,settings-tab:reviewer,scroll:3000"
 message_custom='### {{repo}} #{{pr_number}} by {{pr_author}}\n\n{{summary_line}}\n\n{{findings_list}}\n\n{{carried}}\n\nReviewed by {{model}} at {{short_sha}}. A human still decides.\n'
+# An edit of the proof's review body; like a message: step it can't hold a comma.
+edited='## Review of the sign-in fix\n\nThe open redirect is real: please check the return URL before redirecting.\n\nThe rest looks good to me.\n'
 message_unknown='### {{repo}} #{{pr_number}} for {{reviewer_name}}\n\n{{summary_line}}\n\n{{findings_list}}\n\n{{carried}}\n\nSee {{dashboard_url}}.\n'
 
 # One capture, retried up to three times when the app exits without its PNG or never writes it within 60 s.
@@ -151,6 +153,8 @@ for look in dark light; do
   snap 05c-waterfall-$look     $look 10000 "wait:9000,pr:1291,span:turn 4"
   snap 06-approval-$look       $look 20000 "wait:19000,pr:1291,publish"
   snap 06b-confirm-post-$look  $look 20000 "wait:19000,pr:1291,publish,confirm-post"
+  snap 06c-edit-message-$look  $look 20000 "wait:19000,pr:1291,publish,edit-message:$edited"
+  snap 06d-edited-confirm-$look $look 20000 "wait:19000,pr:1291,publish,edit-message:$edited,confirm-post"
   snap 07-palette-$look        $look 20000 "wait:19000,palette:re"
   snap 07b-palette-readonly-$look $look 20000 "wait:19000,pr:1287,palette:start" "$readonly_script"
   snap 08-settings-$look       $look 1000  "" protocol/playback/setup.ndjson
@@ -188,6 +192,7 @@ for look in dark light; do
   snap 22c-again-palette-$look $look 10000 "wait:9000,pr:1291,palette:again" "$again_script"
   snap 23a-message-default-$look $look 20000 "$message_at" "$settings_script"
   snap 23b-message-unknown-$look $look 20000 "$message_at,message:$message_unknown" "$settings_script"
+  snap 23d-no-findings-$look $look 20000 "wait:19000,goto:settings,settings-tab:review,scroll:1700" "$settings_script"
   snap 23c-message-saved-$look $look 20000 "wait:19000,goto:settings,settings-tab:review,scroll:1390,message:$message_custom,message-saved" "$settings_script"
   snap 24a-settings-review-$look     $look 20000 "wait:19000,goto:settings,settings-tab:review"
   snap 24b-settings-reviewer-$look   $look 1000  "goto:settings" protocol/playback/setup.ndjson

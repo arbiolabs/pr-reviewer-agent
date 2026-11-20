@@ -2,7 +2,7 @@
 import { sha256, stableId } from "../domain/types.ts";
 import { USAGE_BY, USAGE_GROUPS, type UsageBy, type UsageGroupBy, type UsagePr, type UsageRow, usageReport } from "../domain/usage.ts";
 import { DEFAULT_SUMMARY_TEMPLATE, TEMPLATE_VARIABLES } from "../publish/template.ts";
-import { type Account, type ActivitySpan, type AutoReviewParams, type ClientMessage, type DiffFile, type Evidence, type Finding, type FindingDetail, type Pr, type PublicationChange, REVIEW_COMMANDS, type Run, type ServerMessage, type SetupCheck, settingsKey } from "./v1.ts";
+import { type Account, type ActivitySpan, type AutoReviewParams, type ClientMessage, type DiffFile, type Evidence, type Finding, type FindingDetail, type Pr, type PublicationChange, REVIEW_COMMANDS, type Run, type ServerMessage, type SetupCheck, fnv1a64, settingsKey } from "./v1.ts";
 
 const EPOCH = "epoch-1";
 const T0 = Date.parse("2026-10-20T13:00:00Z");
@@ -1554,6 +1554,8 @@ const usageFixture = (by: UsageBy, rows = usageRowsFixture, group: UsageGroupBy 
 const hostileTitle ="\u001b[31mred\u001b[0m \u001b]8;;https://evil.example\u0007click\u001b]8;;\u0007 \u009b2J\u0085done";
 
 /** A custom review summary, as an operator might write one: what the settings fixtures and the desktop show. */
+export const NO_FINDINGS_TEMPLATE = "Nothing to fix in {{repo}} #{{pr_number}} at `{{short_sha}}`.\n\n{{merge_risk}}\n";
+const EDITED_BODY = "Reviewed by hand as well: the open redirect is real, the rest is fine.";
 export const CUSTOM_TEMPLATE = "### Review of {{repo}} #{{pr_number}} at `{{short_sha}}`\n\n{{summary_line}}\n\n{{findings_list}}\n\n{{carried}}\n\nReviewed by {{model}}. A human still decides.\n";
 
 const autoReviewSet: AutoReviewParams = { enabled: true, intervalMinutes: 15, repos: { include: ["acme/shop", "acme/api"] }, dailyCap: 50 };
@@ -1638,6 +1640,11 @@ export const fixtures: Record<string, ClientMessage | ServerMessage | Record<str
   "client.command.review.cancel": { type: "command", requestId: "req-cmd", command: "review.cancel", params: { runId: run1.id }, idempotencyKey: `review.cancel:${run1.id}` },
   "client.command.review.retry": { type: "command", requestId: "req-cmd", command: "review.retry", params: { runId: run1.id }, idempotencyKey: `review.retry:${run1.id}` },
   "client.command.review.publish": publishCommand,
+  "client.command.review.publish.edited": {
+    ...publishCommand,
+    params: { ...publishCommand.params, body: EDITED_BODY },
+    idempotencyKey: `review.publish:${run1.id}:${PREVIEW_ID}:body:${fnv1a64(EDITED_BODY)}`,
+  },
   "client.command.account-select": selectCommand(work),
   "client.command.pr.archive": { type: "command", requestId: "req-cmd", command: "pr.archive", params: { prId: pr1.id }, idempotencyKey: `pr.archive:${pr1.id}` },
   "client.command.pr.unarchive": { type: "command", requestId: "req-cmd", command: "pr.unarchive", params: { prId: pr1.id }, idempotencyKey: `pr.unarchive:${pr1.id}` },
@@ -1668,6 +1675,13 @@ export const fixtures: Record<string, ClientMessage | ServerMessage | Record<str
     params: { summaryTemplate: CUSTOM_TEMPLATE },
     idempotencyKey: settingsKey({ summaryTemplate: CUSTOM_TEMPLATE }),
   },
+  "client.command.settings.set.no-findings": {
+    type: "command",
+    requestId: "req-cmd",
+    command: "settings.set",
+    params: { noFindingsTemplate: NO_FINDINGS_TEMPLATE },
+    idempotencyKey: settingsKey({ noFindingsTemplate: NO_FINDINGS_TEMPLATE }),
+  },
   "client.command.settings.set.reset": {
     type: "command",
     requestId: "req-cmd",
@@ -1694,6 +1708,7 @@ export const fixtures: Record<string, ClientMessage | ServerMessage | Record<str
     ],
     configPath: "/Users/operator/.config/pr-review/pr-review.config.json",
     summaryTemplate: { value: DEFAULT_SUMMARY_TEMPLATE, isDefault: true, default: DEFAULT_SUMMARY_TEMPLATE, variables: [...TEMPLATE_VARIABLES] },
+    noFindingsTemplate: { value: DEFAULT_SUMMARY_TEMPLATE, isDefault: true, default: DEFAULT_SUMMARY_TEMPLATE, variables: [...TEMPLATE_VARIABLES] },
     publishMode: "approval",
     autoReview: { ...autoReviewOn, lastPoll: { at: "2026-10-28T09:55:00Z", found: 4, started: 1, skipped: 3, startedToday: 7 } },
   },
@@ -1743,6 +1758,7 @@ export const fixtures: Record<string, ClientMessage | ServerMessage | Record<str
     models: [{ ref: "anthropic/claude-opus-5-5", provider: "anthropic", name: "Claude Opus 5.5", contextWindow: 1_000_000, authSource: "oauth", preferred: true }],
     configPath: "/Users/operator/.config/pr-review/pr-review.config.json",
     summaryTemplate: { value: CUSTOM_TEMPLATE, isDefault: false, default: DEFAULT_SUMMARY_TEMPLATE, variables: [...TEMPLATE_VARIABLES] },
+    noFindingsTemplate: { value: NO_FINDINGS_TEMPLATE, isDefault: false, default: CUSTOM_TEMPLATE, variables: [...TEMPLATE_VARIABLES] },
   },
   "server.settings.env": {
     type: "settings",

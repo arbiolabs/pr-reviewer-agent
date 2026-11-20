@@ -173,7 +173,11 @@ impl Shell {
             .flatten()
             .chain(self.repos.inputs())
             .any(|i| i.read(cx).focus_handle(cx).is_focused(window))
-            || self.message.editor.as_ref().is_some_and(|e| e.read(cx).focus_handle(cx).is_focused(window))
+            || [&self.message, &self.no_findings]
+                .into_iter()
+                .filter_map(|m| m.editor.as_ref())
+                .chain(self.body_edit.as_ref().and_then(|b| b.editor.as_ref()))
+                .any(|e| e.read(cx).focus_handle(cx).is_focused(window))
     }
 }
 

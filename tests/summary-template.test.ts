@@ -105,6 +105,17 @@ it("the payload appends the marker after any template, keeps a template's own co
   expect(clean.hash).not.toBe(buildPayload({ revisionId: "rev-1", headSha: sha("h"), ...CASES.clean!, files }).hash);
 });
 
+it("a finished review with no findings, new or carried, uses the no-findings template; anything else keeps the summary template", () => {
+  const options = { template: "Findings: {{summary_line}}\n", noFindingsTemplate: "All clear at {{short_sha}}.\n" };
+  expect(renderSummary(sha("h"), CASES.clean!.findings, [], undefined, options)).toBe("All clear at hhhhhhh.\n");
+  expect(renderSummary(sha("h"), CASES.fresh!.findings, [], undefined, options)).toBe("Findings: Found 3 actionable issues.\n");
+  expect(renderSummary(sha("h"), [view(0, carried)], [], undefined, options)).toBe("Findings: No new actionable issues found in the reviewed scope.\n");
+  expect(renderSummary(sha("h"), [], [], "Review did not complete (FAILED).", options)).toBe("Findings: Review did not complete (FAILED).\n");
+  expect(renderSummary(sha("h"), [], [], undefined, { template: options.template, noFindingsTemplate: "" })).toBe("Findings: No actionable issues found in the reviewed scope.\n");
+  const clean = buildPayload({ revisionId: "rev-1", headSha: sha("h"), ...CASES.clean!, files, ...options });
+  expect(clean.payload.body).toBe(`All clear at hhhhhhh.\n\n${marker("rev-1", clean.hash)}\n`);
+});
+
 it("an empty template is the default; an unknown variable or an over-long template is refused by name", () => {
   expect(renderSummary(sha("h"), [], [], undefined, { template: "" })).toBe(renderSummary(sha("h"), [], []));
   expect(templateProblem("")).toBeUndefined();
@@ -120,6 +131,8 @@ it("a config file with an unknown variable in review.summary_template does not l
   expect(() => loadConfig(path)).toThrow(`config ${path}.review.summary_template: unknown variable {{nope}}; known:`);
   writeFileSync(path, JSON.stringify({ review: { summary_template: "{{repo}}" } }));
   expect(loadConfig(path).review.summary_template).toBe("{{repo}}");
+  writeFileSync(path, JSON.stringify({ review: { no_findings_template: "{{nope}}" } }));
+  expect(() => loadConfig(path)).toThrow(`config ${path}.review.no_findings_template: unknown variable {{nope}}; known:`);
 });
 
 it("a dry-run CLI review prints the body through the configured template", async () => {

@@ -64,6 +64,8 @@ pub enum Desk {
     Message(String),
     /// `message-saved`: the editor's text as the daemon would have it after Save, since a playback refuses commands.
     MessageSaved,
+    /// `edit-message` or `edit-message:TEXT`: the proof in front with its review body open to edit, holding TEXT.
+    EditMessage(Option<String>),
     /// `repos:FIELD:QUERY`: Automatic reviews' `only` or `never` repository dropdown, open with QUERY typed.
     Repos(crate::auto::Field, String),
     /// `scroll:Y`: Settings scrolled Y points down.
@@ -129,6 +131,8 @@ pub fn parse(s: &str) -> Result<Vec<Step>, String> {
             Some(("span", v)) => steps.push(Step::Desk(Desk::Span(v.into()))),
             Some(("message", v)) => steps.push(Step::Desk(Desk::Message(v.replace("\\n", "\n")))),
             None if t == "message-saved" => steps.push(Step::Desk(Desk::MessageSaved)),
+            None if t == "edit-message" => steps.push(Step::Desk(Desk::EditMessage(None))),
+            Some(("edit-message", v)) => steps.push(Step::Desk(Desk::EditMessage(Some(v.replace("\\n", "\n"))))),
             Some(("scroll", v)) => steps.push(Step::Desk(Desk::Scroll(number(v)?))),
             Some(("repos", v)) => {
                 let (field, query) = v.split_once(':').unwrap_or((v, ""));

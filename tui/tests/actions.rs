@@ -421,6 +421,29 @@ fn the_preview_styles_the_payload_and_m_shows_the_raw_markdown_exactly() {
 }
 
 #[test]
+fn an_edited_message_goes_with_the_approval_under_a_key_that_names_it_and_freezes_once_sent() {
+    let mut m = previewing();
+    update(&mut m, Msg::EditPublication(Some("Looks fine to me.".into())));
+    let fx = press(&mut m, KeyCode::Char('y'));
+    let [c] = commands(&fx)[..] else { panic!("{fx:?}") };
+    let Command::Publish(p) = &c.command else { panic!() };
+    assert_eq!(p.body.as_deref(), Some("Looks fine to me."));
+    assert_eq!(
+        c.idempotency_key,
+        format!(
+            "review.publish:rev-184-a:{}:body:{:016x}",
+            p.preview_id,
+            pr_review_tui::protocol::fnv1a64("Looks fine to me.")
+        )
+    );
+    update(&mut m, Msg::EditPublication(None));
+    assert!(
+        matches!(m.top_modal(), Some(Modal::Publication { body: Some(b), .. }) if b == "Looks fine to me."),
+        "an approval on its way keeps the text it sent"
+    );
+}
+
+#[test]
 fn y_sends_exactly_one_publish_naming_the_preview_and_only_published_reads_as_done() {
     let mut m = previewing();
     assert!(frame(&mut m).contains("Publish this review?"));

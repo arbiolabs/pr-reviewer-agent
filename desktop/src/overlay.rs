@@ -923,7 +923,11 @@ fn confirm_post(s: &Shell, t: &Colors, cx: &Context<Shell>) -> AnyElement {
                         .child(fact("At commit", p.head_sha.short().to_string()))
                         .child(fact(
                             "It posts",
-                            format!("1 review body and {}", queue::count(p.comments.len(), "inline comment")),
+                            format!(
+                                "1 review body{} and {}",
+                                if s.edited_body(cx).is_some() { ", as you edited it," } else { "" },
+                                queue::count(p.comments.len(), "inline comment")
+                            ),
                         ))
                         .child(fact("Review kind", p.event.as_str().to_lowercase().replace('_', " "))),
                 )

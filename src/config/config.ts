@@ -21,6 +21,8 @@ export type Config = {
     webhook_backoff_ms: number;
     /** The review summary's `{{variable}}` template (src/publish/template.ts); empty means the built-in default. */
     summary_template: string;
+    /** The template for a review with no findings, new or carried; empty means `summary_template` is used. */
+    no_findings_template: string;
     /** The engine-mode daemon polls GitHub for PRs that request the selected account's review and starts them. */
     auto_review: AutoReview;
     /** Repository files with instructions for the reviewer, read from the PR's base commit; [] reads none. */
@@ -79,6 +81,7 @@ export const DEFAULT_CONFIG: Config = {
     webhook_max_attempts: 6,
     webhook_backoff_ms: 5000,
     summary_template: "",
+    no_findings_template: "",
     auto_review: { enabled: false, interval_minutes: 5, include_team_requests: false, repos: { include: [], exclude: [] }, daily_cap: 20 },
     guidance_files: ["AGENTS.md", "CLAUDE.md", ".github/copilot-instructions.md"],
     generated_paths: [
@@ -157,8 +160,10 @@ export const configPath = (env: Record<string, string | undefined> = process.env
 export function loadConfig(path = configPath()): Config {
   if (!existsSync(path)) return structuredClone(DEFAULT_CONFIG);
   const config = mergeChecked(structuredClone(DEFAULT_CONFIG), JSON.parse(readFileSync(path, "utf8")), path) as Config;
-  const problem = templateProblem(config.review.summary_template);
-  if (problem) throw new Error(`config ${path}.review.summary_template: ${problem}`);
+  for (const key of ["summary_template", "no_findings_template"] as const) {
+    const problem = templateProblem(config.review[key]);
+    if (problem) throw new Error(`config ${path}.review.${key}: ${problem}`);
+  }
   const auto = autoReviewProblem(config.review.auto_review);
   if (auto) throw new Error(`config ${path}.review.auto_review: ${auto}`);
   return config;

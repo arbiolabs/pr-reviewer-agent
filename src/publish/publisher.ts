@@ -48,6 +48,8 @@ export function buildPayload(input: {
   files: Map<string, FileDiff>;
   /** The summary template; empty or absent is the default. */
   template?: string;
+  /** The template for a review with no findings at all; empty or absent uses `template`. */
+  noFindingsTemplate?: string;
   facts?: SummaryFacts;
 }): { payload: ReviewPayload; hash: string; inlineFindingIds: string[] } {
   const inline = input.findings.filter((f) => !f.posted && f.anchored && f.candidate.newLine !== null && input.files.get(f.candidate.file)?.headLines.has(f.candidate.newLine));
@@ -57,10 +59,19 @@ export function buildPayload(input: {
     side: "RIGHT",
     body: inert([`**${findingLabel(c)}: ${c.title}**`, ...(c.evidenceKind === "suspected" ? ["", UNCONFIRMED_NOTE] : []), "", c.explanation, ...(c.suggestedFix ? ["", `Suggested fix: ${c.suggestedFix}`] : [])].join("\n")),
   }));
-  const body = fitBody(inert(renderSummary(input.headSha, input.findings, input.limitations, undefined, { template: input.template, facts: input.facts })), input.revisionId);
-  const hash = sha256(JSON.stringify({ body, commit_id: input.headSha, event: "COMMENT", comments }));
-  return { payload: { commit_id: input.headSha, body: `${body}\n${marker(input.revisionId, hash)}\n`, event: "COMMENT", comments }, hash, inlineFindingIds: inline.map((f) => f.findingId) };
+  const summary = renderSummary(input.headSha, input.findings, input.limitations, undefined, { template: input.template, noFindingsTemplate: input.noFindingsTemplate, facts: input.facts });
+  return { ...seal(input.revisionId, input.headSha, summary, comments), inlineFindingIds: inline.map((f) => f.findingId) };
 }
+
+/** The payload around `summary`, and its hash: the body made inert and cut to fit, then the marker that carries the hash. */
+function seal(revisionId: string, commitId: string, summary: string, comments: ReviewComment[]): { payload: ReviewPayload; hash: string } {
+  const body = fitBody(inert(summary), revisionId);
+  const hash = sha256(JSON.stringify({ body, commit_id: commitId, event: "COMMENT", comments }));
+  return { payload: { commit_id: commitId, body: `${body}\n${marker(revisionId, hash)}\n`, event: "COMMENT", comments }, hash };
+}
+
+/** A stored payload with a person's own summary in place of the rendered one. The commit and inline comments stay. */
+export const withBody = (payload: ReviewPayload, revisionId: string, summary: string) => seal(revisionId, payload.commit_id, summary, payload.comments);
 
 /** Whether a review says something the reader has not seen: an inline comment, a finding new to them (`unseen`), or a newly resolved one. */
 export const hasNews = (findings: FindingView[], inlineFindingIds: string[]) => inlineFindingIds.length > 0 || findings.some((f) => unseen(f) || f.status === "RESOLVED");

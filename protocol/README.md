@@ -67,7 +67,7 @@ the recorded `operationId` and does nothing again. A key in any other form is `I
 | `review.again` | `prId`, `expectedHeadSha` | `review.again:<prId>:<expectedHeadSha>` | `review.again:<runId>` of the new run |
 | `review.retry` | `runId` | `review.retry:<runId>` | `review.retry:<runId>` |
 | `review.cancel` | `runId` | `review.cancel:<runId>` | `review.cancel:<runId>` |
-| `review.publish` | `runId`, `previewId`, `expectedHeadSha` | `review.publish:<runId>:<previewId>` | `review.publish:<runId>` |
+| `review.publish` | `runId`, `previewId`, `expectedHeadSha`, optional `body` | `review.publish:<runId>:<previewId>`, then `:body:<hash>` with a `body` | `review.publish:<runId>` |
 | `account.select` | `accountId` | `account.select:<accountId>` | `account.select:<journal seq>` |
 | `pr.archive` | `prId` | `pr.archive:<prId>` | `pr.archive:<journal seq>` |
 | `pr.unarchive` | `prId` | `pr.unarchive:<prId>` | `pr.unarchive:<journal seq>` |
@@ -111,6 +111,10 @@ Every command is checked by the server whatever the client showed:
   payload's hash (`CONFLICT`), and `expectedHeadSha` must be the run's head and GitHub's open head now
   (`REVISION_STALE`; a moved head or closed PR supersedes the run, with nothing posted). Accepted means the audited
   approval is recorded and the exactly-once publisher owns the rest; `review.publication_changed` says what happened.
+  A `body` is the person's edit of the preview's summary. It replaces the stored summary, under a new payload hash,
+  in the approval's transaction; the inline comments and the commit stay, and the durable marker is appended after
+  it. A body of only whitespace is `INVALID_REQUEST`. In the key, `<hash>` is the FNV-1a 64-bit hash of the body's
+  UTF-8 bytes as 16 lowercase hex digits.
 - `daemon.stop`: while a review runs (a `RUNNING` run outside `AWAITING_APPROVAL`) it is refused with `CONFLICT`, naming
   how many, unless `pauseReviews` is `true`. Accepted is the last message on that connection: the server then closes
   it and the daemon shuts down as on SIGTERM. Running reviews pause and resume on the next engine start, the data-dir
@@ -130,6 +134,10 @@ Every command is checked by the server whatever the client showed:
   `summaryTemplate` or both (neither is `INVALID_REQUEST`); both are checked before either is saved. In the key,
   `<model>` is empty when absent, and `<hash>` is the FNV-1a 64-bit hash of the template's UTF-8 bytes as 16 lowercase
   hex digits, or `default` for a reset: `settings.set::template:default`.
+  `noFindingsTemplate` is the template for a finished review with no findings, new or carried, saved as
+  `review.no_findings_template` and checked like `summaryTemplate`; `null` or `""` removes it, and such reviews use
+  the summary template again. `settings.noFindingsTemplate.default` is the summary template in force. It adds
+  `:nofindings:<hash>` to the key after any `:template:` part.
   `autoReview` changes only the fields it carries and saves the result under `review.auto_review`. An interval other
   than 5, 15 or 30, a repository that is not `owner/name`, or a `dailyCap` that is not a whole number of 0 or more, is
   `INVALID_REQUEST`. Turning it on makes the daemon

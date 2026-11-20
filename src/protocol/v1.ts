@@ -215,6 +215,17 @@ export type AccessibleRepo = Static<typeof AccessibleRepo>;
 /** A `{{name}}` the review summary's template may use, and what it looks like filled in. */
 export const TemplateVariable = Type.Object({ name: Type.String({ minLength: 1 }), description: Type.String(), sample: Type.String() });
 
+/** A template as settings reports it. For the no-findings template, the default is the summary template in force. */
+const SettingsTemplate = Type.Object({
+  value: Type.String({ description: "the template in force: the saved one, or the default" }),
+  isDefault: Type.Boolean(),
+  default: Type.String(),
+  variables: Type.Array(TemplateVariable, { description: "every {{name}} a template may use; any other name is refused" }),
+});
+
+/** An edited review message may fill GitHub's body limit, less the marker line the daemon adds. */
+const MAX_EDITED_BODY_CHARS = 65_000;
+
 /** One inline comment of the stored review payload, exactly as it will be posted. */
 export const ReviewComment = Type.Object({ path: Type.String(), line: Type.Integer({ minimum: 1 }), side: Type.Literal("RIGHT"), body: Type.String() });
 
@@ -367,7 +378,18 @@ export const Command = Type.Union([
   command("review.again", { prId: Id, expectedHeadSha: Sha }),
   command("review.cancel", { runId: Id }),
   command("review.retry", { runId: Id }),
-  command("review.publish", { runId: Id, previewId: Id, expectedHeadSha: Sha }),
+  command("review.publish", {
+    runId: Id,
+    previewId: Id,
+    expectedHeadSha: Sha,
+    body: Type.Optional(
+      Type.String({
+        minLength: 1,
+        maxLength: MAX_EDITED_BODY_CHARS,
+        description: "the person's edit of the summary in the preview: it is posted instead, with the marker after it; inline comments stay",
+      }),
+    ),
+  }),
   command("account.select", { accountId: Id }),
   command("pr.archive", { prId: Id }),
   command("pr.unarchive", { prId: Id }),
@@ -382,6 +404,11 @@ export const Command = Type.Union([
     summaryTemplate: Type.Optional(
       Type.Union([Type.String({ maxLength: MAX_TEMPLATE_CHARS }), Type.Null()], {
         description: "saved as review.summary_template and used for review bodies prepared after it; null or empty restores the default",
+      }),
+    ),
+    noFindingsTemplate: Type.Optional(
+      Type.Union([Type.String({ maxLength: MAX_TEMPLATE_CHARS }), Type.Null()], {
+        description: "saved as review.no_findings_template and used for bodies of reviews with no findings; null or empty uses summaryTemplate",
       }),
     ),
     autoReview: Type.Optional(
@@ -409,15 +436,17 @@ export type AutoReviewParams = NonNullable<Extract<Command, { command: "settings
 /**
  * `settings.set:<model>`, then `:template:<hash>` when it sets the template: different texts are different keys.
  * The hash is FNV-1a 64 of the template's UTF-8 bytes in hex, or `default` for a reset; a client computes it too.
+ * Then `:nofindings:<hash>` the same way when it sets the no-findings template.
  * Then `:auto:<hash>` when it sets autoReview: FNV-1a 64 of its compact JSON with the keys in schema order (enabled,
  * intervalMinutes, includeTeamRequests, repos: include, exclude, dailyCap) and absent ones left out.
  */
-export function settingsKey(p: { model?: string; summaryTemplate?: string | null; autoReview?: AutoReviewParams }): string {
+export function settingsKey(p: { model?: string; summaryTemplate?: string | null; noFindingsTemplate?: string | null; autoReview?: AutoReviewParams }): string {
   const template = p.summaryTemplate === undefined ? "" : `:template:${p.summaryTemplate ? fnv1a64(p.summaryTemplate) : "default"}`;
+  const empty = p.noFindingsTemplate === undefined ? "" : `:nofindings:${p.noFindingsTemplate ? fnv1a64(p.noFindingsTemplate) : "default"}`;
   const a = p.autoReview;
   const canonical = a && { enabled: a.enabled, intervalMinutes: a.intervalMinutes, includeTeamRequests: a.includeTeamRequests, repos: a.repos && { include: a.repos.include, exclude: a.repos.exclude }, dailyCap: a.dailyCap };
   const auto = canonical === undefined ? "" : `:auto:${fnv1a64(JSON.stringify(canonical))}`;
-  return `settings.set:${p.model ?? ""}${template}${auto}`;
+  return `settings.set:${p.model ?? ""}${template}${empty}${auto}`;
 }
 
 export function fnv1a64(text: string): string {
@@ -440,7 +469,7 @@ export function idempotencyKey(c: Command): string {
     case "review.retry":
       return `review.retry:${c.params.runId}`;
     case "review.publish":
-      return `review.publish:${c.params.runId}:${c.params.previewId}`;
+      return `review.publish:${c.params.runId}:${c.params.previewId}${c.params.body === undefined ? "" : `:body:${fnv1a64(c.params.body)}`}`;
     case "account.select":
       return `account.select:${c.params.accountId}`;
     case "pr.archive":
@@ -545,14 +574,8 @@ export const ServerMessage = Type.Union([
     model: Type.Object({ ref: Type.String({ minLength: 1 }), source: oneOf(MODEL_SOURCES) }),
     models: Type.Array(ModelOption),
     configPath: Type.String({ description: "the config file settings.set writes" }),
-    summaryTemplate: Type.Optional(
-      Type.Object({
-        value: Type.String({ description: "the template in force: the saved one, or the default" }),
-        isDefault: Type.Boolean(),
-        default: Type.String(),
-        variables: Type.Array(TemplateVariable, { description: "every {{name}} a template may use; any other name is refused" }),
-      }),
-    ),
+    summaryTemplate: Type.Optional(SettingsTemplate),
+    noFindingsTemplate: Type.Optional(SettingsTemplate),
     publishMode: Type.Optional(oneOf(PUBLISH_MODES)),
     autoReview: Type.Optional(
       Type.Object({

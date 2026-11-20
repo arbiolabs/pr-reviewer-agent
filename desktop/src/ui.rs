@@ -219,6 +219,9 @@ pub struct Shell {
     pub jev: crate::jev::KeyField,
     /// Settings → Review message: the template editor.
     pub message: crate::message::MessageEditor,
+    pub no_findings: crate::message::MessageEditor,
+    /// The review body of the proof in front, open to edit before it posts.
+    pub body_edit: Option<crate::publish::BodyEdit>,
     /// Settings → Reviewer → Automatic reviews: the repository comboboxes.
     pub repos: crate::auto::RepoFields,
     /// The Settings tab in front, for this session.
@@ -325,6 +328,8 @@ impl Shell {
             picker: crate::agent::Picker::default(),
             jev: crate::jev::KeyField::new(),
             message: Default::default(),
+            no_findings: Default::default(),
+            body_edit: None,
             repos: Default::default(),
             settings_tab: Default::default(),
             settings_scroll: ScrollHandle::new(),
@@ -352,6 +357,7 @@ impl Shell {
                 Desk::Reviewer(state) => crate::reviewer::stage(&mut s, *state),
                 Desk::Message(text) => s.message.pending = Some(text.clone()),
                 Desk::MessageSaved => crate::message::stage_saved(&mut s),
+                Desk::EditMessage(text) => s.stage_edit(text.clone()),
                 Desk::Scroll(y) => s.settings_scroll_to = Some(*y as f32),
                 Desk::Repos(field, query) => s.repos.staged = Some((*field, query.clone())),
                 Desk::SettingsTab(tab) => s.settings_tab.open_on(*tab),
@@ -651,7 +657,10 @@ impl Shell {
     /// Posting is the one irreversible act: it opens the sheet that names what posts. Only `confirm_post` sends.
     /// `chord` is true when ⌘⏎ opened it, so the same chord can't post until it is armed.
     pub fn post(&mut self, chord: bool, cx: &mut Context<Self>) {
-        if matches!(self.model.top_modal(), Some(Modal::Publication { .. })) && can_confirm(&self.model) {
+        if matches!(self.model.top_modal(), Some(Modal::Publication { .. }))
+            && can_confirm(&self.model)
+            && self.edit_problem(cx).is_none()
+        {
             self.overlay = Some(Overlay::ConfirmPost(Arm::new(Instant::now(), chord)));
             cx.notify();
         }
@@ -659,6 +668,9 @@ impl Shell {
 
     pub fn confirm_post(&mut self, cx: &mut Context<Self>) {
         self.overlay = None;
+        // The edit goes with the approval, as typed when the person posts.
+        let body = self.edited_body(cx);
+        self.send(Msg::EditPublication(body), cx);
         self.act(Action::Confirm, cx);
     }
 
@@ -907,6 +919,7 @@ impl Shell {
                 return;
             }
             (Some(Modal::Publication { .. }), _, _, "y") => return self.post(false, cx),
+            (Some(Modal::Publication { .. }), _, _, "e") => return self.open_edit(cx),
             (Some(Modal::Publication { .. }), _, _, "m") => Action::ToggleRaw,
             (Some(Modal::Publication { .. }), _, _, "d") => Action::OpenDiff,
             (Some(Modal::Finding { .. }), _, _, "n") => Action::NextFinding,
@@ -986,6 +999,7 @@ impl Render for Shell {
                 cx.notify();
             }
         }
+        self.body_editor(window, cx);
         // The PR the sheet sent is selected: the sheet's work is done.
         if matches!(self.overlay, Some(Overlay::AddPr { sent: true, .. })) && self.model.adding.is_none() {
             self.overlay = None;
