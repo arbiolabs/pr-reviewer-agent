@@ -197,6 +197,13 @@ fn face(m: &pr_review_tui::model::Model, c: &Card, selected: bool) -> Face {
                     "Next: exclude generated files or split the PR, then retry".into(),
                     "Retry",
                 ),
+                Some(Ending::LoggedOut) => (
+                    IconName::CircleX,
+                    "Model login expired",
+                    reason,
+                    "Next: log in again from the review, then retry".into(),
+                    "Retry",
+                ),
                 _ => (
                     IconName::CircleX,
                     "Review failed",
