@@ -4,6 +4,8 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 ## [Unreleased]
 
+## [1.14.0] - 2026-11-20
+
 ### Added
 
 - **Edit the review message before it posts.** In approval mode, Edit message (E) on a review's proof page opens its summary in an editor. The edit posts instead of the reviewer's message, and the inline comments post as they are. `review.publish` takes it as `body` (#101).
@@ -260,7 +262,8 @@ This is the first release.
   - the PR is still open.
 - Command idempotency keys are bound to each run attempt, so a replayed command never has a second effect.
 
-[Unreleased]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.13.0...HEAD
+[Unreleased]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.14.0...HEAD
+[1.14.0]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.13.0...v1.14.0
 [1.13.0]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.12.0...v1.13.0
 [1.12.0]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.11.2...v1.12.0
 [1.11.2]: https://github.com/arbiolabs/pr-reviewer-agent/compare/v1.11.1...v1.11.2
