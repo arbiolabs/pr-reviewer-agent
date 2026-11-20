@@ -1,3 +1,4 @@
+import { spawn } from "node:child_process";
 import { readFileSync } from "node:fs";
 import { createInterface } from "node:readline/promises";
 import { parseArgs } from "node:util";
@@ -34,6 +35,8 @@ export type CliDeps = {
   credentials?: CredentialStore;
   engine?: DecisionEngine;
   isTTY?: boolean;
+  /** Opens a login page for `login --browser`; a test records the URL instead. */
+  openUrl?: (url: string) => void;
   out?: (text: string) => void;
   err?: (text: string) => void;
 };
@@ -49,7 +52,7 @@ const USAGE = `usage:
   pr-review usage [--by day|week|month] [--group time|repo|author|pr] [--json]
   pr-review accounts [--json]
   pr-review accounts use <host/login | login>
-  pr-review login [provider] [--api-key]
+  pr-review login [provider] [--api-key | --browser]
   pr-review daemon [--socket PATH] [--fixture NAME] [--data DIR] [--heartbeat SECONDS] [--allow-commands]
   pr-review tui [args for pr-review-tui]`;
 
@@ -511,12 +514,37 @@ async function accounts(args: string[], dataDir: string, out: Out): Promise<numb
   });
 }
 
+/** How long `login --browser` waits for the browser before it gives up. */
+const BROWSER_LOGIN_MS = 5 * 60_000;
+
 async function login(args: string[], deps: CliDeps, out: (t: string) => void): Promise<number> {
-  const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { "api-key": { type: "boolean" } } });
+  const { values, positionals } = parseArgs({ args, allowPositionals: true, options: { "api-key": { type: "boolean" }, browser: { type: "boolean" } } });
   const provider = positionals[0] ?? "anthropic";
   const models = deps.models ?? buildModels(deps.credentials ?? new PiAuthFileStore());
   const auth = models.getProvider(provider)?.auth;
   if (!auth) throw new Error(`unknown provider ${provider}`);
+  if (values.browser && (values["api-key"] || !auth.oauth)) throw new Error(`login --browser needs an OAuth login, which ${provider} does not offer with --api-key`);
+  const type = auth.oauth && !values["api-key"] ? "oauth" : "api_key";
+  if (values.browser) {
+    // For the desktop app, with no terminal: each choice takes the first option (pi lists the browser login first),
+    // and the prompt for a pasted code never answers, since an answer would cancel the browser's callback.
+    const signal = AbortSignal.timeout(BROWSER_LOGIN_MS);
+    const open = deps.openUrl ?? ((url: string) => spawn(process.platform === "darwin" ? "open" : "xdg-open", [url], { stdio: "ignore", detached: true }).unref());
+    await models.login(provider, type, {
+      signal,
+      prompt: (p) =>
+        p.type === "select"
+          ? Promise.resolve(p.options[0]!.id)
+          : new Promise((_, reject) => (p.signal ?? signal).addEventListener("abort", () => reject(new Error("the browser login did not finish in time")), { once: true })),
+      notify: (e) => {
+        if (e.type === "auth_url") open(e.url);
+        else if (e.type === "device_code") out(`Visit ${e.verificationUri} and enter ${e.userCode}\n`);
+        else out(`${e.message}\n`);
+      },
+    });
+    out(`Logged in to ${provider} (${type}); credential stored in pi's auth file.\n`);
+    return 0;
+  }
   const rl = createInterface({ input: process.stdin, output: process.stdout });
   const interaction: AuthInteraction = {
     prompt: async (p) => {
@@ -533,7 +561,6 @@ async function login(args: string[], deps: CliDeps, out: (t: string) => void): P
     },
   };
   try {
-    const type = auth.oauth && !values["api-key"] ? "oauth" : "api_key";
     await models.login(provider, type, interaction);
     out(`Logged in to ${provider} (${type}); credential stored in pi's auth file.\n`);
     return 0;
