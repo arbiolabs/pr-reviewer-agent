@@ -28,6 +28,7 @@ import type { GitHubClient } from "../github/client.ts";
 import { summaryFacts } from "../cli/report.ts";
 import { buildPayload, findReview, hasNews, postReview, PUBLISHER_VERSION, type ReviewPayload, recordVerdict } from "../publish/publisher.ts";
 import { parseDiff } from "../source/diff.ts";
+import { expiredLogin } from "../models/credential-store.ts";
 import { splitRef } from "../models/select.ts";
 
 export const REVIEW_TASK_NAME = "pr-review.revision";
@@ -143,9 +144,12 @@ export function createReviewTask(deps: ReviewTaskDeps): ReviewTask {
         );
       } catch (error) {
         if (runtime.signal.aborted) throw error;
-        const message = error instanceof Error ? error.message : String(error);
+        const raw = error instanceof Error ? error.message : String(error);
+        const expired = expiredLogin(raw);
+        const message = expired ?? raw;
         const attempt = (checkpoint.attempt ?? 0) + 1;
-        if (attempt > config.review.max_retries_per_phase) {
+        if (expired) runtime.report(new Error(`${checkpoint.phase} attempt ${attempt} failed: ${raw}`));
+        if (expired || attempt > config.review.max_retries_per_phase) {
           const state = store.advanceFromCurrent(checkpoint.revisionId, "TERMINAL_ERROR", `${checkpoint.phase} failed after ${attempt} attempts: ${message}`);
           await runtime.commit(() => ({ status: "terminal", outcome: { status: "failed", error: { message, detail: { phase: checkpoint.phase, state: state ?? null } } } }), context);
           return;
