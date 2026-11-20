@@ -1,11 +1,14 @@
 //! The proof: exactly what approving a parked review would post, and what happened once approved.
 
 use gpui_kit::assets::IconName;
+use gpui_kit::component::Sizable as _;
+use gpui_kit::component::input::{Editor, EditorState, InputEvent};
+use gpui_kit::prelude::FluentBuilder as _;
 use gpui_kit::*;
 use pr_review_tui::keymap::Action;
-use pr_review_tui::model::{ConfirmState, DiffKey, Model, Preview};
+use pr_review_tui::model::{ConfirmState, DiffKey, Modal, Model, Preview};
 use pr_review_tui::protocol::{PublicationPreview, PublicationStatus, RunId};
-use pr_review_tui::update::{can_confirm, publish_block, published_url};
+use pr_review_tui::update::{Msg, can_confirm, publish_block, published_url};
 
 use crate::code::Lexer;
 use crate::detail::*;
@@ -15,6 +18,94 @@ use crate::tokens::{Colors, layout, radius, space, text};
 use crate::ui::{Shell, on};
 
 const MARKER: &str = "<!-- durable-review:";
+const EDITOR_HEIGHT: Pixels = px(320.);
+
+/// The summary a stored body carries: the daemon puts its marker on a line of its own after it.
+pub fn summary_of(body: &str) -> &str {
+    body.rfind(&format!("\n{MARKER}")).map_or(body, |at| &body[..at])
+}
+
+/// The review body of one parked run, open to edit. The editor is made on the next draw, which has the window.
+pub struct BodyEdit {
+    run_id: RunId,
+    /// The summary as the daemon stored it: an edit back to it is no edit.
+    stored: String,
+    pub editor: Option<Entity<EditorState>>,
+    /// Text a snapshot script put in before the editor existed.
+    staged: Option<String>,
+    _changes: Option<Subscription>,
+}
+
+impl Shell {
+    /// The proof in front, when its review body can still be edited: ready, nothing sent, and this daemon posts it.
+    fn editable(&self) -> Option<(RunId, String)> {
+        match self.model.top_modal() {
+            Some(Modal::Publication { run_id, preview: Preview::Ready(p), publish: ConfirmState::Asking, .. })
+                if can_confirm(&self.model) =>
+            {
+                Some((run_id.clone(), summary_of(p.body.as_str()).to_string()))
+            }
+            _ => None,
+        }
+    }
+
+    pub fn open_edit(&mut self, cx: &mut Context<Self>) {
+        if let Some((run_id, stored)) = self.editable() {
+            self.body_edit = Some(BodyEdit { run_id, stored, editor: None, staged: None, _changes: None });
+        }
+        cx.notify();
+    }
+
+    pub fn stage_edit(&mut self, text: Option<String>) {
+        if let Some((run_id, stored)) = self.editable() {
+            self.body_edit = Some(BodyEdit { run_id, stored, editor: None, staged: text, _changes: None });
+        }
+    }
+
+    pub fn discard_edit(&mut self, cx: &mut Context<Self>) {
+        self.body_edit = None;
+        self.send(Msg::EditPublication(None), cx);
+    }
+
+    /// Makes the editor for an edit just opened, focused and holding the stored summary.
+    pub fn body_editor(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(edit) = self.body_edit.as_mut().filter(|e| e.editor.is_none()) else { return };
+        let text = edit.staged.take().unwrap_or_else(|| edit.stored.clone());
+        let editor = cx
+            .new(|cx| EditorState::new(window, cx).line_number(false).folding(false).searchable(false).soft_wrap(true));
+        editor.update(cx, |e, cx| {
+            e.set_value(text, window, cx);
+            e.focus(window, cx);
+        });
+        edit._changes = Some(cx.subscribe(&editor, |_, _, ev: &InputEvent, cx| {
+            if matches!(ev, InputEvent::Change) {
+                cx.notify();
+            }
+        }));
+        edit.editor = Some(editor);
+    }
+
+    /// The open edit of the proof in front.
+    fn edit_in_front(&self) -> Option<&BodyEdit> {
+        let Some(Modal::Publication { run_id, .. }) = self.model.top_modal() else { return None };
+        self.body_edit.as_ref().filter(|e| &e.run_id == run_id)
+    }
+
+    fn edit_text(&self, cx: &App) -> Option<String> {
+        self.edit_in_front()?.editor.as_ref().map(|e| e.read(cx).value().to_string())
+    }
+
+    /// The text to post instead of the stored summary: `None` when there is no edit or it is the stored text again.
+    pub fn edited_body(&self, cx: &App) -> Option<String> {
+        let edit = self.edit_in_front()?;
+        self.edit_text(cx).filter(|text| *text != edit.stored)
+    }
+
+    /// Why the edited message can't post.
+    pub fn edit_problem(&self, cx: &App) -> Option<&'static str> {
+        self.edit_text(cx).filter(|t| t.trim().is_empty()).map(|_| "The review message can't be empty.")
+    }
+}
 
 /// Markdown as GitHub will render it, or with `raw` the exact text that will be posted.
 fn markdown(t: &Colors, src: &str, raw: bool) -> Div {
@@ -219,29 +310,72 @@ pub fn publication(
             .child(content.p(space::S4))
     };
     let who = who(m);
+    let editing = s.edit_in_front().and_then(|e| e.editor.clone()).filter(|_| at == Stage::Proof);
+    let edited = s.edited_body(cx);
+    // Once approved, the page shows the message that was sent with the approval.
+    let sent = match m.top_modal() {
+        Some(Modal::Publication { body: Some(b), .. }) if at != Stage::Proof => Some(b.clone()),
+        _ => None,
+    };
+    let shown = sent.or_else(|| edited.clone()).unwrap_or_else(|| p.body.to_string());
+    let head = div()
+        .child(icon(IconName::Bot, px(13.), t.faint))
+        .child(div().font_weight(FontWeight::SEMIBOLD).text_color(t.text).child(who.clone()))
+        .child(match at {
+            Stage::Posted => "commented",
+            Stage::Posting => "is commenting…",
+            Stage::Proof => "will comment",
+        })
+        .child(div().flex_1());
+    let head = match (&editing, at) {
+        (Some(_), _) => {
+            head.child(button(t, "p-discard", "Discard edits", None, Tone::Ghost, on(cx, |s, cx| s.discard_edit(cx))))
+        }
+        (None, Stage::Proof) => head
+            .when(s.editable().is_some(), |h| {
+                h.child(button(t, "p-edit", "Edit message", Some("E"), Tone::Ghost, on(cx, |s, cx| s.open_edit(cx))))
+            })
+            .child(button(
+                t,
+                "p-raw",
+                if raw { "Raw markdown" } else { "As GitHub shows it" },
+                Some("M"),
+                Tone::Ghost,
+                on(cx, |s, cx| s.act(Action::ToggleRaw, cx)),
+            )),
+        _ => head.child(button(
+            t,
+            "p-raw",
+            if raw { "Raw markdown" } else { "As GitHub shows it" },
+            Some("M"),
+            Tone::Ghost,
+            on(cx, |s, cx| s.act(Action::ToggleRaw, cx)),
+        )),
+    };
+    let content = match &editing {
+        Some(editor) => {
+            let note = match (s.edit_problem(cx), &edited) {
+                (Some(why), _) => (t.danger, why.to_string()),
+                (None, Some(_)) => (t.accent, "Edited. This posts instead of the reviewer's message.".to_string()),
+                (None, None) => (t.muted, "The reviewer's message, unchanged.".to_string()),
+            };
+            div()
+                .flex()
+                .flex_col()
+                .gap(space::S2)
+                .child(Editor::new(editor).h(EDITOR_HEIGHT).small())
+                .child(div().text_size(text::SMALL).text_color(note.0).child(note.1))
+                .child(div().text_size(text::SMALL).text_color(t.faint).child(
+                    "Markdown, as GitHub renders it. The inline comments below post as they are, and the hidden \
+                     marker is added after the message.",
+                ))
+        }
+        None => markdown(t, &shown, raw),
+    };
     body = body.child(section(
         t,
-        "Review body",
-        frame(
-            div()
-                .child(icon(IconName::Bot, px(13.), t.faint))
-                .child(div().font_weight(FontWeight::SEMIBOLD).text_color(t.text).child(who.clone()))
-                .child(match at {
-                    Stage::Posted => "commented",
-                    Stage::Posting => "is commenting…",
-                    Stage::Proof => "will comment",
-                })
-                .child(div().flex_1())
-                .child(button(
-                    t,
-                    "p-raw",
-                    if raw { "Raw markdown" } else { "As GitHub shows it" },
-                    Some("M"),
-                    Tone::Ghost,
-                    on(cx, |s, cx| s.act(Action::ToggleRaw, cx)),
-                )),
-            markdown(t, p.body.as_str(), raw),
-        ),
+        if edited.is_some() && editing.is_none() { "Review body · edited" } else { "Review body" },
+        frame(head, content),
     ));
     let key = run.map(|r| DiffKey { pr: r.pr_id.clone(), base: r.base_sha.clone(), head: r.head_sha.clone() });
     let mut comments = div().flex().flex_col().gap(space::S3);
@@ -317,7 +451,7 @@ pub fn publication(
             ],
         }
     } else {
-        let post = match ready {
+        let post = match ready && s.edit_problem(cx).is_none() {
             true => Item::new(
                 "p-post",
                 "Post to GitHub…",
@@ -326,10 +460,11 @@ pub fn publication(
                 Some(Box::new(cx.listener(|s, _: &ClickEvent, _, cx| s.post(false, cx))) as OnClick),
             ),
             false => Item {
-                why: Some(match publish_block(m, p) {
-                    Some(_) if queue::read_only(m) => why_not(m, pr_review_tui::keymap::Mutation::Publish, "post"),
-                    Some(w) => format!("Can't post: {w}"),
-                    None => "Can't post right now.".into(),
+                why: Some(match (publish_block(m, p), s.edit_problem(cx)) {
+                    (Some(_), _) if queue::read_only(m) => why_not(m, pr_review_tui::keymap::Mutation::Publish, "post"),
+                    (Some(w), _) => format!("Can't post: {w}"),
+                    (None, Some(why)) => why.into(),
+                    (None, None) => "Can't post right now.".into(),
                 }),
                 ..Item::new("p-post", "Post to GitHub…", "⌘⏎", Tone::Primary, None)
             },
@@ -424,7 +559,7 @@ fn diff_context(m: &Model, key: &DiffKey, path: &str, line: u32) -> Option<Vec<(
 
 #[cfg(test)]
 mod tests {
-    use super::{Stage, stage};
+    use super::{Stage, stage, summary_of};
     use crate::script::{parse, play};
     use pr_review_tui::model::{Look, Modal, Model, Screen};
     use std::path::Path;
@@ -437,6 +572,17 @@ mod tests {
             Some(Modal::Publication { run_id, publish, .. }) => stage(&m, run_id, publish),
             other => panic!("no proof in front: {other:?}"),
         }
+    }
+
+    #[test]
+    fn the_editable_summary_is_the_body_before_the_daemons_marker_line() {
+        assert_eq!(summary_of("## Review\n\nFine.\n\n<!-- durable-review:r:h -->\n"), "## Review\n\nFine.\n");
+        assert_eq!(summary_of("No marker here."), "No marker here.");
+        // Only the marker on its own line ends the summary; one quoted in the text does not.
+        assert_eq!(
+            summary_of("see <!-- durable-review: x\n<!-- durable-review:r:h -->\n"),
+            "see <!-- durable-review: x"
+        );
     }
 
     #[test]
