@@ -283,6 +283,8 @@ pub enum Modal {
         publish: ConfirmState,
         /// `m`: the markdown exactly as it will be posted, instead of styled.
         raw: bool,
+        /// The person's edit of the summary, posted instead of the stored one.
+        body: Option<String>,
     },
     /// The only place `y` acts. Generic over the command it confirms.
     Confirm {
@@ -617,6 +619,8 @@ pub struct AgentSettings {
     pub save: SaveState,
     /// Save or Reset on the review message.
     pub template_save: SaveState,
+    /// Save or Reset on the message for a review with no findings.
+    pub no_findings_save: SaveState,
     /// A change to automatic reviews.
     pub auto_save: SaveState,
     /// When Settings last asked on its own.

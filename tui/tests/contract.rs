@@ -136,6 +136,14 @@ fn m3_messages_parse_into_the_client_enums() {
     let Command::Publish(params) = &c.command else { panic!() };
     assert_eq!(params.preview_id, p.preview_id);
     assert_eq!(c.idempotency_key, c.command.idempotency_key());
+    // An edited message is a different approval: its text's hash joins the key, as the daemon computes it.
+    let edited = read("client.command.review.publish.edited");
+    let message: ClientMessage = serde_json::from_str(&edited).unwrap();
+    assert_eq!(serde_json::to_value(&message).unwrap(), serde_json::from_str::<serde_json::Value>(&edited).unwrap());
+    let ClientMessage::Command(e) = message else { panic!() };
+    let Command::Publish(params) = &e.command else { panic!() };
+    assert!(params.body.is_some());
+    assert_eq!(e.idempotency_key, e.command.idempotency_key());
 
     let get: ClientMessage = serde_json::from_str(&read("client.publication.get")).unwrap();
     assert!(matches!(&get, ClientMessage::PublicationGet { run_id, .. } if run_id.as_str() == "rev-184-a"));
@@ -175,12 +183,19 @@ fn settings_set_keys_match_the_daemons_for_a_model_a_template_and_a_reset() {
     for name in [
         "client.command.settings.set",
         "client.command.settings.set.template",
+        "client.command.settings.set.no-findings",
         "client.command.settings.set.reset",
         "client.command.settings.set.auto-review",
     ] {
         let ClientMessage::Command(c) = serde_json::from_str(&read(name)).unwrap() else { panic!() };
         assert_eq!(c.idempotency_key, c.command.idempotency_key(), "{name}");
     }
+    // The no-findings template's default is the summary template in force.
+    let ServerMessage::Settings(s) = ServerMessage::parse(&read("server.settings.custom-template")).unwrap() else {
+        panic!()
+    };
+    let (summary, empty) = (s.summary_template.unwrap(), s.no_findings_template.unwrap());
+    assert_eq!((empty.default, empty.is_default), (summary.value, false));
     assert_eq!(
         [pr_review_tui::protocol::fnv1a64(""), pr_review_tui::protocol::fnv1a64("é{{repo}}")],
         [0xcbf29ce484222325, 0x2ec616eb09cd6d39]
