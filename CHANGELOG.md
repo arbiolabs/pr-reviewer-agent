@@ -4,6 +4,11 @@ This file records every notable change to pr-review. Its format follows [Keep a 
 
 ## [Unreleased]
 
+### Added
+
+- **Edit the review message before it posts.** In approval mode, Edit message (E) on a review's proof page opens its summary in an editor. The edit posts instead of the reviewer's message, and the inline comments post as they are. `review.publish` takes it as `body` (#101).
+- **A message for reviews that find nothing.** `review.no_findings_template` is the summary for a review with no findings, new or carried. The desktop app edits it under Settings → When the review finds nothing. Until one is saved, those reviews use the review message (#101).
+
 ## [1.13.0] - 2026-11-20
 
 ### Added
